@@ -1,4 +1,5 @@
-import { stripLeadingFence } from "./sanitize-json";
+import { stripFences } from "./sanitize-json";
+import { repairLlmJson } from "./repair-llm-json";
 import type { Flashcard, GeneratedSheet } from "@/types/generated-sheet";
 
 /**
@@ -89,15 +90,9 @@ const DANGLING_TAIL_RE = /(?:,|"(?:[^"\\]|\\.)*"\s*:)\s*$/;
  * whatever trailing fragment can't be completed, then close the open brackets.
  */
 function repairTail(text: string, state: ScanState): string {
-  let out = text;
-
-  if (state.inString) {
-    // A cut mid-escape leaves `\` or a partial `\uXXXX`; both break the string.
-    if (state.escaped) out = out.slice(0, -1);
-    const partialUnicode = out.match(/\\u[0-9a-fA-F]{0,3}$/);
-    if (partialUnicode) out = out.slice(0, -partialUnicode[0].length);
-    out += '"';
-  }
+  // Escapes are already valid here — repairLlmJson ran first — so an open
+  // string just needs closing.
+  let out = state.inString ? `${text}"` : text;
 
   out = out.trimEnd();
   // Stripping a dangling key can expose the comma before it, so loop.
@@ -185,7 +180,9 @@ function build(
  * "nothing to show yet" and fall back to parsing the full response at the end.
  */
 export function parsePartialSheet(raw: string): PartialSheetResult | null {
-  const text = stripLeadingFence(raw).trimEnd();
+  // Repair escaping first: one unescaped quote in a flashcard would otherwise
+  // stall the reveal at that section for the rest of the stream.
+  const text = repairLlmJson(stripFences(raw));
   if (!text.startsWith("{")) return null;
 
   // Already valid — the object closed, so every key in it is finished.
@@ -204,4 +201,66 @@ export function parsePartialSheet(raw: string): PartialSheetResult | null {
   const salvaged = tryParse(repairTail(truncated, truncatedState));
   if (!salvaged) return null;
   return build(salvaged, truncatedState.keys, true);
+}
+
+/**
+ * How much of the response survived.
+ * - `ok`       — parsed as sent
+ * - `repaired` — the model's escaping was fixed; the sheet is still complete
+ * - `partial`  — the response was cut short; some sections are missing
+ */
+export type SheetParseStatus = "ok" | "repaired" | "partial";
+
+export interface SheetParseResult {
+  sheet: GeneratedSheet;
+  status: SheetParseStatus;
+}
+
+/** In dev, name the exact substring that defeated the parse. */
+function logParseFailure(text: string, error: unknown): void {
+  if (!import.meta.env.DEV) return;
+  const message = error instanceof Error ? error.message : String(error);
+  const at = /position (\d+)/.exec(message);
+  const context = at
+    ? text.slice(Math.max(0, +at[1] - 80), +at[1] + 80)
+    : text.slice(-160);
+  console.warn(
+    `[sheet] JSON.parse failed: ${message}\n--- context ---\n${context}\n---------------`
+  );
+}
+
+/**
+ * Parse a finished response, giving up as little as possible.
+ *
+ * A single unescaped quote used to discard the entire sheet and dump raw JSON
+ * at the reader, so this degrades in steps instead: exact parse, then escaping
+ * repair, then whatever sections completed before the damage. Returns null only
+ * when the text isn't a JSON sheet at all, which is the caller's cue to fall
+ * back to the legacy text renderer.
+ */
+export function parseSheetOutput(raw: string): SheetParseResult | null {
+  const text = stripFences(raw);
+  if (!text.startsWith("{")) return null;
+
+  try {
+    const parsed = JSON.parse(text);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      // Normalize even on the happy path, so a field the model omitted can't
+      // reach the renderer as undefined.
+      return { sheet: normalize(parsed as Record<string, unknown>), status: "ok" };
+    }
+  } catch (error) {
+    logParseFailure(text, error);
+  }
+
+  const repaired = tryParse(repairLlmJson(text));
+  if (repaired) return { sheet: normalize(repaired), status: "repaired" };
+
+  // Structurally broken — salvage the sections that completed.
+  const partial = parsePartialSheet(raw);
+  if (partial && partial.completeKeys.length > 0) {
+    return { sheet: partial.sheet, status: "partial" };
+  }
+
+  return null;
 }

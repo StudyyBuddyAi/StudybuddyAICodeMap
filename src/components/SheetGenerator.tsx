@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { BookOpen, Brain, History, Loader2, PenLine, Settings2, Stethoscope, X } from "lucide-react";
+import { AlertTriangle, BookOpen, Brain, History, Loader2, PenLine, Settings2, Stethoscope, X } from "lucide-react";
 import SectionSkeleton from "@/components/SectionSkeleton";
 import { useToast } from "@/hooks/use-toast";
 import OutputSection, { type CitationState } from "@/components/OutputSection";
@@ -13,8 +13,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { callMedicalNotes } from "@/lib/callMedicalNotes";
 import { useFlashcardDeck } from "@/hooks/use-flashcard-deck";
 import { parseFlashcardsFromOutput } from "@/lib/parse-flashcards";
-import { sanitizeJsonOutput } from "@/lib/sanitize-json";
-import { parsePartialSheet } from "@/lib/parse-partial-sheet";
+import { parsePartialSheet, parseSheetOutput } from "@/lib/parse-partial-sheet";
 import {
   type GeneratedSheet,
   parseStoredSheet,
@@ -453,6 +452,9 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
   // Sections whose JSON has fully arrived, so the renderer knows how much of a
   // still-streaming sheet is safe to show.
   const [streamedKeys, setStreamedKeys] = useState<string[]>([]);
+  // The response was damaged and only part of it could be salvaged — the reader
+  // is told rather than being handed a silently short sheet.
+  const [sheetIncomplete, setSheetIncomplete] = useState(false);
   // A prefilled topic (e.g. a Roadmap chip) must land in a visible textarea —
   // otherwise the picker renders and silently overwrites it on the next click.
   const [showTextarea, setShowTextarea] = useState(!!prefill?.input);
@@ -521,6 +523,7 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
     setLegacyOutput("");
     setDeckSaved(false);
     setStreamedKeys([]);
+    setSheetIncomplete(false);
     setShowTextarea(false);
     setCitationState("idle");
     setCitations([]);
@@ -611,18 +614,22 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
         }
       }
 
-      // Authoritative parse. The repaired partials rendered during the stream
-      // are never the final value — this decides sheet vs legacy fallback.
+      // Authoritative parse, degrading in steps rather than all at once: a
+      // single unescaped quote from the model used to discard the whole sheet
+      // and dump raw JSON at the reader.
       const rawText = fullText || "";
-      const cleaned = sanitizeJsonOutput(rawText);
-      try {
-        const parsed = JSON.parse(cleaned) as GeneratedSheet;
-        setSheet(parsed);
+      const result = parseSheetOutput(rawText);
+      if (result) {
+        setSheet(result.sheet);
         setLegacyOutput("");
-      } catch {
-        // JSON parse failed — fall back to legacy text renderer.
+        setSheetIncomplete(result.status === "partial");
+      } else if (revealedCount === 0) {
+        // Not a JSON sheet at all — hand it to the legacy text renderer.
         setSheet(null);
         setLegacyOutput(rawText);
+      } else {
+        // Unparseable tail, but sections did stream. Keep them.
+        setSheetIncomplete(true);
       }
       setLoading(false);
 
@@ -711,6 +718,7 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
     setShowTextarea(false);
     setConfigDrawerOpen(false);
     setDeckSaved(false);
+    setSheetIncomplete(false);
     setModelUsed(undefined);
     setCitationState("idle");
     setCitations([]);
@@ -1268,6 +1276,39 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
           isStreaming={loading}
           streamedKeys={streamedKeys}
         />
+      )}
+
+      {/* The response was damaged mid-flight. Say so rather than let a short
+          sheet pass for a complete one — this is medical content. */}
+      {!loading && sheetIncomplete && (
+        <div
+          className="animate-fade-in"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 12,
+            borderRadius: "var(--radius-md)",
+            border: "1px solid var(--border)",
+            borderLeft: "3px solid var(--signal)",
+            background: "var(--bg-elevated)",
+            padding: "12px 16px",
+          }}
+        >
+          <AlertTriangle
+            style={{ width: 15, height: 15, color: "var(--signal)", flexShrink: 0 }}
+          />
+          <p style={{ flex: 1, fontSize: 13, color: "var(--fg-muted)", lineHeight: 1.5 }}>
+            This sheet was cut short — some sections may be missing.
+          </p>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8 shrink-0 text-xs"
+            onClick={() => generate()}
+          >
+            Regenerate
+          </Button>
+        </div>
       )}
 
       {/* Flashcards stream in last, so this stays hidden until the sheet is whole. */}

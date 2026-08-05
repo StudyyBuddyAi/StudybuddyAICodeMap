@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parsePartialSheet } from "./parse-partial-sheet";
+import { parsePartialSheet, parseSheetOutput } from "./parse-partial-sheet";
 
 /** Every prefix of a real stream must either parse or return null — never throw. */
 const FULL_SHEET = JSON.stringify({
@@ -161,5 +161,70 @@ describe("parsePartialSheet", () => {
     expect(result!.sheet.flashcards).toEqual([]);
     expect(result!.sheet.clinicalApproach).toBe("");
     expect(result!.sheet.referenceNote).toBe("");
+  });
+
+  it("keeps revealing sections past an unescaped quote", () => {
+    // Before the escaping repair this stalled at examTraps for the rest of the
+    // stream, which is what left the reader watching a skeleton forever.
+    const broken =
+      '{"topic":"Portal HTN","overview":"x","memoryHooks":["a"],' +
+      '"clinicalApproach":"y","keyPoints":["b"],' +
+      '"examTraps":["Don\'t call it "prehepatic" without imaging"],' +
+      '"flashcards":[{"tag":"T","question":"Q","answer":"A"}],"referenceNote":"r"}';
+    const result = parsePartialSheet(broken);
+    expect(result!.completeKeys).toContain("examTraps");
+    expect(result!.completeKeys).toContain("flashcards");
+    expect(result!.sheet.examTraps).toEqual([
+      'Don\'t call it "prehepatic" without imaging',
+    ]);
+  });
+});
+
+describe("parseSheetOutput", () => {
+  it("reports ok for a clean response", () => {
+    const result = parseSheetOutput(FULL_SHEET);
+    expect(result!.status).toBe("ok");
+    expect(result!.sheet.topic).toBe("Heart Failure");
+  });
+
+  it("strips the markdown fence the model wraps around the JSON", () => {
+    const result = parseSheetOutput("```json\n" + FULL_SHEET + "\n```");
+    expect(result!.status).toBe("ok");
+    expect(result!.sheet.flashcards).toHaveLength(1);
+  });
+
+  it("repairs an unescaped quote without losing any section", () => {
+    // The reported failure: complete JSON, closing fence, still unparseable.
+    const broken =
+      "```json\n" +
+      FULL_SHEET.replace(
+        '"Don\'t confuse HFpEF with HFrEF"',
+        '"Don\'t confuse "HFpEF" with HFrEF"'
+      ) +
+      "\n```";
+    const result = parseSheetOutput(broken);
+    expect(result!.status).toBe("repaired");
+    expect(result!.sheet.examTraps).toEqual(['Don\'t confuse "HFpEF" with HFrEF']);
+    expect(result!.sheet.referenceNote).toBe("Based on standard medical references.");
+    expect(result!.sheet.flashcards).toHaveLength(1);
+  });
+
+  it("salvages the completed sections when the response is cut short", () => {
+    const result = parseSheetOutput(FULL_SHEET.slice(0, FULL_SHEET.indexOf('"examTraps"')));
+    expect(result!.status).toBe("partial");
+    expect(result!.sheet.overview).toContain("Mechanism");
+    expect(result!.sheet.examTraps).toEqual([]);
+  });
+
+  it("normalizes a response missing fields entirely", () => {
+    const result = parseSheetOutput('{"overview":"only this"}');
+    expect(result!.status).toBe("ok");
+    expect(result!.sheet.flashcards).toEqual([]);
+    expect(result!.sheet.memoryHooks).toEqual([]);
+  });
+
+  it("returns null for output that isn't a JSON sheet", () => {
+    expect(parseSheetOutput("SUMMARY\nHeart failure is a syndrome...")).toBeNull();
+    expect(parseSheetOutput("")).toBeNull();
   });
 });
