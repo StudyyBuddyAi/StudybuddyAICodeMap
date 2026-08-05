@@ -22,6 +22,7 @@ import {
 import CopyButton from "@/components/CopyButton";
 import FlashcardsSection from "@/components/FlashcardsSection";
 import SaveButton from "@/components/SaveButton";
+import SectionSkeleton from "@/components/SectionSkeleton";
 import CitationBadgeList from "@/components/CitationBadgeList";
 import { startTopProgress, finishTopProgress } from "@/components/TopProgressBar";
 import type { CitationResult } from "@/lib/citation";
@@ -174,6 +175,10 @@ interface OutputSectionProps {
   userId?: string | null;
   isAnonymous?: boolean;
   sheetId?: string;
+  /** True while the sheet is still arriving over the stream. */
+  isStreaming?: boolean;
+  /** Sections safe to render mid-stream. Ignored unless `isStreaming`. */
+  streamedKeys?: string[];
 }
 
 // ─── Legacy renderer helpers (kept for old text-blob sheets) ───────────────
@@ -1001,6 +1006,8 @@ const OutputSection = ({
   userId,
   isAnonymous,
   sheetId,
+  isStreaming = false,
+  streamedKeys,
 }: OutputSectionProps) => {
   const ref = useRef<HTMLDivElement>(null);
   const referenceNoteRef = useRef<HTMLDivElement>(null);
@@ -1207,6 +1214,9 @@ const OutputSection = ({
   const sheetIdentityRef = useRef<string | null>(null);
 
   useEffect(() => {
+    // Identity tracks `overview`, which grows with every chunk — scrolling on
+    // that mid-stream would yank the page under the reader on every section.
+    if (isStreaming) return;
     const hasContent = isJson ? !!sheet : parseSections(output).length > 0;
     if (!hasContent) return;
     const identity = isJson ? `${sheet?.topic ?? ""}::${sheet?.overview ?? ""}` : output;
@@ -1217,7 +1227,7 @@ const OutputSection = ({
       sessionStorage.removeItem("sb_disclaimer_collapsed");
       ref.current?.scrollIntoView({ behavior: "smooth", block: "start" });
     }
-  }, [output]);
+  }, [output, isStreaming]);
 
   // ── Legacy renderer ──────────────────────────────────────────────────────
   if (!isJson) {
@@ -1346,6 +1356,12 @@ const OutputSection = ({
     "referenceNote",
   ];
 
+  // Mid-stream, show only the sections whose JSON has closed. A section that is
+  // still being written would render half a sentence and then reflow.
+  const visibleSections = isStreaming
+    ? JSON_SECTION_ORDER.filter((key) => streamedKeys?.includes(key))
+    : JSON_SECTION_ORDER;
+
   // Group active enhancements by anchor so they can be injected inline.
   // Open ones render as inline blocks; collapsed ones render as golden
   // highlights wrapped around their source text.
@@ -1421,10 +1437,15 @@ const OutputSection = ({
       {/* Mode header + Save */}
       <div className="animate-fade-in flex items-center justify-between">
         {modeInfo && <ModeInfoBar modeInfo={modeInfo} />}
-        <SaveButton input={inputText || ""} output={output} modeInfo={modeInfo} />
+        <SaveButton
+          input={inputText || ""}
+          output={output}
+          modeInfo={modeInfo}
+          disabled={isStreaming}
+        />
       </div>
 
-      {JSON_SECTION_ORDER.map((key, idx) => {
+      {visibleSections.map((key, idx) => {
         const config = JSON_SECTION_CONFIG[key];
         const Icon = config.icon;
         const isReference = key === "referenceNote";
@@ -1432,7 +1453,9 @@ const OutputSection = ({
 
         const copyText =
           key === "flashcards"
-            ? sheet.flashcards.map((c) => `Q: [${c.tag}] ${c.question}\nA: ${c.answer}`).join("\n\n")
+            ? (sheet.flashcards ?? [])
+                .map((c) => `Q: [${c.tag}] ${c.question}\nA: ${c.answer}`)
+                .join("\n\n")
             : Array.isArray(sheet[key])
             ? (sheet[key] as string[]).map((item, i) => `${i + 1}. ${item}`).join("\n")
             : (sheet[key] as string) ?? "";
@@ -1445,7 +1468,10 @@ const OutputSection = ({
             className="animate-fade-in scroll-mt-20"
             style={{
               ...SECTION_CARD_STYLE,
-              animationDelay: `${idx * 200}ms`,
+              // Mid-stream each card mounts when its content lands, so the
+              // stagger is already real — replaying it would just delay the
+              // card into invisibility for its share of the offset.
+              animationDelay: isStreaming ? "0ms" : `${idx * 200}ms`,
               animationFillMode: "backwards",
             }}
           >
@@ -1469,7 +1495,10 @@ const OutputSection = ({
                 <Check
                   aria-label="Section loaded"
                   className="h-3.5 w-3.5 text-primary/50 animate-fade-in"
-                  style={{ animationDelay: `${idx * 200 + 350}ms`, animationFillMode: "backwards" }}
+                  style={{
+                    animationDelay: isStreaming ? "0ms" : `${idx * 200 + 350}ms`,
+                    animationFillMode: "backwards",
+                  }}
                 />
                 {key !== "referenceNote" && key !== "flashcards" && (
                   <RegenerateButton sectionKey={key} />
@@ -1480,11 +1509,11 @@ const OutputSection = ({
 
             <div style={SECTION_BODY_STYLE} data-enh-section={key}>
               {key === "flashcards" ? (
-                <FlashcardsSection cards={sheet.flashcards} />
+                <FlashcardsSection cards={sheet.flashcards ?? []} />
               ) : key === "overview" || key === "clinicalApproach" ? (
                 <div className="text-sm text-muted-foreground leading-relaxed">
                   {renderJsonText(
-                    sheet[key] as string,
+                    (sheet[key] as string) ?? "",
                     key,
                     handleKeywordClick,
                     renderInline,
@@ -1522,6 +1551,9 @@ const OutputSection = ({
           </div>
         );
       })}
+
+      {/* Keeps a "more is coming" affordance under the last landed section. */}
+      {isStreaming && <SectionSkeleton variant="sheet-section" />}
 
       {/* Fallback: selections that couldn't be anchored to a specific line */}
       {enhancementsByAnchor["end"]?.length ? (

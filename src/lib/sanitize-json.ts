@@ -12,3 +12,14 @@ export function sanitizeJsonOutput(raw: string): string {
   }
   return cleaned;
 }
+
+/**
+ * Strip an opening ``` fence without requiring the closing one. Use this on
+ * partial stream text, where the closing fence hasn't been emitted yet.
+ */
+export function stripLeadingFence(raw: string): string {
+  const trimmed = raw.trimStart();
+  return trimmed.startsWith("```")
+    ? trimmed.replace(/^```(?:json)?\s*/i, "")
+    : trimmed;
+}

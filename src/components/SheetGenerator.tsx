@@ -14,6 +14,7 @@ import { callMedicalNotes } from "@/lib/callMedicalNotes";
 import { useFlashcardDeck } from "@/hooks/use-flashcard-deck";
 import { parseFlashcardsFromOutput } from "@/lib/parse-flashcards";
 import { sanitizeJsonOutput } from "@/lib/sanitize-json";
+import { parsePartialSheet } from "@/lib/parse-partial-sheet";
 import {
   type GeneratedSheet,
   parseStoredSheet,
@@ -449,7 +450,9 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
   const [modelUsed, setModelUsed] = useState<"flash" | "gpt-oss" | "claude" | undefined>(undefined);
   const [loading, setLoading] = useState(false);
   const [deckSaved, setDeckSaved] = useState(false);
-  const [loadingMsg, setLoadingMsg] = useState("");
+  // Sections whose JSON has fully arrived, so the renderer knows how much of a
+  // still-streaming sheet is safe to show.
+  const [streamedKeys, setStreamedKeys] = useState<string[]>([]);
   // A prefilled topic (e.g. a Roadmap chip) must land in a visible textarea —
   // otherwise the picker renders and silently overwrites it on the next click.
   const [showTextarea, setShowTextarea] = useState(!!prefill?.input);
@@ -517,6 +520,7 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
     setSheet(null);
     setLegacyOutput("");
     setDeckSaved(false);
+    setStreamedKeys([]);
     setShowTextarea(false);
     setCitationState("idle");
     setCitations([]);
@@ -564,6 +568,10 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
       const decoder = new TextDecoder();
       let textBuffer = "";
       let fullText = "";
+      // Sections rendered so far. The sheet arrives as one JSON object, so we
+      // repair the truncated tail each chunk and reveal a section only once its
+      // field has closed — see parsePartialSheet.
+      let revealedCount = 0;
 
       while (true) {
         const { done, value } = await reader.read();
@@ -587,6 +595,14 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
             const content = parsed.choices?.[0]?.delta?.content;
             if (content) {
               fullText += content;
+              // Re-render only when another section finishes — at most once per
+              // section for the whole stream, so no mid-word reflow.
+              const partial = parsePartialSheet(fullText);
+              if (partial && partial.completeKeys.length > revealedCount) {
+                revealedCount = partial.completeKeys.length;
+                setSheet(partial.sheet);
+                setStreamedKeys(partial.completeKeys);
+              }
             }
           } catch {
             textBuffer = line + "\n" + textBuffer;
@@ -595,7 +611,8 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
         }
       }
 
-      // Parse and render immediately — do not route through pendingOutput.
+      // Authoritative parse. The repaired partials rendered during the stream
+      // are never the final value — this decides sheet vs legacy fallback.
       const rawText = fullText || "";
       const cleaned = sanitizeJsonOutput(rawText);
       try {
@@ -608,7 +625,6 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
         setLegacyOutput(rawText);
       }
       setLoading(false);
-      setLoadingMsg("");
 
       // Citation lookup — runs after stream completes
       try {
@@ -634,7 +650,6 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
       }
     } catch (e: any) {
       setLoading(false);
-      setLoadingMsg("");
       toast({
         title: "Error",
         description: e.message || "Failed to generate study material",
@@ -666,34 +681,6 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
     return () =>
       window.removeEventListener("studybuddy:enhancement-saved", handleEnhancementSaved);
   }, []);
-
-  // Cycles loading messages while a generation is in progress.
-  // Owns ONLY the message display — never touches sheet state.
-  useEffect(() => {
-    if (!loading) return;
-
-    const steps = [
-      "Reading topic…",
-      "Structuring notes…",
-      "Finding exam traps…",
-      "Adding memory hooks…",
-      "Finalizing your sheet…",
-    ];
-
-    let currentStep = 0;
-    setLoadingMsg(steps[0]);
-
-    const interval = setInterval(() => {
-      currentStep += 1;
-      if (currentStep < steps.length) {
-        setLoadingMsg(steps[currentStep]);
-      }
-      // No pendingOutput check here. generate() sets loading=false
-      // when done, which triggers this effect's cleanup automatically.
-    }, 1000);
-
-    return () => clearInterval(interval);
-  }, [loading]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Persona buttons are the generation trigger — there is no separate submit.
   const generateWithPersona = (p: Persona) => {
@@ -1235,25 +1222,13 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
       <div className="w-full space-y-6">
       {loading && !sheet && !legacyOutput && (
         <div className="space-y-6 animate-fade-in">
+          {/* Only until the first section lands — from there the sections
+              themselves are the progress indicator. */}
           <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "0 4px" }}>
             <Loader2
               className="animate-spin"
               style={{ width: 14, height: 14, color: "var(--accent)" }}
             />
-            <p
-              style={{
-                fontFamily: "var(--font-sans)",
-                fontSize: 14,
-                fontWeight: 500,
-                color: "var(--fg)",
-                transition: "all 300ms",
-              }}
-            >
-              {loadingMsg}
-            </p>
-            <p style={{ fontSize: 12, color: "var(--fg-subtle)" }}>
-              Takes a little longer during peak hours — hang tight
-            </p>
           </div>
           {/* Document structure forming — skeletons mirror the incoming sections */}
           <div className="space-y-6">
@@ -1290,10 +1265,13 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
             isLoggedIn ? setGoProOpen(true) : setAuthModalOpen(true)
           }
           citationIsLoggedIn={isLoggedIn}
+          isStreaming={loading}
+          streamedKeys={streamedKeys}
         />
       )}
 
-      {(sheet || legacyOutput) && (
+      {/* Flashcards stream in last, so this stays hidden until the sheet is whole. */}
+      {!loading && (sheet || legacyOutput) && (
         <div className="flex justify-center pt-2">
           <Button
             variant="outline"
@@ -1340,7 +1318,9 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
       {/* ── Right pane: section navigator. Only at 2xl+ (≥1536px), where the
           content area is wide enough that a third column doesn't squeeze the
           document — below that we stay 2-column (config + fluid document). ── */}
-      {sheet && (
+      {/* Held back until streaming ends — its IntersectionObserver re-binds on
+          every sheet update, and the section list would grow under the reader. */}
+      {sheet && !loading && (
         <>
           <div
             aria-hidden
