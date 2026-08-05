@@ -1,5 +1,5 @@
 interface SectionSkeletonProps {
-  variant?: "sheet-section" | "flashcard" | "qbank-options";
+  variant?: "sheet-section" | "sheet-body" | "flashcard" | "qbank-options";
   className?: string;
 }
 
@@ -15,6 +15,19 @@ const Bar = ({ className = "" }: { className?: string }) => (
  * with a left-to-right shimmer sweep.
  */
 const SectionSkeleton = ({ variant = "sheet-section", className = "" }: SectionSkeletonProps) => {
+  // Body only — for slotting inside a section card that already has its own
+  // chrome and heading, so a streaming sheet keeps its structure visible.
+  if (variant === "sheet-body") {
+    return (
+      <div className={`space-y-2.5 ${className}`}>
+        <Bar className="h-3.5 w-full" />
+        <Bar className="h-3.5 w-11/12" />
+        <Bar className="h-3.5 w-4/5" />
+        <Bar className="h-3.5 w-2/3" />
+      </div>
+    );
+  }
+
   if (variant === "flashcard") {
     return (
       <div

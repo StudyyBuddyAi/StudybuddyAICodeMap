@@ -42,8 +42,27 @@ const HEADING = {
 
 const heading = (name: RegExp) => screen.queryByRole("heading", { name });
 
+/**
+ * Text of one section card. Read as a whole because the renderer splits a line
+ * into separate spans for its label and its bold keywords.
+ */
+const sectionText = (key: string) =>
+  document.querySelector(`[data-section-key="${key}"]`)?.textContent ?? "";
+
 describe("OutputSection streaming", () => {
-  it("renders only the sections that have finished streaming", () => {
+  it("lays out every section from the first frame", () => {
+    // The layout must not change shape as content lands, so all seven slots
+    // exist even before anything has streamed.
+    renderSheet(
+      <OutputSection output={JSON.stringify(SHEET)} isStreaming streamedKeys={[]} />
+    );
+
+    for (const name of Object.values(HEADING)) {
+      expect(heading(name)).toBeInTheDocument();
+    }
+  });
+
+  it("shows content only for sections that finished streaming", () => {
     renderSheet(
       <OutputSection
         output={JSON.stringify(SHEET)}
@@ -52,15 +71,28 @@ describe("OutputSection streaming", () => {
       />
     );
 
-    expect(heading(HEADING.overview)).toBeInTheDocument();
-    expect(heading(HEADING.memoryHooks)).toBeInTheDocument();
-    // Present in the object but not yet marked complete — must stay hidden.
-    expect(heading(HEADING.clinicalApproach)).not.toBeInTheDocument();
-    expect(heading(HEADING.examTraps)).not.toBeInTheDocument();
-    expect(heading(HEADING.flashcards)).not.toBeInTheDocument();
+    expect(sectionText("overview")).toContain("Mechanism: reduced output");
+    expect(sectionText("memoryHooks")).toContain("FACES");
+    // Present in the sheet object, but not yet marked complete.
+    expect(sectionText("clinicalApproach")).not.toContain("Diagnosis: echo");
+    expect(sectionText("examTraps")).not.toContain("HFpEF is not HFrEF");
   });
 
-  it("disables Save while streaming so a partial sheet can't be persisted", () => {
+  it("marks exactly one section as being written", () => {
+    renderSheet(
+      <OutputSection
+        output={JSON.stringify(SHEET)}
+        isStreaming
+        streamedKeys={["overview", "memoryHooks"]}
+      />
+    );
+
+    // clinicalApproach is next in order, so it is the one in flight.
+    expect(screen.getAllByLabelText("Writing section")).toHaveLength(1);
+    expect(screen.getAllByLabelText("Waiting").length).toBeGreaterThan(0);
+  });
+
+  it("offers per-section actions only once a section has landed", () => {
     renderSheet(
       <OutputSection
         output={JSON.stringify(SHEET)}
@@ -68,15 +100,28 @@ describe("OutputSection streaming", () => {
         streamedKeys={["overview"]}
       />
     );
+
+    // Two sections are ready in the finished sheet's terms, but only the one
+    // that streamed should expose Copy / the loaded check.
+    expect(screen.getAllByLabelText("Section loaded")).toHaveLength(1);
+  });
+
+  it("disables Save while streaming so a partial sheet can't be persisted", () => {
+    renderSheet(
+      <OutputSection output={JSON.stringify(SHEET)} isStreaming streamedKeys={["overview"]} />
+    );
     expect(screen.getByRole("button", { name: /save/i })).toBeDisabled();
   });
 
-  it("renders every section and enables Save once streaming ends", () => {
+  it("renders every section as ready once streaming ends", () => {
     renderSheet(<OutputSection output={JSON.stringify(SHEET)} />);
 
     for (const name of Object.values(HEADING)) {
       expect(heading(name)).toBeInTheDocument();
     }
+    expect(screen.getAllByLabelText("Section loaded")).toHaveLength(7);
+    expect(screen.queryByLabelText("Writing section")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Waiting")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /save/i })).toBeEnabled();
   });
 

@@ -1356,11 +1356,15 @@ const OutputSection = ({
     "referenceNote",
   ];
 
-  // Mid-stream, show only the sections whose JSON has closed. A section that is
-  // still being written would render half a sentence and then reflow.
-  const visibleSections = isStreaming
-    ? JSON_SECTION_ORDER.filter((key) => streamedKeys?.includes(key))
-    : JSON_SECTION_ORDER;
+  // Every section keeps its slot for the whole generation, so the document
+  // never changes shape — placeholders are filled in rather than replaced.
+  // A section renders its content only once its JSON has closed; before that
+  // it would show half a sentence and then reflow.
+  const isReady = (key: JsonSectionKey) => !isStreaming || !!streamedKeys?.includes(key);
+  // Sections arrive in order, so the first one not yet complete is in flight.
+  const writingKey = isStreaming
+    ? JSON_SECTION_ORDER.find((key) => !isReady(key))
+    : undefined;
 
   // Group active enhancements by anchor so they can be injected inline.
   // Open ones render as inline blocks; collapsed ones render as golden
@@ -1445,11 +1449,14 @@ const OutputSection = ({
         />
       </div>
 
-      {visibleSections.map((key, idx) => {
+      {JSON_SECTION_ORDER.map((key, idx) => {
         const config = JSON_SECTION_CONFIG[key];
         const Icon = config.icon;
         const isReference = key === "referenceNote";
-        const showEvidenceBadge = citationState === "found" && config.evidenceBacked;
+        const ready = isReady(key);
+        const writing = key === writingKey;
+        const showEvidenceBadge =
+          ready && citationState === "found" && config.evidenceBacked;
 
         const copyText =
           key === "flashcards"
@@ -1468,9 +1475,14 @@ const OutputSection = ({
             className="animate-fade-in scroll-mt-20"
             style={{
               ...SECTION_CARD_STYLE,
-              // Mid-stream each card mounts when its content lands, so the
-              // stagger is already real — replaying it would just delay the
-              // card into invisibility for its share of the offset.
+              // A section that hasn't landed keeps a neutral edge, so the
+              // accent lighting up is the signal that its content arrived.
+              borderLeft: `3px solid ${
+                ready || writing ? "var(--accent)" : "var(--border)"
+              }`,
+              // Mid-stream the cards are already mounted and fill in one by
+              // one, so the stagger is real — replaying it would just delay
+              // each card into invisibility for its share of the offset.
               animationDelay: isStreaming ? "0ms" : `${idx * 200}ms`,
               animationFillMode: "backwards",
             }}
@@ -1478,37 +1490,68 @@ const OutputSection = ({
             <div style={SECTION_HEADER_STYLE}>
               <div className="flex items-center gap-2.5 flex-wrap">
                 <div style={SECTION_ICON_STYLE}>
-                  <Icon style={{ width: 14, height: 14, color: "var(--accent)" }} />
+                  <Icon
+                    style={{
+                      width: 14,
+                      height: 14,
+                      color: ready || writing ? "var(--accent)" : "var(--fg-subtle)",
+                    }}
+                  />
                 </div>
-                <h3 style={SECTION_TITLE_STYLE}>
+                <h3
+                  style={{
+                    ...SECTION_TITLE_STYLE,
+                    color: ready || writing ? "var(--fg)" : "var(--fg-muted)",
+                  }}
+                >
                   {config.label}
                   {key === "overview" && sheet.topicEmoji && (
                     <span className="ml-2 text-base">{sheet.topicEmoji}</span>
                   )}
                 </h3>
                 {showEvidenceBadge && <EvidenceBadge onClick={scrollToReference} />}
-                {key === "overview" && modelUsed && (
+                {ready && key === "overview" && modelUsed && (
                   <ModelBadge model={modelUsed} isPro={isPro} />
                 )}
               </div>
               <div className="flex items-center gap-1">
-                <Check
-                  aria-label="Section loaded"
-                  className="h-3.5 w-3.5 text-primary/50 animate-fade-in"
-                  style={{
-                    animationDelay: isStreaming ? "0ms" : `${idx * 200 + 350}ms`,
-                    animationFillMode: "backwards",
-                  }}
-                />
-                {key !== "referenceNote" && key !== "flashcards" && (
-                  <RegenerateButton sectionKey={key} />
+                {ready ? (
+                  <>
+                    <Check
+                      aria-label="Section loaded"
+                      className="h-3.5 w-3.5 text-primary/50 animate-fade-in"
+                      style={{
+                        animationDelay: isStreaming ? "0ms" : `${idx * 200 + 350}ms`,
+                        animationFillMode: "backwards",
+                      }}
+                    />
+                    {key !== "referenceNote" && key !== "flashcards" && (
+                      <RegenerateButton sectionKey={key} />
+                    )}
+                    <CopyButton text={copyText} />
+                  </>
+                ) : (
+                  // Marks where the next content lands. Only the dot pulses —
+                  // animating the whole card would be a distraction to read past.
+                  <span
+                    aria-label={writing ? "Writing section" : "Waiting"}
+                    className={writing ? "animate-pulse" : undefined}
+                    style={{
+                      width: 6,
+                      height: 6,
+                      borderRadius: "50%",
+                      background: writing ? "var(--accent)" : "var(--border-strong)",
+                      margin: "0 9px",
+                    }}
+                  />
                 )}
-                <CopyButton text={copyText} />
               </div>
             </div>
 
             <div style={SECTION_BODY_STYLE} data-enh-section={key}>
-              {key === "flashcards" ? (
+              {!ready ? (
+                <SectionSkeleton variant="sheet-body" />
+              ) : key === "flashcards" ? (
                 <FlashcardsSection cards={sheet.flashcards ?? []} />
               ) : key === "overview" || key === "clinicalApproach" ? (
                 <div className="text-sm text-muted-foreground leading-relaxed">
@@ -1546,21 +1589,25 @@ const OutputSection = ({
                   reopenEnhancement
                 )
               )}
-              {renderInline(`${key}:end`)}
+              {ready && renderInline(`${key}:end`)}
             </div>
           </div>
         );
       })}
-
-      {/* Keeps a "more is coming" affordance under the last landed section. */}
-      {isStreaming && <SectionSkeleton variant="sheet-section" />}
 
       {/* Fallback: selections that couldn't be anchored to a specific line */}
       {enhancementsByAnchor["end"]?.length ? (
         <div className="space-y-1">{renderInline("end")}</div>
       ) : null}
 
-      {renderNudgeAndDisclaimer(showNudge, setShowNudge, inputText, disclaimerCollapsed, toggleDisclaimer)}
+      {/* The nudge says the sheet is ready, so it waits until it actually is. */}
+      {renderNudgeAndDisclaimer(
+        showNudge && !isStreaming,
+        setShowNudge,
+        inputText,
+        disclaimerCollapsed,
+        toggleDisclaimer
+      )}
 
       {/* Anchored action menu — selection (below the highlighted text) */}
       {selection && (

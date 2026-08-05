@@ -2,7 +2,6 @@ import { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { AlertTriangle, BookOpen, Brain, History, Loader2, PenLine, Settings2, Stethoscope, X } from "lucide-react";
-import SectionSkeleton from "@/components/SectionSkeleton";
 import { useToast } from "@/hooks/use-toast";
 import OutputSection, { type CitationState } from "@/components/OutputSection";
 import { useUsageLimit, MAX_DAILY_SHEETS } from "@/hooks/use-usage-limit";
@@ -39,6 +38,22 @@ interface SheetGeneratorProps {
 }
 
 const RECENT_TOPICS_KEY = "sb_recent_topics_v1";
+
+/**
+ * Stand-in for the moments before the first section lands, so the document
+ * renders its full structure from the first frame instead of swapping a
+ * placeholder block out for the real one.
+ */
+const EMPTY_SHEET: GeneratedSheet = {
+  overview: "",
+  memoryHooks: [],
+  clinicalApproach: "",
+  keyPoints: [],
+  examTraps: [],
+  flashcards: [],
+  referenceNote: "",
+};
+const EMPTY_SHEET_JSON = JSON.stringify(EMPTY_SHEET);
 
 interface PillGroupProps {
   label: string;
@@ -133,9 +148,22 @@ function sectionHasContent(sheet: GeneratedSheet, key: string): boolean {
  * Sticky right-rail navigator. Lists the sheet's non-empty sections, smooth-
  * scrolls to a section on click, and highlights the section the reader is on
  * via an IntersectionObserver watching each `[data-section-key]` card.
+ *
+ * While streaming (`readyKeys` given) it lists every section up front, greying
+ * the ones still to come — the rail has to hold its width from the first frame
+ * or it squeezes the document out from under the reader when it appears.
  */
-const SheetSectionNav = ({ sheet }: { sheet: GeneratedSheet }) => {
-  const items = SECTION_NAV_ITEMS.filter((it) => sectionHasContent(sheet, it.key));
+const SheetSectionNav = ({
+  sheet,
+  readyKeys,
+}: {
+  sheet: GeneratedSheet;
+  readyKeys?: string[];
+}) => {
+  const streaming = readyKeys !== undefined;
+  const items = streaming
+    ? SECTION_NAV_ITEMS
+    : SECTION_NAV_ITEMS.filter((it) => sectionHasContent(sheet, it.key));
   const [activeKey, setActiveKey] = useState<string>(items[0]?.key ?? "");
 
   useEffect(() => {
@@ -188,11 +216,13 @@ const SheetSectionNav = ({ sheet }: { sheet: GeneratedSheet }) => {
       </p>
       <nav style={{ display: "flex", flexDirection: "column" }}>
         {items.map((it) => {
-          const active = activeKey === it.key;
+          const pending = streaming && !readyKeys!.includes(it.key);
+          const active = !pending && activeKey === it.key;
           return (
             <button
               key={it.key}
               type="button"
+              disabled={pending}
               onClick={() => scrollToSection(it.key)}
               aria-current={active ? "true" : undefined}
               style={{
@@ -206,17 +236,21 @@ const SheetSectionNav = ({ sheet }: { sheet: GeneratedSheet }) => {
                 fontSize: 13,
                 lineHeight: 1.3,
                 fontWeight: active ? 500 : 400,
-                color: active ? "var(--accent)" : "var(--fg-muted)",
+                color: active
+                  ? "var(--accent)"
+                  : pending
+                  ? "var(--fg-subtle)"
+                  : "var(--fg-muted)",
                 background: "transparent",
-                cursor: "pointer",
+                cursor: pending ? "default" : "pointer",
                 transition:
                   "color var(--dur-micro) var(--ease-out), border-color var(--dur-micro) var(--ease-out)",
               }}
               onMouseEnter={(e) => {
-                if (!active) e.currentTarget.style.color = "var(--fg)";
+                if (!active && !pending) e.currentTarget.style.color = "var(--fg)";
               }}
               onMouseLeave={(e) => {
-                if (!active) e.currentTarget.style.color = "var(--fg-muted)";
+                if (!active && !pending) e.currentTarget.style.color = "var(--fg-muted)";
               }}
             >
               {it.label}
@@ -455,6 +489,9 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
   // The response was damaged and only part of it could be salvaged — the reader
   // is told rather than being handed a silently short sheet.
   const [sheetIncomplete, setSheetIncomplete] = useState(false);
+  // Identifies the sheet on screen, so the section navigator resets its active
+  // item per sheet rather than when `topic` happens to arrive mid-stream.
+  const [generationId, setGenerationId] = useState(0);
   // A prefilled topic (e.g. a Roadmap chip) must land in a visible textarea —
   // otherwise the picker renders and silently overwrites it on the next click.
   const [showTextarea, setShowTextarea] = useState(!!prefill?.input);
@@ -524,6 +561,7 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
     setDeckSaved(false);
     setStreamedKeys([]);
     setSheetIncomplete(false);
+    setGenerationId((id) => id + 1);
     setShowTextarea(false);
     setCitationState("idle");
     setCitations([]);
@@ -719,6 +757,7 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
     setConfigDrawerOpen(false);
     setDeckSaved(false);
     setSheetIncomplete(false);
+    setGenerationId((id) => id + 1);
     setModelUsed(undefined);
     setCitationState("idle");
     setCitations([]);
@@ -1228,38 +1267,15 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
       {/* ── Middle pane: living document (fluid, fills its lane) ── */}
       <div ref={outputRef} className="min-w-0 lg:flex-1 lg:px-8">
       <div className="w-full space-y-6">
-      {loading && !sheet && !legacyOutput && (
-        <div className="space-y-6 animate-fade-in">
-          {/* Only until the first section lands — from there the sections
-              themselves are the progress indicator. */}
-          <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "0 4px" }}>
-            <Loader2
-              className="animate-spin"
-              style={{ width: 14, height: 14, color: "var(--accent)" }}
-            />
-          </div>
-          {/* Document structure forming — skeletons mirror the incoming sections */}
-          <div className="space-y-6">
-            {[0, 1, 2, 3, 4].map((i) => (
-              <div
-                key={i}
-                className="section-reveal"
-                style={{ animationDelay: `${i * 150}ms` }}
-              >
-                <SectionSkeleton variant="sheet-section" />
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
       {!loading && !sheet && !legacyOutput && (
         <SheetsEmptyState onStartTopic={startTopic} onSelectHistory={loadHistoryItem} />
       )}
 
-      {(sheet || legacyOutput) && (
+      {/* Rendered from the first frame of a generation, so the sheet's seven
+          sections are laid out once and filled in — never added or removed. */}
+      {(loading || sheet || legacyOutput) && (
         <OutputSection
-          output={sheet ? JSON.stringify(sheet) : legacyOutput}
+          output={sheet ? JSON.stringify(sheet) : legacyOutput || EMPTY_SHEET_JSON}
           inputText={notes}
           modeInfo={{ examMode, difficulty, focus, length }}
           citations={citations}
@@ -1359,9 +1375,9 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
       {/* ── Right pane: section navigator. Only at 2xl+ (≥1536px), where the
           content area is wide enough that a third column doesn't squeeze the
           document — below that we stay 2-column (config + fluid document). ── */}
-      {/* Held back until streaming ends — its IntersectionObserver re-binds on
-          every sheet update, and the section list would grow under the reader. */}
-      {sheet && !loading && (
+      {/* Present for the whole generation. Appearing at the end would take 240px
+          back from the document just as the reader settles into it. */}
+      {(loading || sheet) && (
         <>
           <div
             aria-hidden
@@ -1369,7 +1385,13 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
             style={{ background: "var(--border)" }}
           />
           <div className="hidden 2xl:block 2xl:w-[240px] 2xl:shrink-0 2xl:sticky 2xl:top-6 2xl:self-start 2xl:pl-6">
-            <SheetSectionNav key={sheet.topic ?? "sheet"} sheet={sheet} />
+            {/* A stable object, not a fresh literal — the observer effect keys
+                off `sheet`, so a new identity each render would rebind it. */}
+            <SheetSectionNav
+              key={generationId}
+              sheet={sheet ?? EMPTY_SHEET}
+              readyKeys={loading ? streamedKeys : undefined}
+            />
           </div>
         </>
       )}
