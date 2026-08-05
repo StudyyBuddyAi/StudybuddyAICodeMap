@@ -531,7 +531,12 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
 
   const { sheetCount, isSheetLimited, isProUser: pro, refresh: refreshUsage } = useUsageLimit();
   const { premiumRemaining, isPremiumHookActive } = usePremiumHook();
-  const { preferredModel, setPreferredModel, saving: modelSaving } = useModelPreference();
+  const {
+    preferredModel,
+    setPreferredModel,
+    saving: modelSaving,
+    isLoading: modelLoading,
+  } = useModelPreference();
   const { user, isAnonymous } = useAuth();
   const {
     canUseCitation,
@@ -1017,9 +1022,9 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
                   <button
                     type="button"
                     onClick={() => setPreferredModel("gpt-oss")}
-                    disabled={modelSaving}
+                    disabled={modelSaving || modelLoading}
                     className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
-                      preferredModel !== "claude"
+                      !modelLoading && preferredModel === "gpt-oss"
                         ? "bg-background text-foreground shadow-sm"
                         : "text-muted-foreground hover:text-foreground"
                     }`}
@@ -1029,9 +1034,9 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
                   <button
                     type="button"
                     onClick={() => setPreferredModel("claude")}
-                    disabled={modelSaving}
+                    disabled={modelSaving || modelLoading}
                     className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
-                      preferredModel === "claude"
+                      !modelLoading && preferredModel === "claude"
                         ? "bg-background text-foreground shadow-sm"
                         : "text-muted-foreground hover:text-foreground"
                     }`}

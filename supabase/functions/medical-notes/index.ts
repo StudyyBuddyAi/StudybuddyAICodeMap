@@ -436,6 +436,12 @@ ${sheetSchemaBlock}`;
         model = "anthropic/claude-haiku-4.5";
         isPremiumGeneration = true;
       } else {
+        // Anything that isn't an explicit 'gpt-oss' (or absent) means the client
+        // and this function disagree about the value space — don't let it pass
+        // as a silent downgrade to the cheaper model.
+        if (preferredModel != null && preferredModel !== "gpt-oss") {
+          console.warn(`Unrecognized preferredModel "${preferredModel}", falling back to gpt-oss`);
+        }
         model = "openai/gpt-oss-20b";
         isPremiumGeneration = false;
       }
