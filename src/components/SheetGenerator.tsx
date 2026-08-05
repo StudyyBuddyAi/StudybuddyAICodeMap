@@ -450,7 +450,6 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
   const [loading, setLoading] = useState(false);
   const [deckSaved, setDeckSaved] = useState(false);
   const [loadingMsg, setLoadingMsg] = useState("");
-  const [pendingOutput, setPendingOutput] = useState<string | null>(null);
   // A prefilled topic (e.g. a Roadmap chip) must land in a visible textarea —
   // otherwise the picker renders and silently overwrites it on the next click.
   const [showTextarea, setShowTextarea] = useState(!!prefill?.input);
@@ -518,7 +517,6 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
     setSheet(null);
     setLegacyOutput("");
     setDeckSaved(false);
-    setPendingOutput(null);
     setShowTextarea(false);
     setCitationState("idle");
     setCitations([]);
@@ -597,8 +595,20 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
         }
       }
 
+      // Parse and render immediately — do not route through pendingOutput.
       const rawText = fullText || "";
-      setPendingOutput(rawText);
+      const cleaned = sanitizeJsonOutput(rawText);
+      try {
+        const parsed = JSON.parse(cleaned) as GeneratedSheet;
+        setSheet(parsed);
+        setLegacyOutput("");
+      } catch {
+        // JSON parse failed — fall back to legacy text renderer.
+        setSheet(null);
+        setLegacyOutput(rawText);
+      }
+      setLoading(false);
+      setLoadingMsg("");
 
       // Citation lookup — runs after stream completes
       try {
@@ -625,7 +635,6 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
     } catch (e: any) {
       setLoading(false);
       setLoadingMsg("");
-      setPendingOutput(null);
       toast({
         title: "Error",
         description: e.message || "Failed to generate study material",
@@ -658,6 +667,8 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
       window.removeEventListener("studybuddy:enhancement-saved", handleEnhancementSaved);
   }, []);
 
+  // Cycles loading messages while a generation is in progress.
+  // Owns ONLY the message display — never touches sheet state.
   useEffect(() => {
     if (!loading) return;
 
@@ -670,40 +681,15 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
     ];
 
     let currentStep = 0;
-    let allStepsDone = false;
     setLoadingMsg(steps[0]);
 
     const interval = setInterval(() => {
       currentStep += 1;
-
       if (currentStep < steps.length) {
         setLoadingMsg(steps[currentStep]);
-      } else {
-        allStepsDone = true;
-        setLoadingMsg(steps[steps.length - 1]);
       }
-
-      if (allStepsDone) {
-        setPendingOutput((pending) => {
-          if (pending !== null) {
-            clearInterval(interval);
-            const cleaned = sanitizeJsonOutput(pending);
-            try {
-              const parsed = JSON.parse(cleaned) as GeneratedSheet;
-              setSheet(parsed);
-              setLegacyOutput("");
-            } catch {
-              // JSON parse failed — fall back to legacy text renderer
-              setSheet(null);
-              setLegacyOutput(pending);
-            }
-            setLoading(false);
-            setLoadingMsg("");
-            return null;
-          }
-          return pending;
-        });
-      }
+      // No pendingOutput check here. generate() sets loading=false
+      // when done, which triggers this effect's cleanup automatically.
     }, 1000);
 
     return () => clearInterval(interval);
