@@ -22,30 +22,31 @@ const ResetPassword = () => {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const hash = window.location.hash.startsWith("#")
-      ? window.location.hash.slice(1)
-      : window.location.hash;
-    const params = new URLSearchParams(hash);
-    const type = params.get("type");
-    const accessToken = params.get("access_token");
-    const refreshToken = params.get("refresh_token");
-
-    if (type !== "recovery" || !accessToken || !refreshToken) {
-      setStatus("invalid");
-      return;
-    }
-
-    (async () => {
-      const { error } = await supabase.auth.setSession({
-        access_token: accessToken,
-        refresh_token: refreshToken,
-      });
-      if (error) {
-        setStatus("invalid");
-        return;
+    // supabase-js consumes the URL fragment on load, so we can't read it manually.
+    // Instead, listen for the PASSWORD_RECOVERY event which fires after the SDK
+    // processes the recovery link, then fall back to getSession() for cases where
+    // the event fired before this component mounted.
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
+      if (event === "PASSWORD_RECOVERY") {
+        setStatus("ready");
       }
-      setStatus("ready");
-    })();
+    });
+
+    // Fallback: check if a recovery session is already active. The anonymous
+    // session every visitor carries does NOT count — without that guard this
+    // always resolves "ready" and the invalid state becomes unreachable.
+    supabase.auth.getSession().then(({ data }) => {
+      if (data.session && !data.session.user.is_anonymous) {
+        setStatus("ready");
+      } else {
+        // Give the PASSWORD_RECOVERY event 2s to fire before declaring invalid
+        setTimeout(() => {
+          setStatus((current) => (current === "parsing" ? "invalid" : current));
+        }, 2000);
+      }
+    });
+
+    return () => subscription.unsubscribe();
   }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {

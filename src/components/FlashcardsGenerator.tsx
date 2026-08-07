@@ -71,7 +71,12 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated }: FlashcardsGene
     refresh: refreshUsage,
   } = useUsageLimit();
   const { premiumRemaining, isPremiumHookActive } = usePremiumHook();
-  const { preferredModel, setPreferredModel, saving: modelSaving } = useModelPreference();
+  const {
+    preferredModel,
+    setPreferredModel,
+    saving: modelSaving,
+    isLoading: modelLoading,
+  } = useModelPreference();
   const { user, isAnonymous } = useAuth();
   const {
     canUseCitation,
@@ -462,7 +467,7 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated }: FlashcardsGene
               type="button"
               className="underline hover:text-foreground transition-colors"
               onClick={() => setPreferredModel(preferredModel === "claude" ? "gpt-oss" : "claude")}
-              disabled={modelSaving}
+              disabled={modelSaving || modelLoading}
             >
               Switch to {preferredModel === "claude" ? "GPT-OSS 20B" : "Claude Haiku 4.5"}
             </button>

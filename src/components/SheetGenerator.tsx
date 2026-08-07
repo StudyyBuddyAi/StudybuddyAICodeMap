@@ -1,8 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { BookOpen, Brain, History, Loader2, PenLine, Settings2, Stethoscope, X } from "lucide-react";
-import SectionSkeleton from "@/components/SectionSkeleton";
+import { AlertTriangle, BookOpen, Brain, History, Loader2, PenLine, Settings2, Stethoscope, X } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import OutputSection, { type CitationState } from "@/components/OutputSection";
 import { useUsageLimit, MAX_DAILY_SHEETS } from "@/hooks/use-usage-limit";
@@ -13,7 +12,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { callMedicalNotes } from "@/lib/callMedicalNotes";
 import { useFlashcardDeck } from "@/hooks/use-flashcard-deck";
 import { parseFlashcardsFromOutput } from "@/lib/parse-flashcards";
-import { sanitizeJsonOutput } from "@/lib/sanitize-json";
+import { parsePartialSheet, parseSheetOutput } from "@/lib/parse-partial-sheet";
 import {
   type GeneratedSheet,
   parseStoredSheet,
@@ -39,6 +38,22 @@ interface SheetGeneratorProps {
 }
 
 const RECENT_TOPICS_KEY = "sb_recent_topics_v1";
+
+/**
+ * Stand-in for the moments before the first section lands, so the document
+ * renders its full structure from the first frame instead of swapping a
+ * placeholder block out for the real one.
+ */
+const EMPTY_SHEET: GeneratedSheet = {
+  overview: "",
+  memoryHooks: [],
+  clinicalApproach: "",
+  keyPoints: [],
+  examTraps: [],
+  flashcards: [],
+  referenceNote: "",
+};
+const EMPTY_SHEET_JSON = JSON.stringify(EMPTY_SHEET);
 
 interface PillGroupProps {
   label: string;
@@ -133,9 +148,22 @@ function sectionHasContent(sheet: GeneratedSheet, key: string): boolean {
  * Sticky right-rail navigator. Lists the sheet's non-empty sections, smooth-
  * scrolls to a section on click, and highlights the section the reader is on
  * via an IntersectionObserver watching each `[data-section-key]` card.
+ *
+ * While streaming (`readyKeys` given) it lists every section up front, greying
+ * the ones still to come — the rail has to hold its width from the first frame
+ * or it squeezes the document out from under the reader when it appears.
  */
-const SheetSectionNav = ({ sheet }: { sheet: GeneratedSheet }) => {
-  const items = SECTION_NAV_ITEMS.filter((it) => sectionHasContent(sheet, it.key));
+const SheetSectionNav = ({
+  sheet,
+  readyKeys,
+}: {
+  sheet: GeneratedSheet;
+  readyKeys?: string[];
+}) => {
+  const streaming = readyKeys !== undefined;
+  const items = streaming
+    ? SECTION_NAV_ITEMS
+    : SECTION_NAV_ITEMS.filter((it) => sectionHasContent(sheet, it.key));
   const [activeKey, setActiveKey] = useState<string>(items[0]?.key ?? "");
 
   useEffect(() => {
@@ -188,11 +216,13 @@ const SheetSectionNav = ({ sheet }: { sheet: GeneratedSheet }) => {
       </p>
       <nav style={{ display: "flex", flexDirection: "column" }}>
         {items.map((it) => {
-          const active = activeKey === it.key;
+          const pending = streaming && !readyKeys!.includes(it.key);
+          const active = !pending && activeKey === it.key;
           return (
             <button
               key={it.key}
               type="button"
+              disabled={pending}
               onClick={() => scrollToSection(it.key)}
               aria-current={active ? "true" : undefined}
               style={{
@@ -206,17 +236,21 @@ const SheetSectionNav = ({ sheet }: { sheet: GeneratedSheet }) => {
                 fontSize: 13,
                 lineHeight: 1.3,
                 fontWeight: active ? 500 : 400,
-                color: active ? "var(--accent)" : "var(--fg-muted)",
+                color: active
+                  ? "var(--accent)"
+                  : pending
+                  ? "var(--fg-subtle)"
+                  : "var(--fg-muted)",
                 background: "transparent",
-                cursor: "pointer",
+                cursor: pending ? "default" : "pointer",
                 transition:
                   "color var(--dur-micro) var(--ease-out), border-color var(--dur-micro) var(--ease-out)",
               }}
               onMouseEnter={(e) => {
-                if (!active) e.currentTarget.style.color = "var(--fg)";
+                if (!active && !pending) e.currentTarget.style.color = "var(--fg)";
               }}
               onMouseLeave={(e) => {
-                if (!active) e.currentTarget.style.color = "var(--fg-muted)";
+                if (!active && !pending) e.currentTarget.style.color = "var(--fg-muted)";
               }}
             >
               {it.label}
@@ -449,8 +483,15 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
   const [modelUsed, setModelUsed] = useState<"flash" | "gpt-oss" | "claude" | undefined>(undefined);
   const [loading, setLoading] = useState(false);
   const [deckSaved, setDeckSaved] = useState(false);
-  const [loadingMsg, setLoadingMsg] = useState("");
-  const [pendingOutput, setPendingOutput] = useState<string | null>(null);
+  // Sections whose JSON has fully arrived, so the renderer knows how much of a
+  // still-streaming sheet is safe to show.
+  const [streamedKeys, setStreamedKeys] = useState<string[]>([]);
+  // The response was damaged and only part of it could be salvaged — the reader
+  // is told rather than being handed a silently short sheet.
+  const [sheetIncomplete, setSheetIncomplete] = useState(false);
+  // Identifies the sheet on screen, so the section navigator resets its active
+  // item per sheet rather than when `topic` happens to arrive mid-stream.
+  const [generationId, setGenerationId] = useState(0);
   // A prefilled topic (e.g. a Roadmap chip) must land in a visible textarea —
   // otherwise the picker renders and silently overwrites it on the next click.
   const [showTextarea, setShowTextarea] = useState(!!prefill?.input);
@@ -490,7 +531,12 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
 
   const { sheetCount, isSheetLimited, isProUser: pro, refresh: refreshUsage } = useUsageLimit();
   const { premiumRemaining, isPremiumHookActive } = usePremiumHook();
-  const { preferredModel, setPreferredModel, saving: modelSaving } = useModelPreference();
+  const {
+    preferredModel,
+    setPreferredModel,
+    saving: modelSaving,
+    isLoading: modelLoading,
+  } = useModelPreference();
   const { user, isAnonymous } = useAuth();
   const {
     canUseCitation,
@@ -518,7 +564,9 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
     setSheet(null);
     setLegacyOutput("");
     setDeckSaved(false);
-    setPendingOutput(null);
+    setStreamedKeys([]);
+    setSheetIncomplete(false);
+    setGenerationId((id) => id + 1);
     setShowTextarea(false);
     setCitationState("idle");
     setCitations([]);
@@ -566,6 +614,10 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
       const decoder = new TextDecoder();
       let textBuffer = "";
       let fullText = "";
+      // Sections rendered so far. The sheet arrives as one JSON object, so we
+      // repair the truncated tail each chunk and reveal a section only once its
+      // field has closed — see parsePartialSheet.
+      let revealedCount = 0;
 
       while (true) {
         const { done, value } = await reader.read();
@@ -589,6 +641,14 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
             const content = parsed.choices?.[0]?.delta?.content;
             if (content) {
               fullText += content;
+              // Re-render only when another section finishes — at most once per
+              // section for the whole stream, so no mid-word reflow.
+              const partial = parsePartialSheet(fullText);
+              if (partial && partial.completeKeys.length > revealedCount) {
+                revealedCount = partial.completeKeys.length;
+                setSheet(partial.sheet);
+                setStreamedKeys(partial.completeKeys);
+              }
             }
           } catch {
             textBuffer = line + "\n" + textBuffer;
@@ -597,8 +657,24 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
         }
       }
 
+      // Authoritative parse, degrading in steps rather than all at once: a
+      // single unescaped quote from the model used to discard the whole sheet
+      // and dump raw JSON at the reader.
       const rawText = fullText || "";
-      setPendingOutput(rawText);
+      const result = parseSheetOutput(rawText);
+      if (result) {
+        setSheet(result.sheet);
+        setLegacyOutput("");
+        setSheetIncomplete(result.status === "partial");
+      } else if (revealedCount === 0) {
+        // Not a JSON sheet at all — hand it to the legacy text renderer.
+        setSheet(null);
+        setLegacyOutput(rawText);
+      } else {
+        // Unparseable tail, but sections did stream. Keep them.
+        setSheetIncomplete(true);
+      }
+      setLoading(false);
 
       // Citation lookup — runs after stream completes
       try {
@@ -624,8 +700,6 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
       }
     } catch (e: any) {
       setLoading(false);
-      setLoadingMsg("");
-      setPendingOutput(null);
       toast({
         title: "Error",
         description: e.message || "Failed to generate study material",
@@ -658,57 +732,6 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
       window.removeEventListener("studybuddy:enhancement-saved", handleEnhancementSaved);
   }, []);
 
-  useEffect(() => {
-    if (!loading) return;
-
-    const steps = [
-      "Reading topic…",
-      "Structuring notes…",
-      "Finding exam traps…",
-      "Adding memory hooks…",
-      "Finalizing your sheet…",
-    ];
-
-    let currentStep = 0;
-    let allStepsDone = false;
-    setLoadingMsg(steps[0]);
-
-    const interval = setInterval(() => {
-      currentStep += 1;
-
-      if (currentStep < steps.length) {
-        setLoadingMsg(steps[currentStep]);
-      } else {
-        allStepsDone = true;
-        setLoadingMsg(steps[steps.length - 1]);
-      }
-
-      if (allStepsDone) {
-        setPendingOutput((pending) => {
-          if (pending !== null) {
-            clearInterval(interval);
-            const cleaned = sanitizeJsonOutput(pending);
-            try {
-              const parsed = JSON.parse(cleaned) as GeneratedSheet;
-              setSheet(parsed);
-              setLegacyOutput("");
-            } catch {
-              // JSON parse failed — fall back to legacy text renderer
-              setSheet(null);
-              setLegacyOutput(pending);
-            }
-            setLoading(false);
-            setLoadingMsg("");
-            return null;
-          }
-          return pending;
-        });
-      }
-    }, 1000);
-
-    return () => clearInterval(interval);
-  }, [loading]); // eslint-disable-line react-hooks/exhaustive-deps
-
   // Persona buttons are the generation trigger — there is no separate submit.
   const generateWithPersona = (p: Persona) => {
     setPersona(p);
@@ -738,6 +761,8 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
     setShowTextarea(false);
     setConfigDrawerOpen(false);
     setDeckSaved(false);
+    setSheetIncomplete(false);
+    setGenerationId((id) => id + 1);
     setModelUsed(undefined);
     setCitationState("idle");
     setCitations([]);
@@ -997,9 +1022,9 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
                   <button
                     type="button"
                     onClick={() => setPreferredModel("gpt-oss")}
-                    disabled={modelSaving}
+                    disabled={modelSaving || modelLoading}
                     className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
-                      preferredModel !== "claude"
+                      !modelLoading && preferredModel === "gpt-oss"
                         ? "bg-background text-foreground shadow-sm"
                         : "text-muted-foreground hover:text-foreground"
                     }`}
@@ -1009,9 +1034,9 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
                   <button
                     type="button"
                     onClick={() => setPreferredModel("claude")}
-                    disabled={modelSaving}
+                    disabled={modelSaving || modelLoading}
                     className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
-                      preferredModel === "claude"
+                      !modelLoading && preferredModel === "claude"
                         ? "bg-background text-foreground shadow-sm"
                         : "text-muted-foreground hover:text-foreground"
                     }`}
@@ -1247,50 +1272,15 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
       {/* ── Middle pane: living document (fluid, fills its lane) ── */}
       <div ref={outputRef} className="min-w-0 lg:flex-1 lg:px-8">
       <div className="w-full space-y-6">
-      {loading && !sheet && !legacyOutput && (
-        <div className="space-y-6 animate-fade-in">
-          <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "0 4px" }}>
-            <Loader2
-              className="animate-spin"
-              style={{ width: 14, height: 14, color: "var(--accent)" }}
-            />
-            <p
-              style={{
-                fontFamily: "var(--font-sans)",
-                fontSize: 14,
-                fontWeight: 500,
-                color: "var(--fg)",
-                transition: "all 300ms",
-              }}
-            >
-              {loadingMsg}
-            </p>
-            <p style={{ fontSize: 12, color: "var(--fg-subtle)" }}>
-              Takes a little longer during peak hours — hang tight
-            </p>
-          </div>
-          {/* Document structure forming — skeletons mirror the incoming sections */}
-          <div className="space-y-6">
-            {[0, 1, 2, 3, 4].map((i) => (
-              <div
-                key={i}
-                className="section-reveal"
-                style={{ animationDelay: `${i * 150}ms` }}
-              >
-                <SectionSkeleton variant="sheet-section" />
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
       {!loading && !sheet && !legacyOutput && (
         <SheetsEmptyState onStartTopic={startTopic} onSelectHistory={loadHistoryItem} />
       )}
 
-      {(sheet || legacyOutput) && (
+      {/* Rendered from the first frame of a generation, so the sheet's seven
+          sections are laid out once and filled in — never added or removed. */}
+      {(loading || sheet || legacyOutput) && (
         <OutputSection
-          output={sheet ? JSON.stringify(sheet) : legacyOutput}
+          output={sheet ? JSON.stringify(sheet) : legacyOutput || EMPTY_SHEET_JSON}
           inputText={notes}
           modeInfo={{ examMode, difficulty, focus, length }}
           citations={citations}
@@ -1304,10 +1294,46 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
             isLoggedIn ? setGoProOpen(true) : setAuthModalOpen(true)
           }
           citationIsLoggedIn={isLoggedIn}
+          isStreaming={loading}
+          streamedKeys={streamedKeys}
         />
       )}
 
-      {(sheet || legacyOutput) && (
+      {/* The response was damaged mid-flight. Say so rather than let a short
+          sheet pass for a complete one — this is medical content. */}
+      {!loading && sheetIncomplete && (
+        <div
+          className="animate-fade-in"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 12,
+            borderRadius: "var(--radius-md)",
+            border: "1px solid var(--border)",
+            borderLeft: "3px solid var(--signal)",
+            background: "var(--bg-elevated)",
+            padding: "12px 16px",
+          }}
+        >
+          <AlertTriangle
+            style={{ width: 15, height: 15, color: "var(--signal)", flexShrink: 0 }}
+          />
+          <p style={{ flex: 1, fontSize: 13, color: "var(--fg-muted)", lineHeight: 1.5 }}>
+            This sheet was cut short — some sections may be missing.
+          </p>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8 shrink-0 text-xs"
+            onClick={() => generate()}
+          >
+            Regenerate
+          </Button>
+        </div>
+      )}
+
+      {/* Flashcards stream in last, so this stays hidden until the sheet is whole. */}
+      {!loading && (sheet || legacyOutput) && (
         <div className="flex justify-center pt-2">
           <Button
             variant="outline"
@@ -1354,7 +1380,9 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
       {/* ── Right pane: section navigator. Only at 2xl+ (≥1536px), where the
           content area is wide enough that a third column doesn't squeeze the
           document — below that we stay 2-column (config + fluid document). ── */}
-      {sheet && (
+      {/* Present for the whole generation. Appearing at the end would take 240px
+          back from the document just as the reader settles into it. */}
+      {(loading || sheet) && (
         <>
           <div
             aria-hidden
@@ -1362,7 +1390,13 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
             style={{ background: "var(--border)" }}
           />
           <div className="hidden 2xl:block 2xl:w-[240px] 2xl:shrink-0 2xl:sticky 2xl:top-6 2xl:self-start 2xl:pl-6">
-            <SheetSectionNav key={sheet.topic ?? "sheet"} sheet={sheet} />
+            {/* A stable object, not a fresh literal — the observer effect keys
+                off `sheet`, so a new identity each render would rebind it. */}
+            <SheetSectionNav
+              key={generationId}
+              sheet={sheet ?? EMPTY_SHEET}
+              readyKeys={loading ? streamedKeys : undefined}
+            />
           </div>
         </>
       )}
