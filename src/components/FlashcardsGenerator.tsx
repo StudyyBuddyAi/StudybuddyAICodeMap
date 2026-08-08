@@ -20,7 +20,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { callMedicalNotes } from "@/lib/callMedicalNotes";
 import { parseFlashcardsFromOutput } from "@/lib/parse-flashcards";
 import { fetchBestCitation, type CitationResult } from "@/lib/citation";
-import { saveCitationsForTopic } from "@/lib/citation-store";
+import { saveCitationsForTopic, getCitationsForTopic } from "@/lib/citation-store";
 import CitationCTABanner from "@/components/CitationCTABanner";
 import CitationBadgeList from "@/components/CitationBadgeList";
 import GoProModal from "@/components/GoProModal";
@@ -76,7 +76,7 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated }: FlashcardsGene
   const {
     canUseCitation,
     isLoggedIn,
-    incrementCitation,
+    refreshCitation,
   } = useCitationUsage();
   const remaining = Math.max(0, MAX_DAILY_CARDS - cardsCount);
 
@@ -177,21 +177,28 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated }: FlashcardsGene
       const parsed = parseFlashcardsFromOutput(fullText, activeTopic);
       setPendingCards(parsed);
 
-      // Citation lookup — runs after cards are saved
+      // Citation lookup — runs after cards are saved. Serves from the local
+      // topic cache when available (no quota consumed); otherwise the edge
+      // function consumes one unit server-side and returns whether it was
+      // accepted, so the server is the source of truth for the daily limit.
       try {
-        if (canUseCitation) {
+        const cached = getCitationsForTopic(activeTopic);
+        if (cached.length > 0) {
+          setCitations(cached);
+          setCitationState("found");
+        } else if (canUseCitation) {
           setCitationState("loading");
-          const results = await fetchBestCitation(activeTopic);
-          setCitations(results);
-          setCitationState(results.length > 0 ? "found" : "hidden");
-          if (results.length > 0) {
-            saveCitationsForTopic(activeTopic, results);
-            try {
-              await incrementCitation();
-            } catch {
-              // ignore — citation already stored
+          const result = await fetchBestCitation(activeTopic);
+          setCitations(result.citations);
+          if (result.quotaExceeded) {
+            setCitationState("locked");
+          } else {
+            setCitationState(result.citations.length > 0 ? "found" : "hidden");
+            if (result.citations.length > 0) {
+              saveCitationsForTopic(activeTopic, result.citations);
             }
           }
+          await refreshCitation();
         } else if (isLoggedIn) {
           setCitationState("locked");
         } else {

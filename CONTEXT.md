@@ -26,7 +26,7 @@ Term → exact code/table/column it maps to.
   - **Pro** — `is_pro=true` AND (`pro_expires_at` null OR future). Computed identically in `use-usage-limit.ts`, `use-premium-hook.ts`, `use-citation-usage.ts`.
   - **Daily quotas** (`usage_records`, key `(user_id,kind,usage_date)`, `kind`∈`sheet|cards`): free/anon 5 sheets + 5 cards/day (`MAX_DAILY_*`). QBank NOT quota-tracked.
   - **Premium hook** — free/anon get Claude Haiku for first N generations as conversion bait. N: anon=1, free=3. Counter `profiles.premium_used` (lifetime, never resets). Incremented server-side in edge fn via service role.
-  - **Citation tier** — cited generations: anon=1/day (localStorage `sb_anon_citation`), free=3/day (`citation_usage` table), Pro unlimited.
+  - **Citation tier** — cited generations: anon=1/day, free=3/day, Pro unlimited. Enforced **server-side** in the `get-citations` edge fn via `consume_citation`/`refund_citation` (service-role RPCs, migration `20260808120000`); client reads `citation_usage` for display only. Anon tracked in DB under their real anon id (survives anon→account upgrade), so `sb_anon_citation` is legacy.
 - **Blueprint topic** — USMLE content taxonomy for a Question. No single column; it's the tuple `subject` → `domain` → `topic` (+ `competency`, `reasoning_order`). Note: DB `subject` is surfaced in QBank UI as **"system"** (e.g. Cardiovascular). "Blueprint"/"blueprints" appears only as marketing copy in `QBank.tsx`.
 - **Persona** — NOT on `main`. Belongs to the planned (unbuilt) Writer→Reviewers→Editor question-generation pipeline. No table, prop, or type. Treat as aspirational.
 - **Model preference** — `profiles.preferred_model` (`claude|gpt-oss`, code default `gpt-oss`). Pro-only chip toggle. Type in `use-model-preference.ts`.
@@ -77,7 +77,7 @@ Anonymous-first. `signUp` on anon = `updateUser({email,password})` (keeps id) th
 - Hooks: file `use-thing.ts` (kebab), export `useThing`.
 - DB columns snake_case; TS props camelCase. Option keys lowercase `a..e`. Enums as inline string unions in `types.ts` (not Postgres enums — `Enums` block is empty).
 - **`subject` (DB) ⇄ "system" (UI/QBank)** — same concept, two names. `qbank_sessions.system` stores it.
-- localStorage keys, two eras: newer `sb_*` (`sb_qbank_session`, `sb_welcomed`, `sb_anon_citation`, `sb_first_sheet_seen`, `sb_first_deck_seen`, `sb_sheet_hint_dismissed`); older `studybuddy_*` (`studybuddy_decks_v1`, `studybuddy_history`). Both live. `APP_STORAGE_KEYS` (Index.tsx) = "has used app before" set.
+- localStorage keys, two eras: newer `sb_*` (`sb_qbank_session`, `sb_welcomed`, `sb_anon_citation` (legacy, unused since server-side citation quota), `sb_first_sheet_seen`, `sb_first_deck_seen`, `sb_sheet_hint_dismissed`); older `studybuddy_*` (`studybuddy_decks_v1`, `studybuddy_history`). Both live. `APP_STORAGE_KEYS` (Index.tsx) = "has used app before" set.
 - React Query keys, array form. QBank keys to invalidate on mutation: `["qbank-count"]`, `["qbank-domains"]`/`["qbank-domain-meta"]`, `["qbank-meta"]`, `["qbank-sessions"]` (note CLAUDE.md lists `qbank-domains` but context uses `qbank-domain-meta` + `qbank-systems`). Profile keys: `["profile",userId]`, `["profile-premium",userId]`, `["model-preference",userId]`.
 - Schema changes are ADDITIVE ONLY (migrated off Lovable; layered history). No raw SQL outside migrations.
 
@@ -92,8 +92,8 @@ Anonymous-first. `signUp` on anon = `updateUser({email,password})` (keeps id) th
 - **Client trusts data it shouldn't:**
   - **Answer key ships to browser.** `questions` rows are fetched to the client *including* `correct_option`, `explanation`, `teaching_point` before the user answers. Correctness is scored client-side (`submitAnswer`). Fully inspectable in devtools/network.
   - **`is_correct` is client-computed** then inserted into `user_attempts`; `score`/`total`/`total_time_ms` into `qbank_sessions`. DB trusts whatever the client sends.
-  - **Entitlement flags are client-supplied.** `medical-notes` reads `isPro`, `isAnonymous`, `preferredModel`, `userId` from the request body — it does NOT verify the JWT. A crafted request can pass `isPro:true` to route to Claude Haiku. Only `premium_used` is enforced server-side (service role).
-  - **Usage counters are client-incremented.** `usage_records` / `citation_usage` upserts happen from the client (`use-usage-limit`, `use-citation-usage`); anon citation count lives purely in localStorage (`sb_anon_citation`).
+  - **Entitlement flags are client-supplied but server-ignored.** `medical-notes` and `get-citations` now verify the JWT and derive identity/entitlement from the profiles row; body `isPro`/`isAnonymous`/`preferredModel`/`userId` are backwards-compat hints only. JWT verification was pre-existing in `medical-notes`; `get-citations` gained it in `20260808120000`. (QBank entitlement still client-supplied — see qbank item below.)
+  - **Usage counters were client-incremented; now server-side.** Sheets/cards (`usage_records`) via `consume_usage`/`refund_usage` (`20260708000000`); citations (`citation_usage`) via `consume_citation`/`refund_citation` (`20260808120000`). The client keeps SELECT for display only (`use-usage-limit`, `use-citation-usage`). QBank scores/attempts still client-inserted.
 - **`useUsageLimit` doesn't return the incrementer for QBank** — QBank has no usage gating at all (intentional? undocumented).
 
 ---
