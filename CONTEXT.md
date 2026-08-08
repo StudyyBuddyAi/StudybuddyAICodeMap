@@ -60,12 +60,11 @@ RLS **defined in migrations** (all own-row `auth.uid()=user_id`, RLS enabled):
 - `flagged_questions` — own SELECT/INSERT/DELETE.
 - `pro_codes` — authenticated may SELECT all; redemption only via `redeem_pro_code(text)` SECURITY DEFINER RPC (blocks anon). Hidden admin feature — never surface in UI.
 
-RLS **NOT in any migration** (tables created directly in Supabase dashboard, posture unverifiable from repo):
-- `questions`, `media`, `question_media` — client reads directly with anon key, so live DB must grant anon/public SELECT.
-- `user_attempts`, `qbank_sessions` — client inserts directly with `user_id`, so live DB must have own-row INSERT policy.
-- Only `flagged_questions` (which FK-references `questions` + `qbank_sessions`) has a migration; the tables it points at do not.
+RLS **retro-fitted in migrations** (`20260808140000_qbank_schema_and_rls.sql`; the tables were created in the dashboard, so the CREATEs are `IF NOT EXISTS` no-ops on live and the DDL mirrors `types.ts` + RPC usage — diff the live tables before applying):
+- `questions`, `media`, `question_media` — SELECT policies to anon + authenticated (`using (true)`); the answer-key columns stay privilege-blocked via the column REVOKE in `20260708130000`.
+- `user_attempts`, `qbank_sessions` — own-row SELECT + DELETE policies; all writes go through the SECURITY DEFINER RPCs below, which bypass RLS as table owner.
 
-RPC / triggers: `redeem_pro_code(code_input)`→json; `handle_new_user` (INSERT auth.users→profiles); `handle_user_email_update` (sync email on anon upgrade).
+RPC / triggers: `redeem_pro_code(code_input)`→json; QBank `start_qbank_session`/`submit_answer`/`end_qbank_session`/`get_session_review` (all→json, browser-called with user JWT, so `auth.uid()` resolves); `handle_new_user` (INSERT auth.users→profiles); `handle_user_email_update` (sync email on anon upgrade).
 
 ### Auth model (`src/hooks/use-auth.ts`)
 Anonymous-first. `signUp` on anon = `updateUser({email,password})` (keeps id) then `migrateLocalCardsToServer` + `migrateLocalStudyHistoryToServer`. `signIn` reconciles `usage_records` from anon id (merges max count per kind for today). New anon-compatible feature pattern: localStorage key → migration step on signup.
@@ -85,15 +84,15 @@ Anonymous-first. `signUp` on anon = `updateUser({email,password})` (keeps id) th
 
 ## Known messes
 
-- **QBank tables untracked in migrations** — `questions`, `media`, `question_media`, `user_attempts`, `qbank_sessions` exist only in the live DB + `types.ts`. No CREATE/RLS in repo. Any reasoning about their RLS is inference, not source.
+- **QBank tables are a migration retro-fit** — `questions`, `media`, `question_media`, `user_attempts`, `qbank_sessions` were created in the dashboard and only later tracked by `20260808140000_qbank_schema_and_rls.sql`. CREATEs are inferred from `types.ts` + RPC bodies (`IF NOT EXISTS` no-ops on live), and the migration chain still cannot `db reset` from scratch because earlier migrations FK-reference these tables. Diff live tables before applying anything new.
 - **`use-qbank.ts` vs `QBankContext.tsx` overlap** — `QBankContext` is the real implementation (persistence, flags, media, timer, DB writes). `useQBank()` in `use-qbank.ts` is a legacy near-duplicate whose session logic is **dead code**; only its exported *types* (`Question`, `QuestionMedia`, `OptionKey`, `SessionAnswer`, `SessionState`) are imported (by QBankContext / QBankSession / QBankSummary). Types live in the stale file.
 - **`preferred_model` migration is stale** — `20260516000000` sets DEFAULT `'flash'` + CHECK `IN ('flash','gpt-oss')`, but code uses `'claude'|'gpt-oss'` default `'gpt-oss'`. Live DB constraint must have been altered directly; migration no longer matches reality. (Comment even calls flash "Gemini 2.5 Flash" — Gemini is gone from the main app.)
 - **Vestigial Stripe columns** — `profiles.stripe_customer_id/stripe_subscription_id/subscription_status/current_period_end/billing_interval` added by `20260508000000` despite the hard "No Stripe" constraint. Unused; do not build on them.
-- **Client trusts data it shouldn't:**
-  - **Answer key ships to browser.** `questions` rows are fetched to the client *including* `correct_option`, `explanation`, `teaching_point` before the user answers. Correctness is scored client-side (`submitAnswer`). Fully inspectable in devtools/network.
-  - **`is_correct` is client-computed** then inserted into `user_attempts`; `score`/`total`/`total_time_ms` into `qbank_sessions`. DB trusts whatever the client sends.
-  - **Entitlement flags are client-supplied but server-ignored.** `medical-notes` and `get-citations` now verify the JWT and derive identity/entitlement from the profiles row; body `isPro`/`isAnonymous`/`preferredModel`/`userId` are backwards-compat hints only. JWT verification was pre-existing in `medical-notes`; `get-citations` gained it in `20260808120000`. (QBank entitlement still client-supplied — see qbank item below.)
-  - **Usage counters were client-incremented; now server-side.** Sheets/cards (`usage_records`) via `consume_usage`/`refund_usage` (`20260708000000`); citations (`citation_usage`) via `consume_citation`/`refund_citation` (`20260808120000`). The client keeps SELECT for display only (`use-usage-limit`, `use-citation-usage`). QBank scores/attempts still client-inserted.
+- **QBank grading is server-side, but the client still holds data it shouldn't for a different reason:**
+  - **Answer key no longer ships.** `questions` rows fetched to the client exclude `correct_option`/`explanation`/`teaching_point` (column REVOKE in `20260708130000`); grading happens in the `submit_answer` RPC and the review payload in `get_session_review` (`20260708120000`). `is_correct`/`score`/`total`/`total_time_ms` are computed server-side, not client-supplied.
+  - **Explanation/teaching-point HTML is escaped before rendering** via `src/lib/render-markdown.ts` (escape-first, then **bold**/*italic* transforms); `dangerouslySetInnerHTML` in `QBankSession.tsx` only ever sees sanitized output.
+  - **Entitlement flags are client-supplied but server-ignored.** `medical-notes` and `get-citations` now verify the JWT and derive identity/entitlement from the profiles row; body `isPro`/`isAnonymous`/`preferredModel`/`userId` are backwards-compat hints only. JWT verification was pre-existing in `medical-notes`; `get-citations` gained it in `20260808120000`. QBank is ungated — no server-side entitlement check at all.
+  - **Usage counters were client-incremented; now server-side.** Sheets/cards (`usage_records`) via `consume_usage`/`refund_usage` (`20260708000000`); citations (`citation_usage`) via `consume_citation`/`refund_citation` (`20260808120000`). The client keeps SELECT for display only (`use-usage-limit`, `use-citation-usage`). QBank is not quota-tracked.
 - **`useUsageLimit` doesn't return the incrementer for QBank** — QBank has no usage gating at all (intentional? undocumented).
 
 ---
