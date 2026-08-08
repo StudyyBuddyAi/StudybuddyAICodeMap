@@ -207,13 +207,13 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated }: FlashcardsGene
       } catch {
         setCitationState("hidden");
       }
-    } catch (e: any) {
+    } catch (e: unknown) {
       setGenerating(false, "");
       setLoadingMsg("");
       setPendingCards(null);
       toast({
         title: "Error",
-        description: e.message || "Failed to generate flashcards",
+        description: e instanceof Error && e.message ? e.message : "Failed to generate flashcards",
         variant: "destructive",
       });
     }

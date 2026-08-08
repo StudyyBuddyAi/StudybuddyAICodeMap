@@ -177,7 +177,7 @@ const QBankSummary = () => {
           });
 
           if (!error && data) {
-            const review = data as {
+            const review = data as unknown as {
               session: {
                 score: number;
                 total: number;

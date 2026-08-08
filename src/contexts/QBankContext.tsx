@@ -220,7 +220,7 @@ export const QBankProvider = ({ children }: { children: ReactNode }) => {
     });
     if (error) throw error;
 
-    const result = data as { session_id: string; questions: Question[] } | null;
+    const result = data as unknown as { session_id: string; questions: Question[] } | null;
     const questions = (result?.questions ?? []) as Question[];
     const now = Date.now();
     const newSession: SessionState = {
@@ -257,7 +257,7 @@ export const QBankProvider = ({ children }: { children: ReactNode }) => {
         console.error("submit_answer failed:", error);
         return undefined;
       }
-      const graded = data as {
+      const graded = data as unknown as {
         is_correct: boolean;
         correct_option: OptionKey;
         explanation: string;

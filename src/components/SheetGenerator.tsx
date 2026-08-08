@@ -124,7 +124,7 @@ const SECTION_NAV_ITEMS: { key: string; label: string }[] = [
 
 /** A section is worth listing only if it actually has content in the sheet. */
 function sectionHasContent(sheet: GeneratedSheet, key: string): boolean {
-  const v = (sheet as Record<string, unknown>)[key];
+  const v = (sheet as unknown as Record<string, unknown>)[key];
   if (Array.isArray(v)) return v.length > 0;
   if (typeof v === "string") return v.trim().length > 0;
   return false;
@@ -628,13 +628,13 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
       } catch {
         setCitationState("hidden");
       }
-    } catch (e: any) {
+    } catch (e: unknown) {
       setLoading(false);
       setLoadingMsg("");
       setPendingOutput(null);
       toast({
         title: "Error",
-        description: e.message || "Failed to generate study material",
+        description: e instanceof Error && e.message ? e.message : "Failed to generate study material",
         variant: "destructive",
       });
     }
