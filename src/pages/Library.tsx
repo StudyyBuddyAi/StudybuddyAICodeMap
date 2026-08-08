@@ -18,20 +18,10 @@ import StudyMode from "@/components/StudyMode";
 import OutputSection from "@/components/OutputSection";
 import { useFlashcardDeck } from "@/hooks/use-flashcard-deck";
 import { useStudyHistory, type StudyHistoryItem } from "@/hooks/use-study-history";
+import { timeAgo } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 
 type StudyFilter = { topic?: string; mode: "due" | "all-cards" | "deck" };
-
-function timeAgo(ts: number): string {
-  const diff = Date.now() - ts;
-  const mins = Math.floor(diff / 60000);
-  if (mins < 1) return "just now";
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  const days = Math.floor(hrs / 24);
-  return `${days}d ago`;
-}
 
 const Library = () => {
   const { toast } = useToast();

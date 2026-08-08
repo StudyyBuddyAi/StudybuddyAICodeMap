@@ -1,5 +1,6 @@
 // Shared QBank types. The session engine lives entirely in
-// `src/contexts/QBankContext.tsx`; this file intentionally exports types only.
+// `src/contexts/QBankContext.tsx`; this file is the single source of truth for
+// the question/session shapes the client works with.
 
 export type Difficulty = "Easy" | "Medium" | "Hard";
 export type OptionKey = "a" | "b" | "c" | "d" | "e";

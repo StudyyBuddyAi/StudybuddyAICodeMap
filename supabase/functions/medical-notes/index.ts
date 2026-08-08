@@ -7,6 +7,12 @@ const corsHeaders = {
   "Access-Control-Expose-Headers": "x-model-used, x-is-premium",
 };
 
+// Structured, machine-parseable logs (visible in Supabase edge-fn logs).
+// Metadata only — never log notes/topic content, tokens, or keys.
+const log = (event: string, fields: Record<string, unknown> = {}) => {
+  console.log(JSON.stringify({ fn: "medical-notes", event, ...fields }));
+};
+
 function sanitizeJsonOutput(raw: string): string {
   // Strip markdown code fences if the model wraps the JSON
   let cleaned = raw.trim();
@@ -94,6 +100,7 @@ serve(async (req) => {
   }
 
   try {
+    const startedAt = Date.now();
     // ── JWT verification ───────────────────────────────────────────────────
     // Reject missing/invalid tokens before doing any work. The client sends the
     // user's Supabase access token as the Authorization bearer.
@@ -525,7 +532,18 @@ ${sheetSchemaBlock}`;
       ? { provider: { order: ["Anthropic"], allow_fallbacks: true } }
       : {};
 
-    console.log("[MODEL_USED]:", model, "| isPremium:", isPremiumGeneration);
+    log("generation_start", {
+      userId: user.id,
+      isAnonymous,
+      isProUser,
+      model,
+      isPremium: isPremiumGeneration,
+      mode,
+      cardsOnly: !!cardsOnly,
+      explainMode: !!explainMode,
+      enhanceMode: enhanceMode ?? null,
+      quotaEligible,
+    });
 
     // ── SERVER-SIDE DAILY QUOTA ────────────────────────────────────────────
     // Sheets and cards count toward the free/anon daily cap; explain and enhance
@@ -670,6 +688,12 @@ ${sheetSchemaBlock}`;
       },
       flush(controller) {
         controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+        log("generation_stream_end", {
+          userId: user.id,
+          model,
+          isPremium: isPremiumGeneration,
+          elapsedMs: Date.now() - startedAt,
+        });
       },
     });
 
@@ -682,9 +706,10 @@ ${sheetSchemaBlock}`;
       },
     });
   } catch (e) {
-    console.error("medical-notes error:", e);
+    const message = e instanceof Error ? e.message : String(e);
+    log("error", { error: message, elapsedMs: Date.now() - startedAt });
     return new Response(
-      JSON.stringify({ error: e instanceof Error ? e.message : "Unknown error" }),
+      JSON.stringify({ error: message }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   }

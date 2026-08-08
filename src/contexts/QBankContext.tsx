@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
-import type { Question, OptionKey, SessionAnswer, SessionState } from "@/hooks/use-qbank";
+import type { Question, OptionKey, SessionAnswer, SessionState } from "@/lib/qbank-types";
 
 const STORAGE_KEY = "sb_qbank_session";
 

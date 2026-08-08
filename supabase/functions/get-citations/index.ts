@@ -6,6 +6,12 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
+// Structured, machine-parseable logs (visible in Supabase edge-fn logs).
+// Metadata only — never log topic content, tokens, or keys.
+const log = (event: string, fields: Record<string, unknown> = {}) => {
+  console.log(JSON.stringify({ fn: "get-citations", event, ...fields }));
+};
+
 // ─── Specialty detection ──────────────────────────────────────────────────
 
 interface SpecialtyProfile {
@@ -294,6 +300,7 @@ serve(async (req) => {
   let quotaConsumedUser: string | null = null;
 
   try {
+    const startedAt = Date.now();
     // ── JWT verification ───────────────────────────────────────────────────
     // Identity must be proven before any work is done. The client sends the
     // user's Supabase access token as the Authorization bearer.
@@ -367,6 +374,16 @@ serve(async (req) => {
     const result = await fetchPubMed(topic, NCBI_API_KEY, specialty);
     const citations = result ? [result] : [];
 
+    log("lookup_complete", {
+      userId: user.id,
+      isAnonymous,
+      isProUser,
+      specialty: specialty?.name ?? null,
+      citations: citations.length,
+      quotaConsumed,
+      elapsedMs: Date.now() - startedAt,
+    });
+
     // Refund on failed/empty lookup — no quota burned for undelivered results.
     if (quotaConsumed && citations.length === 0) {
       try {
@@ -376,7 +393,10 @@ serve(async (req) => {
 
     return json({ citations });
   } catch (e) {
-    console.error("get-citations error:", e);
+    log("error", {
+      error: e instanceof Error ? e.message : String(e),
+      elapsedMs: Date.now() - startedAt,
+    });
     // Refund the consumed unit so a crashed lookup never burns quota.
     if (quotaConsumed) {
       try {
