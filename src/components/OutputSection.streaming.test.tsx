@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { act, render, screen, type RenderResult } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import OutputSection from "./OutputSection";
 import type { GeneratedSheet } from "@/types/generated-sheet";
@@ -9,12 +9,22 @@ beforeAll(() => {
   Element.prototype.scrollIntoView = () => {};
 });
 
-/** SaveButton reads study history through react-query. */
-function renderSheet(ui: React.ReactElement) {
+/**
+ * SaveButton reads study history through react-query, and its useAuth resolves a
+ * session one microtask after mount. Awaiting inside act() lets that settle before
+ * the assertions run, so the state update isn't reported as unwrapped.
+ */
+async function renderSheet(ui: React.ReactElement): Promise<RenderResult> {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
-  return render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>);
+  let result!: RenderResult;
+  await act(async () => {
+    result = render(
+      <QueryClientProvider client={client}>{ui}</QueryClientProvider>
+    );
+  });
+  return result;
 }
 
 const SHEET: GeneratedSheet = {
@@ -50,10 +60,10 @@ const sectionText = (key: string) =>
   document.querySelector(`[data-section-key="${key}"]`)?.textContent ?? "";
 
 describe("OutputSection streaming", () => {
-  it("lays out every section from the first frame", () => {
+  it("lays out every section from the first frame", async () => {
     // The layout must not change shape as content lands, so all seven slots
     // exist even before anything has streamed.
-    renderSheet(
+    await renderSheet(
       <OutputSection output={JSON.stringify(SHEET)} isStreaming streamedKeys={[]} />
     );
 
@@ -62,8 +72,8 @@ describe("OutputSection streaming", () => {
     }
   });
 
-  it("shows content only for sections that finished streaming", () => {
-    renderSheet(
+  it("shows content only for sections that finished streaming", async () => {
+    await renderSheet(
       <OutputSection
         output={JSON.stringify(SHEET)}
         isStreaming
@@ -78,8 +88,8 @@ describe("OutputSection streaming", () => {
     expect(sectionText("examTraps")).not.toContain("HFpEF is not HFrEF");
   });
 
-  it("marks exactly one section as being written", () => {
-    renderSheet(
+  it("marks exactly one section as being written", async () => {
+    await renderSheet(
       <OutputSection
         output={JSON.stringify(SHEET)}
         isStreaming
@@ -92,8 +102,8 @@ describe("OutputSection streaming", () => {
     expect(screen.getAllByLabelText("Waiting").length).toBeGreaterThan(0);
   });
 
-  it("offers per-section actions only once a section has landed", () => {
-    renderSheet(
+  it("offers per-section actions only once a section has landed", async () => {
+    await renderSheet(
       <OutputSection
         output={JSON.stringify(SHEET)}
         isStreaming
@@ -106,15 +116,15 @@ describe("OutputSection streaming", () => {
     expect(screen.getAllByLabelText("Section loaded")).toHaveLength(1);
   });
 
-  it("disables Save while streaming so a partial sheet can't be persisted", () => {
-    renderSheet(
+  it("disables Save while streaming so a partial sheet can't be persisted", async () => {
+    await renderSheet(
       <OutputSection output={JSON.stringify(SHEET)} isStreaming streamedKeys={["overview"]} />
     );
     expect(screen.getByRole("button", { name: /save/i })).toBeDisabled();
   });
 
-  it("renders every section as ready once streaming ends", () => {
-    renderSheet(<OutputSection output={JSON.stringify(SHEET)} />);
+  it("renders every section as ready once streaming ends", async () => {
+    await renderSheet(<OutputSection output={JSON.stringify(SHEET)} />);
 
     for (const name of Object.values(HEADING)) {
       expect(heading(name)).toBeInTheDocument();
@@ -125,7 +135,7 @@ describe("OutputSection streaming", () => {
     expect(screen.getByRole("button", { name: /save/i })).toBeEnabled();
   });
 
-  it("survives a partial sheet whose later fields are still empty", () => {
+  it("survives a partial sheet whose later fields are still empty", async () => {
     const partial: GeneratedSheet = {
       ...SHEET,
       clinicalApproach: "",
@@ -134,7 +144,9 @@ describe("OutputSection streaming", () => {
       flashcards: [],
       referenceNote: "",
     };
-    expect(() =>
+    // Rejects rather than throws now that the render is awaited, but a render or
+    // effect error still fails the test.
+    await expect(
       renderSheet(
         <OutputSection
           output={JSON.stringify(partial)}
@@ -142,6 +154,6 @@ describe("OutputSection streaming", () => {
           streamedKeys={["overview", "memoryHooks"]}
         />
       )
-    ).not.toThrow();
+    ).resolves.toBeTruthy();
   });
 });
