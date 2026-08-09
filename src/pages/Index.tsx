@@ -351,14 +351,23 @@ const Index = () => {
       <main>
         {/* ---------- Hero ---------- */}
         <section id="home" className="hero bg-grid" data-screen style={{ backgroundColor: '#F7F9FB', padding: '60px 0 80px' }}>
-          <div className="container hero-grid" style={{ display: 'grid', gridTemplateColumns: '1.1fr 0.9fr', gap: '40px', alignItems: 'center' }}>
+          <div
+            className="container hero-grid"
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 320px), 1fr))',
+              gap: 'clamp(24px, 4vw, 40px)',
+              alignItems: 'center',
+              width: '100%',
+            }}
+          >
             <div>
               <div className="eyebrow" style={{ color: '#64748B', textTransform: 'uppercase', fontSize: '12px', fontWeight: '600', letterSpacing: '0.05em', marginBottom: '16px' }}>StudyBuddy AI · Built for Medical Students</div>
-              <h1 className="display-xl hero-title" style={{ color: '#191c1e', fontSize: '56px', lineHeight: '1.1', fontWeight: '800', marginBottom: '24px' }}>
+              <h1 className="display-xl hero-title " style={{ color: '#191c1e', fontSize: 'clamp(32px, 7vw, 56px)', lineHeight: '1.1', fontWeight: '800', marginBottom: '24px' }}>
                 Study smarter. Score higher.{" "}
                 <span className="serif-italic" style={{ fontFamily: 'Georgia, serif', fontStyle: 'italic', fontWeight: '400', color: '#0F4C81' }}>Pass.</span>
               </h1>
-              <p className="body-lg hero-desc" style={{ color: '#42474f', fontSize: '18px', lineHeight: '1.6', marginBottom: '32px' }}>
+              <p className="body-lg hero-desc" style={{ color: '#42474f', fontSize: 'clamp(15px, 3.2vw, 18px)', lineHeight: '1.6', marginBottom: '32px' }}>
                 StudyBuddy turns your curriculum into AI-powered sheets, questions, and
                 explanations — so{" "}
                 <span
@@ -375,16 +384,16 @@ const Index = () => {
                 . Built by a medical student, for medical students in MENA and beyond.
               </p>
 
-              <div className="hero-ctas" style={{ display: 'flex', gap: '16px', marginBottom: '32px', alignItems: 'center' }}>
+              <div className="hero-ctas flex w-full flex-col gap-4 sm:flex-row sm:items-center sm:gap-4 sm:w-auto" style={{ display: 'flex', gap: '16px', marginBottom: '32px', alignItems: 'center' }}>
                 <button
-                  className="btn btn-primary btn-lg"
+                  className="btn btn-primary btn-lg w-full sm:w-auto justify-center"
                   style={{ backgroundColor: '#111827', borderColor: '#111827', color: '#fff', padding: '14px 28px', borderRadius: '9999px', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '8px' }}
                   onClick={() => navigate("/dashboard?start=sheet")}
                 >
                   Start for free
                   <ArrowRight className="icon" size={18} strokeWidth={1.6} />
                 </button>
-                <a className="btn btn-outline btn-lg" href="#playground" style={{ borderColor: '#d1d5db', color: '#374151', padding: '14px 28px', borderRadius: '9999px', fontWeight: '600', backgroundColor: '#fff' }}>
+                <a className="btn btn-outline btn-lg w-full sm:w-auto justify-center" href="#playground" style={{ borderColor: '#d1d5db', color: '#374151', padding: '14px 28px', borderRadius: '9999px', fontWeight: '600', backgroundColor: '#fff' }}>
                   See how it works
                 </a>
               </div>
@@ -490,7 +499,7 @@ D. Pericarditis`}
 
         {/* ---------- How it works ---------- */}
         <section id="playground" data-screen style={{ backgroundColor: '#F7F9FB', padding: '80px 0' }}>
-          <div className="container">
+          <div className="container mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8">
             <div className="playground-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1.1fr', gap: '60px', alignItems: 'center' }}>
               <div className="playground-lead">
                 <div className="eyebrow" style={{ color: '#64748B', textTransform: 'uppercase', fontSize: '12px', fontWeight: '600', letterSpacing: '0.05em', marginBottom: '12px' }}>How it works</div>
@@ -939,7 +948,7 @@ D. Pericarditis`}
 
             <div className="footer-col">
               <div className="footer-col-head" style={{ fontWeight: '700', fontSize: '14px', color: '#111827', marginBottom: '16px' }}>Product</div>
-              <ul style={{ listStyle: 'none', padding: '0', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              <ul  style={{ listStyle: 'none', padding: '0', display: 'flex', flexDirection: 'column', gap: '10px' }}>
                 <li>
                   <Link to="/qbank" style={{ color: '#4b5563', textDecoration: 'none', fontSize: '14px' }}>QBank</Link>
                 </li>
