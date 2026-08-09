@@ -153,7 +153,7 @@ const DashboardSidebar = ({
         {/* Workspace block */}
         {!collapsed && (
           isAnonymous || !user ? (
-            <div className="rounded-lg border border-border bg-card p-3 space-y-2">
+            <div className="rounded-lg text bg-card border border-border p-3 space-y-2">
               <p className="text-[13px] font-medium text-foreground leading-snug">
                 Sign in to save your progress
               </p>

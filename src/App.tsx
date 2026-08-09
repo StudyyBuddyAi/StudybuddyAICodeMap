@@ -8,6 +8,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import TopProgressBar from "@/components/TopProgressBar";
 import Index from "./pages/Index.tsx";
+import Home from "./pages/Home.tsx";
 import Dashboard from "./pages/Dashboard.tsx";
 import Library from "./pages/Library.tsx";
 import NotFound from "./pages/NotFound.tsx";
@@ -53,6 +54,7 @@ const AppRoutes = () => {
     <div className={stage === "exit" ? "page-transition-exit" : "page-transition-enter"}>
       <Routes location={displayLocation}>
         <Route path="/" element={<Index />} />
+        <Route path="/home" element={<Home />} />
         <Route path="/dashboard" element={<Dashboard />} />
         <Route path="/roadmap" element={<Roadmap />} />
         <Route path="/sheets" element={<Sheets />} />

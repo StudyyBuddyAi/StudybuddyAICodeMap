@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { Compass } from "lucide-react";
@@ -6,13 +6,24 @@ import DashboardLayout from "@/components/dashboard/DashboardLayout";
 import PageLoader from "@/components/PageLoader";
 import { Button } from "@/components/ui/button";
 import {
-  Accordion,
-  AccordionContent,
-  AccordionItem,
-  AccordionTrigger,
-} from "@/components/ui/accordion";
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
+import TpiceRodmap from "@/modles/TpiceRodmap";
+import {
+  FaBone,
+  FaBrain,
+  FaCapsules,
+  FaDroplet,
+  FaHeartPulse,
+  FaLungs,
+  FaShieldHeart,
+  FaStethoscope,
+} from "react-icons/fa6";
 
 type CurriculumTopic = Database["public"]["Tables"]["curriculum_topics"]["Row"];
 
@@ -41,8 +52,35 @@ const groupBySystem = (rows: CurriculumTopic[]): SystemSection[] => {
   return [...sections.values()].filter((s) => s.topics.length > 0);
 };
 
+const getSectionAppearance = (system: string, index: number) => {
+  const normalized = system.toLowerCase();
+  const tone = index % 2 === 0 ? "blue" : "green";
+
+  const iconMap = [
+    { test: /(cardio|heart)/, icon: FaHeartPulse },
+    { test: /(musculo|skin|bone)/, icon: FaBone },
+    { test: /(hemat|onc|blood)/, icon: FaDroplet },
+    { test: /(psych|brain|neuro)/, icon: FaBrain },
+    { test: /(resp|lung)/, icon: FaLungs },
+    { test: /(pedi|child)/, icon: FaShieldHeart },
+    { test: /(endo|horm|thyroid)/, icon: FaCapsules },
+    { test: /(gastro|digest|intestinal)/, icon: FaStethoscope },
+    { test: /(repro|obgyn|preg|gyne)/, icon: FaShieldHeart },
+    { test: /(infect|micro|virus)/, icon: FaShieldHeart },
+    { test: /(renal|urinary|kidney)/, icon: FaDroplet },
+  ] as const;
+
+  const match = iconMap.find(({ test }) => test.test(normalized));
+
+  return {
+    tone,
+    Icon: match?.icon ?? (tone === "blue" ? FaHeartPulse : FaStethoscope),
+  };
+};
+
 const Roadmap = () => {
   const navigate = useNavigate();
+  const [selectedSection, setSelectedSection] = useState<SystemSection | null>(null);
 
   const topicsQuery = useQuery({
     queryKey: ["curriculum-topics"],
@@ -76,9 +114,9 @@ const Roadmap = () => {
 
   return (
     <DashboardLayout>
-      <div className="space-y-6">
+      <div className=" max-w-[100%] bg-[#f3f4f6] space-y-6 px-4 py-6 sm:px-8 lg:px-12">
         <div className="space-y-1">
-          <h1 className="text-2xl font-semibold tracking-tight text-foreground">
+          <h1 className="text-3xl py-2 font-semibold text-[#0F4C81] tracking-tight">
             Roadmap
           </h1>
           <p className="text-sm text-muted-foreground">
@@ -120,48 +158,66 @@ const Roadmap = () => {
           </div>
         ) : (
           <>
-            <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-              {countLabel}
-            </p>
+            <div className="inline-flex items-center gap-3 rounded-full border border-[#0F4C81]/30 bg-white/90 px-4 py-2.5 shadow-[0_0_0_1px_rgba(15,23,42,0.02)] ring-1 ring-[#0F4C81]/10">
+              <div className="flex h-6 w-6 items-center justify-center rounded-[10px] border border-[#0F4C81]/20 bg-[#eaf4ff] text-[#0F4C81]">
+                <Compass className="h-3.5 w-3.5" />
+              </div>
+              <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#0F4C81] sm:text-xs">
+                {countLabel}
+              </p>
+            </div>
 
-            <Accordion
-              type="multiple"
-              defaultValue={sections.map((s) => s.system)}
-              className="rounded-lg border border-border bg-card px-4"
-            >
-              {sections.map((section) => (
-                <AccordionItem
-                  key={section.system}
-                  value={section.system}
-                  className="border-b last:border-b-0"
-                >
-                  <AccordionTrigger className="text-sm font-semibold text-foreground hover:no-underline">
-                    <span className="flex items-center gap-2.5">
-                      {section.system}
-                      <span className="rounded-full bg-accent px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
-                        {section.topics.length}
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
+              {sections.map((section, index) => {
+                const { tone, Icon } = getSectionAppearance(section.system, index);
+                const isBlue = tone === "blue";
+
+                return (
+                  <div
+                    onClick={() => setSelectedSection(section)}
+                    key={section.system}
+                    className="group min-h-[170px] cursor-pointer rounded-[24px] border border-[#e5e7eb] bg-[#f3f4f6] p-5 shadow-[0_0_0_1px_rgba(15,23,42,0.02)] transition-all duration-200 ease-out hover:-translate-y-1 hover:shadow-md hover:border-primary/20"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div
+                        className={`flex h-16 w-16 items-center justify-center rounded-[18px] ${
+                          isBlue
+                            ? "bg-[#dfeaf5] text-[#0F4C81]"
+                            : "bg-[#dff3ee] text-[#0D8D8F]"
+                        }`}
+                      >
+                        <Icon className="h-7 w-7" />
+                      </div>
+
+                      <span
+                        className={`inline-flex items-center rounded-full px-4 py-2 text-base font-semibold ${
+                          isBlue
+                            ? "bg-[#edf4fb] text-[#0F4C81]"
+                            : "bg-[#ecfaf7] text-[#0D8D8F]"
+                        }`}
+                      >
+                        {section.topics.length} Topics
                       </span>
-                    </span>
-                  </AccordionTrigger>
-
-                  <AccordionContent>
-                    <div className="flex flex-wrap gap-2 pb-2">
-                      {section.topics.map((topic) => (
-                        <Button
-                          key={topic.id}
-                          variant="outline"
-                          onClick={() => openSheetFor(topic.title)}
-                          aria-label={`Generate a study sheet on ${topic.title}`}
-                          className="h-auto min-h-[44px] whitespace-normal rounded-lg px-4 py-2.5 text-left text-[13px] font-medium leading-snug text-foreground hover:border-primary/50 hover:bg-accent"
-                        >
-                          {topic.title}
-                        </Button>
-                      ))}
                     </div>
-                  </AccordionContent>
-                </AccordionItem>
-              ))}
-            </Accordion>
+
+                    <h3 className="mt-8 text-left text-[1.2rem] font-medium leading-none tracking-[-0.04em] text-[#1f2937]">
+                      {section.system}
+                    </h3>
+                  </div>
+                );
+              })}
+            </div>
+
+            <Dialog open={selectedSection !== null} onOpenChange={() => setSelectedSection(null)}>
+              <DialogContent className="max-h-[86vh] max-w-[1160px] overflow-y-auto border-0 bg-transparent p-0 shadow-none">
+                {selectedSection && (
+                  <TpiceRodmap
+                    section={selectedSection}
+                    onClose={() => setSelectedSection(null)}
+                  />
+                )}
+              </DialogContent>
+            </Dialog>
           </>
         )}
       </div>

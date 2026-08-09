@@ -41,42 +41,46 @@ interface StatChipProps {
   label: string;
   accent?: boolean;
   suffix?: ReactNode;
+  iconBackground: string;
+  iconColor: string;
 }
 
-const StatChip = ({ icon, value, label, accent, suffix }: StatChipProps) => {
+const StatChip = ({
+  icon,
+  value,
+  label,
+  accent,
+  suffix,
+  iconBackground,
+  iconColor,
+}: StatChipProps) => {
   const animated = useCountUp(value);
+
   return (
-    <div style={{
-      display: "flex",
-      flex: 1,
-      flexDirection: "column",
-      alignItems: "center",
-      gap: 4,
-      padding: "4px 8px",
-      textAlign: "center",
-    }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <span style={{ color: "var(--fg-subtle)", display: "flex" }}>{icon}</span>
-        <span style={{
-          fontSize: 24,
-          fontWeight: 600,
-          lineHeight: 1,
-          fontVariantNumeric: "tabular-nums",
-          letterSpacing: "-0.02em",
-          color: accent ? "var(--accent)" : "var(--fg)",
-        }}>
+    <div className="stats-strip-card">
+      <div
+        className="stats-strip-icon"
+        style={{
+          background: iconBackground,
+          color: iconColor,
+        }}
+      >
+        {icon}
+      </div>
+
+      <div className="stats-strip-value-row">
+        <span
+          className="stats-strip-value"
+          style={{
+            color: accent ? "var(--accent)" : "#111827",
+          }}
+        >
           {value === null ? "—" : animated}
         </span>
-        {suffix}
+        {suffix && <span className="stats-strip-suffix">{suffix}</span>}
       </div>
-      <span style={{
-        fontFamily: "var(--font-mono)",
-        fontSize: 11,
-        color: "var(--fg-muted)",
-        letterSpacing: "0.04em",
-      }}>
-        {label}
-      </span>
+
+      <span className="stats-strip-label">{label}</span>
     </div>
   );
 };
@@ -90,77 +94,53 @@ const StatsStrip = () => {
   const streakLabel = !isAnonymous && streak === 1 ? "day streak" : "days streak";
 
   const sheetsValue = isAnonymous || sheetsThisWeek === null ? null : sheetsThisWeek;
-  const sheetsLabel = "sheets this week";
+  const sheetsLabel = "Sheets this week";
 
   const dueValue = isAnonymous ? null : stats.due;
-  const dueLabel = "cards due today";
+  const dueLabel = "Cards due today";
 
   return (
-    <div
-      className="animate-fade-in"
-      style={{
-        border: "1px solid var(--border)",
-        borderRadius: "var(--radius-lg)",
-        background: "var(--bg-elevated)",
-        padding: "20px 24px",
-      }}
-    >
-      <div
-        style={{
-          fontFamily: "var(--font-mono)",
-          fontSize: 11,
-          fontWeight: 500,
-          letterSpacing: "0.14em",
-          textTransform: "uppercase",
-          color: "var(--accent)",
-          marginBottom: 16,
-        }}
-      >
-        Your progress
+    <div className="animate-fade-in stats-strip-section">
+      
+      <div className="stats-strip-header">
+        <span>Detailed Analytics</span>
+        <svg viewBox="0 0 20 20" aria-hidden="true" className="stats-strip-header-icon">
+          <path d="M7.5 5.5 12 10l-4.5 4.5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
       </div>
 
-      <div style={{
-        display: "flex",
-        flexDirection: "row",
-        alignItems: "stretch",
-        gap: 0,
-      }}>
+      <div className="stats-strip-grid">
         <StatChip
-          icon={<FileText className="h-3.5 w-3.5" />}
+          icon={<FileText className="h-7 w-7" />}
           value={sheetsValue}
           label={sheetsLabel}
+          iconBackground="rgba(14, 160, 140, 0.12)"
+          iconColor="#0d6e6e"
         />
-        <div style={{ width: 1, background: "var(--border)", alignSelf: "stretch" }} />
         <StatChip
-          icon={<Layers className="h-3.5 w-3.5" />}
+          icon={<Layers className="h-7 w-7" />}
           value={dueValue}
           label={dueLabel}
+          iconBackground="rgba(59, 130, 246, 0.10)"
+          iconColor="#1d4ed8"
         />
-        <div style={{ width: 1, background: "var(--border)", alignSelf: "stretch" }} />
         <StatChip
-          icon={<Flame className="h-3.5 w-3.5" />}
+          icon={<Flame className="h-7 w-7" />}
           value={streakValue}
           label={streakLabel}
           accent
+          iconBackground="rgba(239, 68, 68, 0.12)"
+          iconColor="#ef4444"
           suffix={
             streakValue !== null && streakValue > 0 ? (
-              <span className="text-base leading-none" aria-hidden>
-                🔥
-              </span>
+              <span aria-hidden="true">days</span>
             ) : undefined
           }
         />
       </div>
 
       {isAnonymous && (
-        <p style={{
-          textAlign: "center",
-          fontFamily: "var(--font-mono)",
-          fontSize: 11,
-          color: "var(--fg-subtle)",
-          letterSpacing: "0.04em",
-          marginTop: 12,
-        }}>
+        <p className="stats-strip-anonymous-note">
           Sign in to track your progress
         </p>
       )}

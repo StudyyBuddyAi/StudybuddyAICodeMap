@@ -549,4 +549,98 @@
       transition: none;
     }
   }
+
+  /* Stats Strip Styles */
+  .stats-strip-section {
+    padding: 24px;
+    background: var(--card);
+    border-radius: var(--radius);
+    border: 1px solid hsl(var(--sb-border));
+  }
+
+  .stats-strip-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+    font-size: 14px;
+    font-weight: 500;
+    color: hsl(var(--muted-foreground));
+  }
+
+  .stats-strip-header-icon {
+    width: 16px;
+    height: 16px;
+    color: hsl(var(--sb-accent));
+  }
+
+  .stats-strip-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+  }
+
+  .stats-strip-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 20px 16px;
+    background: hsl(var(--background));
+    border-radius: var(--radius);
+    border: 1px solid hsl(var(--sb-border));
+    transition: all 0.2s ease;
+  }
+
+  .stats-strip-card:hover {
+    border-color: hsl(var(--sb-accent));
+    transform: translateY(-2px);
+  }
+
+  .stats-strip-icon {
+    width: 48px;
+    height: 48px;
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 12px;
+  }
+
+  .stats-strip-value-row {
+    display: flex;
+    align-items: baseline;
+    gap: 4px;
+    margin-bottom: 4px;
+  }
+
+  .stats-strip-value {
+    font-size: 28px;
+    font-weight: 600;
+    line-height: 1;
+    font-family: var(--font-display, system-ui);
+  }
+
+  .stats-strip-suffix {
+    font-size: 12px;
+    color: hsl(var(--muted-foreground));
+    font-weight: 500;
+  }
+
+  .stats-strip-label {
+    font-size: 13px;
+    color: hsl(var(--muted-foreground));
+    font-weight: 500;
+    text-align: center;
+  }
+
+  .stats-strip-anonymous-note {
+    margin-top: 16px;
+    text-align: center;
+    font-size: 13px;
+    color: hsl(var(--muted-foreground));
+    font-weight: 500;
+    padding: 12px;
+    background: hsl(var(--secondary));
+    border-radius: var(--radius);
+  }
 }
