@@ -5,7 +5,7 @@ import DashboardLayout from "@/components/dashboard/DashboardLayout";
 import PageLoader from "@/components/PageLoader";
 import { useQBankContext } from "@/contexts/QBankContext";
 import { supabase } from "@/integrations/supabase/client";
-import type { Question, QuestionMedia, SessionAnswer } from "@/hooks/use-qbank";
+import type { Question, QuestionMedia, SessionAnswer } from "@/lib/qbank-types";
 
 interface SummaryData {
   questions: Question[];
@@ -177,7 +177,7 @@ const QBankSummary = () => {
           });
 
           if (!error && data) {
-            const review = data as {
+            const review = data as unknown as {
               session: {
                 score: number;
                 total: number;

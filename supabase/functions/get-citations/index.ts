@@ -6,6 +6,12 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
+// Structured, machine-parseable logs (visible in Supabase edge-fn logs).
+// Metadata only — never log topic content, tokens, or keys.
+const log = (event: string, fields: Record<string, unknown> = {}) => {
+  console.log(JSON.stringify({ fn: "get-citations", event, ...fields }));
+};
+
 // ─── Specialty detection ──────────────────────────────────────────────────
 
 interface SpecialtyProfile {
@@ -121,7 +127,7 @@ function buildSearchQuery(topic: string): string {
   return topic
     .replace(/according to .+/i, "")
     .replace(/management of /i, "")
-    .replace(/[^a-zA-Z0-9\s\-]/g, " ")
+    .replace(/[^a-zA-Z0-9\s-]/g, " ")
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, 120);
@@ -234,6 +240,45 @@ async function fetchPubMed(
   }
 }
 
+// ─── Auth & quota helpers ─────────────────────────────────────────────────
+
+/**
+ * Decode a verified JWT's payload (middle segment) to read identity claims.
+ * Used for `is_anonymous`, which the DB also reads via `auth.jwt() ->> 'is_anonymous'`.
+ * Returns {} on any parse failure — never throws.
+ */
+function decodeJwtPayload(token: string): Record<string, unknown> {
+  try {
+    const b64url = token.split(".")[1] ?? "";
+    const pad = b64url.length % 4 === 0 ? "" : "=".repeat(4 - (b64url.length % 4));
+    const b64 = b64url.replace(/-/g, "+").replace(/_/g, "/") + pad;
+    const bin = atob(b64);
+    const bytes = Uint8Array.from(bin, (c) => c.charCodeAt(0));
+    return JSON.parse(new TextDecoder().decode(bytes));
+  } catch {
+    return {};
+  }
+}
+
+// Best-effort per-instance burst limiter. Deno isolates are ephemeral (a
+// module-level Map does not survive cold starts and is not shared across
+// instances), so this only flattens bursts — it is NOT a distributed limit.
+// The daily citation_usage quota is the authoritative control.
+const BURST_LIMIT_PER_MINUTE = 10;
+const burstBuckets = new Map<string, number[]>();
+
+function checkBurstLimit(userId: string, nowMs: number): boolean {
+  const cutoff = nowMs - 60_000;
+  const recent = (burstBuckets.get(userId) ?? []).filter((t) => t > cutoff);
+  if (recent.length >= BURST_LIMIT_PER_MINUTE) {
+    burstBuckets.set(userId, recent);
+    return false;
+  }
+  recent.push(nowMs);
+  burstBuckets.set(userId, recent);
+  return true;
+}
+
 // ─── Main handler ─────────────────────────────────────────────────────────
 
 serve(async (req) => {
@@ -241,13 +286,87 @@ serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
+  const json = (
+    body: unknown,
+    status = 200,
+    extraHeaders: Record<string, string> = {}
+  ) =>
+    new Response(JSON.stringify(body), {
+      status,
+      headers: { ...corsHeaders, "Content-Type": "application/json", ...extraHeaders },
+    });
+
+  let quotaConsumed = false;
+  let quotaConsumedUser: string | null = null;
+
   try {
+    const startedAt = Date.now();
+    // ── JWT verification ───────────────────────────────────────────────────
+    // Identity must be proven before any work is done. The client sends the
+    // user's Supabase access token as the Authorization bearer.
+    const authHeader = req.headers.get("Authorization") ?? "";
+    const token = authHeader.replace(/^Bearer\s+/i, "").trim();
+    if (!token) {
+      return json({ error: "invalid_token" }, 401);
+    }
+    const { createClient } = await import("https://esm.sh/@supabase/supabase-js@2");
+    const authClient = createClient(
+      Deno.env.get("SUPABASE_URL")!,
+      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
+    );
+    const { data: { user }, error: authError } = await authClient.auth.getUser(token);
+    if (authError || !user) {
+      return json({ error: "invalid_token" }, 401);
+    }
+
+    // ── SERVER-SIDE IDENTITY & ENTITLEMENT ──────────────────────────────────
+    // Citation limits are derived from the verified JWT + the profiles row,
+    // never from request body fields. Pro users are uncapped.
+    const isAnonymous =
+      user.is_anonymous === true || decodeJwtPayload(token).is_anonymous === true;
+
+    const { data: profile } = await authClient
+      .from("profiles")
+      .select("is_pro, pro_expires_at")
+      .eq("id", user.id)
+      .maybeSingle();
+
+    const isProUser =
+      profile?.is_pro === true &&
+      (profile.pro_expires_at === null ||
+        new Date(profile.pro_expires_at) > new Date());
+
+    // ── Burst rate limit (best-effort, per-instance) ────────────────────────
+    if (!checkBurstLimit(user.id, Date.now())) {
+      return json({ error: "rate_limited" }, 429, { "Retry-After": "60" });
+    }
+
     const { topic } = await req.json();
     if (!topic || typeof topic !== "string" || !topic.trim()) {
-      return new Response(
-        JSON.stringify({ citations: [] }),
-        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      return json({ citations: [] });
+    }
+
+    // ── SERVER-SIDE DAILY CITATION QUOTA ───────────────────────────────────
+    // Consume one unit atomically BEFORE calling NCBI; refund below if the
+    // lookup fails or finds nothing, so only delivered citations count.
+    const ANON_CITATION_LIMIT = 1;
+    const FREE_CITATION_LIMIT = 3;
+
+    if (!isProUser) {
+      const citationLimit = isAnonymous ? ANON_CITATION_LIMIT : FREE_CITATION_LIMIT;
+      const { data: consumeResult, error: consumeError } = await authClient.rpc(
+        "consume_citation",
+        { p_user: user.id, p_cap: citationLimit }
       );
+      if (consumeError) {
+        console.error("consume_citation failed:", consumeError);
+        return json({ error: "quota_check_failed" }, 500);
+      }
+      if (!consumeResult?.allowed) {
+        return json({ citations: [], quotaExceeded: true });
+      }
+      quotaConsumed = true;
+      quotaConsumedUser = user.id;
     }
 
     const NCBI_API_KEY = Deno.env.get("NCBI_API_KEY") ?? "";
@@ -255,15 +374,43 @@ serve(async (req) => {
     const result = await fetchPubMed(topic, NCBI_API_KEY, specialty);
     const citations = result ? [result] : [];
 
-    return new Response(
-      JSON.stringify({ citations }),
-      { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
+    log("lookup_complete", {
+      userId: user.id,
+      isAnonymous,
+      isProUser,
+      specialty: specialty?.name ?? null,
+      citations: citations.length,
+      quotaConsumed,
+      elapsedMs: Date.now() - startedAt,
+    });
+
+    // Refund on failed/empty lookup — no quota burned for undelivered results.
+    if (quotaConsumed && citations.length === 0) {
+      try {
+        await authClient.rpc("refund_citation", { p_user: user.id });
+      } catch { /* best effort */ }
+    }
+
+    return json({ citations });
   } catch (e) {
-    console.error("get-citations error:", e);
-    return new Response(
-      JSON.stringify({ citations: [] }),
-      { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
+    log("error", {
+      error: e instanceof Error ? e.message : String(e),
+      elapsedMs: Date.now() - startedAt,
+    });
+    // Refund the consumed unit so a crashed lookup never burns quota.
+    if (quotaConsumed) {
+      try {
+        const { createClient } = await import("https://esm.sh/@supabase/supabase-js@2");
+        const refundClient = createClient(
+          Deno.env.get("SUPABASE_URL")!,
+          Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
+        );
+        const userId = quotaConsumedUser;
+        if (userId) {
+          await refundClient.rpc("refund_citation", { p_user: userId });
+        }
+      } catch { /* best effort */ }
+    }
+    return json({ citations: [] });
   }
 });

@@ -19,6 +19,7 @@ import {
   isJsonSheet,
 } from "@/types/generated-sheet";
 import { fetchBestCitation, type CitationResult } from "@/lib/citation";
+import { getCitationsForTopic } from "@/lib/citation-store";
 import CitationCTABanner from "@/components/CitationCTABanner";
 import AuthModal from "@/components/AuthModal";
 import GoProModal from "@/components/GoProModal";
@@ -138,7 +139,7 @@ const SECTION_NAV_ITEMS: { key: string; label: string }[] = [
 
 /** A section is worth listing only if it actually has content in the sheet. */
 function sectionHasContent(sheet: GeneratedSheet, key: string): boolean {
-  const v = (sheet as Record<string, unknown>)[key];
+  const v = (sheet as unknown as Record<string, unknown>)[key];
   if (Array.isArray(v)) return v.length > 0;
   if (typeof v === "string") return v.trim().length > 0;
   return false;
@@ -541,7 +542,7 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
   const {
     canUseCitation,
     isLoggedIn,
-    incrementCitation,
+    refreshCitation,
   } = useCitationUsage();
   const { saveCards } = useFlashcardDeck();
   const { persona, setPersona } = usePersona();
@@ -676,20 +677,25 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
       }
       setLoading(false);
 
-      // Citation lookup — runs after stream completes
+      // Citation lookup — runs after stream completes. Serves from the local
+      // topic cache when available (no quota consumed); otherwise the edge
+      // function consumes one unit server-side and returns whether it was
+      // accepted, so the server is the source of truth for the daily limit.
       try {
-        if (canUseCitation) {
+        const cached = getCitationsForTopic(activeNotes);
+        if (cached.length > 0) {
+          setCitations(cached);
+          setCitationState("found");
+        } else if (canUseCitation) {
           setCitationState("loading");
-          const results = await fetchBestCitation(activeNotes);
-          setCitations(results);
-          setCitationState(results.length > 0 ? "found" : "hidden");
-          if (results.length > 0) {
-            try {
-              await incrementCitation();
-            } catch {
-              // ignore — citation already shown
-            }
+          const result = await fetchBestCitation(activeNotes);
+          setCitations(result.citations);
+          if (result.quotaExceeded) {
+            setCitationState("locked");
+          } else {
+            setCitationState(result.citations.length > 0 ? "found" : "hidden");
           }
+          await refreshCitation();
         } else if (isLoggedIn) {
           setCitationState("locked");
         } else {
@@ -698,11 +704,11 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
       } catch {
         setCitationState("hidden");
       }
-    } catch (e: any) {
+    } catch (e: unknown) {
       setLoading(false);
       toast({
         title: "Error",
-        description: e.message || "Failed to generate study material",
+        description: e instanceof Error && e.message ? e.message : "Failed to generate study material",
         variant: "destructive",
       });
     }

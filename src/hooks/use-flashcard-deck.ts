@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
+import { getNextReview } from "@/lib/spaced-repetition";
 
 export type Card = {
   id: string;
@@ -19,8 +20,6 @@ export type Card = {
 
 const STORAGE_KEY = "studybuddy_decks_v1";
 const DECK_CHANGE_EVENT = "studybuddy:deck-changed";
-const PROGRESSION = [1, 3, 7, 21, 60];
-const DAY = 24 * 60 * 60 * 1000;
 
 function djb2(str: string): string {
   let hash = 5381;
@@ -243,28 +242,8 @@ export function useFlashcardDeck() {
     async (id: string, rating: "again" | "good" | "easy") => {
       const computeNext = (card: Card) => {
         const now = Date.now();
-        let interval = card.interval;
-        let dueAt = card.dueAt;
-        if (rating === "again") {
-          interval = 0;
-          dueAt = now + 10 * 60 * 1000;
-        } else {
-          const idx = PROGRESSION.indexOf(interval);
-          let nextIdx: number;
-          if (interval === 0) {
-            nextIdx = rating === "easy" ? 1 : 0;
-          } else if (idx === -1) {
-            nextIdx = 0;
-          } else {
-            nextIdx =
-              rating === "easy"
-                ? Math.min(idx + 2, PROGRESSION.length - 1)
-                : Math.min(idx + 1, PROGRESSION.length - 1);
-          }
-          interval = PROGRESSION[nextIdx];
-          dueAt = now + interval * DAY;
-        }
-        return { interval, dueAt, lastReviewed: now };
+        const next = getNextReview(card.interval, rating, now);
+        return { interval: next.interval, dueAt: next.dueAt, lastReviewed: next.lastReviewed };
       };
 
       if (useServer) {

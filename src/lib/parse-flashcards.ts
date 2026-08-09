@@ -36,7 +36,7 @@ export function parseFlashcardsFromOutput(output: string, topic: string): Parsed
   let m: RegExpExecArray | null;
   while ((m = regex.exec(section)) !== null) {
     let question = m[1].trim();
-    let answer = m[2].trim();
+    const answer = m[2].trim();
     if (!question || !answer) continue;
 
     // Reject malformed cards: if either field still contains an inline Q: or A: marker

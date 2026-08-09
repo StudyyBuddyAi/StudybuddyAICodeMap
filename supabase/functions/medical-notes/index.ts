@@ -7,6 +7,12 @@ const corsHeaders = {
   "Access-Control-Expose-Headers": "x-model-used, x-is-premium",
 };
 
+// Structured, machine-parseable logs (visible in Supabase edge-fn logs).
+// Metadata only — never log notes/topic content, tokens, or keys.
+const log = (event: string, fields: Record<string, unknown> = {}) => {
+  console.log(JSON.stringify({ fn: "medical-notes", event, ...fields }));
+};
+
 function sanitizeJsonOutput(raw: string): string {
   // Strip markdown code fences if the model wraps the JSON
   let cleaned = raw.trim();
@@ -14,6 +20,24 @@ function sanitizeJsonOutput(raw: string): string {
     cleaned = cleaned.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
   }
   return cleaned;
+}
+
+/**
+ * Decode a verified JWT's payload (middle segment) to read identity claims.
+ * Used for `is_anonymous`, which the DB also reads via `auth.jwt() ->> 'is_anonymous'`.
+ * Returns {} on any parse failure — never throws.
+ */
+function decodeJwtPayload(token: string): Record<string, unknown> {
+  try {
+    const b64url = token.split(".")[1] ?? "";
+    const pad = b64url.length % 4 === 0 ? "" : "=".repeat(4 - (b64url.length % 4));
+    const b64 = b64url.replace(/-/g, "+").replace(/_/g, "/") + pad;
+    const bin = atob(b64);
+    const bytes = Uint8Array.from(bin, (c) => c.charCodeAt(0));
+    return JSON.parse(new TextDecoder().decode(bytes));
+  } catch {
+    return {};
+  }
 }
 
 /**
@@ -76,6 +100,7 @@ serve(async (req) => {
   }
 
   try {
+    const startedAt = Date.now();
     // ── JWT verification ───────────────────────────────────────────────────
     // Reject missing/invalid tokens before doing any work. The client sends the
     // user's Supabase access token as the Authorization bearer.
@@ -100,8 +125,12 @@ serve(async (req) => {
       );
     }
 
+    // Entitlement fields (userId / isAnonymous / isPro / preferredModel) may
+    // still be present in the body — the client sends them for backwards
+    // compatibility — but they are deliberately NOT read here. Identity and
+    // entitlement are derived solely from the verified JWT + profiles below.
     const { notes, difficulty, focus, length, examMode, cardsOnly, cardCount, focusCard,
-            explainMode, userId, isAnonymous, isPro, preferredModel,
+            explainMode,
             enhanceMode, itemText, sectionKey, sectionItems, enhanceTopic,
             persona } = await req.json();
 
@@ -415,8 +444,28 @@ ${sheetSchemaBlock}`;
       throw new Error("OPENROUTER_API_KEY is not configured");
     }
 
+    // ── SERVER-SIDE IDENTITY & ENTITLEMENT ──────────────────────────────────
+    // The JWT was verified above (authClient.auth.getUser). Pro status, account
+    // state and model preference are derived from that verified identity + the
+    // profiles row. Any isPro / isAnonymous / preferredModel / userId sent in
+    // the request body are UI hints at most and are ignored here.
+    const isAnonymous =
+      user.is_anonymous === true || decodeJwtPayload(token).is_anonymous === true;
+
+    const { data: profile } = await authClient
+      .from("profiles")
+      .select("is_pro, pro_expires_at, preferred_model")
+      .eq("id", user.id)
+      .maybeSingle();
+
+    const isProUser =
+      profile?.is_pro === true &&
+      (profile.pro_expires_at === null ||
+        new Date(profile.pro_expires_at) > new Date());
+    const preferredModel = profile?.preferred_model ?? "gpt-oss";
+
     // ── MODEL SELECTION LOGIC ──────────────────────────────────────────────
-    // Pro + Claude toggle → Claude Haiku 4.5
+    // Pro + Claude preference → Claude Haiku 4.5
     // Free/anon hook (first 1-3 gens) → Claude Haiku 4.5 (premium hook)
     // After hook exhausted → GPT-OSS 20B
     // Pro default → GPT-OSS 20B
@@ -429,9 +478,9 @@ ${sheetSchemaBlock}`;
 
     // Enhance calls: simple tier routing, no premium hook tracking
     if (enhanceMode) {
-      model = isPro ? "anthropic/claude-haiku-4.5" : "openai/gpt-oss-20b";
-      isPremiumGeneration = isPro;
-    } else if (isPro) {
+      model = isProUser ? "anthropic/claude-haiku-4.5" : "openai/gpt-oss-20b";
+      isPremiumGeneration = isProUser;
+    } else if (isProUser) {
       if (preferredModel === "claude") {
         model = "anthropic/claude-haiku-4.5";
         isPremiumGeneration = true;
@@ -447,35 +496,20 @@ ${sheetSchemaBlock}`;
       }
     } else {
       const premiumLimit = isAnonymous ? ANON_PREMIUM_LIMIT : FREE_PREMIUM_LIMIT;
-      let currentPremiumUsed = 0;
-
-      if (userId) {
-        const { data: profileData } = await (await import("https://esm.sh/@supabase/supabase-js@2"))
-          .createClient(
-            Deno.env.get("SUPABASE_URL")!,
-            Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
-          )
-          .from("profiles")
-          .select("premium_used")
-          .eq("id", userId)
-          .maybeSingle();
-        currentPremiumUsed = profileData?.premium_used ?? 0;
-      }
-
-      if (currentPremiumUsed < premiumLimit) {
+      // Atomic premium-hook consumption (service-role RPC, mirrors consume_usage).
+      // On RPC failure fall back to GPT-OSS so the generation still succeeds;
+      // the hook is a free conversion perk, not a paid entitlement.
+      const { data: hookResult, error: hookError } = await authClient.rpc(
+        "consume_premium_hook",
+        { p_user: user.id, p_limit: premiumLimit }
+      );
+      if (hookError) {
+        console.error("consume_premium_hook failed:", hookError);
+        model = "openai/gpt-oss-20b";
+        isPremiumGeneration = false;
+      } else if (hookResult?.allowed) {
         model = "anthropic/claude-haiku-4.5";
         isPremiumGeneration = true;
-
-        if (userId) {
-          await (await import("https://esm.sh/@supabase/supabase-js@2"))
-            .createClient(
-              Deno.env.get("SUPABASE_URL")!,
-              Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
-            )
-            .from("profiles")
-            .update({ premium_used: currentPremiumUsed + 1 })
-            .eq("id", userId);
-        }
       } else {
         model = "openai/gpt-oss-20b";
         isPremiumGeneration = false;
@@ -504,7 +538,18 @@ ${sheetSchemaBlock}`;
       ? { provider: { order: ["Anthropic"], allow_fallbacks: true } }
       : {};
 
-    console.log("[MODEL_USED]:", model, "| isPremium:", isPremiumGeneration);
+    log("generation_start", {
+      userId: user.id,
+      isAnonymous,
+      isProUser,
+      model,
+      isPremium: isPremiumGeneration,
+      mode,
+      cardsOnly: !!cardsOnly,
+      explainMode: !!explainMode,
+      enhanceMode: enhanceMode ?? null,
+      quotaEligible,
+    });
 
     // ── SERVER-SIDE DAILY QUOTA ────────────────────────────────────────────
     // Sheets and cards count toward the free/anon daily cap; explain and enhance
@@ -517,16 +562,8 @@ ${sheetSchemaBlock}`;
     let quotaConsumed = false;
 
     if (quotaEligible) {
-      const { data: proProfile } = await authClient
-        .from("profiles")
-        .select("is_pro, pro_expires_at")
-        .eq("id", user.id)
-        .maybeSingle();
-      const isProUser =
-        proProfile?.is_pro === true &&
-        (proProfile.pro_expires_at === null ||
-          new Date(proProfile.pro_expires_at) > new Date());
-
+      // isProUser is derived above from the verified identity + profiles row,
+      // so the quota gate can never be bypassed with a body-supplied flag.
       if (!isProUser) {
         const { data: consumeResult, error: consumeError } = await authClient.rpc(
           "consume_usage",
@@ -657,6 +694,12 @@ ${sheetSchemaBlock}`;
       },
       flush(controller) {
         controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+        log("generation_stream_end", {
+          userId: user.id,
+          model,
+          isPremium: isPremiumGeneration,
+          elapsedMs: Date.now() - startedAt,
+        });
       },
     });
 
@@ -669,9 +712,10 @@ ${sheetSchemaBlock}`;
       },
     });
   } catch (e) {
-    console.error("medical-notes error:", e);
+    const message = e instanceof Error ? e.message : String(e);
+    log("error", { error: message, elapsedMs: Date.now() - startedAt });
     return new Response(
-      JSON.stringify({ error: e instanceof Error ? e.message : "Unknown error" }),
+      JSON.stringify({ error: message }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   }

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Outlet, Route, Routes, useLocation } from "react-router-dom";
 import { Analytics } from "@vercel/analytics/react";
@@ -7,17 +7,21 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import TopProgressBar from "@/components/TopProgressBar";
+import PageLoader from "@/components/PageLoader";
 import Index from "./pages/Index.tsx";
-import Dashboard from "./pages/Dashboard.tsx";
-import Library from "./pages/Library.tsx";
 import NotFound from "./pages/NotFound.tsx";
 import ResetPassword from "./pages/ResetPassword.tsx";
-import Roadmap from "./pages/Roadmap.tsx";
-import Sheets from "./pages/Sheets.tsx";
-import Flashcards from "./pages/Flashcards.tsx";
-import QBank from "./pages/QBank.tsx";
-import QBankSession from "./pages/QBankSession.tsx";
-import QBankSummary from "./pages/QBankSummary.tsx";
+
+// Route pages are lazy-loaded so the heavy page chunks (Sheets, Flashcards,
+// QBank family) are only fetched on navigation instead of in the initial bundle.
+const Dashboard = lazy(() => import("./pages/Dashboard.tsx"));
+const Library = lazy(() => import("./pages/Library.tsx"));
+const Roadmap = lazy(() => import("./pages/Roadmap.tsx"));
+const Sheets = lazy(() => import("./pages/Sheets.tsx"));
+const Flashcards = lazy(() => import("./pages/Flashcards.tsx"));
+const QBank = lazy(() => import("./pages/QBank.tsx"));
+const QBankSession = lazy(() => import("./pages/QBankSession.tsx"));
+const QBankSummary = lazy(() => import("./pages/QBankSummary.tsx"));
 
 const queryClient = new QueryClient();
 
@@ -51,22 +55,24 @@ const AppRoutes = () => {
 
   return (
     <div className={stage === "exit" ? "page-transition-exit" : "page-transition-enter"}>
-      <Routes location={displayLocation}>
-        <Route path="/" element={<Index />} />
-        <Route path="/dashboard" element={<Dashboard />} />
-        <Route path="/roadmap" element={<Roadmap />} />
-        <Route path="/sheets" element={<Sheets />} />
-        <Route path="/flashcards" element={<Flashcards />} />
-        <Route element={<QBankProvider><Outlet /></QBankProvider>}>
-          <Route path="/qbank" element={<QBank />} />
-          <Route path="/qbank/session" element={<QBankSession />} />
-          <Route path="/qbank/summary" element={<QBankSummary />} />
-        </Route>
-        <Route path="/library" element={<Library />} />
-        <Route path="/reset-password" element={<ResetPassword />} />
-        {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
-        <Route path="*" element={<NotFound />} />
-      </Routes>
+      <Suspense fallback={<PageLoader context="generic" />}>
+        <Routes location={displayLocation}>
+          <Route path="/" element={<Index />} />
+          <Route path="/dashboard" element={<Dashboard />} />
+          <Route path="/roadmap" element={<Roadmap />} />
+          <Route path="/sheets" element={<Sheets />} />
+          <Route path="/flashcards" element={<Flashcards />} />
+          <Route element={<QBankProvider><Outlet /></QBankProvider>}>
+            <Route path="/qbank" element={<QBank />} />
+            <Route path="/qbank/session" element={<QBankSession />} />
+            <Route path="/qbank/summary" element={<QBankSummary />} />
+          </Route>
+          <Route path="/library" element={<Library />} />
+          <Route path="/reset-password" element={<ResetPassword />} />
+          {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
+          <Route path="*" element={<NotFound />} />
+        </Routes>
+      </Suspense>
     </div>
   );
 };

@@ -14,14 +14,8 @@ import {
 import DashboardLayout from "@/components/dashboard/DashboardLayout";
 import PageLoader from "@/components/PageLoader";
 import { useQBankContext } from "@/contexts/QBankContext";
-import type { OptionKey, QuestionMedia } from "@/hooks/use-qbank";
-
-function renderMarkdown(text: string): string {
-  if (text == null || text === "") return "";
-  return text
-    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-    .replace(/\*(.+?)\*/g, '<em>$1</em>');
-}
+import { renderMarkdown } from "@/lib/render-markdown";
+import type { OptionKey, QuestionMedia } from "@/lib/qbank-types";
 
 type AnswerState =
   | { status: "unanswered" }

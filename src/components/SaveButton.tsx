@@ -27,10 +27,10 @@ const SaveButton = ({ input, output, modeInfo, disabled = false }: SaveButtonPro
       await saveItem(input, output, modeInfo);
       setSaved(true);
       toast({ title: "Saved to Study History" });
-    } catch (e: any) {
+    } catch (e: unknown) {
       toast({
         title: "Failed to save",
-        description: e?.message ?? "Please try again",
+        description: e instanceof Error && e.message ? e.message : "Please try again",
         variant: "destructive",
       });
     }

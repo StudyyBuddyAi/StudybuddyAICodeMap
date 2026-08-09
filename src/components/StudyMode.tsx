@@ -408,10 +408,10 @@ export const ExplainPanel = ({ open, scope, card, onClose }: ExplainPanelProps) 
             }
           }
         }
-      } catch (e: any) {
+      } catch (e: unknown) {
         toast({
           title: "Error",
-          description: e.message || "Failed to load explanation",
+          description: e instanceof Error && e.message ? e.message : "Failed to load explanation",
           variant: "destructive",
         });
       } finally {
