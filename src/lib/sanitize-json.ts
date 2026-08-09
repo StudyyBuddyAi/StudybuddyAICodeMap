@@ -1,14 +1,15 @@
 /**
- * Strip markdown fences that some models wrap around JSON output.
- * Call this on the assembled stream text before JSON.parse().
+ * Strip the markdown fence some models wrap around JSON output.
+ *
+ * The opening and closing fences are handled independently, so this works on
+ * partial stream text (where the closing fence hasn't been emitted yet) as
+ * well as on a finished response.
  */
-export function sanitizeJsonOutput(raw: string): string {
+export function stripFences(raw: string): string {
   let cleaned = raw.trim();
   if (cleaned.startsWith("```")) {
-    cleaned = cleaned
-      .replace(/^```(?:json)?\s*/i, "")
-      .replace(/\s*```$/, "")
-      .trim();
+    cleaned = cleaned.replace(/^```(?:json)?\s*/i, "");
   }
-  return cleaned;
+  // The closing fence only exists once the model has finished.
+  return cleaned.replace(/\s*```$/, "").trim();
 }
