@@ -6,6 +6,12 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
+// Structured, machine-parseable logs (visible in Supabase edge-fn logs).
+// Metadata only — never log topic content, tokens, or keys.
+const log = (event: string, fields: Record<string, unknown> = {}) => {
+  console.log(JSON.stringify({ fn: "get-citations", event, ...fields }));
+};
+
 // ─── Specialty detection ──────────────────────────────────────────────────
 
 interface SpecialtyProfile {

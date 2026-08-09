@@ -13,9 +13,11 @@ interface SaveButtonProps {
     focus: string;
     length: string;
   };
+  /** Blocks saving while the sheet is still streaming and would persist partial. */
+  disabled?: boolean;
 }
 
-const SaveButton = ({ input, output, modeInfo }: SaveButtonProps) => {
+const SaveButton = ({ input, output, modeInfo, disabled = false }: SaveButtonProps) => {
   const [saved, setSaved] = useState(false);
   const { toast } = useToast();
   const { saveItem } = useStudyHistory();
@@ -40,7 +42,7 @@ const SaveButton = ({ input, output, modeInfo }: SaveButtonProps) => {
       size="sm"
       className="gap-1.5 text-xs"
       onClick={handleSave}
-      disabled={saved}
+      disabled={saved || disabled}
     >
       {saved ? (
         <>

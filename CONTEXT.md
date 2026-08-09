@@ -16,7 +16,7 @@ Term → exact code/table/column it maps to.
 - **QBank** — MCQ engine. Content in `questions` + `question_media` + `media`. UI: `src/pages/QBank.tsx` (landing), `QBankSession.tsx` (runner), `QBankSummary.tsx`. State in `contexts/QBankContext.tsx`.
 - **Question** — table `questions`. Cols: `subject`, `domain`, `topic`, `competency`, `reasoning_order`(`1st|2nd|3rd`), `difficulty`(`Easy|Medium|Hard`), `question_text`, `option_a..option_e`, `correct_option`(`a..e`), `explanation`, `teaching_point`, `is_active`, `external_id`. Media joined via `question_media`(`display_context`=`stem|explanation|both`, `display_order`, `caption`) → `media`(`file_url`, `media_type`, `license`, `attribution`).
 - **Session** — TWO unrelated meanings:
-  1. **QBank session** — one MCQ block. In-memory `SessionState` (`src/hooks/use-qbank.ts` type). Persisted mid-flight to localStorage `sb_qbank_session` (24h TTL, `restoreSession()`). On `endSession` → summary row in `qbank_sessions` (`score`, `total`, `total_time_ms`, `system`, `started_at`/`ended_at`). Config = `SessionConfig` (`domains[]`, `limit`, `system`, `questionIds[]`).
+  1. **QBank session** — one MCQ block. In-memory `SessionState` (`src/lib/qbank-types.ts`). Persisted mid-flight to localStorage `sb_qbank_session` (24h TTL, `restoreSession()`). On `endSession` → summary row in `qbank_sessions` (`score`, `total`, `total_time_ms`, `system`, `started_at`/`ended_at`). Config = `SessionConfig` (`domains[]`, `limit`, `system`, `questionIds[]`).
   2. **Review session** — one flashcard review event, table `review_sessions` (`card_id`, `rating`=`again|hard|good|easy`). Feeds streak/retention stats. Do not conflate with QBank session.
 - **Attempt** — one answered MCQ. Table `user_attempts` (`question_id`, `selected_option`, `is_correct`, `time_taken_ms`, `session_id`→qbank_sessions). In-memory type `SessionAnswer`.
 - **Flag** — user-marked question for later review. Table `flagged_questions` (`question_id`, `session_id`, `UNIQUE(user_id,session_id,question_id)`). In-session flags held in `SessionState.flaggedIds`, written to DB on `endSession`.
@@ -47,6 +47,7 @@ Term → exact code/table/column it maps to.
 ### Edge functions (`supabase/functions/`)
 - **`medical-notes`** — sole generator for sheets, flashcards, explain, enhance. Modes gated on request body: `cardsOnly`/`cardCount`, `explainMode`+`focusCard`, `enhanceMode`(`expand`/`clinical`)+`itemText`/`sectionKey`. Two prompt families: `gptOss*Prompt` (default) / `haiku*Prompt`. Model routing: Pro+`claude`→Haiku; Pro+`gpt-oss`→GPT-OSS; free/anon under hook→Haiku (reads+increments `premium_used` via service-role client); else GPT-OSS 20B (`openai/gpt-oss-20b`). All via OpenRouter (`OPENROUTER_API_KEY`). Response headers `x-model-used`, `x-is-premium` (client detects model by substring).
 - **`get-citations`** — PubMed via NCBI E-utilities (`VITE_NCBI_API_KEY`). Specialty-aware journal filtering (`SPECIALTY_MAP`). Client libs `src/lib/citation*.ts`, `use-citation-usage.ts`.
+  - Both edge fns emit structured JSON logs (`fn`/`event`/`userId`/`model`/`elapsedMs`/`error`) — metadata only, never notes/topic content or secrets. `.env.example` documents the runtime env vars (`SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `OPENROUTER_API_KEY`, `NCBI_API_KEY`).
 
 ### Supabase tables + RLS posture
 

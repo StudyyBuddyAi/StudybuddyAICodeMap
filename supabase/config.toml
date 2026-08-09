@@ -1,1 +1,65 @@
 project_id = "ntubppijiiwahogpnrxx"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Auth (GoTrue)
+#
+# WARNING: `supabase config push` replaces the remote auth config WHOLESALE.
+# Any setting absent from this file is reset to the CLI default on push. The
+# remote values were never snapshotted (CLI 2.109.1 has no `config pull`), so
+# verify against the dashboard before pushing:
+#   https://supabase.com/dashboard/project/ntubppijiiwahogpnrxx/auth/providers
+# ─────────────────────────────────────────────────────────────────────────────
+
+[auth]
+site_url = "env(SUPABASE_AUTH_SITE_URL)"
+additional_redirect_urls = [
+  "https://www.studyybuddyai.com/reset-password",
+  "http://localhost:8080/reset-password",
+]
+# Every visitor is signed in anonymously on load (src/hooks/use-auth.ts).
+# Turning this off breaks the entire app, not just signup.
+enable_anonymous_sign_ins = true
+
+[auth.email]
+enable_signup = true
+# The flip this branch exists for. With confirmations on, an anonymous user's
+# `is_anonymous` claim stays true until the email is verified — which is what
+# makes "unverified = anon tier" work through the existing isAnonymous checks.
+enable_confirmations = true
+double_confirm_changes = true
+# Matches the 60s resend cooldown in the OTP step of AuthModal.
+max_frequency = "60s"
+otp_length = 6
+otp_expiry = 3600
+
+[auth.email.smtp]
+enabled = true
+host = "live.smtp.mailtrap.io"
+port = 587
+user = "env(MAILTRAP_SMTP_USER)"
+pass = "env(MAILTRAP_SMTP_PASS)"
+admin_email = "no-reply@studyybuddyai.com"
+sender_name = "StudyBuddy AI"
+
+# Templates must render {{ .Token }} or no OTP reaches the user — GoTrue's
+# stock templates only include {{ .ConfirmationURL }}, which would make the
+# verification step look broken with no error to trace.
+# Paths resolve from the project root, not from supabase/.
+
+[auth.email.template.email_change]
+subject = "Verify your new StudyBuddy AI email"
+content_path = "./supabase/templates/email_change.html"
+
+[auth.email.template.confirmation]
+subject = "Confirm your StudyBuddy AI account"
+content_path = "./supabase/templates/confirmation.html"
+
+[auth.email.template.recovery]
+subject = "Reset your StudyBuddy AI password"
+content_path = "./supabase/templates/recovery.html"
+
+[auth.rate_limit]
+# Default is 2/hour, which would throttle the second OTP of a single test
+# session. Raised for the OTP + resend flow.
+email_sent = 30
+anonymous_users = 30

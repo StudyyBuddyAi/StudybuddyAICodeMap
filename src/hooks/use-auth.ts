@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { Session, User } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
+import { isDisposableEmail } from "@/lib/email-domains";
 
 const STORAGE_KEY = "studybuddy_decks_v1";
 const HISTORY_STORAGE_KEY = "studybuddy_history";
@@ -191,32 +192,75 @@ export function useAuth() {
 
   const isAnonymous = Boolean(session?.user?.is_anonymous);
 
-  const signUp = async (email: string, password: string): Promise<{ error: string | null }> => {
-    if (isAnonymous) {
-      const { data, error } = await supabase.auth.updateUser({ email, password });
-      if (error) return { error: error.message };
-      const upgradedUserId = data.user?.id ?? session?.user?.id;
-      if (upgradedUserId) {
-        try {
-          await migrateLocalCardsToServer(upgradedUserId);
-        } catch {
-          toast({
-            title: "Couldn't sync local cards to your account, please try again later",
-            variant: "destructive",
-          });
-        }
-        try {
-          await migrateLocalStudyHistoryToServer(upgradedUserId);
-        } catch {
-          toast({
-            title: "Couldn't sync local study history to your account, please try again later",
-            variant: "destructive",
-          });
-        }
-      }
-      return { error: null };
+  // Signup is two-phase because GoTrue refuses to set a password on an anonymous
+  // user: updateUser({ email }) writes to `email_change` (not `email`) and leaves
+  // is_anonymous true until the OTP is confirmed. So we send the code here and
+  // apply the password in confirmSignUp once the user is no longer anonymous.
+  const startSignUp = async (
+    email: string,
+    password: string
+  ): Promise<{ error: string | null; otpType: "email_change" | "signup" | null }> => {
+    if (isDisposableEmail(email)) {
+      return { error: "Please use a permanent email address.", otpType: null };
     }
+
+    if (isAnonymous) {
+      const { error } = await supabase.auth.updateUser({ email });
+      if (error) return { error: error.message, otpType: null };
+      return { error: null, otpType: "email_change" };
+    }
+
     const { error } = await supabase.auth.signUp({ email, password });
+    if (error) return { error: error.message, otpType: null };
+    return { error: null, otpType: "signup" };
+  };
+
+  const confirmSignUp = async (
+    email: string,
+    token: string,
+    password: string,
+    otpType: "email_change" | "signup"
+  ): Promise<{ error: string | null }> => {
+    const { error: verifyError } = await supabase.auth.verifyOtp({
+      email,
+      token,
+      type: otpType,
+    });
+    if (verifyError) return { error: verifyError.message };
+
+    const { error: passwordError } = await supabase.auth.updateUser({ password });
+    if (passwordError) return { error: passwordError.message };
+
+    const { data: { user: confirmedUser } } = await supabase.auth.getUser();
+    const uid = confirmedUser?.id;
+
+    if (uid) {
+      try {
+        await migrateLocalCardsToServer(uid);
+      } catch {
+        toast({
+          title: "Couldn't sync local cards to your account, please try again later",
+          variant: "destructive",
+        });
+      }
+      try {
+        await migrateLocalStudyHistoryToServer(uid);
+      } catch {
+        toast({
+          title: "Couldn't sync local study history to your account, please try again later",
+          variant: "destructive",
+        });
+      }
+    }
+
+    return { error: null };
+  };
+
+  const resendSignUpOtp = async (
+    email: string,
+    otpType: "email_change" | "signup"
+  ): Promise<{ error: string | null }> => {
+    const { error } = await supabase.auth.resend({ type: otpType, email });
     return { error: error?.message ?? null };
   };
 
@@ -266,14 +310,20 @@ export function useAuth() {
     return { error: null };
   };
 
+  // Re-establish an anonymous session immediately: the anon sign-in at mount only
+  // runs inside the initial getSession() branch, so without this the app is left
+  // with no JWT on an app route and every RLS-backed query fails until a reload.
   const signOut = async (): Promise<{ error: string | null }> => {
     const { error } = await supabase.auth.signOut();
+    if (!error) {
+      await supabase.auth.signInAnonymously();
+    }
     return { error: error?.message ?? null };
   };
 
   const resetPasswordForEmail = async (email: string): Promise<{ error: string | null }> => {
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: "https://www.studyybuddyai.com/reset-password",
+      redirectTo: `${import.meta.env.VITE_SITE_URL}/reset-password`,
     });
     return { error: error?.message ?? null };
   };
@@ -283,5 +333,9 @@ export function useAuth() {
     return { error: error?.message ?? null };
   };
 
-  return { user, session, loading, isAnonymous, signUp, signIn, signOut, resetPasswordForEmail, updatePassword };
+  return {
+    user, session, loading, isAnonymous,
+    startSignUp, confirmSignUp, resendSignUpOtp,
+    signIn, signOut, resetPasswordForEmail, updatePassword,
+  };
 }
