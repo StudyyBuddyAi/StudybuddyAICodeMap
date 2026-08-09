@@ -1,6 +1,6 @@
 # StudyBuddy AI
 
-> AI-powered study platform built for medical students. Live at [studybuddyai.com](https://studybuddyai.com)
+> AI-powered study platform built for medical students. Live at [studybuddyai.com](https://studyybuddyai.com)
 
 StudyBuddy turns raw notes or a topic name into exam-ready study material — structured sheets, active-recall flashcards, and USMLE-style QBank sessions — with spaced repetition, cloud sync, and a PubMed citation engine.
 
