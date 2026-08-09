@@ -15,7 +15,7 @@ import DashboardLayout from "@/components/dashboard/DashboardLayout";
 import PageLoader from "@/components/PageLoader";
 import { useQBankContext } from "@/contexts/QBankContext";
 import { renderMarkdown } from "@/lib/render-markdown";
-import type { OptionKey, QuestionMedia } from "@/lib/qbank-types";
+import type { OptionKey, QuestionMedia } from "@/hooks/use-qbank";
 
 type AnswerState =
   | { status: "unanswered" }
