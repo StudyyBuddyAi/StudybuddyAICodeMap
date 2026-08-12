@@ -24,6 +24,7 @@ import {
   HeartPulse,
   Pill,
 } from "lucide-react";
+import ResponsiveSection from "@/components/ResponsiveSection";
 import "@/styles/openmed-tokens.css";
 import "@/styles/openmed-components.css";
 
@@ -460,6 +461,8 @@ D. Pericarditis`}
           </div>
         </section>
 
+        <ResponsiveSection />
+
         {/* ---------- Stat band ---------- */}
         <section className="statband" aria-label="Traction stats" style={{ backgroundColor: '#0F4C81', color: '#fff', padding: '48px 0' }}>
           <div className="container" style={{ textAlign: 'center' }}>
@@ -500,7 +503,7 @@ D. Pericarditis`}
         {/* ---------- How it works ---------- */}
         <section id="playground" data-screen style={{ backgroundColor: '#F7F9FB', padding: '80px 0' }}>
           <div className="container mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8">
-            <div className="playground-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1.1fr', gap: '60px', alignItems: 'center' }}>
+            <div className="playground-grid flex max-sm:flex-col md:flex-row" >
               <div className="playground-lead">
                 <div className="eyebrow" style={{ color: '#64748B', textTransform: 'uppercase', fontSize: '12px', fontWeight: '600', letterSpacing: '0.05em', marginBottom: '12px' }}>How it works</div>
                 <h2 className="display-lg" style={{ color: '#191c1e', fontSize: '40px', fontWeight: '800', lineHeight: '1.2', marginBottom: '20px' }}>
@@ -592,7 +595,7 @@ D. Pericarditis`}
               </p>
             </div>
 
-            <div className="runtime-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '24px' }}>
+            <div className="runtime-grid" style={{ display: 'grid', gap: '24px' }}>
               {RUNTIMES.map(({ icon: Icon, eyebrow, title, desc, link }) => (
                 <div className="runtime-cell" key={eyebrow} style={{ backgroundColor: '#F7F9FB', border: '1px solid #e5e7eb', borderRadius: '16px', padding: '32px 24px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
                   <div className="cell-icon" style={{ width: '44px', height: '44px', borderRadius: '12px', backgroundColor: '#e0f2fe', color: '#0369a1', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -630,7 +633,7 @@ D. Pericarditis`}
               </p>
             </div>
 
-            <div className="deid-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '24px' }}>
+            <div className="deid-grid" style={{ display: 'grid', gap: '24px' }}>
               {FEATURES.map(({ icon: Icon, title, desc, tags }) => (
                 <div className="deid-cell" key={title} style={{ backgroundColor: '#fff', border: '1px solid #e5e7eb', borderRadius: '16px', padding: '28px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
                   <div className="deid-icon" style={{ width: '36px', height: '36px', borderRadius: '10px', backgroundColor: '#f3f4f6', color: '#111827', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -697,7 +700,7 @@ D. Pericarditis`}
               ))}
             </div>
 
-            <div className="models-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '24px' }}>
+            <div className="models-grid grid grid-cols-1 gap-8 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-5 2xl:gap-x-12 2xl:gap-y-16">
               {visibleSubjects.map(({ name, arch, tags }) => (
                 <Link className="model-cell" to="/qbank" key={name} style={{ backgroundColor: '#F7F9FB', border: '1px solid #e5e7eb', borderRadius: '16px', padding: '24px', display: 'flex', flexDirection: 'column', gap: '12px', textDecoration: 'none', color: 'inherit' }}>
                   <div className="heading-sm model-name" style={{ fontSize: '18px', fontWeight: '700', color: '#111827' }}>{name}</div>
@@ -735,7 +738,7 @@ D. Pericarditis`}
               </p>
             </div>
 
-            <div className="product-duo" style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '30px', maxWidth: '900px', margin: '0 auto 40px' }}>
+            <div className="product-duo grid grid-cols-2 gap-4 max-w-[900px] mx-auto mb-8" style={{ gap: '30px' }}>
               <div className="product-card" style={{ backgroundColor: '#fff', border: '1px solid #e5e7eb', borderRadius: '24px', padding: '36px', display: 'flex', flexDirection: 'column', gap: '20px', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)' }}>
                 <div className="product-card-top" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <div className="product-wordmark" style={{ fontSize: '24px', fontWeight: '800', color: '#111827' }}>Free</div>
@@ -794,7 +797,7 @@ D. Pericarditis`}
 
         {/* ---------- Story ---------- */}
         <section id="story" className="research" data-screen style={{ padding: '80px 0', backgroundColor: '#fff' }}>
-          <div className="container research-grid" style={{ display: 'grid', gridTemplateColumns: '1.1fr 0.9fr', gap: '60px', alignItems: 'center' }}>
+          <div className="container research-grid sm:grid-cols-2 lg:grid-cols-4 gap-12" style={{ display: 'grid' }}>
             <div>
               <div className="research-eyebrow" style={{ color: '#64748B', textTransform: 'uppercase', fontSize: '12px', fontWeight: '600', letterSpacing: '0.05em', marginBottom: '12px' }}>Built on evidence · since 2025</div>
               <h2 className="display-lg" style={{ fontSize: '36px', fontWeight: '800', color: '#111827', lineHeight: '1.2', marginBottom: '20px' }}>
@@ -821,7 +824,7 @@ D. Pericarditis`}
                 </a>
               </div>
             </div>
-            <div className="research-stats" style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '20px' }}>
+            <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
               <div className="research-stat" style={{ backgroundColor: '#F7F9FB', border: '1px solid #e5e7eb', padding: '24px', borderRadius: '16px' }}>
                 <div className="num" style={{ fontSize: '28px', fontWeight: '800', color: '#111827', marginBottom: '4px' }}>
                   USMLE
@@ -860,7 +863,7 @@ D. Pericarditis`}
 
         {/* ---------- FAQ ---------- */}
         <section id="faq" data-screen style={{ padding: '80px 0', backgroundColor: '#F7F9FB' }}>
-          <div className="container faq-grid" style={{ display: 'grid', gridTemplateColumns: '0.9fr 1.1fr', gap: '60px' }}>
+          <div className="container faq-grid sm:grid-cols-2 grid-cols-1 max-w-[100%] mx-auto px-4 py-6 sm:py-12" style={{ display: 'grid', gap: '60px' }}>
             <div className="faq-lead">
               <div className="eyebrow" style={{ color: '#64748B', textTransform: 'uppercase', fontSize: '12px', fontWeight: '600', letterSpacing: '0.05em', marginBottom: '12px' }}>FAQ</div>
               <h2 className="display-lg" style={{ fontSize: '36px', fontWeight: '800', color: '#111827', lineHeight: '1.2', marginBottom: '16px' }}>
@@ -871,7 +874,7 @@ D. Pericarditis`}
                 If yours isn't here, email us — it reaches the person who builds the thing.
               </p>
             </div>
-            <div className="faq-list" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            <div className="faq-list " style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
               {FAQS.map(({ q, a }, i) => (
                 <div className={openFaq === i ? "faq-item open" : "faq-item"} key={q} style={{ backgroundColor: '#fff', border: '1px solid #e5e7eb', borderRadius: '12px', overflow: 'hidden' }}>
                   <button
@@ -934,80 +937,80 @@ D. Pericarditis`}
       </main>
 
       {/* ---------- Footer ---------- */}
-      <footer className="footer" style={{ backgroundColor: '#F7F9FB', borderTop: '1px solid #e5e7eb', padding: '60px 0 30px' }}>
-        <div className="container">
-          <div className="footer-grid" style={{ display: 'grid', gridTemplateColumns: '1.5fr 1fr 1fr 1fr', gap: '40px', marginBottom: '40px' }}>
+      <footer className="footer bg-[#0F4C81] py-[60px] sm:py-[60px] px-4">
+        <div className="container mx-auto max-w-7xl ">
+          <div className="footer-grid grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8 sm:gap-10 mb-10">
             <div className="footer-col">
-              <div className="footer-brand" style={{ marginBottom: '16px' }}>
-                <span className="wordmark" style={{ fontSize: '20px', fontWeight: '800', color: '#0F4C81' }}>StudyBuddy AI</span>
+              <div className="footer-brand mb-4">
+                <span className="wordmark text-[20px] font-extrabold text-[#F7F9FB]">StudyBuddy AI</span>
               </div>
-              <p className="body-sm" style={{ maxWidth: "38ch", color: '#6b7280', fontSize: '14px', lineHeight: '1.6' }}>
+              <p className="body-sm text-gray-500 text-[14px] leading-relaxed max-w-[38ch]">
                 AI-powered study tools for medical students in MENA and beyond.
               </p>
             </div>
 
             <div className="footer-col">
-              <div className="footer-col-head" style={{ fontWeight: '700', fontSize: '14px', color: '#111827', marginBottom: '16px' }}>Product</div>
-              <ul  style={{ listStyle: 'none', padding: '0', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              <div className="footer-col-head font-bold text-[14px] text-gray-900 mb-4">Product</div>
+              <ul className="list-none p-0 flex flex-col gap-2.5">
                 <li>
-                  <Link to="/qbank" style={{ color: '#4b5563', textDecoration: 'none', fontSize: '14px' }}>QBank</Link>
+                  <Link to="/qbank" className="text-gray-600 no-underline text-[14px] hover:text-gray-900 transition-colors">QBank</Link>
                 </li>
                 <li>
-                  <Link to="/sheets" style={{ color: '#4b5563', textDecoration: 'none', fontSize: '14px' }}>Study sheets</Link>
+                  <Link to="/sheets" className="text-gray-600 no-underline text-[14px] hover:text-gray-900 transition-colors">Study sheets</Link>
                 </li>
                 <li>
-                  <Link to="/flashcards" style={{ color: '#4b5563', textDecoration: 'none', fontSize: '14px' }}>Flashcards</Link>
+                  <Link to="/flashcards" className="text-gray-600 no-underline text-[14px] hover:text-gray-900 transition-colors">Flashcards</Link>
                 </li>
                 <li>
-                  <Link to="/roadmap" style={{ color: '#4b5563', textDecoration: 'none', fontSize: '14px' }}>Roadmap</Link>
+                  <Link to="/roadmap" className="text-gray-600 no-underline text-[14px] hover:text-gray-900 transition-colors">Roadmap</Link>
+                </li>
+              </ul>
+            </div>
+
+            <div className="footer-col ">
+              <div className="footer-col-head font-bold text-[14px] text-gray-900 mb-4">Resources</div>
+              <ul className="list-none p-0 flex flex-col gap-2.5">
+                <li>
+                  <a href="#playground" className="text-gray-600 no-underline text-[14px] hover:text-gray-900 transition-colors">How it works</a>
+                </li>
+                <li>
+                  <a href="#features" className="text-gray-600 no-underline text-[14px] hover:text-gray-900 transition-colors">Features</a>
+                </li>
+                <li>
+                  <a href="#pricing" className="text-gray-600 no-underline text-[14px] hover:text-gray-900 transition-colors">Pricing</a>
+                </li>
+                <li>
+                  <a href="#faq" className="text-gray-600 no-underline text-[14px] hover:text-gray-900 transition-colors">FAQ</a>
                 </li>
               </ul>
             </div>
 
             <div className="footer-col">
-              <div className="footer-col-head" style={{ fontWeight: '700', fontSize: '14px', color: '#111827', marginBottom: '16px' }}>Resources</div>
-              <ul style={{ listStyle: 'none', padding: '0', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              <div className="footer-col-head font-bold text-[14px] text-gray-900 mb-4">Connect</div>
+              <ul className="list-none p-0 flex flex-col gap-2.5">
                 <li>
-                  <a href="#playground" style={{ color: '#4b5563', textDecoration: 'none', fontSize: '14px' }}>How it works</a>
-                </li>
-                <li>
-                  <a href="#features" style={{ color: '#4b5563', textDecoration: 'none', fontSize: '14px' }}>Features</a>
-                </li>
-                <li>
-                  <a href="#pricing" style={{ color: '#4b5563', textDecoration: 'none', fontSize: '14px' }}>Pricing</a>
-                </li>
-                <li>
-                  <a href="#faq" style={{ color: '#4b5563', textDecoration: 'none', fontSize: '14px' }}>FAQ</a>
-                </li>
-              </ul>
-            </div>
-
-            <div className="footer-col">
-              <div className="footer-col-head" style={{ fontWeight: '700', fontSize: '14px', color: '#111827', marginBottom: '16px' }}>Connect</div>
-              <ul style={{ listStyle: 'none', padding: '0', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                <li>
-                  <a href={SOCIALS.instagram} target="_blank" rel="noopener noreferrer" style={{ color: '#4b5563', textDecoration: 'none', fontSize: '14px' }}>
+                  <a href={SOCIALS.instagram} target="_blank" rel="noopener noreferrer" className="text-gray-600 no-underline text-[14px] hover:text-gray-900 transition-colors">
                     Instagram
                   </a>
                 </li>
                 <li>
-                  <a href={SOCIALS.linkedin} target="_blank" rel="noopener noreferrer" style={{ color: '#4b5563', textDecoration: 'none', fontSize: '14px' }}>
+                  <a href={SOCIALS.linkedin} target="_blank" rel="noopener noreferrer" className="text-gray-600 no-underline text-[14px] hover:text-gray-900 transition-colors">
                     LinkedIn
                   </a>
                 </li>
                 <li>
-                  <a href={SOCIALS.telegram} target="_blank" rel="noopener noreferrer" style={{ color: '#4b5563', textDecoration: 'none', fontSize: '14px' }}>
+                  <a href={SOCIALS.telegram} target="_blank" rel="noopener noreferrer" className="text-gray-600 no-underline text-[14px] hover:text-gray-900 transition-colors">
                     Telegram
                   </a>
                 </li>
                 <li>
-                  <a href={CONTACT_EMAIL} style={{ color: '#4b5563', textDecoration: 'none', fontSize: '14px' }}>Email us</a>
+                  <a href={CONTACT_EMAIL} className="text-gray-600 no-underline text-[14px] hover:text-gray-900 transition-colors">Email us</a>
                 </li>
               </ul>
             </div>
           </div>
 
-          <div className="footer-foot" style={{ borderTop: '1px solid #e5e7eb', paddingTop: '20px', display: 'flex', justifyContent: 'space-between', color: '#6b7280', fontSize: '13px' }}>
+          <div className="footer-foot border-t border-gray-200 pt-5 flex flex-col sm:flex-row justify-between items-center sm:items-start text-gray-500 text-[13px] gap-2">
             <span>© {new Date().getFullYear()} StudyBuddy AI</span>
             <span>Built by Osama Shihada · Gaza</span>
           </div>

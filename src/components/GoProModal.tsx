@@ -36,7 +36,7 @@ const GoProModal = ({ open, onOpenChange }: GoProModalProps) => {
           >
             StudyBuddy AI · Pro
           </div>
-          <DialogTitle className="text-xl font-semibold tracking-tight">Go Pro</DialogTitle>
+          <DialogTitle className="text-xl text-white font-semibold tracking-tight">Go Pro</DialogTitle>
           <div className="pt-1">
             <p className="text-2xl font-semibold tracking-tight text-foreground">
               $4.99 <span className="text-sm font-medium text-muted-foreground">USD / month</span>
