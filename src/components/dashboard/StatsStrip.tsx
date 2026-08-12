@@ -57,9 +57,9 @@ const StatChip = ({
   const animated = useCountUp(value);
 
   return (
-    <div className="stats-strip-card">
+    <div className="items-center flex flex-col bg-white rounded-lg p-4">
       <div
-        className="stats-strip-icon"
+        className="stats-strip-icon "
         style={{
           background: iconBackground,
           color: iconColor,
@@ -109,7 +109,7 @@ const StatsStrip = () => {
         </svg>
       </div>
 
-      <div className="stats-strip-grid">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <StatChip
           icon={<FileText className="h-7 w-7" />}
           value={sheetsValue}
