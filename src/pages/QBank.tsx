@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
-import { FlaskConical, LogIn, Zap, BookOpen, CheckCircle, History, ChevronRight, Clock, Trash2, Flag } from "lucide-react";
+import { FlaskConical, LogIn, Zap, BookOpen, CheckCircle, History, ChevronRight, Clock, Trash2, Flag, Sparkles, Check, Search, ArrowRight, Stethoscope, Brain, Heart, Activity, Layers } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import DashboardLayout from "@/components/dashboard/DashboardLayout";
 import PageLoader from "@/components/PageLoader";
@@ -50,64 +50,6 @@ const getScoreBg = (score: number, total: number) => {
 };
 
 const PAGE_SIZE = 5;
-
-// ── OpenMed token styles ────────────────────────────────────────────────────
-
-const PANEL_STYLE: React.CSSProperties = {
-  border: "1px solid var(--border)",
-  borderRadius: "var(--radius-md)",
-  background: "var(--bg-elevated)",
-};
-
-const EYEBROW_STYLE: React.CSSProperties = {
-  fontFamily: "var(--font-mono)",
-  fontSize: 11,
-  fontWeight: 500,
-  letterSpacing: "0.12em",
-  textTransform: "uppercase",
-  color: "var(--fg-muted)",
-  marginBottom: 8,
-};
-
-const STAT_LABEL_STYLE: React.CSSProperties = {
-  fontFamily: "var(--font-mono)",
-  fontSize: 10,
-  color: "var(--fg-muted)",
-  marginTop: 4,
-  letterSpacing: "0.06em",
-};
-
-const chipStyle = (active: boolean): React.CSSProperties => ({
-  background: active ? "var(--accent-soft)" : "var(--bg)",
-  border: active ? "1px solid var(--accent)" : "1px solid var(--border)",
-  color: active ? "var(--accent)" : "var(--fg-muted)",
-  borderRadius: "var(--radius-sm)",
-  padding: "5px 12px",
-  fontFamily: "var(--font-sans)",
-  fontSize: 12,
-  fontWeight: 500,
-  cursor: "pointer",
-  transition: "all var(--dur-micro) var(--ease-out)",
-});
-
-/** Dark CTA — the OpenMed primary button (ink on light, parchment on dark). */
-const darkButtonStyle = (disabled = false): React.CSSProperties => ({
-  display: "inline-flex",
-  alignItems: "center",
-  justifyContent: "center",
-  gap: 8,
-  height: 44,
-  borderRadius: "var(--radius-md)",
-  border: "1px solid transparent",
-  background: "var(--fg)",
-  color: "var(--bg)",
-  fontFamily: "var(--font-sans)",
-  fontSize: 14,
-  fontWeight: 500,
-  cursor: disabled ? "not-allowed" : "pointer",
-  opacity: disabled ? 0.4 : 1,
-  transition: "opacity var(--dur-micro) var(--ease-out)",
-});
 
 const QBank = () => {
   const navigate = useNavigate();
@@ -320,104 +262,59 @@ const QBank = () => {
 
   return (
     <DashboardLayout>
-      <div className="flex flex-col items-center justify-center min-h-[70vh] px-4">
-        <div className="w-full max-w-lg space-y-8 animate-fade-in">
-          <div style={{ textAlign: "center" }}>
-            <p
-              style={{
-                fontFamily: "var(--font-mono)",
-                fontSize: 11,
-                fontWeight: 500,
-                letterSpacing: "0.14em",
-                textTransform: "uppercase",
-                color: "var(--accent)",
-                marginBottom: 8,
-              }}
-            >
-              QBank · USMLE-style
-            </p>
-            <h1
-              style={{
-                fontFamily: "var(--font-display)",
-                fontSize: "clamp(28px, 4vw, 40px)",
-                fontWeight: 500,
-                lineHeight: 1.1,
-                letterSpacing: "-0.012em",
-                color: "var(--fg)",
-                margin: "0 0 10px",
-              }}
-            >
-              Practice questions,{" "}
-              <span style={{ fontStyle: "italic", color: "var(--accent)" }}>
-                built to stick.
-              </span>
-            </h1>
-            <p
-              style={{
-                fontFamily: "var(--font-sans)",
-                fontSize: 14,
-                color: "var(--fg-muted)",
-                lineHeight: 1.55,
-                maxWidth: 400,
-                margin: "0 auto",
-              }}
-            >
+      <div className="flex flex-col lg:flex-row gap-6 lg:gap-8 min-h-[calc(100vh-8rem)] px-4 lg:px-6 py-6">
+        {/* Left Panel - Configuration */}
+        <div className="flex-1 max-w-2xl mx-auto lg:mx-0 lg:max-w-none space-y-6 animate-fade-in">
+          {/* Header */}
+          <div className="space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-teal-100 to-teal-200 dark:from-teal-900/30 dark:to-teal-800/30 flex items-center justify-center">
+                <FlaskConical className="w-6 h-6 text-teal-600 dark:text-teal-400" />
+              </div>
+              <div>
+                <p className="font-mono text-[11px] font-medium tracking-widest uppercase text-teal-600 dark:text-teal-400">
+                  QBank · USMLE-style
+                </p>
+                <h1 className="text-2xl lg:text-3xl font-serif font-medium leading-tight tracking-tight text-slate-900 dark:text-slate-100">
+                  Practice questions,{" "}
+                  <span className="italic text-teal-600 dark:text-teal-400">
+                    built to stick.
+                  </span>
+                </h1>
+              </div>
+            </div>
+            <p className="text-sm text-slate-600 dark:text-slate-400 leading-relaxed">
               NBME blueprints, clinical guidelines, human-verified. Instant feedback on
               every answer.
             </p>
           </div>
 
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}>
-            <div style={{ ...PANEL_STYLE, padding: "12px 8px", textAlign: "center" }}>
-              <p
-                style={{
-                  fontFamily: "var(--font-display)",
-                  fontSize: 28,
-                  fontWeight: 500,
-                  color: "var(--accent)",
-                  margin: 0,
-                  lineHeight: 1,
-                }}
-              >
+          {/* Stats Grid */}
+          <div className="grid grid-cols-3 gap-3">
+            <div className="rounded-xl border border-slate-200 bg-gradient-to-br from-white to-slate-50 p-4 text-center shadow-sm dark:from-slate-800 dark:to-slate-900 dark:border-slate-700">
+              <p className="text-3xl font-serif font-medium text-teal-600 leading-none dark:text-teal-400">
                 {questionCount}
               </p>
-              <p style={STAT_LABEL_STYLE}>questions</p>
+              <p className="font-mono text-[10px] text-slate-500 mt-1 dark:text-slate-400">questions</p>
             </div>
-            <div style={{ ...PANEL_STYLE, padding: "12px 8px", textAlign: "center" }}>
-              <p
-                style={{
-                  fontFamily: "var(--font-display)",
-                  fontSize: 22,
-                  fontWeight: 500,
-                  color: "var(--fg)",
-                  margin: 0,
-                  lineHeight: 1,
-                }}
-              >
+            <div className="rounded-xl border border-slate-200 bg-gradient-to-br from-white to-slate-50 p-4 text-center shadow-sm dark:from-slate-800 dark:to-slate-900 dark:border-slate-700">
+              <p className="text-2xl font-serif font-medium text-slate-900 leading-none dark:text-slate-100">
                 Step 1
               </p>
-              <p style={STAT_LABEL_STYLE}>&amp; Step 2</p>
+              <p className="font-mono text-[10px] text-slate-500 mt-1 dark:text-slate-400">&amp; Step 2</p>
             </div>
-            <div style={{ ...PANEL_STYLE, padding: "12px 8px", textAlign: "center" }}>
-              <p
-                style={{
-                  fontFamily: "var(--font-display)",
-                  fontSize: 28,
-                  fontWeight: 500,
-                  color: "var(--fg)",
-                  margin: 0,
-                  lineHeight: 1,
-                }}
-              >
+            <div className="rounded-xl border border-slate-200 bg-gradient-to-br from-white to-slate-50 p-4 text-center shadow-sm dark:from-slate-800 dark:to-slate-900 dark:border-slate-700">
+              <p className="text-3xl font-serif font-medium text-slate-900 leading-none dark:text-slate-100">
                 {availableSystems.length > 0 ? availableSystems.length : "—"}
               </p>
-              <p style={STAT_LABEL_STYLE}>
+              <p className="font-mono text-[10px] text-slate-500 mt-1 dark:text-slate-400">
                 {availableSystems.length === 1 ? "system" : "systems"}
               </p>
             </div>
           </div>
 
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "center" }}>
+          {/* Feature Badges */}
+          <div className="flex flex-wrap gap-2">
             {[
               { icon: Zap, label: "Instant feedback" },
               { icon: BookOpen, label: "Full explanations" },
@@ -425,61 +322,27 @@ const QBank = () => {
             ].map(({ icon: Icon, label }) => (
               <div
                 key={label}
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 6,
-                  border: "1px solid var(--border)",
-                  borderRadius: "var(--radius-pill)",
-                  background: "var(--bg-elevated)",
-                  padding: "6px 12px",
-                }}
+                className="inline-flex items-center gap-1.5 border border-slate-200 rounded-full bg-white px-3 py-1.5 dark:bg-slate-800 dark:border-slate-700"
               >
-                <Icon style={{ width: 12, height: 12, color: "var(--accent)" }} />
-                <span
-                  style={{
-                    fontFamily: "var(--font-mono)",
-                    fontSize: 11,
-                    color: "var(--fg-muted)",
-                    letterSpacing: "0.04em",
-                  }}
-                >
+                <Icon className="w-3 h-3 text-teal-600 dark:text-teal-400" />
+                <span className="font-mono text-[11px] text-slate-600 dark:text-slate-400">
                   {label}
                 </span>
               </div>
             ))}
           </div>
 
+          {/* Sign In Card */}
           {isAnonymous || !user ? (
-            <div
-              style={{
-                ...PANEL_STYLE,
-                borderRadius: "var(--radius-lg)",
-                padding: 24,
-                textAlign: "center",
-              }}
-              className="space-y-4"
-            >
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  width: 40,
-                  height: 40,
-                  borderRadius: "var(--radius-md)",
-                  border: "1px solid var(--border)",
-                  background: "var(--bg)",
-                  margin: "0 auto",
-                }}
-              >
-                <LogIn style={{ width: 16, height: 16, color: "var(--accent)" }} />
+            <div className="rounded-2xl border border-slate-200 bg-gradient-to-br from-white to-slate-50 p-6 text-center shadow-sm dark:from-slate-800 dark:to-slate-900 dark:border-slate-700 space-y-4">
+              <div className="flex items-center justify-center w-10 h-10 rounded-xl border border-slate-200 bg-white mx-auto dark:bg-slate-800 dark:border-slate-700">
+                <LogIn className="w-4 h-4 text-teal-600 dark:text-teal-400" />
               </div>
               <div className="space-y-1">
-                <p style={{ fontSize: 14, fontWeight: 500, color: "var(--fg)" }}>
+                <p className="text-sm font-medium text-slate-900 dark:text-slate-100">
                   Sign in to access QBank
                 </p>
-                <p style={{ fontSize: 13, color: "var(--fg-muted)" }}>
+                <p className="text-xs text-slate-600 dark:text-slate-400">
                   Create a free account to start answering questions and track
                   your progress.
                 </p>
@@ -487,71 +350,35 @@ const QBank = () => {
               <button
                 type="button"
                 onClick={() => navigate("/dashboard")}
-                style={{ ...darkButtonStyle(), width: "100%" }}
+                className="w-full h-11 rounded-lg bg-teal-500 text-white text-sm font-medium hover:bg-teal-600 transition-colors flex items-center justify-center gap-2"
               >
-                <LogIn style={{ width: 16, height: 16 }} />
+                <LogIn className="w-4 h-4" />
                 Sign In to Start
               </button>
             </div>
           ) : (
             <>
+              {/* Resume Session Card */}
               {hasSavedSession && savedSessionMeta && (
-                <div
-                  className="space-y-3"
-                  style={{
-                    ...PANEL_STYLE,
-                    borderLeft: "3px solid var(--accent)",
-                    padding: "16px 18px",
-                  }}
-                >
+                <div className="space-y-3 rounded-xl border-l-4 border-l-teal-500 border border-slate-200 bg-gradient-to-r from-teal-50 to-white p-4 dark:from-teal-950/20 dark:to-slate-900 dark:border-slate-700">
                   <div className="flex items-center gap-3">
-                    <div
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        width: 36,
-                        height: 36,
-                        borderRadius: "var(--radius-md)",
-                        border: "1px solid var(--border)",
-                        background: "var(--bg)",
-                        flexShrink: 0,
-                      }}
-                    >
-                      <History style={{ width: 16, height: 16, color: "var(--accent)" }} />
+                    <div className="flex items-center justify-center w-9 h-9 rounded-lg border border-slate-200 bg-white flex-shrink-0 dark:bg-slate-800 dark:border-slate-700">
+                      <History className="w-4 h-4 text-teal-600 dark:text-teal-400" />
                     </div>
                     <div>
-                      <p style={{ fontSize: 14, fontWeight: 500, color: "var(--fg)" }}>
+                      <p className="text-sm font-medium text-slate-900 dark:text-slate-100">
                         Resume previous session
                       </p>
-                      <p
-                        style={{
-                          fontFamily: "var(--font-mono)",
-                          fontSize: 11,
-                          color: "var(--fg-muted)",
-                          marginTop: 2,
-                        }}
-                      >
+                      <p className="font-mono text-[11px] text-slate-600 dark:text-slate-400 mt-0.5">
                         {savedSessionMeta.system} · {savedSessionMeta.answered}/{savedSessionMeta.total} answered
                       </p>
                     </div>
                   </div>
 
-                  <div
-                    style={{
-                      width: "100%",
-                      height: 4,
-                      borderRadius: 999,
-                      background: "var(--border)",
-                      overflow: "hidden",
-                    }}
-                  >
+                  <div className="w-full h-1 rounded-full bg-slate-200 overflow-hidden dark:bg-slate-700">
                     <div
-                      className="transition-all"
+                      className="transition-all h-full rounded-full bg-teal-500"
                       style={{
-                        height: "100%",
-                        borderRadius: 999,
-                        background: "var(--accent)",
                         width: `${savedSessionMeta.total > 0 ? (savedSessionMeta.answered / savedSessionMeta.total) * 100 : 0}%`,
                       }}
                     />
@@ -561,26 +388,15 @@ const QBank = () => {
                     <button
                       type="button"
                       onClick={handleResume}
-                      style={{ ...darkButtonStyle(), flex: 1, height: 38, fontSize: 13 }}
+                      className="flex-1 h-9.5 rounded-lg bg-teal-500 text-white text-sm font-medium hover:bg-teal-600 transition-colors flex items-center justify-center gap-1.5"
                     >
-                      <ChevronRight style={{ width: 15, height: 15 }} />
+                      <ChevronRight className="w-4 h-4" />
                       Continue
                     </button>
                     <button
                       type="button"
                       onClick={handleDiscard}
-                      style={{
-                        height: 38,
-                        padding: "0 16px",
-                        borderRadius: "var(--radius-md)",
-                        border: "1px solid var(--border)",
-                        background: "transparent",
-                        color: "var(--fg-muted)",
-                        fontFamily: "var(--font-sans)",
-                        fontSize: 13,
-                        fontWeight: 500,
-                        cursor: "pointer",
-                      }}
+                      className="h-9.5 px-4 rounded-lg border border-slate-200 bg-transparent text-slate-600 text-sm font-medium hover:bg-slate-50 transition-colors dark:border-slate-700 dark:text-slate-400 dark:hover:bg-slate-800"
                     >
                       Discard
                     </button>
@@ -588,23 +404,18 @@ const QBank = () => {
                 </div>
               )}
 
-              <div
-                className="space-y-5"
-                style={{
-                  ...PANEL_STYLE,
-                  borderRadius: "var(--radius-lg)",
-                  padding: "20px 20px 24px",
-                }}
-              >
+              {/* Configuration Card */}
+              <div className="space-y-5 rounded-2xl border border-slate-200 bg-gradient-to-br from-white to-slate-50 p-5 shadow-sm dark:from-slate-800 dark:to-slate-900 dark:border-slate-700">
+                {/* System Selector */}
                 <div>
-                  <p style={EYEBROW_STYLE}>System</p>
+                  <p className="font-mono text-[11px] font-medium tracking-widest uppercase text-slate-500 mb-2 dark:text-slate-400">System</p>
                   <div className="flex flex-wrap gap-2">
                     {availableSystems.length === 0 ? (
                       [100, 88].map((w) => (
                         <div
                           key={w}
-                          style={{ width: `${w}px`, background: "var(--border)" }}
-                          className="h-7 rounded-full animate-pulse"
+                          style={{ width: `${w}px` }}
+                          className="h-7 rounded-full bg-slate-200 animate-pulse dark:bg-slate-700"
                         />
                       ))
                     ) : (
@@ -613,8 +424,13 @@ const QBank = () => {
                           key={system}
                           type="button"
                           onClick={() => handleSystemChange(system)}
-                          style={chipStyle(selectedSystem === system)}
+                          className={`inline-flex items-center gap-2 h-8 px-4 rounded-lg text-sm font-medium transition-all duration-200 ${
+                            selectedSystem === system
+                              ? "bg-teal-500 border-teal-500 text-white shadow-md"
+                              : "bg-white border-slate-200 text-slate-700 hover:border-teal-300 hover:text-teal-700 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-300 dark:hover:border-teal-500 dark:hover:text-teal-300"
+                          } border`}
                         >
+                          {selectedSystem === system && <Check className="w-4 h-4" />}
                           {system}
                         </button>
                       ))
@@ -622,25 +438,18 @@ const QBank = () => {
                   </div>
                 </div>
 
+                {/* Filter - Flagged Only */}
                 {flaggedCount > 0 && (
                   <div>
-                    <p style={EYEBROW_STYLE}>Filter</p>
+                    <p className="font-mono text-[11px] font-medium tracking-widest uppercase text-slate-500 mb-2 dark:text-slate-400">Filter</p>
                     <button
                       type="button"
                       onClick={() => setFlaggedOnly((v) => !v)}
-                      style={{
-                        ...chipStyle(false),
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 8,
-                        ...(flaggedOnly
-                          ? {
-                              background: "rgba(217,119,6,0.08)",
-                              border: "1px solid #d97706",
-                              color: "#d97706",
-                            }
-                          : {}),
-                      }}
+                      className={`inline-flex items-center gap-2 h-8 px-4 rounded-lg text-sm font-medium transition-all duration-200 ${
+                        flaggedOnly
+                          ? "bg-amber-500/10 border-amber-500 text-amber-600 dark:bg-amber-500/20 dark:text-amber-400"
+                          : "bg-white border-slate-200 text-slate-600 hover:border-slate-300 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-400 dark:hover:border-slate-600"
+                      } border`}
                     >
                       <Flag className="h-3 w-3" fill={flaggedOnly ? "currentColor" : "none"} />
                       Flagged only ({flaggedCount})
@@ -648,15 +457,16 @@ const QBank = () => {
                   </div>
                 )}
 
+                {/* Domain Selector */}
                 <div className={flaggedOnly ? "opacity-50 pointer-events-none" : ""}>
-                  <p style={EYEBROW_STYLE}>Domain</p>
+                  <p className="font-mono text-[11px] font-medium tracking-widest uppercase text-slate-500 mb-2 dark:text-slate-400">Domain</p>
                   <div className="flex flex-wrap gap-2">
                     {availableDomains.length === 0 ? (
                       [80, 96, 72, 88].map((w) => (
                         <div
                           key={w}
-                          style={{ width: `${w}px`, background: "var(--border)" }}
-                          className="h-7 rounded-full animate-pulse"
+                          style={{ width: `${w}px` }}
+                          className="h-7 rounded-full bg-slate-200 animate-pulse dark:bg-slate-700"
                         />
                       ))
                     ) : (
@@ -664,8 +474,13 @@ const QBank = () => {
                         <button
                           type="button"
                           onClick={selectAll}
-                          style={chipStyle(selectedDomains.length === 0)}
+                          className={`inline-flex items-center gap-2 h-8 px-4 rounded-lg text-sm font-medium transition-all duration-200 ${
+                            selectedDomains.length === 0
+                              ? "bg-teal-500 border-teal-500 text-white shadow-md"
+                              : "bg-white border-slate-200 text-slate-700 hover:border-teal-300 hover:text-teal-700 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-300 dark:hover:border-teal-500 dark:hover:text-teal-300"
+                          } border`}
                         >
+                          {selectedDomains.length === 0 && <Check className="w-4 h-4" />}
                           All
                         </button>
                         {availableDomains.map((domain) => (
@@ -673,8 +488,13 @@ const QBank = () => {
                             key={domain}
                             type="button"
                             onClick={() => toggleDomain(domain)}
-                            style={chipStyle(selectedDomains.includes(domain))}
+                            className={`inline-flex items-center gap-2 h-8 px-4 rounded-lg text-sm font-medium transition-all duration-200 ${
+                              selectedDomains.includes(domain)
+                                ? "bg-teal-500 border-teal-500 text-white shadow-md"
+                                : "bg-white border-slate-200 text-slate-700 hover:border-teal-300 hover:text-teal-700 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-300 dark:hover:border-teal-500 dark:hover:text-teal-300"
+                            } border`}
                           >
+                            {selectedDomains.includes(domain) && <Check className="w-4 h-4" />}
                             {domain}
                           </button>
                         ))}
@@ -683,21 +503,11 @@ const QBank = () => {
                   </div>
                 </div>
 
+                {/* Question Count Slider */}
                 <div className={`space-y-2 ${flaggedOnly ? "opacity-50 pointer-events-none" : ""}`}>
                   <div className="flex items-center justify-between">
-                    <p style={{ ...EYEBROW_STYLE, marginBottom: 0 }}>Questions</p>
-                    <span
-                      style={{
-                        fontFamily: "var(--font-mono)",
-                        fontSize: 13,
-                        fontWeight: 600,
-                        color: "var(--accent)",
-                        padding: "2px 8px",
-                        border: "1px solid var(--accent)",
-                        borderRadius: "var(--radius-sm)",
-                        background: "var(--accent-soft)",
-                      }}
-                    >
+                    <p className="font-mono text-[11px] font-medium tracking-widest uppercase text-slate-500 dark:text-slate-400">Questions</p>
+                    <span className="font-mono text-xs font-semibold text-teal-600 px-2 py-0.5 border border-teal-500 rounded-lg bg-teal-50 dark:text-teal-400 dark:bg-teal-950/20">
                       {questionLimit}
                     </span>
                   </div>
@@ -708,66 +518,39 @@ const QBank = () => {
                     step={5}
                     value={questionLimit}
                     onChange={(e) => setQuestionLimit(Number(e.target.value))}
-                    className="w-full h-1.5 rounded-full appearance-none cursor-pointer accent-primary"
-                    style={{ background: "var(--border)" }}
+                    className="w-full h-1.5 rounded-full appearance-none cursor-pointer accent-teal-500 bg-slate-200 dark:bg-slate-700"
                   />
-                  <div
-                    className="flex justify-between"
-                    style={{
-                      fontFamily: "var(--font-mono)",
-                      fontSize: 10,
-                      color: "var(--fg-subtle)",
-                    }}
-                  >
+                  <div className="flex justify-between font-mono text-[10px] text-slate-400 dark:text-slate-500">
                     <span>5</span>
                     <span>{effectiveSliderMax}</span>
                   </div>
                   {selectedDomains.length > 0 && (
-                    <p
-                      style={{
-                        fontSize: 11,
-                        color: "var(--fg-subtle)",
-                        textAlign: "center",
-                        marginTop: 4,
-                      }}
-                    >
+                    <p className="text-[11px] text-slate-500 text-center mt-1 dark:text-slate-400">
                       {availableForSelection} question{availableForSelection !== 1 ? "s" : ""} available in selected domains
                     </p>
                   )}
                 </div>
               </div>
 
+              {/* Start Session Button */}
               <button
                 type="button"
                 onClick={handleStart}
                 disabled={questionCount === 0 || (flaggedOnly ? flaggedCount === 0 : effectiveSliderMax === 0)}
-                style={{
-                  ...darkButtonStyle(
-                    questionCount === 0 || (flaggedOnly ? flaggedCount === 0 : effectiveSliderMax === 0)
-                  ),
-                  width: "100%",
-                }}
+                className="w-full h-11 rounded-lg bg-teal-500 text-white text-sm font-medium hover:bg-teal-600 transition-colors flex items-center justify-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed shadow-md"
               >
-                <FlaskConical style={{ width: 16, height: 16 }} />
+                <FlaskConical className="w-4 h-4" />
                 Start Session · {flaggedOnly ? flaggedCount : questionLimit} Questions
               </button>
             </>
           )}
 
+          {/* Session History - Mobile */}
           {!isAnonymous && user && (
-            <div className="w-full space-y-3 pt-2">
-              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
-                <History style={{ width: 14, height: 14, color: "var(--fg-muted)" }} />
-                <p
-                  style={{
-                    fontFamily: "var(--font-mono)",
-                    fontSize: 11,
-                    fontWeight: 500,
-                    letterSpacing: "0.14em",
-                    textTransform: "uppercase",
-                    color: "var(--fg-muted)",
-                  }}
-                >
+            <div className="w-full space-y-4 pt-2 lg:hidden">
+              <div className="flex items-center gap-2 mb-3">
+                <History className="w-3.5 h-3.5 text-slate-500" />
+                <p className="font-mono text-[11px] font-medium tracking-widest uppercase text-slate-500 dark:text-slate-400">
                   Session History
                 </p>
               </div>
@@ -777,18 +560,13 @@ const QBank = () => {
                   {[1, 2, 3].map((i) => (
                     <div
                       key={i}
-                      className="h-16 animate-pulse"
-                      style={{
-                        borderRadius: "var(--radius-md)",
-                        border: "1px solid var(--border)",
-                        background: "var(--bg-elevated)",
-                      }}
+                      className="h-16 rounded-lg border border-slate-200 bg-slate-100 animate-pulse dark:bg-slate-800 dark:border-slate-700"
                     />
                   ))}
                 </div>
               ) : !sessionHistory || sessionHistory.rows.length === 0 ? (
-                <div style={{ ...PANEL_STYLE, padding: 16, textAlign: "center" }}>
-                  <p style={{ fontSize: 12, color: "var(--fg-muted)" }}>
+                <div className="rounded-xl border border-slate-200 bg-gradient-to-br from-white to-slate-50 p-4 text-center dark:from-slate-800 dark:to-slate-900 dark:border-slate-700">
+                  <p className="text-xs text-slate-600 dark:text-slate-400">
                     No sessions yet — complete your first session to see your history here.
                   </p>
                 </div>
@@ -804,11 +582,11 @@ const QBank = () => {
                             key={s.id}
                             className="w-full rounded-lg px-4 py-3 flex items-center justify-between gap-3 border border-red-500/30 bg-red-500/5"
                           >
-                            <p className="text-xs font-medium text-foreground">Delete this session?</p>
+                            <p className="text-xs font-medium text-slate-900 dark:text-slate-100">Delete this session?</p>
                             <div className="flex items-center gap-2 shrink-0">
                               <button
                                 onClick={() => setPendingDeleteId(null)}
-                                className="text-xs text-muted-foreground hover:text-foreground transition-colors px-2 py-1"
+                                className="text-xs text-slate-600 hover:text-slate-900 transition-colors px-2 py-1 dark:text-slate-400 dark:hover:text-slate-100"
                               >
                                 Cancel
                               </button>
@@ -833,46 +611,29 @@ const QBank = () => {
                         <button
                           key={s.id}
                           onClick={() => navigate(`/qbank/summary?session=${s.id}`)}
-                          className="group"
-                          style={{
-                            ...PANEL_STYLE,
-                            width: "100%",
-                            padding: "12px 16px",
-                            display: "flex",
-                            alignItems: "center",
-                            gap: 14,
-                            textAlign: "left",
-                            cursor: "pointer",
-                            transition: "border-color var(--dur-micro) var(--ease-out)",
-                          }}
-                          onMouseEnter={(e) =>
-                            (e.currentTarget.style.borderColor = "var(--border-strong)")
-                          }
-                          onMouseLeave={(e) =>
-                            (e.currentTarget.style.borderColor = "var(--border)")
-                          }
+                          className="group w-full rounded-xl border border-slate-200 bg-gradient-to-br from-white to-slate-50 p-3 flex items-center gap-3.5 text-left hover:border-teal-300 transition-colors dark:from-slate-800 dark:to-slate-900 dark:border-slate-700 dark:hover:border-teal-500 shadow-sm"
                         >
                           <div
-                            className={`flex flex-col items-center justify-center rounded-md border px-3 py-1.5 shrink-0 ${getScoreBg(s.score, s.total)}`}
+                            className={`flex flex-col items-center justify-center rounded-lg border px-3 py-1.5 shrink-0 ${getScoreBg(s.score, s.total)}`}
                           >
                             <span className={`text-base font-semibold tabular-nums leading-none ${getScoreColor(s.score, s.total)}`}>
                               {pct}%
                             </span>
-                            <span className="text-[10px] text-muted-foreground/60 mt-0.5">
+                            <span className="text-[10px] text-slate-500/60 mt-0.5 dark:text-slate-400/60">
                               {s.score}/{s.total}
                             </span>
                           </div>
 
                           <div className="flex-1 min-w-0 space-y-0.5">
-                            <p className="text-sm font-semibold text-foreground truncate">
+                            <p className="text-sm font-semibold text-slate-900 truncate dark:text-slate-100">
                               {s.system}
                             </p>
                             <div className="flex items-center gap-3">
-                              <span className="flex items-center gap-1 text-[11px] text-muted-foreground/60">
+                              <span className="flex items-center gap-1 text-[11px] text-slate-500/60 dark:text-slate-400/60">
                                 <Clock className="h-3 w-3" />
                                 {formatSessionTime(s.total_time_ms)}
                               </span>
-                              <span className="text-[11px] text-muted-foreground/40">
+                              <span className="text-[11px] text-slate-400/40 dark:text-slate-500/40">
                                 {formatSessionDate(s.ended_at)}
                               </span>
                             </div>
@@ -892,13 +653,13 @@ const QBank = () => {
                                 setPendingDeleteId(s.id);
                               }
                             }}
-                            className="shrink-0 p-1.5 rounded-md text-muted-foreground/40 hover:text-red-500 hover:bg-red-500/10 transition-colors cursor-pointer"
+                            className="shrink-0 p-1.5 rounded-md text-slate-400/40 hover:text-red-500 hover:bg-red-500/10 transition-colors cursor-pointer"
                             aria-label="Delete session"
                           >
                             <Trash2 className="h-3.5 w-3.5" />
                           </span>
 
-                          <ChevronRight className="h-4 w-4 text-muted-foreground/30 group-hover:text-primary/60 transition-colors shrink-0" />
+                          <ChevronRight className="h-4 w-4 text-slate-400/30 group-hover:text-teal-500/60 transition-colors shrink-0" />
                         </button>
                       );
                     })}
@@ -908,17 +669,17 @@ const QBank = () => {
                     <button
                       onClick={() => setPage((p) => Math.max(0, p - 1))}
                       disabled={page === 0}
-                      className="text-xs font-medium text-muted-foreground/60 hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                      className="text-xs font-medium text-slate-500/60 hover:text-slate-900 disabled:opacity-30 disabled:cursor-not-allowed transition-colors dark:text-slate-400/60 dark:hover:text-slate-100"
                     >
                       ← Previous
                     </button>
-                    <span className="text-[11px] text-muted-foreground/40">
+                    <span className="text-[11px] text-slate-400/40 dark:text-slate-500/40">
                       Page {page + 1}
                     </span>
                     <button
                       onClick={() => setPage((p) => p + 1)}
                       disabled={!sessionHistory.hasMore}
-                      className="text-xs font-medium text-muted-foreground/60 hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                      className="text-xs font-medium text-slate-500/60 hover:text-slate-900 disabled:opacity-30 disabled:cursor-not-allowed transition-colors dark:text-slate-400/60 dark:hover:text-slate-100"
                     >
                       Next →
                     </button>
@@ -928,6 +689,150 @@ const QBank = () => {
             </div>
           )}
         </div>
+
+        {/* Right Panel - Session History (Desktop) */}
+        {!isAnonymous && user && (
+          <div className="hidden lg:block w-80 xl:w-96 space-y-4">
+            <div className="flex items-center gap-2 mb-3">
+              <History className="w-3.5 h-3.5 text-slate-500" />
+              <p className="font-mono text-[11px] font-medium tracking-widest uppercase text-slate-500 dark:text-slate-400">
+                Session History
+              </p>
+            </div>
+
+            {historyLoading ? (
+              <div className="space-y-2">
+                {[1, 2, 3].map((i) => (
+                  <div
+                    key={i}
+                    className="h-16 rounded-lg border border-slate-200 bg-slate-100 animate-pulse dark:bg-slate-800 dark:border-slate-700"
+                  />
+                ))}
+              </div>
+            ) : !sessionHistory || sessionHistory.rows.length === 0 ? (
+              <div className="rounded-xl border border-slate-200 bg-gradient-to-br from-white to-slate-50 p-4 text-center dark:from-slate-800 dark:to-slate-900 dark:border-slate-700">
+                <p className="text-xs text-slate-600 dark:text-slate-400">
+                  No sessions yet — complete your first session to see your history here.
+                </p>
+              </div>
+            ) : (
+              <>
+                <div className="space-y-2">
+                  {sessionHistory.rows.map((s) => {
+                    const pct = s.total > 0 ? Math.round((s.score / s.total) * 100) : 0;
+
+                    if (pendingDeleteId === s.id) {
+                      return (
+                        <div
+                          key={s.id}
+                          className="w-full rounded-lg px-4 py-3 flex items-center justify-between gap-3 border border-red-500/30 bg-red-500/5"
+                        >
+                          <p className="text-xs font-medium text-slate-900 dark:text-slate-100">Delete this session?</p>
+                          <div className="flex items-center gap-2 shrink-0">
+                            <button
+                              onClick={() => setPendingDeleteId(null)}
+                              className="text-xs text-slate-600 hover:text-slate-900 transition-colors px-2 py-1 dark:text-slate-400 dark:hover:text-slate-100"
+                            >
+                              Cancel
+                            </button>
+                            <button
+                              onClick={() => handleDeleteSession(s.id)}
+                              disabled={isDeleting}
+                              className="flex items-center gap-1.5 rounded-md bg-red-500/10 border border-red-500/40 text-red-600 dark:text-red-400 hover:bg-red-500/20 text-xs font-medium px-3 py-1.5 transition-colors disabled:opacity-50"
+                            >
+                              {isDeleting ? (
+                                <span className="h-3 w-3 rounded-full border-2 border-red-400/40 border-t-red-500 animate-spin" />
+                              ) : (
+                                <Trash2 className="h-3 w-3" />
+                              )}
+                              Delete
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    }
+
+                    return (
+                      <button
+                        key={s.id}
+                        onClick={() => navigate(`/qbank/summary?session=${s.id}`)}
+                        className="group w-full rounded-xl border border-slate-200 bg-gradient-to-br from-white to-slate-50 p-3 flex items-center gap-3.5 text-left hover:border-teal-300 transition-colors dark:from-slate-800 dark:to-slate-900 dark:border-slate-700 dark:hover:border-teal-500 shadow-sm"
+                      >
+                        <div
+                          className={`flex flex-col items-center justify-center rounded-lg border px-3 py-1.5 shrink-0 ${getScoreBg(s.score, s.total)}`}
+                        >
+                          <span className={`text-base font-semibold tabular-nums leading-none ${getScoreColor(s.score, s.total)}`}>
+                            {pct}%
+                          </span>
+                          <span className="text-[10px] text-slate-500/60 mt-0.5 dark:text-slate-400/60">
+                            {s.score}/{s.total}
+                          </span>
+                        </div>
+
+                        <div className="flex-1 min-w-0 space-y-0.5">
+                          <p className="text-sm font-semibold text-slate-900 truncate dark:text-slate-100">
+                            {s.system}
+                          </p>
+                          <div className="flex items-center gap-3">
+                            <span className="flex items-center gap-1 text-[11px] text-slate-500/60 dark:text-slate-400/60">
+                              <Clock className="h-3 w-3" />
+                              {formatSessionTime(s.total_time_ms)}
+                            </span>
+                            <span className="text-[11px] text-slate-400/40 dark:text-slate-500/40">
+                              {formatSessionDate(s.ended_at)}
+                            </span>
+                          </div>
+                        </div>
+
+                        <span
+                          role="button"
+                          tabIndex={0}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setPendingDeleteId(s.id);
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" || e.key === " ") {
+                              e.stopPropagation();
+                              e.preventDefault();
+                              setPendingDeleteId(s.id);
+                            }
+                          }}
+                          className="shrink-0 p-1.5 rounded-md text-slate-400/40 hover:text-red-500 hover:bg-red-500/10 transition-colors cursor-pointer"
+                          aria-label="Delete session"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </span>
+
+                        <ChevronRight className="h-4 w-4 text-slate-400/30 group-hover:text-teal-500/60 transition-colors shrink-0" />
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <div className="flex items-center justify-between pt-1">
+                  <button
+                    onClick={() => setPage((p) => Math.max(0, p - 1))}
+                    disabled={page === 0}
+                    className="text-xs font-medium text-slate-500/60 hover:text-slate-900 disabled:opacity-30 disabled:cursor-not-allowed transition-colors dark:text-slate-400/60 dark:hover:text-slate-100"
+                  >
+                    ← Previous
+                  </button>
+                  <span className="text-[11px] text-slate-400/40 dark:text-slate-500/40">
+                    Page {page + 1}
+                  </span>
+                  <button
+                    onClick={() => setPage((p) => p + 1)}
+                    disabled={!sessionHistory.hasMore}
+                    className="text-xs font-medium text-slate-500/60 hover:text-slate-900 disabled:opacity-30 disabled:cursor-not-allowed transition-colors dark:text-slate-400/60 dark:hover:text-slate-100"
+                  >
+                    Next →
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        )}
       </div>
     </DashboardLayout>
   );
