@@ -69,56 +69,98 @@
     --section-memoryhooks: 45 80% 48%;
     --section-flashcards: 260 50% 55%;
     --section-examtraps: 35 85% 50%;
+
+    /* Semantic status. Previously hand-rolled per component as emerald-500 /
+       amber-500 / red-500 at a dozen different alpha levels; centralised here so
+       both themes stay in step. `-soft` is the tinted chip background, and it is
+       a full colour (not an alpha) so it never depends on what sits behind it. */
+    --success: 158 64% 30%;
+    --success-foreground: 0 0% 100%;
+    --success-soft: 158 55% 92%;
+    --warning: 32 81% 39%;
+    --warning-foreground: 0 0% 100%;
+    --warning-soft: 40 87% 93%;
+    --danger: 3 62% 45%;
+    --danger-foreground: 0 0% 100%;
+    --danger-soft: 4 74% 94%;
+
+    /* Violet, the AI / "Explain this" accent used alongside the teal brand. */
+    --info: 262 60% 48%;
+    --info-foreground: 0 0% 100%;
+    --info-soft: 262 70% 95%;
   }
 
   .dark {
-    /* Surfaces: --paper dark #0B0D10 */
-    --background: 220 14% 6%;
-    --foreground: 43 22% 87%; /* --ink dark #E9E4D7 */
+    /* Dark surface ramp. The previous values sat between 6% and 13% lightness,
+       which put background/card/secondary/muted within ~3% of each other —
+       elevation, badges, inputs and hover states were all indistinguishable.
+       The ramp below spans 5% → 17% so each step reads as a distinct surface. */
 
-    --card: 220 18% 10%;
+    /* Surfaces: --paper dark #0B0D10 */
+    --background: 220 16% 5%;
+    --foreground: 43 22% 90%; /* --ink dark #E9E4D7 */
+
+    --card: 220 17% 9%;
     --card-foreground: 46 24% 90%;
 
-    --popover: 220 18% 10%;
+    /* Popovers sit one step above cards so overlays read as floating */
+    --popover: 220 17% 12%;
     --popover-foreground: 46 24% 90%;
 
     /* Primary: --teal-300 #6FB5B5 */
-    --primary: 180 28% 57%;
-    --primary-foreground: 220 14% 6%;
+    --primary: 180 32% 60%;
+    --primary-foreground: 220 16% 5%;
 
     /* Secondary: --paper-2 dark #141820 */
-    --secondary: 220 21% 11%;
-    --secondary-foreground: 46 24% 90%;
+    --secondary: 220 15% 15%;
+    --secondary-foreground: 46 24% 92%;
 
-    --muted: 220 18% 13%;
-    --muted-foreground: 43 10% 58%;
+    --muted: 220 15% 17%;
+    --muted-foreground: 43 12% 66%;
 
-    --sb-accent: 180 28% 57%;
-    --accent-foreground: 220 14% 6%;
+    --sb-accent: 180 32% 60%;
+    --accent-foreground: 220 16% 5%;
 
-    --destructive: 3 54% 35%;
-    --destructive-foreground: 46 24% 90%;
+    /* Inverted the way --primary already is: a LIGHT red on a dark foreground.
+       The old `3 54% 35%` was darker than the page, so `text-destructive` — the
+       form-error colour in AuthModal / ResetPassword — sat at ~1.9:1 and was
+       effectively invisible. */
+    --destructive: 0 70% 63%;
+    --destructive-foreground: 220 16% 5%;
 
-    --sb-border: 220 18% 17%;
-    --input: 220 18% 17%;
-    --ring: 180 28% 57%;
+    --sb-border: 220 13% 24%;
+    --input: 220 12% 34%; /* form controls need a stronger edge than panels */
+    --ring: 180 32% 60%;
 
-    --sidebar-background: 220 14% 6%;
-    --sidebar-foreground: 43 22% 87%;
-    --sidebar-primary: 180 28% 57%;
-    --sidebar-primary-foreground: 220 14% 6%;
-    --sidebar-accent: 220 21% 11%;
-    --sidebar-accent-foreground: 43 22% 87%;
-    --sidebar-border: 220 18% 17%;
-    --sidebar-ring: 180 28% 57%;
+    --sidebar-background: 220 16% 5%;
+    --sidebar-foreground: 43 22% 90%;
+    --sidebar-primary: 180 32% 60%;
+    --sidebar-primary-foreground: 220 16% 5%;
+    --sidebar-accent: 220 15% 15%;
+    --sidebar-accent-foreground: 43 22% 90%;
+    --sidebar-border: 220 13% 24%;
+    --sidebar-ring: 180 32% 60%;
 
-    --section-summary: 180 28% 57%;
+    --section-summary: 180 32% 60%;
     --section-clinical: 180 40% 45%;
     --section-keypoints: 220 14% 55%;
     --section-visuals: 180 40% 48%;
     --section-memoryhooks: 45 80% 55%;
     --section-flashcards: 260 50% 60%;
     --section-examtraps: 35 85% 55%;
+
+    --success: 158 52% 60%;
+    --success-foreground: 220 16% 5%;
+    --success-soft: 158 30% 16%;
+    --warning: 40 84% 62%;
+    --warning-foreground: 220 16% 5%;
+    --warning-soft: 38 40% 16%;
+    --danger: 0 70% 63%;
+    --danger-foreground: 220 16% 5%;
+    --danger-soft: 0 38% 17%;
+    --info: 262 70% 74%;
+    --info-foreground: 220 16% 5%;
+    --info-soft: 262 30% 20%;
   }
 }
 
@@ -548,5 +590,164 @@
     .top-progress-bar {
       transition: none;
     }
+  }
+
+  /* Stats Strip Styles */
+  .stats-strip-section {
+    padding: 24px;
+    /* hsl() is required: --card is a bare `H S% L%` triplet, so a raw
+       var(--card) here is invalid and silently resolves to transparent. */
+    background: hsl(var(--card));
+    border-radius: var(--radius);
+    border: 1px solid hsl(var(--sb-border));
+  }
+
+  .stats-strip-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+    font-size: 14px;
+    font-weight: 500;
+    color: hsl(var(--muted-foreground));
+  }
+
+  .stats-strip-header-icon {
+    width: 16px;
+    height: 16px;
+    color: hsl(var(--sb-accent));
+  }
+
+  .stats-strip-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+  }
+
+  .stats-strip-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 20px 16px;
+    background: hsl(var(--background));
+    border-radius: var(--radius);
+    border: 1px solid hsl(var(--sb-border));
+    transition: all 0.2s ease;
+  }
+
+  .stats-strip-card:hover {
+    border-color: hsl(var(--sb-accent));
+    transform: translateY(-2px);
+  }
+
+  .stats-strip-icon {
+    width: 48px;
+    height: 48px;
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 12px;
+  }
+
+  .stats-strip-value-row {
+    display: flex;
+    align-items: baseline;
+    gap: 4px;
+    margin-bottom: 4px;
+  }
+
+  .stats-strip-value {
+    font-size: 28px;
+    font-weight: 600;
+    line-height: 1;
+    font-family: var(--font-display, system-ui);
+  }
+
+  .stats-strip-suffix {
+    font-size: 12px;
+    color: hsl(var(--muted-foreground));
+    font-weight: 500;
+  }
+
+  .stats-strip-label {
+    font-size: 13px;
+    color: hsl(var(--muted-foreground));
+    font-weight: 500;
+    text-align: center;
+  }
+
+  /* ─── Print: "Export PDF" is window.print() into the browser's own
+     Save-as-PDF, so the page has to reduce to just the sheet document. ─── */
+  @media print {
+    /* Force the light token set — a dark-mode user must not print a black page. */
+    :root,
+    .dark {
+      --background: 0 0% 100%;
+      --foreground: 0 0% 8%;
+      --card: 0 0% 100%;
+      --card-foreground: 0 0% 8%;
+      --muted: 0 0% 96%;
+      --muted-foreground: 0 0% 32%;
+      --secondary: 0 0% 96%;
+      --secondary-foreground: 0 0% 8%;
+      --primary: 180 79% 24%;
+      --sb-border: 0 0% 80%;
+      --fg: #111;
+      --fg-muted: #444;
+      --bg: #fff;
+      --bg-panel: #fff;
+      --bg-elevated: #fff;
+      --border: #ccc;
+    }
+
+    /* Hide everything, then reveal the document and its descendants. Using
+       visibility (not display) keeps the layout intact inside the document. */
+    body * {
+      visibility: hidden;
+      box-shadow: none !important;
+    }
+    .print-document,
+    .print-document * {
+      visibility: visible;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+    .print-document {
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 100%;
+      padding: 0;
+      margin: 0;
+    }
+
+    /* Interactive affordances have no meaning on paper. */
+    .print-document button,
+    .print-document [role="button"],
+    .print-document [data-no-print] {
+      display: none !important;
+    }
+
+    /* Don't split a section card across pages if it can be helped. */
+    .print-document [data-section-key] {
+      break-inside: avoid;
+      page-break-inside: avoid;
+    }
+
+    @page {
+      margin: 16mm;
+    }
+  }
+
+  .stats-strip-anonymous-note {
+    margin-top: 16px;
+    text-align: center;
+    font-size: 13px;
+    color: hsl(var(--muted-foreground));
+    font-weight: 500;
+    padding: 12px;
+    background: hsl(var(--secondary));
+    border-radius: var(--radius);
   }
 }

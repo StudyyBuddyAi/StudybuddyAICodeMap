@@ -1,4 +1,5 @@
 import { useRef, useEffect, useState, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
 import { callMedicalNotes } from "@/lib/callMedicalNotes";
 import {
   BookOpen,
@@ -14,7 +15,6 @@ import {
   Zap,
   ChevronDown,
   ChevronUp,
-  RefreshCw,
   Sparkles,
   RotateCcw,
   X,
@@ -636,21 +636,6 @@ function EvidenceBadge({ onClick }: { onClick: () => void }) {
   );
 }
 
-function RegenerateButton({ sectionKey }: { sectionKey: string }) {
-  return (
-    <button
-      type="button"
-      title="Regenerate this section"
-      className="h-7 w-7 flex items-center justify-center rounded-lg text-muted-foreground/40 hover:text-muted-foreground hover:bg-secondary/60 transition-colors"
-      onClick={(e) => {
-        e.stopPropagation();
-      }}
-    >
-      <RefreshCw className="h-3.5 w-3.5" />
-    </button>
-  );
-}
-
 // ─── Floating enhance bubble ───────────────────────────────────────────────
 
 interface EnhanceBubbleProps {
@@ -1009,6 +994,7 @@ const OutputSection = ({
   isStreaming = false,
   streamedKeys,
 }: OutputSectionProps) => {
+  const navigate = useNavigate();
   const ref = useRef<HTMLDivElement>(null);
   const referenceNoteRef = useRef<HTMLDivElement>(null);
   const [showNudge, setShowNudge] = useState(() => !localStorage.getItem("sb_first_sheet_seen"));
@@ -1235,7 +1221,7 @@ const OutputSection = ({
 
     if (sections.length === 0) {
       return (
-        <div ref={ref}>
+        <div ref={ref} className="print-document">
           <div
             className="animate-fade-in"
             style={{
@@ -1256,7 +1242,7 @@ const OutputSection = ({
     const hasReferenceSection = sections.some((s) => s.title === "REFERENCE NOTE");
 
     return (
-      <div ref={ref} className="space-y-4">
+      <div ref={ref} className="print-document space-y-4">
         <div className="animate-fade-in flex items-center justify-between">
           {modeInfo && <ModeInfoBar modeInfo={modeInfo} />}
           <SaveButton input={inputText || ""} output={output} modeInfo={modeInfo} />
@@ -1403,7 +1389,7 @@ const OutputSection = ({
   return (
     <div
       ref={ref}
-      className="relative space-y-4"
+      className="print-document relative space-y-4"
       onMouseUp={handleSelectionChange}
       onTouchEnd={handleSelectionChange}
     >
@@ -1525,9 +1511,6 @@ const OutputSection = ({
                         animationFillMode: "backwards",
                       }}
                     />
-                    {key !== "referenceNote" && key !== "flashcards" && (
-                      <RegenerateButton sectionKey={key} />
-                    )}
                     <CopyButton text={copyText} />
                   </>
                 ) : (
@@ -1692,11 +1675,10 @@ function renderNudgeAndDisclaimer(
                   const topic = (inputText || "").trim();
                   if (!topic) return;
                   setShowNudge(false);
-                  window.dispatchEvent(
-                    new CustomEvent("studybuddy:generate-flashcards", {
-                      detail: { topic, cardCount: 5 },
-                    })
-                  );
+                  // The `studybuddy:generate-flashcards` listener lives in
+                  // FlashcardsGenerator, which is not mounted on /sheets — the
+                  // event went nowhere. Take the user to the page that has it.
+                  navigate("/flashcards", { state: { topic } });
                 }}
                 style={{
                   display: "inline-flex",

@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll } from "vitest";
 import { act, render, screen, type RenderResult } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { MemoryRouter } from "react-router-dom";
 import OutputSection from "./OutputSection";
 import type { GeneratedSheet } from "@/types/generated-sheet";
 
@@ -21,7 +22,11 @@ async function renderSheet(ui: React.ReactElement): Promise<RenderResult> {
   let result!: RenderResult;
   await act(async () => {
     result = render(
-      <QueryClientProvider client={client}>{ui}</QueryClientProvider>
+      // OutputSection calls useNavigate (section actions route out to Flashcards),
+      // so it needs router context even though these tests never navigate.
+      <QueryClientProvider client={client}>
+        <MemoryRouter>{ui}</MemoryRouter>
+      </QueryClientProvider>
     );
   });
   return result;

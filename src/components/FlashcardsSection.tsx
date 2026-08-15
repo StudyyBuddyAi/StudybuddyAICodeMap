@@ -71,7 +71,19 @@ function FlipCard({
   const isOpen = forceShow || revealed;
 
   return (
-    <div onClick={() => setRevealed(!revealed)} className="perspective cursor-pointer">
+    <div
+      onClick={() => setRevealed(!revealed)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          setRevealed(!revealed);
+        }
+      }}
+      role="button"
+      tabIndex={0}
+      aria-expanded={isOpen}
+      className="perspective cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background rounded-lg"
+    >
       <div
         className={`rounded-lg border bg-background p-4 space-y-2 transition-colors hover:border-foreground/20 ${
           isOpen ? "border-primary/30" : "border-border"
@@ -97,7 +109,7 @@ function FlipCard({
           </p>
         </div>
         {!isOpen && (
-          <p className="text-xs text-muted-foreground/60">Click to reveal answer</p>
+          <p className="text-xs text-muted-foreground">Click to reveal answer</p>
         )}
       </div>
     </div>

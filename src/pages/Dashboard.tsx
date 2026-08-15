@@ -1,5 +1,7 @@
 import { useNavigate } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
 import { FileText, Layers, FlaskConical, Stethoscope } from "lucide-react";
+import { supabase } from "@/integrations/supabase/client";
 import DashboardLayout from "@/components/dashboard/DashboardLayout";
 import StatsStrip from "@/components/dashboard/StatsStrip";
 import GoProNudgeBanner from "@/components/dashboard/GoProNudgeBanner";
@@ -31,9 +33,10 @@ const ActiveToolCard = ({
   ctaLabel,
   onClick,
 }: ActiveToolCardProps) => (
-  <div
+  <button
+    type="button"
     onClick={onClick}
-    className="group animate-fade-in"
+    className="group animate-fade-in text-left"
     style={{
       position: "relative",
       display: "flex",
@@ -116,7 +119,7 @@ const ActiveToolCard = ({
           className="group-hover:translate-x-0.5">→</span>
       </span>
     </div>
-  </div>
+  </button>
 );
 
 const ComingSoonCard = ({ icon, title, description }: ComingSoonCardProps) => (
@@ -222,6 +225,39 @@ const Dashboard = () => {
     </span>
   );
 
+  // Dashboard sits outside QBankProvider, so it runs its own count query. The
+  // key matches QBankContext's, so React Query serves both from one cache entry.
+  const qbankCountQuery = useQuery({
+    queryKey: ["qbank-count"],
+    queryFn: async (): Promise<number> => {
+      // select("id") not "*": the answer columns are REVOKE'd, so `*` 403s.
+      const { count, error } = await supabase
+        .from("questions")
+        .select("id", { count: "exact", head: true })
+        .eq("is_active", true);
+      if (error) throw error;
+      return count ?? 0;
+    },
+  });
+
+  const qbankStat = qbankCountQuery.isLoading ? (
+    <span style={{ fontSize: 12, color: "var(--fg-subtle)" }}>Loading…</span>
+  ) : (
+    <span>
+      <span style={{
+        fontSize: 18,
+        fontWeight: 600,
+        fontVariantNumeric: "tabular-nums",
+        color: "var(--fg)",
+      }}>
+        {qbankCountQuery.data ?? 0}
+      </span>
+      <span style={{ fontSize: 12, color: "var(--fg-muted)", marginLeft: 6 }}>
+        question{qbankCountQuery.data !== 1 ? "s" : ""} ready
+      </span>
+    </span>
+  );
+
   const flashcardStat = isAnonymous ? (
     <span style={{ fontSize: 12, color: "var(--fg-subtle)" }}>
       Sign in to track your stats
@@ -291,14 +327,7 @@ const Dashboard = () => {
             icon={<FlaskConical className="h-5 w-5" />}
             title="QBank"
             description="USMLE-style questions for Step 1 and Step 2 — built on NBME blueprints and clinical guidelines. Human-verified."
-            stat={
-              <span>
-                <span style={{ fontSize: 18, fontWeight: 600, fontVariantNumeric: "tabular-nums", color: "var(--fg)" }}>
-                  10
-                </span>
-                <span style={{ fontSize: 12, color: "var(--fg-muted)", marginLeft: 6 }}>questions ready</span>
-              </span>
-            }
+            stat={qbankStat}
             ctaLabel="Open"
             onClick={() => navigate("/qbank")}
           />
