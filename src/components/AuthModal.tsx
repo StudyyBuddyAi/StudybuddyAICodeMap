@@ -7,6 +7,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { InputOTP, InputOTPGroup, InputOTPSlot } from "@/components/ui/input-otp";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
@@ -20,7 +21,7 @@ interface AuthModalProps {
 }
 
 const AuthModal = ({ open, onOpenChange }: AuthModalProps) => {
-  const { signIn, signUp, resetPasswordForEmail } = useAuth();
+  const { signIn, startSignUp, confirmSignUp, resendSignUpOtp, resetPasswordForEmail } = useAuth();
   const { toast } = useToast();
 
   const [tab, setTab] = useState<"signin" | "signup">("signin");
@@ -34,12 +35,31 @@ const AuthModal = ({ open, onOpenChange }: AuthModalProps) => {
   const [signUpPassword, setSignUpPassword] = useState("");
   const [signUpError, setSignUpError] = useState<string | null>(null);
   const [signUpLoading, setSignUpLoading] = useState(false);
+  const [signUpConfirmPassword, setSignUpConfirmPassword] = useState("");
+  const [signUpStep, setSignUpStep] = useState<"form" | "otp">("form");
+  const [signUpOtpType, setSignUpOtpType] = useState<"email_change" | "signup" | null>(null);
+  const [signUpOtpValue, setSignUpOtpValue] = useState("");
+  const [resendCooldown, setResendCooldown] = useState(0);
 
   const [showForgotPassword, setShowForgotPassword] = useState(false);
   const [forgotEmail, setForgotEmail] = useState("");
   const [forgotError, setForgotError] = useState<string | null>(null);
   const [forgotLoading, setForgotLoading] = useState(false);
   const [forgotSent, setForgotSent] = useState(false);
+
+  // The typed password lives here from the form step through the OTP step, then
+  // goes straight to confirmSignUp. In memory only — never persisted anywhere.
+  const resetSignUpState = () => {
+    setSignUpEmail("");
+    setSignUpPassword("");
+    setSignUpConfirmPassword("");
+    setSignUpError(null);
+    setSignUpLoading(false);
+    setSignUpStep("form");
+    setSignUpOtpType(null);
+    setSignUpOtpValue("");
+    setResendCooldown(0);
+  };
 
   useEffect(() => {
     if (!open) {
@@ -48,8 +68,15 @@ const AuthModal = ({ open, onOpenChange }: AuthModalProps) => {
       setForgotError(null);
       setForgotLoading(false);
       setForgotSent(false);
+      resetSignUpState();
     }
   }, [open]);
+
+  useEffect(() => {
+    if (resendCooldown <= 0) return;
+    const timer = setTimeout(() => setResendCooldown((c) => c - 1), 1000);
+    return () => clearTimeout(timer);
+  }, [resendCooldown]);
 
   const handleSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -83,16 +110,53 @@ const AuthModal = ({ open, onOpenChange }: AuthModalProps) => {
   const handleSignUp = async (e: React.FormEvent) => {
     e.preventDefault();
     setSignUpError(null);
+
+    if (signUpPassword !== signUpConfirmPassword) {
+      setSignUpError("Passwords don't match");
+      return;
+    }
+
     setSignUpLoading(true);
-    const { error } = await signUp(signUpEmail, signUpPassword);
+    const { error, otpType } = await startSignUp(signUpEmail, signUpPassword);
     setSignUpLoading(false);
+
     if (error) {
       setSignUpError(error);
       return;
     }
-    toast({ title: "Account created — check your email" });
-    setSignUpEmail("");
-    setSignUpPassword("");
+
+    setSignUpOtpType(otpType);
+    setSignUpStep("otp");
+    setResendCooldown(60);
+  };
+
+  const handleVerifyOtp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!signUpOtpType) return;
+    setSignUpError(null);
+    setSignUpLoading(true);
+    const { error } = await confirmSignUp(signUpEmail, signUpOtpValue, signUpPassword, signUpOtpType);
+    setSignUpLoading(false);
+
+    if (error) {
+      setSignUpError(error);
+      setSignUpOtpValue("");
+      return;
+    }
+
+    toast({ title: "Email verified — welcome to StudyBuddy!" });
+    resetSignUpState();
+    onOpenChange(false);
+  };
+
+  const handleResendOtp = async () => {
+    if (!signUpOtpType || resendCooldown > 0) return;
+    const { error } = await resendSignUpOtp(signUpEmail, signUpOtpType);
+    if (error) {
+      setSignUpError(error);
+      return;
+    }
+    setResendCooldown(60);
   };
 
   return (
@@ -219,44 +283,146 @@ const AuthModal = ({ open, onOpenChange }: AuthModalProps) => {
           </TabsContent>
 
           <TabsContent value="signup">
-            <form onSubmit={handleSignUp} className="space-y-4 pt-2">
-              <div className="space-y-2">
-                <Label htmlFor="signup-email">Email</Label>
-                <Input
-                  id="signup-email"
-                  type="email"
-                  autoComplete="email"
-                  value={signUpEmail}
-                  onChange={(e) => setSignUpEmail(e.target.value)}
-                  required
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="signup-password">Password</Label>
-                <Input
-                  id="signup-password"
-                  type="password"
-                  autoComplete="new-password"
-                  value={signUpPassword}
-                  onChange={(e) => setSignUpPassword(e.target.value)}
-                  required
-                  minLength={6}
-                />
-              </div>
-              {signUpError && (
-                <p className="text-sm text-destructive">{signUpError}</p>
-              )}
-              <Button type="submit" className="w-full h-10 rounded-lg font-medium" disabled={signUpLoading}>
-                {signUpLoading ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Creating account…
-                  </>
-                ) : (
-                  "Sign Up"
+            {signUpStep === "form" ? (
+              <form onSubmit={handleSignUp} className="space-y-4 pt-2">
+                <div className="space-y-2">
+                  <Label htmlFor="signup-email">Email</Label>
+                  <Input
+                    id="signup-email"
+                    type="email"
+                    autoComplete="email"
+                    value={signUpEmail}
+                    onChange={(e) => setSignUpEmail(e.target.value)}
+                    required
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="signup-password">Password</Label>
+                  <Input
+                    id="signup-password"
+                    type="password"
+                    autoComplete="new-password"
+                    value={signUpPassword}
+                    onChange={(e) => setSignUpPassword(e.target.value)}
+                    required
+                    minLength={6}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="signup-confirm-password">Confirm password</Label>
+                  <Input
+                    id="signup-confirm-password"
+                    type="password"
+                    autoComplete="new-password"
+                    value={signUpConfirmPassword}
+                    onChange={(e) => setSignUpConfirmPassword(e.target.value)}
+                    required
+                    minLength={6}
+                  />
+                  {signUpConfirmPassword.length > 0 && signUpPassword !== signUpConfirmPassword && (
+                    <p className="text-sm text-destructive">Passwords don't match</p>
+                  )}
+                </div>
+                {signUpError && (
+                  <p className="text-sm text-destructive">{signUpError}</p>
                 )}
-              </Button>
-            </form>
+                <Button
+                  type="submit"
+                  className="w-full h-10 rounded-lg font-medium"
+                  disabled={signUpLoading}
+                >
+                  {signUpLoading ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Creating account…
+                    </>
+                  ) : (
+                    "Sign Up"
+                  )}
+                </Button>
+              </form>
+            ) : (
+              <div className="space-y-4 pt-2">
+                <div className="flex items-center gap-2">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7"
+                    onClick={() => {
+                      setSignUpStep("form");
+                      setSignUpOtpValue("");
+                      setSignUpError(null);
+                    }}
+                    aria-label="Back to sign up form"
+                  >
+                    <ArrowLeft className="h-4 w-4" />
+                  </Button>
+                  <h3 className="text-base font-semibold tracking-tight">Check your email</h3>
+                </div>
+
+                <p className="text-sm text-muted-foreground">
+                  We sent a 6-digit code to <span className="font-medium text-foreground">{signUpEmail}</span>
+                </p>
+
+                <form onSubmit={handleVerifyOtp} className="space-y-4">
+                  <div className="flex justify-center">
+                    <InputOTP
+                      maxLength={6}
+                      value={signUpOtpValue}
+                      onChange={setSignUpOtpValue}
+                      autoFocus
+                    >
+                      <InputOTPGroup>
+                        <InputOTPSlot index={0} className="h-12 w-11 text-base" />
+                        <InputOTPSlot index={1} className="h-12 w-11 text-base" />
+                        <InputOTPSlot index={2} className="h-12 w-11 text-base" />
+                        <InputOTPSlot index={3} className="h-12 w-11 text-base" />
+                        <InputOTPSlot index={4} className="h-12 w-11 text-base" />
+                        <InputOTPSlot index={5} className="h-12 w-11 text-base" />
+                      </InputOTPGroup>
+                    </InputOTP>
+                  </div>
+
+                  {signUpError && (
+                    <p className="text-sm text-destructive text-center">{signUpError}</p>
+                  )}
+
+                  <Button
+                    type="submit"
+                    className="w-full h-10 rounded-lg font-medium"
+                    disabled={signUpLoading || signUpOtpValue.length < 6}
+                  >
+                    {signUpLoading ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Verifying…
+                      </>
+                    ) : (
+                      "Verify email"
+                    )}
+                  </Button>
+                </form>
+
+                <div className="text-center">
+                  {resendCooldown > 0 ? (
+                    <span className="text-sm text-muted-foreground">
+                      Resend code ({resendCooldown}s)
+                    </span>
+                  ) : (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-auto p-0 text-sm text-primary hover:bg-transparent hover:text-primary/80"
+                      onClick={handleResendOtp}
+                    >
+                      Resend code
+                    </Button>
+                  )}
+                </div>
+              </div>
+            )}
           </TabsContent>
         </Tabs>
       </DialogContent>

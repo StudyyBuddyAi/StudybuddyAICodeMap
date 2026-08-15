@@ -611,6 +611,32 @@ export type Database = {
     }
     Functions: {
       redeem_pro_code: { Args: { code_input: string }; Returns: Json }
+      start_qbank_session: {
+        Args: {
+          p_domains: string[] | null
+          p_limit: number
+          p_system: string | null
+          p_question_ids: string[] | null
+        }
+        Returns: Json
+      }
+      submit_answer: {
+        Args: {
+          p_session: string
+          p_question: string
+          p_selected: string
+          p_time_ms: number
+        }
+        Returns: Json
+      }
+      end_qbank_session: {
+        Args: { p_session: string }
+        Returns: Json
+      }
+      get_session_review: {
+        Args: { p_session: string }
+        Returns: Json
+      }
     }
     Enums: {
       [_ in never]: never

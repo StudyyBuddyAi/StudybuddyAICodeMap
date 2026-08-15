@@ -22,6 +22,7 @@ import {
 import CopyButton from "@/components/CopyButton";
 import FlashcardsSection from "@/components/FlashcardsSection";
 import SaveButton from "@/components/SaveButton";
+import SectionSkeleton from "@/components/SectionSkeleton";
 import CitationBadgeList from "@/components/CitationBadgeList";
 import { startTopProgress, finishTopProgress } from "@/components/TopProgressBar";
 import type { CitationResult } from "@/lib/citation";
@@ -174,6 +175,10 @@ interface OutputSectionProps {
   userId?: string | null;
   isAnonymous?: boolean;
   sheetId?: string;
+  /** True while the sheet is still arriving over the stream. */
+  isStreaming?: boolean;
+  /** Sections safe to render mid-stream. Ignored unless `isStreaming`. */
+  streamedKeys?: string[];
 }
 
 // ─── Legacy renderer helpers (kept for old text-blob sheets) ───────────────
@@ -986,6 +991,8 @@ const OutputSection = ({
   userId,
   isAnonymous,
   sheetId,
+  isStreaming = false,
+  streamedKeys,
 }: OutputSectionProps) => {
   const navigate = useNavigate();
   const ref = useRef<HTMLDivElement>(null);
@@ -1193,6 +1200,9 @@ const OutputSection = ({
   const sheetIdentityRef = useRef<string | null>(null);
 
   useEffect(() => {
+    // Identity tracks `overview`, which grows with every chunk — scrolling on
+    // that mid-stream would yank the page under the reader on every section.
+    if (isStreaming) return;
     const hasContent = isJson ? !!sheet : parseSections(output).length > 0;
     if (!hasContent) return;
     const identity = isJson ? `${sheet?.topic ?? ""}::${sheet?.overview ?? ""}` : output;
@@ -1203,7 +1213,7 @@ const OutputSection = ({
       sessionStorage.removeItem("sb_disclaimer_collapsed");
       ref.current?.scrollIntoView({ behavior: "smooth", block: "start" });
     }
-  }, [output]);
+  }, [output, isStreaming]);
 
   // ── Legacy renderer ──────────────────────────────────────────────────────
   if (!isJson) {
@@ -1332,6 +1342,16 @@ const OutputSection = ({
     "referenceNote",
   ];
 
+  // Every section keeps its slot for the whole generation, so the document
+  // never changes shape — placeholders are filled in rather than replaced.
+  // A section renders its content only once its JSON has closed; before that
+  // it would show half a sentence and then reflow.
+  const isReady = (key: JsonSectionKey) => !isStreaming || !!streamedKeys?.includes(key);
+  // Sections arrive in order, so the first one not yet complete is in flight.
+  const writingKey = isStreaming
+    ? JSON_SECTION_ORDER.find((key) => !isReady(key))
+    : undefined;
+
   // Group active enhancements by anchor so they can be injected inline.
   // Open ones render as inline blocks; collapsed ones render as golden
   // highlights wrapped around their source text.
@@ -1407,18 +1427,28 @@ const OutputSection = ({
       {/* Mode header + Save */}
       <div className="animate-fade-in flex items-center justify-between">
         {modeInfo && <ModeInfoBar modeInfo={modeInfo} />}
-        <SaveButton input={inputText || ""} output={output} modeInfo={modeInfo} />
+        <SaveButton
+          input={inputText || ""}
+          output={output}
+          modeInfo={modeInfo}
+          disabled={isStreaming}
+        />
       </div>
 
       {JSON_SECTION_ORDER.map((key, idx) => {
         const config = JSON_SECTION_CONFIG[key];
         const Icon = config.icon;
         const isReference = key === "referenceNote";
-        const showEvidenceBadge = citationState === "found" && config.evidenceBacked;
+        const ready = isReady(key);
+        const writing = key === writingKey;
+        const showEvidenceBadge =
+          ready && citationState === "found" && config.evidenceBacked;
 
         const copyText =
           key === "flashcards"
-            ? sheet.flashcards.map((c) => `Q: [${c.tag}] ${c.question}\nA: ${c.answer}`).join("\n\n")
+            ? (sheet.flashcards ?? [])
+                .map((c) => `Q: [${c.tag}] ${c.question}\nA: ${c.answer}`)
+                .join("\n\n")
             : Array.isArray(sheet[key])
             ? (sheet[key] as string[]).map((item, i) => `${i + 1}. ${item}`).join("\n")
             : (sheet[key] as string) ?? "";
@@ -1431,43 +1461,85 @@ const OutputSection = ({
             className="animate-fade-in scroll-mt-20"
             style={{
               ...SECTION_CARD_STYLE,
-              animationDelay: `${idx * 200}ms`,
+              // A section that hasn't landed keeps a neutral edge, so the
+              // accent lighting up is the signal that its content arrived.
+              borderLeft: `3px solid ${
+                ready || writing ? "var(--accent)" : "var(--border)"
+              }`,
+              // Mid-stream the cards are already mounted and fill in one by
+              // one, so the stagger is real — replaying it would just delay
+              // each card into invisibility for its share of the offset.
+              animationDelay: isStreaming ? "0ms" : `${idx * 200}ms`,
               animationFillMode: "backwards",
             }}
           >
             <div style={SECTION_HEADER_STYLE}>
               <div className="flex items-center gap-2.5 flex-wrap">
                 <div style={SECTION_ICON_STYLE}>
-                  <Icon style={{ width: 14, height: 14, color: "var(--accent)" }} />
+                  <Icon
+                    style={{
+                      width: 14,
+                      height: 14,
+                      color: ready || writing ? "var(--accent)" : "var(--fg-subtle)",
+                    }}
+                  />
                 </div>
-                <h3 style={SECTION_TITLE_STYLE}>
+                <h3
+                  style={{
+                    ...SECTION_TITLE_STYLE,
+                    color: ready || writing ? "var(--fg)" : "var(--fg-muted)",
+                  }}
+                >
                   {config.label}
                   {key === "overview" && sheet.topicEmoji && (
                     <span className="ml-2 text-base">{sheet.topicEmoji}</span>
                   )}
                 </h3>
                 {showEvidenceBadge && <EvidenceBadge onClick={scrollToReference} />}
-                {key === "overview" && modelUsed && (
+                {ready && key === "overview" && modelUsed && (
                   <ModelBadge model={modelUsed} isPro={isPro} />
                 )}
               </div>
               <div className="flex items-center gap-1">
-                <Check
-                  aria-label="Section loaded"
-                  className="h-3.5 w-3.5 text-primary/50 animate-fade-in"
-                  style={{ animationDelay: `${idx * 200 + 350}ms`, animationFillMode: "backwards" }}
-                />
-                <CopyButton text={copyText} />
+                {ready ? (
+                  <>
+                    <Check
+                      aria-label="Section loaded"
+                      className="h-3.5 w-3.5 text-primary/50 animate-fade-in"
+                      style={{
+                        animationDelay: isStreaming ? "0ms" : `${idx * 200 + 350}ms`,
+                        animationFillMode: "backwards",
+                      }}
+                    />
+                    <CopyButton text={copyText} />
+                  </>
+                ) : (
+                  // Marks where the next content lands. Only the dot pulses —
+                  // animating the whole card would be a distraction to read past.
+                  <span
+                    aria-label={writing ? "Writing section" : "Waiting"}
+                    className={writing ? "animate-pulse" : undefined}
+                    style={{
+                      width: 6,
+                      height: 6,
+                      borderRadius: "50%",
+                      background: writing ? "var(--accent)" : "var(--border-strong)",
+                      margin: "0 9px",
+                    }}
+                  />
+                )}
               </div>
             </div>
 
             <div style={SECTION_BODY_STYLE} data-enh-section={key}>
-              {key === "flashcards" ? (
-                <FlashcardsSection cards={sheet.flashcards} />
+              {!ready ? (
+                <SectionSkeleton variant="sheet-body" />
+              ) : key === "flashcards" ? (
+                <FlashcardsSection cards={sheet.flashcards ?? []} />
               ) : key === "overview" || key === "clinicalApproach" ? (
                 <div className="text-sm text-muted-foreground leading-relaxed">
                   {renderJsonText(
-                    sheet[key] as string,
+                    (sheet[key] as string) ?? "",
                     key,
                     handleKeywordClick,
                     renderInline,
@@ -1500,7 +1572,7 @@ const OutputSection = ({
                   reopenEnhancement
                 )
               )}
-              {renderInline(`${key}:end`)}
+              {ready && renderInline(`${key}:end`)}
             </div>
           </div>
         );
@@ -1511,7 +1583,14 @@ const OutputSection = ({
         <div className="space-y-1">{renderInline("end")}</div>
       ) : null}
 
-      {renderNudgeAndDisclaimer(showNudge, setShowNudge, inputText, disclaimerCollapsed, toggleDisclaimer)}
+      {/* The nudge says the sheet is ready, so it waits until it actually is. */}
+      {renderNudgeAndDisclaimer(
+        showNudge && !isStreaming,
+        setShowNudge,
+        inputText,
+        disclaimerCollapsed,
+        toggleDisclaimer
+      )}
 
       {/* Anchored action menu — selection (below the highlighted text) */}
       {selection && (
