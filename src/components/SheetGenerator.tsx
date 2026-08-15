@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef } from "react";
+import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { BookOpen, Brain, History, Loader2, PenLine, Settings2, Stethoscope, X, Activity, Heart, FileText, Sparkles, ChevronRight, Check, Search, FileDown, Share2, Bookmark, Play, ArrowRight, Zap } from "lucide-react";
+import { BookOpen, Brain, History, Loader2, Settings2, Stethoscope, X, Sparkles, ChevronRight, Check, Search, FileDown, Share2, Play, ArrowRight, Zap } from "lucide-react";
 import SectionSkeleton from "@/components/SectionSkeleton";
 import { useToast } from "@/hooks/use-toast";
 import OutputSection, { type CitationState } from "@/components/OutputSection";
@@ -20,13 +21,13 @@ import {
   isJsonSheet,
 } from "@/types/generated-sheet";
 import { fetchBestCitation, type CitationResult } from "@/lib/citation";
-import CitationCTABanner from "@/components/CitationCTABanner";
 import AuthModal from "@/components/AuthModal";
 import GoProModal from "@/components/GoProModal";
 import { startTopProgress, finishTopProgress } from "@/components/TopProgressBar";
 import { useStudyHistory, type StudyHistoryItem } from "@/hooks/use-study-history";
 import { usePersona, type Persona } from "@/hooks/use-persona";
 import { timeAgo } from "@/lib/utils";
+import { sheetToPlainText } from "@/lib/sheet-to-text";
 
 export interface SheetGeneratorPrefill {
   input: string;
@@ -50,7 +51,7 @@ interface PillGroupProps {
 /** Inline pill toggle group — all options visible, tap to select. */
 const PillGroup = ({ label, options, value, onChange }: PillGroupProps) => (
   <div className="mb-4">
-    <label className="block font-mono text-[11px] font-medium tracking-widest uppercase text-slate-500 mb-2 dark:text-slate-400">
+    <label className="block font-mono text-[11px] font-medium tracking-widest uppercase text-muted-foreground mb-2">
       {label}
     </label>
     <div className="flex flex-wrap gap-2">
@@ -64,8 +65,8 @@ const PillGroup = ({ label, options, value, onChange }: PillGroupProps) => (
             aria-pressed={active}
             className={`inline-flex items-center gap-2 h-9 px-4 rounded-lg text-sm font-medium transition-all duration-200 ${
               active
-                ? "bg-teal-500 border-teal-500 text-white shadow-md"
-                : "bg-white border-slate-200 text-slate-700 hover:border-teal-300 hover:text-teal-700 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-300 dark:hover:border-teal-500 dark:hover:text-teal-300"
+                ? "bg-primary border-primary text-primary-foreground shadow-md"
+                : "bg-card border-border text-muted-foreground hover:border-primary hover:text-primary"
             } border`}
           >
             {active && <Check className="w-4 h-4" />}
@@ -155,8 +156,8 @@ const SheetSectionNav = ({ sheet }: { sheet: GeneratedSheet }) => {
               aria-current={active ? "true" : undefined}
               className={`border-none border-l-2 py-1.5 pl-3 text-left text-sm transition-all duration-200 ${
                 active
-                  ? "border-l-teal-500 text-teal-700 dark:border-l-teal-400 dark:text-teal-300 font-medium"
-                  : "border-l-slate-200 text-slate-600 hover:text-slate-800 dark:border-l-slate-700 dark:text-slate-400 dark:hover:text-slate-300"
+                  ? "border-l-primary text-primary font-medium"
+                  : "border-l-border text-muted-foreground hover:text-foreground"
               }`}
             >
               {it.label}
@@ -188,12 +189,12 @@ const QuickstartChips = ({ onStartTopic }: { onStartTopic: (label: string) => vo
         key={label}
         type="button"
         onClick={() => onStartTopic(label)}
-        className="group flex flex-col items-center gap-2 p-4 rounded-xl border border-slate-200 bg-white hover:border-teal-400 hover:shadow-md transition-all duration-200 dark:bg-slate-800 dark:border-slate-700 dark:hover:border-teal-500"
+        className="group flex flex-col items-center gap-2 p-4 rounded-xl border border-border bg-card hover:border-primary hover:shadow-md transition-all duration-200"
       >
         <span className="text-2xl">{icon}</span>
         <div className="text-center">
-          <p className="text-sm font-medium text-slate-800 group-hover:text-teal-700 dark:text-slate-200 dark:group-hover:text-teal-300">{label}</p>
-          <p className="text-[11px] text-slate-500 dark:text-slate-400">{category}</p>
+          <p className="text-sm font-medium text-foreground group-hover:text-primary">{label}</p>
+          <p className="text-[11px] text-muted-foreground">{category}</p>
         </div>
       </button>
     ))}
@@ -237,15 +238,15 @@ const SheetsEmptyState = ({ onStartTopic, onSelectHistory }: SheetsEmptyStatePro
   // New users (no history): the original topic-picker empty state.
   if (history.length === 0) {
     return (
-      <div className="animate-fade-in flex flex-col items-center justify-center gap-6 rounded-2xl border border-slate-200 bg-gradient-to-br from-white to-slate-50 px-8 py-16 text-center shadow-sm dark:from-slate-900 dark:to-slate-800 dark:border-slate-700">
-        <div className="flex items-center justify-center w-20 h-20 rounded-3xl bg-gradient-to-br from-teal-100 to-teal-200 dark:from-teal-900/30 dark:to-teal-800/30 shadow-lg">
-          <Stethoscope className="w-10 h-10 text-teal-600 dark:text-teal-400" />
+      <div className="animate-fade-in flex flex-col items-center justify-center gap-6 rounded-2xl border border-border bg-card px-8 py-16 text-center shadow-sm">
+        <div className="flex items-center justify-center w-20 h-20 rounded-3xl bg-primary/15 shadow-lg">
+          <Stethoscope className="w-10 h-10 text-primary" />
         </div>
         <div className="space-y-3">
-          <h3 className="text-xl font-serif font-semibold text-slate-900 dark:text-slate-100">
+          <h3 className="text-xl font-serif font-semibold text-foreground">
             Start Your Study Journey
           </h3>
-          <p className="text-base text-slate-600 dark:text-slate-400 max-w-md">
+          <p className="text-base text-muted-foreground max-w-md">
             Choose a medical topic below or type your own to generate a comprehensive study sheet with AI-powered insights.
           </p>
         </div>
@@ -260,8 +261,8 @@ const SheetsEmptyState = ({ onStartTopic, onSelectHistory }: SheetsEmptyStatePro
     <div className="animate-fade-in space-y-6">
       <div className="space-y-4">
         <div className="flex items-center justify-between">
-          <h3 className="text-sm font-serif font-semibold text-slate-900 dark:text-slate-100">Continue Studying</h3>
-          <span className="text-xs text-slate-500 dark:text-slate-400">{recent.length} recent sheets</span>
+          <h3 className="text-sm font-serif font-semibold text-foreground">Continue Studying</h3>
+          <span className="text-xs text-muted-foreground">{recent.length} recent sheets</span>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
           {recent.map((item) => {
@@ -273,20 +274,20 @@ const SheetsEmptyState = ({ onStartTopic, onSelectHistory }: SheetsEmptyStatePro
                 key={item.id}
                 type="button"
                 onClick={() => onSelectHistory(item)}
-                className="group flex flex-col gap-2 rounded-xl border border-slate-200 bg-white p-4 text-left hover:border-teal-400 hover:shadow-md hover:-translate-y-0.5 transition-all duration-200 dark:bg-slate-800 dark:border-slate-700 dark:hover:border-teal-500"
+                className="group flex flex-col gap-2 rounded-xl border border-border bg-card p-4 text-left hover:border-primary hover:shadow-md hover:-translate-y-0.5 transition-all duration-200"
               >
                 <div className="flex items-start justify-between gap-2">
-                  <p className="truncate text-sm font-medium text-slate-800 group-hover:text-teal-700 dark:text-slate-200 dark:group-hover:text-teal-300 leading-tight">
+                  <p className="truncate text-sm font-medium text-foreground group-hover:text-primary leading-tight">
                     {item.topic}
                   </p>
-                  <ChevronRight className="w-4 h-4 text-slate-400 group-hover:text-teal-500 flex-shrink-0" />
+                  <ChevronRight className="w-4 h-4 text-muted-foreground group-hover:text-primary flex-shrink-0" />
                 </div>
                 {chips && (
-                  <p className="truncate text-xs text-slate-600 dark:text-slate-400">
+                  <p className="truncate text-xs text-muted-foreground">
                     {chips}
                   </p>
                 )}
-                <p className="text-xs text-slate-500 dark:text-slate-500 mt-auto pt-1">
+                <p className="text-xs text-muted-foreground mt-auto pt-1">
                   {timeAgo(item.timestamp)}
                 </p>
               </button>
@@ -296,11 +297,11 @@ const SheetsEmptyState = ({ onStartTopic, onSelectHistory }: SheetsEmptyStatePro
       </div>
 
       <div className="flex items-center gap-4">
-        <div className="flex-1 h-px bg-slate-200 dark:bg-slate-700" />
-        <span className="font-mono text-[11px] tracking-widest uppercase text-slate-500 dark:text-slate-500">
+        <div className="flex-1 h-px bg-border" />
+        <span className="font-mono text-[11px] tracking-widest uppercase text-muted-foreground">
           or start fresh
         </span>
-        <div className="flex-1 h-px bg-slate-200 dark:bg-slate-700" />
+        <div className="flex-1 h-px bg-border" />
       </div>
 
       <QuickstartChips onStartTopic={onStartTopic} />
@@ -329,7 +330,6 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
   const [pendingOutput, setPendingOutput] = useState<string | null>(null);
   // A prefilled topic (e.g. a Roadmap chip) must land in a visible textarea —
   // otherwise the picker renders and silently overwrites it on the next click.
-  const [showTextarea, setShowTextarea] = useState(!!prefill?.input);
   const [citationState, setCitationState] = useState<CitationState>("idle");
   const [citations, setCitations] = useState<CitationResult[]>([]);
   const [authModalOpen, setAuthModalOpen] = useState(false);
@@ -346,6 +346,7 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
   });
   const outputRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
+  const navigate = useNavigate();
 
   const recordRecentTopic = (topic: string) => {
     const trimmed = topic.trim().slice(0, 60);
@@ -395,7 +396,6 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
     setLegacyOutput("");
     setDeckSaved(false);
     setPendingOutput(null);
-    setShowTextarea(false);
     setCitationState("idle");
     setCitations([]);
 
@@ -595,10 +595,42 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
 
   const startTopic = (label: string) => {
     setNotes(label);
-    setShowTextarea(false);
     setDeckSaved(false);
     setConfigDrawerOpen(false);
     generate(label);
+  };
+
+  /**
+   * Share the sheet's text. There is no per-sheet route to link to, so this
+   * shares the content itself: the native share sheet where available (mobile),
+   * clipboard everywhere else.
+   */
+  const handleShare = async () => {
+    const text = sheetToPlainText(sheet, legacyOutput, notes);
+    if (!text.trim()) {
+      toast({ title: "Nothing to share yet", variant: "destructive" });
+      return;
+    }
+
+    const title = sheet?.topic?.trim() || notes.trim().slice(0, 60) || "Study sheet";
+
+    if (navigator.share) {
+      try {
+        await navigator.share({ title, text });
+        return;
+      } catch (e: unknown) {
+        // The user dismissing the native sheet is not an error worth surfacing.
+        if (e instanceof Error && e.name === "AbortError") return;
+        // Anything else (unsupported payload, permission) falls through to copy.
+      }
+    }
+
+    try {
+      await navigator.clipboard.writeText(text);
+      toast({ title: "Study sheet copied to clipboard" });
+    } catch {
+      toast({ title: "Couldn't copy the sheet", variant: "destructive" });
+    }
   };
 
   // Load a saved sheet straight from history (no regeneration) — mirrors how the
@@ -611,7 +643,6 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
       setLength(item.modeInfo.length || "Concise");
     }
     setNotes(item.input);
-    setShowTextarea(false);
     setConfigDrawerOpen(false);
     setDeckSaved(false);
     setModelUsed(undefined);
@@ -632,27 +663,27 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
   const configurator = (
       <div className="animate-fade-in space-y-6">
         {/* ── Step 1: Topic Selection ── */}
-        <div className="rounded-2xl border border-slate-200 bg-gradient-to-br from-white to-slate-50 p-6 shadow-sm dark:from-slate-800 dark:to-slate-900 dark:border-slate-700">
+        <div className="rounded-2xl border border-border bg-card p-6 shadow-sm">
           <div className="space-y-4">
             <div className="flex items-center gap-2">
-              <div className="flex items-center justify-center w-7 h-7 rounded-full bg-teal-500 text-white text-xs font-bold">1</div>
-              <h2 className="text-lg font-serif font-semibold text-slate-900 dark:text-slate-100">Medical Topic</h2>
+              <div className="flex items-center justify-center w-7 h-7 rounded-full bg-primary text-primary-foreground text-xs font-bold">1</div>
+              <h2 className="text-lg font-serif font-semibold text-foreground">Medical Topic</h2>
             </div>
             
             <div className="space-y-3">
               <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                 <Textarea
                   placeholder="Search or type a medical topic (e.g., Heart Failure, Pneumonia, Diabetes...)"
                   value={notes}
                   onChange={(e) => setNotes(e.target.value)}
-                  className="min-h-[80px] pl-10 pr-10 text-sm leading-relaxed rounded-xl border-slate-200 focus:border-teal-400 focus:ring-2 focus:ring-teal-100 dark:bg-slate-800 dark:border-slate-700 dark:focus:border-teal-500 dark:focus:ring-teal-900/20"
+                  className="min-h-[80px] pl-10 pr-10 text-sm leading-relaxed rounded-xl border-border focus:border-primary focus:ring-2 focus:ring-primary"
                 />
                 {notes && (
                   <button
                     type="button"
                     onClick={() => setNotes("")}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-600 transition-colors dark:text-slate-500 dark:hover:text-slate-300"
+                    className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-muted-foreground hover:text-foreground transition-colors"
                     aria-label="Clear"
                   >
                     <X className="w-4 h-4" />
@@ -661,19 +692,19 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
               </div>
               
               <div className="pt-2">
-                <p className="font-mono text-[11px] font-medium tracking-widest uppercase text-slate-500 mb-3 dark:text-slate-400">Popular Topics</p>
+                <p className="font-mono text-[11px] font-medium tracking-widest uppercase text-muted-foreground mb-3">Popular Topics</p>
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                   {QUICKSTART_TOPICS.slice(0, 6).map(({ label, icon, category }) => (
                     <button
                       key={label}
                       type="button"
                       onClick={() => setNotes(label)}
-                      className="group flex flex-col items-center gap-1.5 p-3 rounded-xl border border-slate-200 bg-white hover:border-teal-400 hover:shadow-sm transition-all duration-200 dark:bg-slate-800 dark:border-slate-700 dark:hover:border-teal-500"
+                      className="group flex flex-col items-center gap-1.5 p-3 rounded-xl border border-border bg-card hover:border-primary hover:shadow-sm transition-all duration-200"
                     >
                       <span className="text-xl">{icon}</span>
                       <div className="text-center">
-                        <p className="text-xs font-medium text-slate-800 group-hover:text-teal-700 dark:text-slate-200 dark:group-hover:text-teal-300 leading-tight">{label}</p>
-                        <p className="text-[10px] text-slate-500 dark:text-slate-400">{category}</p>
+                        <p className="text-xs font-medium text-foreground group-hover:text-primary leading-tight">{label}</p>
+                        <p className="text-[10px] text-muted-foreground">{category}</p>
                       </div>
                     </button>
                   ))}
@@ -684,11 +715,11 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
         </div>
 
         {/* ── Step 2: Customize ── */}
-        <div className="rounded-2xl border border-slate-200 bg-gradient-to-br from-white to-slate-50 p-6 shadow-sm dark:from-slate-800 dark:to-slate-900 dark:border-slate-700">
+        <div className="rounded-2xl border border-border bg-card p-6 shadow-sm">
           <div className="space-y-4">
             <div className="flex items-center gap-2">
-              <div className="flex items-center justify-center w-7 h-7 rounded-full bg-slate-200 text-slate-600 text-xs font-bold dark:bg-slate-700 dark:text-slate-300">2</div>
-              <h2 className="text-lg font-serif font-semibold text-slate-900 dark:text-slate-100">Customize</h2>
+              <div className="flex items-center justify-center w-7 h-7 rounded-full bg-border text-muted-foreground text-xs font-bold">2</div>
+              <h2 className="text-lg font-serif font-semibold text-foreground">Customize</h2>
             </div>
             
             <div className="space-y-4">
@@ -737,11 +768,11 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
         </div>
 
         {/* ── Step 3: AI Perspective ── */}
-        <div className="rounded-2xl border border-slate-200 bg-gradient-to-br from-white to-slate-50 p-6 shadow-sm dark:from-slate-800 dark:to-slate-900 dark:border-slate-700">
+        <div className="rounded-2xl border border-border bg-card p-6 shadow-sm">
           <div className="space-y-4">
             <div className="flex items-center gap-2">
-              <div className="flex items-center justify-center w-7 h-7 rounded-full bg-violet-500 text-white text-xs font-bold">3</div>
-              <h2 className="text-lg font-serif font-semibold text-slate-900 dark:text-slate-100">AI Perspective</h2>
+              <div className="flex items-center justify-center w-7 h-7 rounded-full bg-info text-primary-foreground text-xs font-bold">3</div>
+              <h2 className="text-lg font-serif font-semibold text-foreground">AI Perspective</h2>
             </div>
             
             <div className="grid grid-cols-1 gap-3">
@@ -778,39 +809,39 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
                     aria-pressed={active}
                     className={`relative group w-full flex items-start gap-4 p-4 rounded-xl text-left transition-all duration-200 ${
                       active
-                        ? "border-2 shadow-md " + (color === "blue" ? "border-blue-500 bg-blue-50" : color === "teal" ? "border-teal-500 bg-teal-50" : "border-violet-500 bg-violet-50")
-                        : "border border-slate-200 bg-white hover:border-slate-300 hover:shadow-sm dark:bg-slate-800 dark:border-slate-700 dark:hover:border-slate-600"
+                        ? "border-2 shadow-md " + (color === "blue" ? "border-success bg-success-soft" : color === "teal" ? "border-primary bg-primary/10" : "border-info bg-info-soft")
+                        : "border border-border bg-card hover:border-input hover:shadow-sm"
                     } ${loading ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
                   >
                     {active && (
                       <div className={`absolute -top-2 -right-2 w-6 h-6 rounded-full flex items-center justify-center ${
-                        color === "blue" ? "bg-blue-500" : color === "teal" ? "bg-teal-500" : "bg-violet-500"
+                        color === "blue" ? "bg-success" : color === "teal" ? "bg-primary" : "bg-info"
                       }`}>
-                        <Check className="w-4 h-4 text-white" />
+                        <Check className="w-4 h-4 text-primary-foreground" />
                       </div>
                     )}
                     <span className={`flex items-center justify-center w-10 h-10 rounded-lg flex-shrink-0 transition-colors ${
                       active
-                        ? (color === "blue" ? "bg-blue-500" : color === "teal" ? "bg-teal-500" : "bg-violet-500")
-                        : "bg-slate-100 dark:bg-slate-700"
+                        ? (color === "blue" ? "bg-success" : color === "teal" ? "bg-primary" : "bg-info")
+                        : "bg-secondary"
                     }`}>
                       {loading && active ? (
-                        <Loader2 className="w-5 h-5 text-white animate-spin" />
+                        <Loader2 className="w-5 h-5 text-primary-foreground animate-spin" />
                       ) : (
                         <Icon className={`w-5 h-5 ${
-                          active ? "text-white" : "text-slate-500 dark:text-slate-400"
+                          active ? "text-primary-foreground" : "text-muted-foreground"
                         }`} />
                       )}
                     </span>
                     <div className="flex-1 min-w-0">
                       <p className={`text-sm font-semibold leading-tight mb-1 ${
                         active
-                          ? (color === "blue" ? "text-blue-700" : color === "teal" ? "text-teal-700" : "text-violet-700")
-                          : "text-slate-800 dark:text-slate-200"
+                          ? (color === "blue" ? "text-success" : color === "teal" ? "text-primary" : "text-info")
+                          : "text-foreground"
                       }`}>
                         {loading && active ? "Generating…" : label}
                       </p>
-                      <p className="text-xs text-slate-500 leading-relaxed dark:text-slate-400">
+                      <p className="text-xs text-muted-foreground leading-relaxed">
                         {sub}
                       </p>
                     </div>
@@ -825,7 +856,7 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
         <Button
           onClick={() => generate()}
           disabled={loading || !notes.trim()}
-          className="w-full h-12 rounded-xl bg-gradient-to-r from-teal-500 to-teal-600 text-white font-semibold text-base shadow-lg hover:shadow-xl hover:from-teal-600 hover:to-teal-700 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+          className="w-full h-12 rounded-xl bg-primary text-primary-foreground font-semibold text-base shadow-lg hover:shadow-xl transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
         >
           <Sparkles className="w-5 h-5" />
           Generate Study Sheet
@@ -833,22 +864,22 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
         </Button>
 
         {pro && (
-          <div className="flex items-center justify-center gap-2 rounded-xl border border-teal-200 bg-teal-50 px-4 py-2.5 dark:border-teal-800 dark:bg-teal-950/30">
-            <span className="h-1.5 w-1.5 rounded-full bg-teal-500" />
-            <p className="text-sm font-medium text-teal-800 dark:text-teal-300">
+          <div className="flex items-center justify-center gap-2 rounded-xl border border-primary/30 bg-primary/10 px-4 py-2.5">
+            <span className="h-1.5 w-1.5 rounded-full bg-primary" />
+            <p className="text-sm font-medium text-primary">
               Unlimited access active
             </p>
           </div>
         )}
 
         {!pro && (
-          <div className="text-center text-xs text-slate-500 space-y-1 dark:text-slate-400">
+          <div className="text-center text-xs text-muted-foreground space-y-1">
             {isSheetLimited ? (
-              <span className="text-amber-600 dark:text-amber-400 font-medium block">
+              <span className="text-warning font-medium block">
                 Daily limit reached ·{" "}
                 <button
                   type="button"
-                  className="underline hover:text-amber-700 transition-colors dark:hover:text-amber-300"
+                  className="underline hover:text-warning transition-colors"
                   onClick={() => setGoProOpen(true)}
                 >
                   Go Pro for Claude + unlimited
@@ -858,38 +889,38 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
               <span>{sheetCount} / {MAX_DAILY_SHEETS} uses today · Resets at midnight</span>
             )}
             {isPremiumHookActive ? (
-              <span className="text-violet-600 dark:text-violet-400 font-medium block">
+              <span className="text-info font-medium block">
                 ✦ {premiumRemaining} Claude generation{premiumRemaining !== 1 ? "s" : ""} left ·{" "}
                 <button
                   type="button"
-                  className="underline hover:text-violet-700 transition-colors dark:hover:text-violet-300"
+                  className="underline hover:text-info transition-colors"
                   onClick={() => setGoProOpen(true)}
                 >
                   Go Pro for unlimited Claude
                 </button>
               </span>
             ) : !isSheetLimited ? (
-              <span className="text-slate-400/60 block dark:text-slate-500/60">
+              <span className="text-muted-foreground block">
                 Powered by GPT-OSS 20B
               </span>
             ) : null}
           </div>
         )}
         {pro && (
-          <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 space-y-2 dark:border-slate-700 dark:bg-slate-800/50">
-            <p className="text-xs font-medium text-slate-600 text-center dark:text-slate-400">
+          <div className="rounded-xl border border-border bg-secondary px-4 py-3 space-y-2">
+            <p className="text-xs font-medium text-muted-foreground text-center">
               AI Model
             </p>
             <div className="flex items-center justify-center">
-              <div className="inline-flex items-center rounded-lg bg-white p-0.5 shadow-sm dark:bg-slate-700">
+              <div className="inline-flex items-center rounded-lg bg-card p-0.5 shadow-sm">
                 <button
                   type="button"
                   onClick={() => setPreferredModel("gpt-oss")}
                   disabled={modelSaving}
                   className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
                     preferredModel !== "claude"
-                      ? "bg-white text-slate-800 shadow-sm dark:bg-slate-600 dark:text-slate-200"
-                      : "text-slate-600 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200"
+                      ? "bg-card text-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground"
                     }`}
                   >
                     GPT-OSS 20B
@@ -900,8 +931,8 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
                     disabled={modelSaving}
                     className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
                       preferredModel === "claude"
-                        ? "bg-white text-slate-800 shadow-sm dark:bg-slate-600 dark:text-slate-200"
-                        : "text-slate-600 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200"
+                        ? "bg-card text-foreground shadow-sm"
+                        : "text-muted-foreground hover:text-foreground"
                     }`}
                   >
                     Claude Haiku 4.5
@@ -909,14 +940,14 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
                 </div>
               </div>
               {modelSaving && (
-                <p className="text-[11px] text-slate-400/50 text-center dark:text-slate-500/50">Saving preference…</p>
+                <p className="text-[11px] text-muted-foreground text-center">Saving preference…</p>
               )}
             </div>
           )}
 
         {recentTopics.length > 0 && (
-          <div className="pt-4 border-t border-slate-200 mt-4 dark:border-slate-700">
-            <p className="flex items-center gap-1.5 font-mono text-[11px] font-medium tracking-widest uppercase text-slate-500 mb-2 pt-2 dark:text-slate-400">
+          <div className="pt-4 border-t border-border mt-4">
+            <p className="flex items-center gap-1.5 font-mono text-[11px] font-medium tracking-widest uppercase text-muted-foreground mb-2 pt-2">
               <History className="w-3 h-3" />
               Recent Topics
             </p>
@@ -927,7 +958,7 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
                   type="button"
                   disabled={loading}
                   onClick={() => setNotes(topic)}
-                  className="truncate max-w-full px-2.5 py-1 rounded-lg border border-slate-200 bg-slate-50 text-slate-600 text-xs font-medium hover:border-teal-400 hover:text-teal-700 transition-all duration-200 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-400 dark:hover:border-teal-500 dark:hover:text-teal-300 disabled:opacity-50 disabled:cursor-default"
+                  className="truncate max-w-full px-2.5 py-1 rounded-lg border border-border bg-secondary text-muted-foreground text-xs font-medium hover:border-primary hover:text-primary transition-all duration-200 disabled:opacity-50 disabled:cursor-default"
                 >
                   {topic}
                 </button>
@@ -949,7 +980,7 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
       {/* ── 1px divider between config and document ── */}
       <div
         aria-hidden
-        className="hidden lg:block lg:w-px lg:shrink-0 lg:self-stretch bg-slate-200 dark:bg-slate-700"
+        className="hidden lg:block lg:w-px lg:shrink-0 lg:self-stretch bg-border"
       />
 
       {/* ── Middle pane: living document (fluid, fills its lane) ── */}
@@ -958,41 +989,41 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
       {loading && !sheet && !legacyOutput && (
         <div className="space-y-6 animate-fade-in">
           {/* AI Generation Progress */}
-          <div className="rounded-2xl border border-slate-200 bg-gradient-to-br from-white to-slate-50 p-8 text-center shadow-sm dark:from-slate-800 dark:to-slate-900 dark:border-slate-700">
+          <div className="rounded-2xl border border-border bg-card p-8 text-center shadow-sm">
             <div className="flex flex-col items-center gap-4">
               <div className="relative">
-                <div className="w-16 h-16 rounded-full bg-gradient-to-br from-teal-100 to-teal-200 dark:from-teal-900/30 dark:to-teal-800/30 flex items-center justify-center">
-                  <Sparkles className="w-8 h-8 text-teal-500" />
+                <div className="w-16 h-16 rounded-full bg-primary/15 flex items-center justify-center">
+                  <Sparkles className="w-8 h-8 text-primary" />
                 </div>
-                <Loader2 className="absolute -bottom-1 -right-1 w-6 h-6 text-teal-500 animate-spin" />
+                <Loader2 className="absolute -bottom-1 -right-1 w-6 h-6 text-primary animate-spin" />
               </div>
               <div className="space-y-2">
-                <h3 className="text-lg font-serif font-semibold text-slate-900 dark:text-slate-100">
+                <h3 className="text-lg font-serif font-semibold text-foreground">
                   AI is generating your study sheet
                 </h3>
-                <p className="text-sm text-slate-600 dark:text-slate-400">
+                <p className="text-sm text-muted-foreground">
                   {loadingMsg}
                 </p>
               </div>
               {/* Progress steps */}
-              <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
-                <span className={`flex items-center gap-1 ${loadingMsg.includes("Understanding") ? "text-teal-600 font-medium" : ""}`}>
-                  <div className={`w-1.5 h-1.5 rounded-full ${loadingMsg.includes("Understanding") ? "bg-teal-500" : "bg-slate-300"}`} />
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <span className={`flex items-center gap-1 ${loadingMsg.includes("Understanding") ? "text-primary font-medium" : ""}`}>
+                  <div className={`w-1.5 h-1.5 rounded-full ${loadingMsg.includes("Understanding") ? "bg-primary" : "bg-border"}`} />
                   Understanding
                 </span>
                 <ChevronRight className="w-3 h-3" />
-                <span className={`flex items-center gap-1 ${loadingMsg.includes("Structuring") ? "text-teal-600 font-medium" : ""}`}>
-                  <div className={`w-1.5 h-1.5 rounded-full ${loadingMsg.includes("Structuring") ? "bg-teal-500" : "bg-slate-300"}`} />
+                <span className={`flex items-center gap-1 ${loadingMsg.includes("Structuring") ? "text-primary font-medium" : ""}`}>
+                  <div className={`w-1.5 h-1.5 rounded-full ${loadingMsg.includes("Structuring") ? "bg-primary" : "bg-border"}`} />
                   Structuring
                 </span>
                 <ChevronRight className="w-3 h-3" />
-                <span className={`flex items-center gap-1 ${loadingMsg.includes("Creating") ? "text-teal-600 font-medium" : ""}`}>
-                  <div className={`w-1.5 h-1.5 rounded-full ${loadingMsg.includes("Creating") ? "bg-teal-500" : "bg-slate-300"}`} />
+                <span className={`flex items-center gap-1 ${loadingMsg.includes("Creating") ? "text-primary font-medium" : ""}`}>
+                  <div className={`w-1.5 h-1.5 rounded-full ${loadingMsg.includes("Creating") ? "bg-primary" : "bg-border"}`} />
                   Creating
                 </span>
                 <ChevronRight className="w-3 h-3" />
-                <span className={`flex items-center gap-1 ${loadingMsg.includes("Finalizing") ? "text-teal-600 font-medium" : ""}`}>
-                  <div className={`w-1.5 h-1.5 rounded-full ${loadingMsg.includes("Finalizing") ? "bg-teal-500" : "bg-slate-300"}`} />
+                <span className={`flex items-center gap-1 ${loadingMsg.includes("Finalizing") ? "text-primary font-medium" : ""}`}>
+                  <div className={`w-1.5 h-1.5 rounded-full ${loadingMsg.includes("Finalizing") ? "bg-primary" : "bg-border"}`} />
                   Finalizing
                 </span>
               </div>
@@ -1015,7 +1046,7 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
       )}
 
       {!loading && !sheet && !legacyOutput && (
-        <SheetsEmptyState onStartTopic={setNotes} onSelectHistory={loadHistoryItem} />
+        <SheetsEmptyState onStartTopic={startTopic} onSelectHistory={loadHistoryItem} />
       )}
 
       {(sheet || legacyOutput) && (
@@ -1041,7 +1072,7 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
         <div className="flex flex-wrap justify-center gap-3 pt-4">
           <Button
             variant="outline"
-            className="h-10 rounded-xl font-medium text-sm px-4 border-slate-200 hover:border-teal-400 hover:text-teal-700 hover:bg-teal-50 dark:border-slate-700 dark:hover:border-teal-500 dark:hover:text-teal-300 dark:hover:bg-teal-950/20 flex items-center gap-2"
+            className="h-10 rounded-xl font-medium text-sm px-4 border-border hover:border-primary hover:text-primary hover:bg-primary/10 flex items-center gap-2"
             disabled={deckSaved}
             onClick={() => {
               try {
@@ -1079,31 +1110,30 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
           
           <Button
             variant="outline"
-            className="h-10 rounded-xl font-medium text-sm px-4 border-slate-200 hover:border-violet-400 hover:text-violet-700 hover:bg-violet-50 dark:border-slate-700 dark:hover:border-violet-500 dark:hover:text-violet-300 dark:hover:bg-violet-950/20 flex items-center gap-2"
+            className="h-10 rounded-xl font-medium text-sm px-4 border-border hover:border-info hover:text-info hover:bg-info-soft flex items-center gap-2"
+            onClick={() => navigate("/qbank")}
           >
             <Play className="w-4 h-4" />
             Practice QBank
           </Button>
-          
+
+          {/* No "Save" here: OutputSection already renders a working SaveButton
+              at the top of the document. A second one would keep its own
+              `saved` state and drift out of sync with the first. */}
+
           <Button
             variant="outline"
-            className="h-10 rounded-xl font-medium text-sm px-4 border-slate-200 hover:border-slate-400 hover:text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:hover:border-slate-500 dark:hover:text-slate-300 dark:hover:bg-slate-800 flex items-center gap-2"
-          >
-            <Bookmark className="w-4 h-4" />
-            Save
-          </Button>
-          
-          <Button
-            variant="outline"
-            className="h-10 rounded-xl font-medium text-sm px-4 border-slate-200 hover:border-slate-400 hover:text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:hover:border-slate-500 dark:hover:text-slate-300 dark:hover:bg-slate-800 flex items-center gap-2"
+            className="h-10 rounded-xl font-medium text-sm px-4 border-border hover:border-input hover:text-foreground hover:bg-secondary flex items-center gap-2"
+            onClick={() => window.print()}
           >
             <FileDown className="w-4 h-4" />
             Export PDF
           </Button>
-          
+
           <Button
             variant="outline"
-            className="h-10 rounded-xl font-medium text-sm px-4 border-slate-200 hover:border-slate-400 hover:text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:hover:border-slate-500 dark:hover:text-slate-300 dark:hover:bg-slate-800 flex items-center gap-2"
+            className="h-10 rounded-xl font-medium text-sm px-4 border-border hover:border-input hover:text-foreground hover:bg-secondary flex items-center gap-2"
+            onClick={handleShare}
           >
             <Share2 className="w-4 h-4" />
             Share
@@ -1120,7 +1150,7 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
         <>
           <div
             aria-hidden
-            className="hidden 2xl:block 2xl:w-px 2xl:shrink-0 2xl:self-stretch bg-slate-200 dark:bg-slate-700"
+            className="hidden 2xl:block 2xl:w-px 2xl:shrink-0 2xl:self-stretch bg-border"
           />
           <div className="hidden 2xl:block 2xl:w-[240px] 2xl:shrink-0 2xl:sticky 2xl:top-6 2xl:self-start 2xl:pl-6">
             <SheetSectionNav key={sheet.topic ?? "sheet"} sheet={sheet} />
@@ -1133,7 +1163,7 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
     <button
       type="button"
       onClick={() => setConfigDrawerOpen(true)}
-      className="hidden md:max-lg:inline-flex fixed bottom-4 left-4 z-40 h-9 items-center gap-1.5 rounded-full bg-teal-500 px-4 text-xs font-semibold text-white shadow-lg hover:bg-teal-600 transition-colors"
+      className="hidden md:max-lg:inline-flex fixed bottom-4 left-4 z-40 h-9 items-center gap-1.5 rounded-full bg-primary px-4 text-xs font-semibold text-primary-foreground shadow-lg hover:bg-primary/90 transition-colors"
     >
       <Settings2 className="h-3.5 w-3.5" />
       Configure
@@ -1153,18 +1183,18 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
         onClick={() => setConfigDrawerOpen(false)}
       />
       <div
-        className={`absolute inset-y-0 left-0 w-[320px] overflow-y-auto bg-white border-r border-slate-200 p-4 motion-safe:transition-transform motion-safe:duration-[250ms] motion-safe:ease-out dark:bg-slate-900 dark:border-slate-700 ${
+        className={`absolute inset-y-0 left-0 w-[320px] overflow-y-auto bg-card border-r border-border p-4 motion-safe:transition-transform motion-safe:duration-[250ms] motion-safe:ease-out ${
           configDrawerOpen ? "translate-x-0" : "-translate-x-full"
         }`}
       >
         <div className="flex items-center justify-between pb-3">
-          <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400">
+          <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
             Configure
           </span>
           <button
             type="button"
             onClick={() => setConfigDrawerOpen(false)}
-            className="p-1 rounded-md text-slate-500 hover:text-slate-800 transition-colors dark:text-slate-400 dark:hover:text-slate-200"
+            className="p-1 rounded-md text-muted-foreground hover:text-foreground transition-colors"
             aria-label="Close configurator"
           >
             <X className="h-4 w-4" />

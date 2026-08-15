@@ -25,30 +25,30 @@ const getTopicVisual = (title: string): { icon: LucideIcon; accent: string } => 
   const normalized = title.toLowerCase();
 
   if (normalized.includes("hypertension") || normalized.includes("pressure")) {
-    return { icon: Activity, accent: "bg-[#d2e4ff] text-[#0F4C81]" };
+    return { icon: Activity, accent: "bg-primary/10 text-primary" };
   }
 
   if (normalized.includes("heart") || normalized.includes("cardio") || normalized.includes("arrhythmia")) {
-    return { icon: HeartPulse, accent: "bg-[#d2e4ff] text-[#0F4C81]" };
+    return { icon: HeartPulse, accent: "bg-primary/10 text-primary" };
   }
 
   if (normalized.includes("failure") || normalized.includes("valve") || normalized.includes("disease")) {
-    return { icon: Stethoscope, accent: "bg-[#cae6ff] text-[#006492]" };
+    return { icon: Stethoscope, accent: "bg-primary/10 text-primary" };
   }
 
   if (normalized.includes("statin") || normalized.includes("pharmac") || normalized.includes("lipid")) {
-    return { icon: Pill, accent: "bg-[#93f2f2] text-[#005353]" };
+    return { icon: Pill, accent: "bg-success-soft text-success" };
   }
 
   if (normalized.includes("pedi") || normalized.includes("child") || normalized.includes("congenital")) {
-    return { icon: Baby, accent: "bg-[#cae6ff] text-[#006492]" };
+    return { icon: Baby, accent: "bg-primary/10 text-primary" };
   }
 
   if (normalized.includes("immune") || normalized.includes("inflammatory") || normalized.includes("infection")) {
-    return { icon: Shield, accent: "bg-[#cae6ff] text-[#006492]" };
+    return { icon: Shield, accent: "bg-primary/10 text-primary" };
   }
 
-  return { icon: HeartPulse, accent: "bg-[#d2e4ff] text-[#0F4C81]" };
+  return { icon: HeartPulse, accent: "bg-primary/10 text-primary" };
 };
 
 const TpiceRodmap = ({
@@ -74,13 +74,13 @@ const TpiceRodmap = ({
   };
 
   return (
-    <div className="w-full rounded-[16px] border border-[#E2E8F0] bg-white p-4 shadow-[0px_4px_20px_rgba(15,76,129,0.05)] sm:p-6">
+    <div className="w-full rounded-[16px] border border-border bg-card p-4 shadow-lg sm:p-6">
       <div className="mb-6 flex items-center justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-semibold tracking-[-0.04em] text-[#0F4C81] sm:text-[2.1rem]" style={{ fontFamily: 'Manrope, sans-serif' }}>
+          <h2 className="text-2xl font-semibold tracking-[-0.04em] text-primary sm:text-[2.1rem]" style={{ fontFamily: 'Manrope, sans-serif' }}>
             {section.system ?? "Topics"}
           </h2>
-          <p className="mt-2 text-sm text-[#64748B] sm:text-base" style={{ fontFamily: 'Inter, sans-serif' }}>
+          <p className="mt-2 text-sm text-muted-foreground sm:text-base" style={{ fontFamily: 'Inter, sans-serif' }}>
             Select a topic to generate a detailed study sheet or flashcards.
           </p>
         </div>
@@ -88,7 +88,7 @@ const TpiceRodmap = ({
         <button
           type="button"
           onClick={handleBack}
-          className="inline-flex items-center gap-2 rounded-xl border border-[#E2E8F0] bg-white px-3 py-2 text-sm font-medium text-[#0F4C81] transition hover:border-[#0F4C81] hover:bg-[#F7F9FB]"
+          className="inline-flex items-center gap-2 rounded-xl border border-border bg-card px-3 py-2 text-sm font-medium text-primary transition hover:border-primary hover:bg-secondary"
         >
           <span className="inline-flex items-center gap-1.5">
             <ArrowLeft className="h-4 w-4" />
@@ -107,19 +107,19 @@ const TpiceRodmap = ({
               key={topic.id ?? `${topic.title}-${index}`}
               type="button"
               onClick={() => openSheetFor(topic.title)}
-              className="group relative flex w-full items-center gap-3 rounded-[12px] border border-[#E2E8F0] bg-[#F7F9FB] p-3 text-left shadow-[0px_4px_20px_rgba(15,76,129,0.05)] transition-all duration-300 hover:-translate-y-0.5 hover:border-[#0F4C81] hover:bg-white hover:shadow-[0px_8px_30px_rgba(15,76,129,0.1)]"
+              className="group relative flex w-full items-center gap-3 rounded-[12px] border border-border bg-secondary p-3 text-left transition-all duration-300 hover:-translate-y-0.5 hover:border-primary hover:bg-card hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
               <div className={`flex h-14 w-14 shrink-0 items-center justify-center rounded-[12px] ${accent}`}>
                 <Icon className="h-6 w-6" strokeWidth={2} />
               </div>
 
               <div className="min-w-0 flex-1">
-                <div className="mb-2 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-[#0F4C81]" style={{ fontFamily: 'Inter, sans-serif' }}>
-                  <span className="inline-flex h-2.5 w-2.5 items-center justify-center rounded-full bg-[#0F4C81]" />
+                <div className="mb-2 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-primary" style={{ fontFamily: 'Inter, sans-serif' }}>
+                  <span className="inline-flex h-2.5 w-2.5 items-center justify-center rounded-full bg-primary" />
                   READY
                 </div>
 
-                <div className="text-left text-[1.05rem] font-medium leading-[1.35] tracking-[-0.02em] text-[#191c1e]" style={{ fontFamily: 'Manrope, sans-serif' }}>
+                <div className="text-left text-[1.05rem] font-medium leading-[1.35] tracking-[-0.02em] text-foreground" style={{ fontFamily: 'Manrope, sans-serif' }}>
                   {topic.title}
                 </div>
               </div>

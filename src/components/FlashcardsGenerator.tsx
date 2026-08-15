@@ -307,7 +307,7 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated }: FlashcardsGene
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
-    <Card className="glass-card animate-fade-in rounded-2xl border border-slate-200 bg-gradient-to-br from-white to-slate-50 shadow-sm dark:from-slate-800 dark:to-slate-900 dark:border-slate-700">
+    <Card className="glass-card animate-fade-in rounded-2xl border border-border bg-card shadow-sm">
       <CardContent className="p-6 space-y-6">
         {!isLoggedIn && (
           <CitationCTABanner onSignInClick={() => setAuthModalOpen(true)} />
@@ -316,24 +316,24 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated }: FlashcardsGene
         {/* Step 1: Topic Selection */}
         <div className="space-y-4">
           <div className="flex items-center gap-2">
-            <div className="flex items-center justify-center w-7 h-7 rounded-full bg-teal-500 text-white text-xs font-bold">1</div>
-            <h2 className="text-sm font-serif font-semibold text-slate-900 dark:text-slate-100">Medical Topic</h2>
+            <div className="flex items-center justify-center w-7 h-7 rounded-full bg-primary text-primary-foreground text-xs font-bold">1</div>
+            <h2 className="text-sm font-serif font-semibold text-foreground">Medical Topic</h2>
           </div>
           
           <div className="space-y-3">
             <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
               <Textarea
                 placeholder="Search or type a medical topic (e.g., Heart Failure, Pneumonia, Diabetes...)"
                 value={topic}
                 onChange={(e) => setTopic(e.target.value)}
-                className="min-h-[80px] pl-10 pr-10 text-sm leading-relaxed rounded-xl border-slate-200 focus:border-teal-400 focus:ring-2 focus:ring-teal-100 dark:bg-slate-800 dark:border-slate-700 dark:focus:border-teal-500 dark:focus:ring-teal-900/20"
+                className="min-h-[80px] pl-10 pr-10 text-sm leading-relaxed rounded-xl border-border focus:border-primary focus:ring-2 focus:ring-primary"
               />
               {topic && (
                 <button
                   type="button"
                   onClick={() => setTopic("")}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-600 transition-colors dark:text-slate-500 dark:hover:text-slate-300"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-muted-foreground hover:text-foreground transition-colors"
                   aria-label="Clear"
                 >
                   <X className="w-4 h-4" />
@@ -342,19 +342,19 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated }: FlashcardsGene
             </div>
             
             <div className="pt-2">
-              <p className="font-mono text-[11px] font-medium tracking-widest uppercase text-slate-500 mb-3 dark:text-slate-400">Popular Topics</p>
+              <p className="font-mono text-[11px] font-medium tracking-widest uppercase text-muted-foreground mb-3">Popular Topics</p>
               <div className="grid grid-cols-2 gap-2">
                 {POPULAR_TOPICS.slice(0, 6).map(({ label, icon, category }) => (
                   <button
                     key={label}
                     type="button"
                     onClick={() => { setTopic(label); setShowTextarea(false); }}
-                    className="group flex flex-col items-center gap-1.5 p-3 rounded-xl border border-slate-200 bg-white hover:border-teal-400 hover:shadow-sm transition-all duration-200 dark:bg-slate-800 dark:border-slate-700 dark:hover:border-teal-500"
+                    className="group flex flex-col items-center gap-1.5 p-3 rounded-xl border border-border bg-card hover:border-primary hover:shadow-sm transition-all duration-200"
                   >
                     <span className="text-xl">{icon}</span>
                     <div className="text-center">
-                      <p className="text-xs font-medium text-slate-800 group-hover:text-teal-700 dark:text-slate-200 dark:group-hover:text-teal-300 leading-tight">{label}</p>
-                      <p className="text-[10px] text-slate-500 dark:text-slate-400">{category}</p>
+                      <p className="text-xs font-medium text-foreground group-hover:text-primary leading-tight">{label}</p>
+                      <p className="text-[10px] text-muted-foreground">{category}</p>
                     </div>
                   </button>
                 ))}
@@ -366,14 +366,14 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated }: FlashcardsGene
         {/* Step 2: Configure */}
         <div className="space-y-4">
           <div className="flex items-center gap-2">
-            <div className="flex items-center justify-center w-7 h-7 rounded-full bg-violet-500 text-white text-xs font-bold">2</div>
-            <h2 className="text-sm font-serif font-semibold text-slate-900 dark:text-slate-100">Configure</h2>
+            <div className="flex items-center justify-center w-7 h-7 rounded-full bg-info text-primary-foreground text-xs font-bold">2</div>
+            <h2 className="text-sm font-serif font-semibold text-foreground">Configure</h2>
           </div>
           
           <div className="space-y-4">
             {/* Exam Mode */}
             <div className="space-y-2">
-              <label className="block font-mono text-[11px] font-medium tracking-widest uppercase text-slate-500 dark:text-slate-400">
+              <label className="block font-mono text-[11px] font-medium tracking-widest uppercase text-muted-foreground">
                 Exam Mode
               </label>
               <div className="flex flex-wrap gap-2">
@@ -387,13 +387,13 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated }: FlashcardsGene
                       aria-pressed={active}
                       className={`inline-flex flex-col items-start gap-1 p-3 rounded-lg border text-left transition-all duration-200 ${
                         active
-                          ? "bg-violet-50 border-violet-400 text-violet-900 dark:bg-violet-950/30 dark:border-violet-500 dark:text-violet-200"
-                          : "bg-white border-slate-200 text-slate-700 hover:border-violet-300 hover:text-violet-700 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-300 dark:hover:border-violet-500 dark:hover:text-violet-300"
+                          ? "bg-info-soft border-info text-info"
+                          : "bg-card border-border text-muted-foreground hover:border-info hover:text-info"
                       }`}
                     >
                       <span className="text-sm font-medium">{opt.label}</span>
-                      <span className="text-[10px] text-slate-500 dark:text-slate-400">{opt.description}</span>
-                      {active && <Check className="w-3 h-3 text-violet-600 dark:text-violet-400" />}
+                      <span className="text-[10px] text-muted-foreground">{opt.description}</span>
+                      {active && <Check className="w-3 h-3 text-info" />}
                     </button>
                   );
                 })}
@@ -402,7 +402,7 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated }: FlashcardsGene
 
             {/* Number of Cards */}
             <div className="space-y-2">
-              <label className="block font-mono text-[11px] font-medium tracking-widest uppercase text-slate-500 dark:text-slate-400">
+              <label className="block font-mono text-[11px] font-medium tracking-widest uppercase text-muted-foreground">
                 Number of Cards
               </label>
               <div className="grid grid-cols-2 gap-2">
@@ -416,13 +416,13 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated }: FlashcardsGene
                       aria-pressed={active}
                       className={`inline-flex flex-col items-start gap-1 p-3 rounded-lg border text-left transition-all duration-200 ${
                         active
-                          ? "bg-teal-50 border-teal-400 text-teal-900 dark:bg-teal-950/30 dark:border-teal-500 dark:text-teal-200"
-                          : "bg-white border-slate-200 text-slate-700 hover:border-teal-300 hover:text-teal-700 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-300 dark:hover:border-teal-500 dark:hover:text-teal-300"
+                          ? "bg-primary/10 border-primary text-primary"
+                          : "bg-card border-border text-muted-foreground hover:border-primary hover:text-primary"
                       }`}
                     >
                       <span className="text-sm font-medium">{opt.label}</span>
-                      <span className="text-[10px] text-slate-500 dark:text-slate-400">{opt.description}</span>
-                      {active && <Check className="w-3 h-3 text-teal-600 dark:text-teal-400" />}
+                      <span className="text-[10px] text-muted-foreground">{opt.description}</span>
+                      {active && <Check className="w-3 h-3 text-primary" />}
                     </button>
                   );
                 })}
@@ -433,7 +433,7 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated }: FlashcardsGene
 
         {/* Generate Button */}
         <Button
-          className="w-full h-12 text-sm font-semibold rounded-xl bg-teal-500 hover:bg-teal-600 text-white shadow-md hover:shadow-lg transition-all duration-200"
+          className="w-full h-12 text-sm font-semibold rounded-xl bg-primary hover:bg-primary/90 text-primary-foreground shadow-md hover:shadow-lg transition-all duration-200"
           onClick={() => handleGenerate()}
           disabled={loading || !topic.trim()}
         >
@@ -453,33 +453,33 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated }: FlashcardsGene
 
         {/* Usage Indicator */}
         {!pro && (
-          <div className="rounded-lg bg-slate-50 border border-slate-200 p-3 text-center dark:bg-slate-800/50 dark:border-slate-700">
+          <div className="rounded-lg bg-secondary border border-border p-3 text-center">
             {isCardsLimited ? (
-              <span className="text-amber-600 dark:text-amber-400 font-medium text-xs block">
+              <span className="text-warning font-medium text-xs block">
                 Daily limit reached ·{" "}
                 <button
                   type="button"
-                  className="underline hover:text-amber-500 transition-colors"
+                  className="underline hover:text-warning transition-colors"
                   onClick={() => setGoProOpen(true)}
                 >
                   Upgrade for unlimited
                 </button>
               </span>
             ) : (
-              <span className="text-slate-600 dark:text-slate-400 text-xs block">
+              <span className="text-muted-foreground text-xs block">
                 {remaining} / {MAX_DAILY_CARDS} cards today · Resets at midnight
               </span>
             )}
             {isPremiumHookActive && (
-              <span className="text-violet-600 dark:text-violet-400 font-medium text-xs block mt-1">
+              <span className="text-info font-medium text-xs block mt-1">
                 ✦ {premiumRemaining} Claude generation{premiumRemaining !== 1 ? "s" : ""} left
               </span>
             )}
           </div>
         )}
         {pro && (
-          <div className="rounded-lg bg-teal-50 border border-teal-200 p-3 text-center dark:bg-teal-950/30 dark:border-teal-800">
-            <span className="text-teal-700 dark:text-teal-300 font-medium text-xs">
+          <div className="rounded-lg bg-primary/10 border border-primary/30 p-3 text-center">
+            <span className="text-primary font-medium text-xs">
               ✦ Pro: {preferredModel === "claude" ? "Claude Haiku 4.5" : "GPT-OSS 20B"}
             </span>
           </div>
@@ -487,8 +487,8 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated }: FlashcardsGene
 
         {/* Recent Topics */}
         {recentTopics.length > 0 && (
-          <div className="space-y-3 pt-4 border-t border-slate-200 dark:border-slate-700">
-            <p className="flex items-center gap-2 font-mono text-[11px] font-medium tracking-widest uppercase text-slate-500 dark:text-slate-400">
+          <div className="space-y-3 pt-4 border-t border-border">
+            <p className="flex items-center gap-2 font-mono text-[11px] font-medium tracking-widest uppercase text-muted-foreground">
               <History className="h-3 w-3" />
               Recent Topics
             </p>
@@ -503,7 +503,7 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated }: FlashcardsGene
                     setShowTextarea(false);
                     handleGenerate(t);
                   }}
-                  className="max-w-full truncate inline-flex items-center gap-1.5 h-8 px-3 rounded-lg border border-slate-200 bg-white text-slate-700 text-xs font-medium hover:border-teal-400 hover:text-teal-700 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-default dark:bg-slate-800 dark:border-slate-700 dark:text-slate-300 dark:hover:border-teal-500 dark:hover:text-teal-300"
+                  className="max-w-full truncate inline-flex items-center gap-1.5 h-8 px-3 rounded-lg border border-border bg-card text-muted-foreground text-xs font-medium hover:border-primary hover:text-primary transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-default"
                 >
                   <ChevronRight className="h-3 w-3" />
                   {t}

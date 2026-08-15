@@ -13,7 +13,7 @@ const DashboardLayout = ({ children, wide = false }: DashboardLayoutProps) => {
   const [accountModalOpen, setAccountModalOpen] = useState(false);
 
   return (
-    <div style={{  background: "#f3f4f6" }}>
+    <div className="min-h-screen bg-background">
       <AppNav
         onOpenAuth={() => setAuthModalOpen(true)}
         onOpenAccount={() => setAccountModalOpen(true)}

@@ -49,7 +49,7 @@ const FirstDeckBanner = ({ onGoToFlashcards }: FirstDeckBannerProps) => {
             setShow(false);
             localStorage.setItem("sb_first_deck_seen", "dismissed");
           }}
-          className="text-muted-foreground/50 hover:text-muted-foreground transition-colors"
+          className="text-muted-foreground hover:text-foreground transition-colors"
           aria-label="Dismiss"
         >
           <X className="h-4 w-4" />

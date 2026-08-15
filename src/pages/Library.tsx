@@ -122,16 +122,16 @@ const Library = () => {
         {/* Header */}
         <div className="space-y-4">
           <div className="flex items-center gap-3">
-            <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-teal-100 to-teal-200 dark:from-teal-900/30 dark:to-teal-800/30 flex items-center justify-center">
-              <LibraryIcon className="w-6 h-6 text-teal-600 dark:text-teal-400" />
+            <div className="w-12 h-12 rounded-xl bg-primary/15 flex items-center justify-center">
+              <LibraryIcon className="w-6 h-6 text-primary" />
             </div>
             <div>
-              <p className="font-mono text-[11px] font-medium tracking-widest uppercase text-teal-600 dark:text-teal-400">
+              <p className="font-mono text-[11px] font-medium tracking-widest uppercase text-primary">
                 Library · Everything you've created
               </p>
-              <h1 className="text-2xl lg:text-3xl font-serif font-medium leading-tight tracking-tight text-slate-900 dark:text-slate-100">
+              <h1 className="text-2xl lg:text-3xl font-serif font-medium leading-tight tracking-tight text-foreground">
                 Your saved{" "}
-                <span className="italic text-teal-600 dark:text-teal-400">sheets and decks.</span>
+                <span className="italic text-primary">sheets and decks.</span>
               </h1>
             </div>
           </div>
@@ -139,19 +139,19 @@ const Library = () => {
 
         {/* Tabs with counts */}
         <Tabs defaultValue="decks" className="w-full">
-          <TabsList className="grid w-full grid-cols-2 bg-slate-100 border border-slate-200 rounded-lg p-1 dark:bg-slate-800 dark:border-slate-700">
-            <TabsTrigger value="decks" className="data-[state=active]:bg-white data-[state=active]:text-teal-600 data-[state=active]:shadow-sm dark:data-[state=active]:bg-slate-700 dark:data-[state=active]:text-teal-400">
+          <TabsList className="grid w-full grid-cols-2 bg-secondary border border-border rounded-lg p-1">
+            <TabsTrigger value="decks" className="data-[state=active]:bg-card data-[state=active]:text-primary data-[state=active]:shadow-sm">
               <span className="flex items-center gap-2">
                 <Layers className="w-4 h-4" />
                 Decks
-                <span className="text-xs font-medium text-slate-500 dark:text-slate-400">{totalDecks}</span>
+                <span className="text-xs font-medium text-muted-foreground">{totalDecks}</span>
               </span>
             </TabsTrigger>
-            <TabsTrigger value="sheets" className="data-[state=active]:bg-white data-[state=active]:text-teal-600 data-[state=active]:shadow-sm dark:data-[state=active]:bg-slate-700 dark:data-[state=active]:text-teal-400">
+            <TabsTrigger value="sheets" className="data-[state=active]:bg-card data-[state=active]:text-primary data-[state=active]:shadow-sm">
               <span className="flex items-center gap-2">
                 <FileText className="w-4 h-4" />
                 Sheets
-                <span className="text-xs font-medium text-slate-500 dark:text-slate-400">{history.length}</span>
+                <span className="text-xs font-medium text-muted-foreground">{history.length}</span>
               </span>
             </TabsTrigger>
           </TabsList>
@@ -160,32 +160,32 @@ const Library = () => {
           <TabsContent value="decks" className="pt-4">
             {/* Search Bar */}
             <div className="relative mb-4">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none" />
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
               <Input
                 placeholder="Search your sheets and flashcards…"
                 value={deckSearch}
                 onChange={(e) => setDeckSearch(e.target.value)}
-                className="pl-9 h-10 rounded-lg border-slate-200 bg-white text-sm focus:border-teal-400 focus:ring-2 focus:ring-teal-100 dark:bg-slate-800 dark:border-slate-700 dark:focus:border-teal-500 dark:focus:ring-teal-900/20"
+                className="pl-9 h-10 rounded-lg border-border bg-card text-sm focus:border-primary focus:ring-2 focus:ring-primary"
               />
             </div>
 
             {/* Empty State */}
             {totalDecks === 0 ? (
-              <div className="rounded-2xl border border-slate-200 bg-gradient-to-br from-white to-slate-50 p-8 text-center shadow-sm dark:from-slate-800 dark:to-slate-900 dark:border-slate-700">
-                <div className="flex items-center justify-center w-12 h-12 rounded-xl border border-slate-200 bg-white mx-auto dark:bg-slate-800 dark:border-slate-700">
-                  <Sparkles className="w-6 h-6 text-teal-600 dark:text-teal-400" />
+              <div className="rounded-2xl border border-border bg-card p-8 text-center shadow-sm">
+                <div className="flex items-center justify-center w-12 h-12 rounded-xl border border-border bg-card mx-auto">
+                  <Sparkles className="w-6 h-6 text-primary" />
                 </div>
                 <div className="mt-4 space-y-1">
-                  <p className="text-sm font-medium text-slate-900 dark:text-slate-100">
+                  <p className="text-sm font-medium text-foreground">
                     No decks yet
                   </p>
-                  <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
+                  <p className="text-xs text-muted-foreground leading-relaxed">
                     Generate flashcards from a topic to build your first deck.
                   </p>
                 </div>
                 <Link
                   to="/dashboard"
-                  className="inline-flex items-center h-9 px-5 rounded-lg bg-teal-500 text-white text-sm font-medium hover:bg-teal-600 transition-colors mt-4"
+                  className="inline-flex items-center h-9 px-5 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors mt-4"
                 >
                   Create your first deck
                 </Link>
@@ -203,7 +203,7 @@ const Library = () => {
                     <button
                       type="button"
                       onClick={() => setVisibleDecks((n) => n + 10)}
-                      className="h-9 px-6 rounded-lg border border-slate-200 bg-transparent text-slate-600 text-sm font-medium hover:border-slate-300 hover:text-slate-900 transition-colors dark:border-slate-700 dark:text-slate-400 dark:hover:border-slate-600 dark:hover:text-slate-100"
+                      className="h-9 px-6 rounded-lg border border-border bg-transparent text-muted-foreground text-sm font-medium hover:border-input hover:text-foreground transition-colors"
                     >
                       Load more
                     </button>
@@ -217,32 +217,32 @@ const Library = () => {
           <TabsContent value="sheets" className="pt-4">
             {/* Search Bar */}
             <div className="relative mb-4">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none" />
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
               <Input
                 placeholder="Search your sheets and flashcards…"
                 value={sheetSearch}
                 onChange={(e) => setSheetSearch(e.target.value)}
-                className="pl-9 h-10 rounded-lg border-slate-200 bg-white text-sm focus:border-teal-400 focus:ring-2 focus:ring-teal-100 dark:bg-slate-800 dark:border-slate-700 dark:focus:border-teal-500 dark:focus:ring-teal-900/20"
+                className="pl-9 h-10 rounded-lg border-border bg-card text-sm focus:border-primary focus:ring-2 focus:ring-primary"
               />
             </div>
 
             {/* Empty State */}
             {history.length === 0 ? (
-              <div className="rounded-2xl border border-slate-200 bg-gradient-to-br from-white to-slate-50 p-8 text-center shadow-sm dark:from-slate-800 dark:to-slate-900 dark:border-slate-700">
-                <div className="flex items-center justify-center w-12 h-12 rounded-xl border border-slate-200 bg-white mx-auto dark:bg-slate-800 dark:border-slate-700">
-                  <FileText className="w-6 h-6 text-teal-600 dark:text-teal-400" />
+              <div className="rounded-2xl border border-border bg-card p-8 text-center shadow-sm">
+                <div className="flex items-center justify-center w-12 h-12 rounded-xl border border-border bg-card mx-auto">
+                  <FileText className="w-6 h-6 text-primary" />
                 </div>
                 <div className="mt-4 space-y-1">
-                  <p className="text-sm font-medium text-slate-900 dark:text-slate-100">
+                  <p className="text-sm font-medium text-foreground">
                     No saved sheets yet
                   </p>
-                  <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
+                  <p className="text-xs text-muted-foreground leading-relaxed">
                     Generate a study sheet and save it to see it here.
                   </p>
                 </div>
                 <Link
                   to="/dashboard"
-                  className="inline-flex items-center h-9 px-5 rounded-lg bg-teal-500 text-white text-sm font-medium hover:bg-teal-600 transition-colors mt-4"
+                  className="inline-flex items-center h-9 px-5 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors mt-4"
                 >
                   Generate your first study sheet
                 </Link>
@@ -258,20 +258,20 @@ const Library = () => {
                   return (
                     <div
                       key={item.id}
-                      className="group relative rounded-xl border border-slate-200 bg-gradient-to-br from-white to-slate-50 p-3.5 flex items-start gap-3 cursor-pointer hover:border-teal-300 transition-colors dark:from-slate-800 dark:to-slate-900 dark:border-slate-700 dark:hover:border-teal-500 shadow-sm"
+                      className="group relative rounded-xl border border-border bg-card p-3.5 flex items-start gap-3 cursor-pointer hover:border-primary transition-colors shadow-sm"
                       onClick={() => setActiveSheet(item)}
                     >
-                      <div className="flex items-center justify-center w-9 h-9 rounded-lg border border-slate-200 bg-white flex-shrink-0 dark:bg-slate-800 dark:border-slate-700">
-                        <FileText className="w-4 h-4 text-teal-600 dark:text-teal-400" />
+                      <div className="flex items-center justify-center w-9 h-9 rounded-lg border border-border bg-card flex-shrink-0">
+                        <FileText className="w-4 h-4 text-primary" />
                       </div>
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-slate-900 truncate dark:text-slate-100">
+                        <p className="text-sm font-medium text-foreground truncate">
                           {item.topic}
                         </p>
-                        <p className="text-xs text-slate-600 mt-1 line-clamp-2 dark:text-slate-400">
+                        <p className="text-xs text-muted-foreground mt-1 line-clamp-2">
                           {preview}
                         </p>
-                        <p className="text-[11px] text-slate-500 mt-1.5 dark:text-slate-500">
+                        <p className="text-[11px] text-muted-foreground mt-1.5">
                           {timeAgo(item.timestamp)}
                           {item.modeInfo && (
                             <span className="ml-1.5 opacity-60">· {item.modeInfo.examMode}</span>
@@ -279,7 +279,7 @@ const Library = () => {
                         </p>
                       </div>
                       <button
-                        className="opacity-0 w-8 h-8 flex items-center justify-center rounded-lg border-none bg-transparent cursor-pointer text-slate-400 transition-opacity flex-shrink-0 group-hover:opacity-100 hover:text-red-500 hover:bg-red-500/10"
+                        className="opacity-0 w-8 h-8 flex items-center justify-center rounded-lg border-none bg-transparent cursor-pointer text-muted-foreground transition-opacity flex-shrink-0 group-hover:opacity-100 hover:text-danger hover:bg-danger/10"
                         onClick={(e) => handleDeleteSheet(item.id, e)}
                         aria-label="Delete sheet"
                       >
@@ -293,7 +293,7 @@ const Library = () => {
                     <button
                       type="button"
                       onClick={() => setVisibleSheets((n) => n + 10)}
-                      className="h-9 px-6 rounded-lg border border-slate-200 bg-transparent text-slate-600 text-sm font-medium hover:border-slate-300 hover:text-slate-900 transition-colors dark:border-slate-700 dark:text-slate-400 dark:hover:border-slate-600 dark:hover:text-slate-100"
+                      className="h-9 px-6 rounded-lg border border-border bg-transparent text-muted-foreground text-sm font-medium hover:border-input hover:text-foreground transition-colors"
                     >
                       Load more
                     </button>

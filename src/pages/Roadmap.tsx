@@ -13,7 +13,7 @@ import {
 } from "@/components/ui/dialog";
 import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
-import TpiceRodmap from "@/modles/TpiceRodmap";
+import TpiceRodmap from "@/models/TpiceRodmap";
 import {
   FaBone,
   FaBrain,
@@ -114,9 +114,9 @@ const Roadmap = () => {
 
   return (
     <DashboardLayout>
-      <div className=" max-w-[100%] bg-[#f3f4f6] space-y-6 px-4 py-6 sm:px-8 lg:px-12">
+      <div className="max-w-[100%] space-y-6 px-4 py-6 sm:px-8 lg:px-12">
         <div className="space-y-1">
-          <h1 className="text-3xl py-2 font-semibold text-[#0F4C81] tracking-tight">
+          <h1 className="text-3xl py-2 font-semibold text-primary tracking-tight">
             Roadmap
           </h1>
           <p className="text-sm text-muted-foreground">
@@ -158,11 +158,11 @@ const Roadmap = () => {
           </div>
         ) : (
           <>
-            <div className="inline-flex items-center gap-3 rounded-full border border-[#0F4C81]/30 bg-white/90 px-4 py-2.5 shadow-[0_0_0_1px_rgba(15,23,42,0.02)] ring-1 ring-[#0F4C81]/10">
-              <div className="flex h-6 w-6 items-center justify-center rounded-[10px] border border-[#0F4C81]/20 bg-[#eaf4ff] text-[#0F4C81]">
+            <div className="inline-flex items-center gap-3 rounded-full border border-primary/30 bg-card px-4 py-2.5 ring-1 ring-primary/10">
+              <div className="flex h-6 w-6 items-center justify-center rounded-[10px] border border-primary/20 bg-primary/10 text-primary">
                 <Compass className="h-3.5 w-3.5" />
               </div>
-              <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#0F4C81] sm:text-xs">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-primary sm:text-xs">
                 {countLabel}
               </p>
             </div>
@@ -173,17 +173,20 @@ const Roadmap = () => {
                 const isBlue = tone === "blue";
 
                 return (
-                  <div
+                  <button
+                    type="button"
                     onClick={() => setSelectedSection(section)}
                     key={section.system}
-                    className="group min-h-[170px] cursor-pointer rounded-[24px] border border-[#e5e7eb] bg-[#f3f4f6] p-5 shadow-[0_0_0_1px_rgba(15,23,42,0.02)] transition-all duration-200 ease-out hover:-translate-y-1 hover:shadow-md hover:border-primary/20"
+                    className="group min-h-[170px] w-full cursor-pointer rounded-[24px] border border-border bg-card p-5 text-left transition-all duration-200 ease-out hover:-translate-y-1 hover:shadow-md hover:border-primary/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
                   >
                     <div className="flex items-start justify-between gap-3">
+                      {/* Two tones alternate purely by index for visual rhythm —
+                          they carry no meaning, so any two theme tokens work. */}
                       <div
                         className={`flex h-16 w-16 items-center justify-center rounded-[18px] ${
                           isBlue
-                            ? "bg-[#dfeaf5] text-[#0F4C81]"
-                            : "bg-[#dff3ee] text-[#0D8D8F]"
+                            ? "bg-primary/10 text-primary"
+                            : "bg-success-soft text-success"
                         }`}
                       >
                         <Icon className="h-7 w-7" />
@@ -192,18 +195,18 @@ const Roadmap = () => {
                       <span
                         className={`inline-flex items-center rounded-full px-4 py-2 text-base font-semibold ${
                           isBlue
-                            ? "bg-[#edf4fb] text-[#0F4C81]"
-                            : "bg-[#ecfaf7] text-[#0D8D8F]"
+                            ? "bg-primary/10 text-primary"
+                            : "bg-success-soft text-success"
                         }`}
                       >
                         {section.topics.length} Topics
                       </span>
                     </div>
 
-                    <h3 className="mt-8 text-left text-[1.2rem] font-medium leading-none tracking-[-0.04em] text-[#1f2937]">
+                    <h3 className="mt-8 text-left text-[1.2rem] font-medium leading-none tracking-[-0.04em] text-foreground">
                       {section.system}
                     </h3>
-                  </div>
+                  </button>
                 );
               })}
             </div>

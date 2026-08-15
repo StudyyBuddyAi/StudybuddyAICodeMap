@@ -1,6 +1,6 @@
-import { useMemo, useState } from "react";
-import { Link } from "react-router-dom";
-import { ArrowRight, BookOpen, Layers, Play, Repeat, Settings2, Shuffle, X, Sparkles, Check, ChevronRight, ArrowLeft, Heart, Star, RotateCcw, Bookmark } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { Link, useLocation, useNavigate } from "react-router-dom";
+import { ArrowRight, BookOpen, Layers, Play, Repeat, Settings2, Shuffle, X, Sparkles, Check, ChevronRight, ArrowLeft, RotateCcw, Bookmark } from "lucide-react";
 import DashboardLayout from "@/components/dashboard/DashboardLayout";
 import FlashcardsGenerator, { type GeneratedCard } from "@/components/FlashcardsGenerator";
 import DeckList from "@/components/DeckList";
@@ -22,11 +22,11 @@ const DueCardsReminderStrip = ({
   dueCount: number;
   onStartReview: () => void;
 }) => (
-  <div className="flex items-center justify-between gap-2 rounded-xl border-l-4 border-l-teal-500 border border-slate-200 bg-gradient-to-r from-teal-50 to-white p-3.5 animate-fade-in dark:from-teal-950/20 dark:to-slate-900 dark:border-slate-700">
+  <div className="flex items-center justify-between gap-2 rounded-xl border-l-4 border-l-primary border border-border bg-primary/5 p-3.5 animate-fade-in">
     <div className="flex items-center gap-2 min-w-0">
-      <Repeat className="w-4 h-4 text-teal-600 flex-shrink-0 dark:text-teal-400" />
-      <span className="text-sm text-slate-800 dark:text-slate-200">
-        <span key={dueCount} className="flip-number font-semibold text-teal-700 dark:text-teal-300">
+      <Repeat className="w-4 h-4 text-primary flex-shrink-0" />
+      <span className="text-sm text-foreground">
+        <span key={dueCount} className="flip-number font-semibold text-primary">
           {dueCount}
         </span>{" "}
         {dueCount === 1 ? "card" : "cards"} due today
@@ -35,7 +35,7 @@ const DueCardsReminderStrip = ({
     <button
       type="button"
       onClick={onStartReview}
-      className="h-7 px-3 rounded-lg bg-teal-500 text-white text-xs font-medium hover:bg-teal-600 transition-colors flex items-center gap-1.5 flex-shrink-0"
+      className="h-7 px-3 rounded-lg bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 transition-colors flex items-center gap-1.5 flex-shrink-0"
     >
       <Play className="w-3 h-3" />
       Review
@@ -56,6 +56,8 @@ function vibrate(rating: Rating | "flip") {
 
 const Flashcards = () => {
   const { toast } = useToast();
+  const location = useLocation();
+  const navigate = useNavigate();
   const { allCards, dueCards, reviewCard, deleteCard, stats } = useFlashcardDeck();
 
   // ── Split-pane state ──────────────────────────────────────────────────
@@ -93,6 +95,33 @@ const Flashcards = () => {
       recentTopics.has(c.topic || "Untitled")
     );
     return { totalDecks: latestByTopic.size, recentDeckCards: recent };
+  }, [allCards]);
+
+  /**
+   * The card shown in the idle-state preview. Anonymous users and signed-in
+   * users with an empty library both fall back to a worked example rather than
+   * a skeleton, so the pane never looks like it is stuck loading.
+   */
+  const previewCard = useMemo(() => {
+    const newest = allCards.reduce<DeckCard | null>(
+      (best, c) => (!best || c.createdAt > best.createdAt ? c : best),
+      null
+    );
+    if (newest) {
+      return {
+        isSample: false,
+        question: newest.question,
+        answer: newest.answer,
+        topic: newest.topic || "Untitled",
+      };
+    }
+    return {
+      isSample: true,
+      question:
+        "A 58-year-old man has crushing chest pain radiating to the left arm. His ECG shows ST elevation in leads II, III and aVF. Which artery is occluded?",
+      answer: "The right coronary artery — this is an inferior STEMI.",
+      topic: "Cardiology",
+    };
   }, [allCards]);
 
   // ── Session lifecycle ─────────────────────────────────────────────────
@@ -230,60 +259,69 @@ const Flashcards = () => {
     toast({ title: "Remaining cards shuffled" });
   };
 
-  const quickStart = (topic: string) => {
+  /**
+   * The "Generate flashcards" nudge on /sheets navigates here with a topic.
+   * FlashcardsGenerator already listens for `studybuddy:generate-flashcards`
+   * and is mounted on this page, so hand the topic straight to it. The history
+   * entry is then cleared so a refresh doesn't regenerate.
+   */
+  useEffect(() => {
+    const topic = (location.state as { topic?: string } | null)?.topic?.trim();
+    if (!topic) return;
+    navigate(location.pathname, { replace: true, state: null });
     window.dispatchEvent(
       new CustomEvent("studybuddy:generate-flashcards", {
         detail: { topic, cardCount: 12 },
       })
     );
-  };
+  }, [location, navigate]);
 
   // ── Left pane ─────────────────────────────────────────────────────────
   const leftPaneContent = session ? (
     <div
       key="session"
-      className="pane-crossfade rounded-2xl border border-slate-200 bg-gradient-to-br from-white to-slate-50 p-5 shadow-sm dark:from-slate-800 dark:to-slate-900 dark:border-slate-700"
+      className="pane-crossfade rounded-2xl border border-border bg-card p-5 shadow-sm"
     >
       <div className="flex flex-col gap-4">
-        <p className="text-sm font-serif font-semibold text-slate-900 dark:text-slate-100 leading-tight">
+        <p className="text-sm font-serif font-semibold text-foreground leading-tight">
           {session.topic}
         </p>
 
         <div className="flex flex-col gap-2">
-          <p className="text-xs text-slate-600 dark:text-slate-400">
+          <p className="text-xs text-muted-foreground">
             Card {Math.min(index + 1, total)} of {total}
           </p>
-          <div className="h-1.5 w-full rounded-full overflow-hidden bg-slate-200 dark:bg-slate-700">
+          <div className="h-1.5 w-full rounded-full overflow-hidden bg-border">
             <div
               style={{ width: `${progressPct}%` }}
-              className="h-full rounded-full bg-teal-500 transition-all duration-300"
+              className="h-full rounded-full bg-primary transition-all duration-300"
             />
           </div>
         </div>
 
         <div className="flex flex-col gap-1">
-          <p className="text-xs font-medium text-emerald-600 dark:text-emerald-400">
+          <p className="text-xs font-medium text-success">
             ✓ Known: <span className="tabular-nums">{known}</span>
           </p>
-          <p className="text-xs font-medium text-red-600 dark:text-red-400">
+          <p className="text-xs font-medium text-danger">
             ✗ Unsure: <span className="tabular-nums">{unsure}</span>
           </p>
         </div>
 
-        <div className="border-t border-slate-200 dark:border-slate-700" aria-hidden />
+        <div className="border-t border-border" aria-hidden />
 
         <div className="flex flex-col gap-2">
           <button
             type="button"
             onClick={endSession}
-            className="w-full h-9 rounded-lg border border-slate-200 bg-white text-slate-800 text-sm font-medium hover:border-slate-300 hover:bg-slate-50 transition-colors dark:bg-slate-800 dark:border-slate-700 dark:text-slate-200 dark:hover:border-slate-600 dark:hover:bg-slate-700"
+            className="w-full h-9 rounded-lg border border-border bg-card text-foreground text-sm font-medium hover:border-input hover:bg-secondary transition-colors"
           >
             End Session
           </button>
           <button
             type="button"
             onClick={shuffleRemaining}
-            className="w-full h-9 rounded-lg border-none bg-transparent text-slate-500 text-sm font-medium hover:text-slate-700 transition-colors flex items-center justify-center gap-2 dark:text-slate-400 dark:hover:text-slate-300"
+            className="w-full h-9 rounded-lg border-none bg-transparent text-muted-foreground text-sm font-medium hover:text-foreground transition-colors flex items-center justify-center gap-2"
           >
             <Shuffle className="w-4 h-4" />
             Shuffle remaining
@@ -308,36 +346,36 @@ const Flashcards = () => {
     rightPhase === "generating" ? (
       <div key="generating" className="pane-crossfade mx-auto w-full max-w-[560px] space-y-4">
         {/* AI Generation Progress */}
-        <div className="rounded-2xl border border-slate-200 bg-gradient-to-br from-white to-slate-50 p-8 text-center shadow-sm dark:from-slate-800 dark:to-slate-900 dark:border-slate-700">
+        <div className="rounded-2xl border border-border bg-card p-8 text-center shadow-sm">
           <div className="flex flex-col items-center gap-4">
             <div className="relative">
-              <div className="w-16 h-16 rounded-full bg-gradient-to-br from-teal-100 to-teal-200 dark:from-teal-900/30 dark:to-teal-800/30 flex items-center justify-center">
-                <Sparkles className="w-8 h-8 text-teal-500" />
+              <div className="w-16 h-16 rounded-full bg-primary/15 flex items-center justify-center">
+                <Sparkles className="w-8 h-8 text-primary" />
               </div>
               <div className="absolute inset-0 rounded-full border-2 border-transparent border-t-teal-500 animate-spin" />
             </div>
             <div className="space-y-2">
-              <h3 className="text-lg font-serif font-semibold text-slate-900 dark:text-slate-100">
+              <h3 className="text-lg font-serif font-semibold text-foreground">
                 AI is generating your flashcards
               </h3>
-              <p className="text-sm text-slate-600 dark:text-slate-400">
+              <p className="text-sm text-muted-foreground">
                 {genTopic || "new"} flashcards…
               </p>
             </div>
             {/* Progress steps */}
-            <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
-              <span className="flex items-center gap-1 text-teal-600 font-medium">
-                <div className="w-1.5 h-1.5 rounded-full bg-teal-500" />
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <span className="flex items-center gap-1 text-primary font-medium">
+                <div className="w-1.5 h-1.5 rounded-full bg-primary" />
                 Analyzing
               </span>
               <ChevronRight className="w-3 h-3" />
-              <span className="flex items-center gap-1 text-slate-500">
-                <div className="w-1.5 h-1.5 rounded-full bg-slate-300" />
+              <span className="flex items-center gap-1 text-muted-foreground">
+                <div className="w-1.5 h-1.5 rounded-full bg-border" />
                 Creating
               </span>
               <ChevronRight className="w-3 h-3" />
-              <span className="flex items-center gap-1 text-slate-500">
-                <div className="w-1.5 h-1.5 rounded-full bg-slate-300" />
+              <span className="flex items-center gap-1 text-muted-foreground">
+                <div className="w-1.5 h-1.5 rounded-full bg-border" />
                 Finalizing
               </span>
             </div>
@@ -349,13 +387,13 @@ const Flashcards = () => {
           {[0, 1, 2].map((i) => (
             <div
               key={i}
-              className="section-reveal rounded-xl border border-slate-200 bg-white h-48 p-5 dark:bg-slate-800 dark:border-slate-700"
+              className="section-reveal rounded-xl border border-border bg-card h-48 p-5"
               style={{ animationDelay: `${i * 150}ms` }}
             >
-              <div className="skeleton-shimmer h-5 w-24 rounded-lg bg-slate-200 mb-3 dark:bg-slate-700" />
-              <div className="skeleton-shimmer h-3.5 w-3/4 rounded bg-slate-200 mb-2 dark:bg-slate-700" />
-              <div className="skeleton-shimmer h-3.5 w-2/3 rounded bg-slate-200 mb-2 dark:bg-slate-700" />
-              <div className="skeleton-shimmer h-3.5 w-1/2 rounded bg-slate-200 dark:bg-slate-700" />
+              <div className="skeleton-shimmer h-5 w-24 rounded-lg bg-border mb-3" />
+              <div className="skeleton-shimmer h-3.5 w-3/4 rounded bg-border mb-2" />
+              <div className="skeleton-shimmer h-3.5 w-2/3 rounded bg-border mb-2" />
+              <div className="skeleton-shimmer h-3.5 w-1/2 rounded bg-border" />
             </div>
           ))}
         </div>
@@ -365,30 +403,30 @@ const Flashcards = () => {
         {/* Progress bar with card counter */}
         <div className="flex items-center justify-between gap-4">
           <div className="flex-1">
-            <div className="h-1.5 w-full rounded-full bg-slate-200 overflow-hidden dark:bg-slate-700">
+            <div className="h-1.5 w-full rounded-full bg-border overflow-hidden">
               <div
                 style={{ width: `${progressPct}%` }}
-                className="h-full rounded-full bg-teal-500 transition-all duration-300"
+                className="h-full rounded-full bg-primary transition-all duration-300"
               />
             </div>
           </div>
-          <span className="text-xs font-medium text-slate-600 dark:text-slate-400 tabular-nums">
+          <span className="text-xs font-medium text-muted-foreground tabular-nums">
             {Math.min(index + 1, total)} / {total}
           </span>
         </div>
 
         {done ? (
           <div className="text-center py-16 px-6 animate-fade-in">
-            <div className="w-16 h-16 rounded-full bg-gradient-to-br from-teal-100 to-teal-200 dark:from-teal-900/30 dark:to-teal-800/30 flex items-center justify-center mx-auto mb-4">
-              <Check className="w-8 h-8 text-teal-600 dark:text-teal-400" />
+            <div className="w-16 h-16 rounded-full bg-primary/15 flex items-center justify-center mx-auto mb-4">
+              <Check className="w-8 h-8 text-primary" />
             </div>
-            <p className="font-mono text-[11px] font-medium tracking-widest uppercase text-teal-600 mb-3 dark:text-teal-400">
+            <p className="font-mono text-[11px] font-medium tracking-widest uppercase text-primary mb-3">
               Session complete
             </p>
-            <h2 className="text-2xl font-serif font-semibold text-slate-900 mb-2 dark:text-slate-100">
+            <h2 className="text-2xl font-serif font-semibold text-foreground mb-2">
               All cards reviewed.
             </h2>
-            <p className="text-sm text-slate-600 mb-6 dark:text-slate-400">
+            <p className="text-sm text-muted-foreground mb-6">
               {reviewed} {reviewed === 1 ? "card" : "cards"} reviewed
               {" · "}✓ {known} known{" · "}✗ {unsure} unsure
             </p>
@@ -398,14 +436,14 @@ const Flashcards = () => {
               <button
                 type="button"
                 onClick={endSession}
-                className="h-10 px-6 rounded-xl bg-teal-500 text-white text-sm font-medium hover:bg-teal-600 transition-colors"
+                className="h-10 px-6 rounded-xl bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors"
               >
                 Done
               </button>
               <button
                 type="button"
                 onClick={shuffleRemaining}
-                className="h-10 px-6 rounded-xl border border-slate-200 bg-white text-slate-700 text-sm font-medium hover:border-slate-300 hover:bg-slate-50 transition-colors dark:bg-slate-800 dark:border-slate-700 dark:text-slate-300 dark:hover:border-slate-600 dark:hover:bg-slate-700"
+                className="h-10 px-6 rounded-xl border border-border bg-card text-muted-foreground text-sm font-medium hover:border-input hover:bg-secondary transition-colors"
               >
                 <RotateCcw className="w-4 h-4 mr-2" />
                 Practice Again
@@ -415,15 +453,15 @@ const Flashcards = () => {
             <div className="flex flex-wrap justify-center gap-2">
               <Link
                 to="/qbank"
-                className="inline-flex items-center gap-1.5 text-xs text-slate-500 hover:text-teal-600 transition-colors dark:text-slate-400 dark:hover:text-teal-400"
+                className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-primary transition-colors"
               >
                 <Play className="w-3 h-3" />
                 Practice QBank
               </Link>
-              <span className="text-slate-300 dark:text-slate-600">·</span>
+              <span className="text-muted-foreground">·</span>
               <Link
                 to="/library"
-                className="inline-flex items-center gap-1.5 text-xs text-slate-500 hover:text-teal-600 transition-colors dark:text-slate-400 dark:hover:text-teal-400"
+                className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-primary transition-colors"
               >
                 <BookOpen className="w-3 h-3" />
                 View Library
@@ -438,30 +476,20 @@ const Flashcards = () => {
                 type="button"
                 onClick={prevCard}
                 disabled={index === 0}
-                className="p-2 rounded-lg border border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50 disabled:opacity-30 disabled:cursor-not-allowed transition-colors dark:bg-slate-800 dark:border-slate-700 dark:text-slate-400 dark:hover:border-slate-600 dark:hover:bg-slate-700"
+                className="p-2 rounded-lg border border-border bg-card text-muted-foreground hover:border-input hover:bg-secondary disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
                 aria-label="Previous card"
               >
                 <ArrowLeft className="w-4 h-4" />
               </button>
+              {/* The Star and Heart buttons that used to sit here had no
+                  handlers and no column on `cards` to persist to. Removed
+                  rather than left as decoration — card starring needs a
+                  migration first. */}
               <div className="flex items-center gap-1">
                 <button
                   type="button"
-                  className="p-2 rounded-lg border border-slate-200 bg-white text-slate-600 hover:border-violet-400 hover:text-violet-600 transition-colors dark:bg-slate-800 dark:border-slate-700 dark:text-slate-400"
-                  aria-label="Mark as difficult"
-                >
-                  <Star className="w-4 h-4" />
-                </button>
-                <button
-                  type="button"
-                  className="p-2 rounded-lg border border-slate-200 bg-white text-slate-600 hover:border-red-400 hover:text-red-600 transition-colors dark:bg-slate-800 dark:border-slate-700 dark:text-slate-400"
-                  aria-label="Mark as difficult"
-                >
-                  <Heart className="w-4 h-4" />
-                </button>
-                <button
-                  type="button"
                   onClick={shuffleRemaining}
-                  className="p-2 rounded-lg border border-slate-200 bg-white text-slate-600 hover:border-teal-400 hover:text-teal-600 transition-colors dark:bg-slate-800 dark:border-slate-700 dark:text-slate-400"
+                  className="p-2 rounded-lg border border-border bg-card text-muted-foreground hover:border-primary hover:text-primary transition-colors"
                   aria-label="Shuffle remaining"
                 >
                   <Shuffle className="w-4 h-4" />
@@ -471,7 +499,7 @@ const Flashcards = () => {
                 type="button"
                 onClick={nextCard}
                 disabled={index === total - 1}
-                className="p-2 rounded-lg border border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50 disabled:opacity-30 disabled:cursor-not-allowed transition-colors dark:bg-slate-800 dark:border-slate-700 dark:text-slate-400 dark:hover:border-slate-600 dark:hover:bg-slate-700"
+                className="p-2 rounded-lg border border-border bg-card text-muted-foreground hover:border-input hover:bg-secondary disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
                 aria-label="Next card"
               >
                 <ArrowRight className="w-4 h-4" />
@@ -508,7 +536,7 @@ const Flashcards = () => {
               <button
                 type="button"
                 onClick={handleFlip}
-                className="w-full h-12 rounded-xl bg-slate-900 text-white text-sm font-semibold hover:bg-slate-800 transition-colors dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-slate-200"
+                className="w-full h-12 rounded-xl bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors"
               >
                 Show Answer
               </button>
@@ -518,7 +546,7 @@ const Flashcards = () => {
                   <button
                     type="button"
                     onClick={() => { setExplainScope("card"); setExplainOpen(true); }}
-                    className="inline-flex items-center gap-1.5 text-xs text-slate-500 hover:text-violet-600 transition-colors dark:text-slate-400 dark:hover:text-violet-400"
+                    className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-info transition-colors"
                   >
                     <BookOpen className="h-3.5 w-3.5" />
                     Explain this card
@@ -528,21 +556,21 @@ const Flashcards = () => {
                   <button
                     type="button"
                     onClick={() => handleRate("again")}
-                    className="h-12 rounded-xl border border-red-200 bg-red-50 text-red-600 text-sm font-medium hover:border-red-300 hover:bg-red-100 transition-colors dark:border-red-900/30 dark:bg-red-950/20 dark:text-red-400 dark:hover:border-red-800/50 dark:hover:bg-red-950/30"
+                    className="h-12 rounded-xl border border-danger/30 bg-danger-soft text-danger text-sm font-medium hover:border-danger/60 transition-colors"
                   >
                     ✗ Don't Know
                   </button>
                   <button
                     type="button"
                     onClick={() => handleRate("good")}
-                    className="h-12 rounded-xl border border-amber-200 bg-amber-50 text-amber-600 text-sm font-medium hover:border-amber-300 hover:bg-amber-100 transition-colors dark:border-amber-900/30 dark:bg-amber-950/20 dark:text-amber-400 dark:hover:border-amber-800/50 dark:hover:bg-amber-950/30"
+                    className="h-12 rounded-xl border border-warning/30 bg-warning-soft text-warning text-sm font-medium hover:border-warning/60 transition-colors"
                   >
                     ~ Almost
                   </button>
                   <button
                     type="button"
                     onClick={() => handleRate("easy")}
-                    className="h-12 rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-600 text-sm font-medium hover:border-emerald-300 hover:bg-emerald-100 transition-colors dark:border-emerald-900/30 dark:bg-emerald-950/20 dark:text-emerald-400 dark:hover:border-emerald-800/50 dark:hover:bg-emerald-950/30"
+                    className="h-12 rounded-xl border border-success/30 bg-success-soft text-success text-sm font-medium hover:border-success/60 transition-colors"
                   >
                     ✓ Got It
                   </button>
@@ -550,7 +578,7 @@ const Flashcards = () => {
               </div>
             )}
 
-            <p className="text-center text-[11px] text-slate-400/60 dark:text-slate-500/60">
+            <p className="text-center text-[11px] text-muted-foreground">
               Tap the card to flip · AI-generated content · Not a substitute for clinical judgment
             </p>
           </>
@@ -558,59 +586,65 @@ const Flashcards = () => {
       </div>
     ) : (
       <div key="idle" className="pane-crossfade space-y-6">
-        {/* Flashcard Preview Workspace */}
-        <div className="rounded-2xl border border-slate-200 bg-gradient-to-br from-white to-slate-50 p-6 shadow-sm dark:from-slate-800 dark:to-slate-900 dark:border-slate-700 animate-fade-in">
+        {/* Preview of the card you last added — or a worked example when there
+            is nothing to show yet. This used to be a block of grey bars that
+            read as a loading skeleton and never resolved for anyone. */}
+        <div className="rounded-2xl border border-border bg-card p-6 shadow-sm animate-fade-in">
           <div className="flex items-center gap-2 mb-4">
-            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-teal-100 to-teal-200 dark:from-teal-900/30 dark:to-teal-800/30 flex items-center justify-center">
-              <Layers className="w-4 h-4 text-teal-600 dark:text-teal-400" />
+            <div className="w-8 h-8 rounded-lg bg-primary/15 flex items-center justify-center">
+              <Layers className="w-4 h-4 text-primary" />
             </div>
             <div>
-              <h3 className="text-sm font-serif font-semibold text-slate-900 dark:text-slate-100">
-                Flashcard Preview Workspace
+              <h3 className="text-sm font-serif font-semibold text-foreground">
+                {previewCard.isSample ? "What a flashcard looks like" : "Your latest card"}
               </h3>
-              <p className="text-xs text-slate-600 dark:text-slate-400">
-                See what your flashcards will look like
+              <p className="text-xs text-muted-foreground">
+                {previewCard.isSample
+                  ? "An example while your first deck is empty"
+                  : `From ${previewCard.topic}`}
+              </p>
+            </div>
+            {previewCard.isSample && (
+              <span className="ml-auto rounded-full border border-border px-2.5 py-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+                Example
+              </span>
+            )}
+          </div>
+
+          <div className="rounded-xl border border-border bg-background p-5">
+            <div className="flex items-center gap-2 mb-2">
+              <div className="w-2 h-2 rounded-full bg-primary" />
+              <span className="text-xs font-medium text-muted-foreground">Question</span>
+            </div>
+            <p className="text-sm leading-relaxed text-foreground mb-4">
+              {previewCard.question}
+            </p>
+
+            <div className="border-t border-border pt-3">
+              <div className="flex items-center gap-2 mb-2">
+                <div className="w-2 h-2 rounded-full bg-info" />
+                <span className="text-xs font-medium text-muted-foreground">Answer</span>
+              </div>
+              <p className="text-sm leading-relaxed text-muted-foreground">
+                {previewCard.answer}
               </p>
             </div>
           </div>
 
-          {/* Preview card skeleton */}
-          <div className="rounded-xl border border-slate-200 bg-white p-5 dark:bg-slate-800 dark:border-slate-700">
-            <div className="flex items-center gap-2 mb-3">
-              <div className="w-2 h-2 rounded-full bg-teal-500" />
-              <span className="text-xs font-medium text-slate-500 dark:text-slate-400">Question</span>
-            </div>
-            <div className="space-y-2 mb-4">
-              <div className="h-4 w-3/4 rounded bg-slate-200 dark:bg-slate-700" />
-              <div className="h-4 w-1/2 rounded bg-slate-200 dark:bg-slate-700" />
-            </div>
-            <div className="border-t border-slate-200 pt-3 dark:border-slate-700">
-              <div className="flex items-center gap-2 mb-3">
-                <div className="w-2 h-2 rounded-full bg-violet-500" />
-                <span className="text-xs font-medium text-slate-500 dark:text-slate-400">Answer</span>
-              </div>
-              <div className="space-y-2">
-                <div className="h-3 w-full rounded bg-slate-100 dark:bg-slate-700/50" />
-                <div className="h-3 w-5/6 rounded bg-slate-100 dark:bg-slate-700/50" />
-                <div className="h-3 w-2/3 rounded bg-slate-100 dark:bg-slate-700/50" />
-              </div>
-            </div>
-          </div>
-
-          {/* Rating buttons preview */}
-          <div className="mt-4 grid grid-cols-3 gap-2">
-            <div className="h-10 rounded-lg border border-red-200 bg-red-50 flex items-center justify-center text-xs font-medium text-red-600 dark:border-red-900/30 dark:bg-red-950/20 dark:text-red-400">
+          {/* Illustrative only — the live controls are in the review pane. */}
+          <div className="mt-4 grid grid-cols-3 gap-2" aria-hidden="true">
+            <div className="h-10 rounded-lg border border-danger/30 bg-danger-soft flex items-center justify-center text-xs font-medium text-danger pointer-events-none select-none">
               ✗ Don't Know
             </div>
-            <div className="h-10 rounded-lg border border-amber-200 bg-amber-50 flex items-center justify-center text-xs font-medium text-amber-600 dark:border-amber-900/30 dark:bg-amber-950/20 dark:text-amber-400">
+            <div className="h-10 rounded-lg border border-warning/30 bg-warning-soft flex items-center justify-center text-xs font-medium text-warning pointer-events-none select-none">
               ~ Almost
             </div>
-            <div className="h-10 rounded-lg border border-emerald-200 bg-emerald-50 flex items-center justify-center text-xs font-medium text-emerald-600 dark:border-emerald-900/30 dark:bg-emerald-950/20 dark:text-emerald-400">
+            <div className="h-10 rounded-lg border border-success/30 bg-success-soft flex items-center justify-center text-xs font-medium text-success pointer-events-none select-none">
               ✓ Got It
             </div>
           </div>
 
-          <p className="text-center text-[11px] text-slate-400 mt-4 dark:text-slate-500">
+          <p className="text-center text-[11px] text-muted-foreground mt-4">
             Select a topic on the left to generate your flashcards
           </p>
         </div>
@@ -618,10 +652,10 @@ const Flashcards = () => {
         {totalDecks > 0 && (
           <div className="space-y-4">
             <div className="flex items-center justify-between">
-              <h3 className="text-sm font-serif font-semibold text-slate-900 dark:text-slate-100">
+              <h3 className="text-sm font-serif font-semibold text-foreground">
                 My decks
               </h3>
-              <span className="text-xs text-slate-500 dark:text-slate-400">{totalDecks} decks</span>
+              <span className="text-xs text-muted-foreground">{totalDecks} decks</span>
             </div>
             <DeckList
               cards={recentDeckCards}
@@ -633,7 +667,7 @@ const Flashcards = () => {
               <div className="pl-1">
                 <Link
                   to="/library"
-                  className="inline-flex items-center gap-1 text-xs font-medium text-slate-500 hover:text-teal-600 transition-colors dark:text-slate-400 dark:hover:text-teal-400"
+                  className="inline-flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-primary transition-colors"
                 >
                   View all in Library
                   <ArrowRight className="h-3 w-3" />
@@ -649,12 +683,12 @@ const Flashcards = () => {
     <DashboardLayout wide>
       <div className="space-y-6">
         <div className="mb-6">
-          <p className="font-mono text-[11px] font-medium tracking-widest uppercase text-teal-600 mb-2 dark:text-teal-400">
+          <p className="font-mono text-[11px] font-medium tracking-widest uppercase text-primary mb-2">
             Flashcards · Spaced repetition
           </p>
-          <h1 className="text-[clamp(26px,3.5vw,36px)] font-serif font-medium leading-tight tracking-tight text-slate-900 dark:text-slate-100">
+          <h1 className="text-[clamp(26px,3.5vw,36px)] font-serif font-medium leading-tight tracking-tight text-foreground">
             Study any topic,{" "}
-            <span className="italic text-teal-600 dark:text-teal-400">lock it in.</span>
+            <span className="italic text-primary">lock it in.</span>
           </h1>
         </div>
 
@@ -665,7 +699,7 @@ const Flashcards = () => {
           </div>
 
           {/* ── 1px divider between panes ── */}
-          <div aria-hidden className="hidden lg:block lg:w-px lg:shrink-0 lg:self-stretch bg-slate-200 dark:bg-slate-700" />
+          <div aria-hidden className="hidden lg:block lg:w-px lg:shrink-0 lg:self-stretch bg-border" />
 
           {/* ── Right pane ── */}
           <div className="min-w-0 lg:flex-1 lg:pl-8">
@@ -678,7 +712,7 @@ const Flashcards = () => {
       <button
         type="button"
         onClick={() => setConfigDrawerOpen(true)}
-        className="hidden md:max-lg:inline-flex fixed bottom-4 left-4 z-40 h-9 items-center gap-1.5 rounded-full bg-teal-500 px-4 text-xs font-semibold text-white shadow-lg hover:bg-teal-600 transition-colors"
+        className="hidden md:max-lg:inline-flex fixed bottom-4 left-4 z-40 h-9 items-center gap-1.5 rounded-full bg-primary px-4 text-xs font-semibold text-primary-foreground shadow-lg hover:bg-primary/90 transition-colors"
       >
         <Settings2 className="h-3.5 w-3.5" />
         {session ? "Session" : "Configure"}
@@ -698,18 +732,18 @@ const Flashcards = () => {
           onClick={() => setConfigDrawerOpen(false)}
         />
         <div
-          className={`absolute inset-y-0 left-0 w-[320px] overflow-y-auto bg-white border-r border-slate-200 p-4 motion-safe:transition-transform motion-safe:duration-[250ms] motion-safe:ease-out dark:bg-slate-900 dark:border-slate-700 ${
+          className={`absolute inset-y-0 left-0 w-[320px] overflow-y-auto bg-card border-r border-border p-4 motion-safe:transition-transform motion-safe:duration-[250ms] motion-safe:ease-out ${
             configDrawerOpen ? "translate-x-0" : "-translate-x-full"
           }`}
         >
           <div className="flex items-center justify-between pb-3">
-            <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400">
+            <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
               {session ? "Session" : "Configure"}
             </span>
             <button
               type="button"
               onClick={() => setConfigDrawerOpen(false)}
-              className="p-1 rounded-md text-slate-500 hover:text-slate-800 transition-colors dark:text-slate-400 dark:hover:text-slate-200"
+              className="p-1 rounded-md text-muted-foreground hover:text-foreground transition-colors"
               aria-label="Close"
             >
               <X className="h-4 w-4" />

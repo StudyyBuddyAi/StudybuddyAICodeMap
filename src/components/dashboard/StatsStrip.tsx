@@ -41,8 +41,8 @@ interface StatChipProps {
   label: string;
   accent?: boolean;
   suffix?: ReactNode;
-  iconBackground: string;
-  iconColor: string;
+  /** Tailwind bg + text classes for the icon tile; must carry both themes. */
+  iconClassName: string;
 }
 
 const StatChip = ({
@@ -51,19 +51,14 @@ const StatChip = ({
   label,
   accent,
   suffix,
-  iconBackground,
-  iconColor,
+  iconClassName,
 }: StatChipProps) => {
   const animated = useCountUp(value);
 
   return (
-    <div className="items-center flex flex-col bg-white rounded-lg p-4">
+    <div className="items-center flex flex-col bg-card border border-border rounded-lg p-4">
       <div
-        className="stats-strip-icon "
-        style={{
-          background: iconBackground,
-          color: iconColor,
-        }}
+        className={`stats-strip-icon ${iconClassName}`}
       >
         {icon}
       </div>
@@ -72,7 +67,7 @@ const StatChip = ({
         <span
           className="stats-strip-value"
           style={{
-            color: accent ? "var(--accent)" : "#111827",
+            color: accent ? "var(--accent)" : "var(--fg)",
           }}
         >
           {value === null ? "—" : animated}
@@ -102,11 +97,10 @@ const StatsStrip = () => {
   return (
     <div className="animate-fade-in stats-strip-section">
       
+      {/* Plain heading — this used to carry a chevron that read as expandable
+          but had nothing behind it. */}
       <div className="stats-strip-header">
-        <span>Detailed Analytics</span>
-        <svg viewBox="0 0 20 20" aria-hidden="true" className="stats-strip-header-icon">
-          <path d="M7.5 5.5 12 10l-4.5 4.5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
+        <span>Your progress</span>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -114,23 +108,20 @@ const StatsStrip = () => {
           icon={<FileText className="h-7 w-7" />}
           value={sheetsValue}
           label={sheetsLabel}
-          iconBackground="rgba(14, 160, 140, 0.12)"
-          iconColor="#0d6e6e"
+          iconClassName="bg-primary/15 text-primary"
         />
         <StatChip
           icon={<Layers className="h-7 w-7" />}
           value={dueValue}
           label={dueLabel}
-          iconBackground="rgba(59, 130, 246, 0.10)"
-          iconColor="#1d4ed8"
+          iconClassName="bg-success-soft text-success"
         />
         <StatChip
           icon={<Flame className="h-7 w-7" />}
           value={streakValue}
           label={streakLabel}
           accent
-          iconBackground="rgba(239, 68, 68, 0.12)"
-          iconColor="#ef4444"
+          iconClassName="bg-danger-soft text-danger"
           suffix={
             streakValue !== null && streakValue > 0 ? (
               <span aria-hidden="true">days</span>

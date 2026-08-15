@@ -259,7 +259,7 @@ const DashboardSidebar = ({
         <GoProModal open={goProOpen} onOpenChange={setGoProOpen} />
 
         {!collapsed && (
-          <p className="text-[10px] text-muted-foreground/50 leading-snug text-center px-1 pb-1">
+          <p className="text-[10px] text-muted-foreground leading-snug text-center px-1 pb-1">
             For educational use only · Not for clinical practice
           </p>
         )}

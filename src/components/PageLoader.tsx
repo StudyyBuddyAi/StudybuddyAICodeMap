@@ -83,7 +83,7 @@ const PageLoader = ({ context = "generic", fullPage = true }: PageLoaderProps) =
         >
           {steps[stepIndex].text}
         </p>
-        <span className="text-[10px] text-muted-foreground/50 mt-1 block tracking-wider uppercase font-semibold">
+        <span className="text-[10px] text-muted-foreground mt-1 block tracking-wider uppercase font-semibold">
           StudyBuddy Medical
         </span>
       </div>

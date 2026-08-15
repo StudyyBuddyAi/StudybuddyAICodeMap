@@ -37,16 +37,16 @@ const formatSessionTime = (ms: number) => {
 
 const getScoreColor = (score: number, total: number) => {
   const pct = total > 0 ? score / total : 0;
-  if (pct >= 0.8) return "text-emerald-600 dark:text-emerald-400";
-  if (pct >= 0.6) return "text-amber-600 dark:text-amber-400";
-  return "text-red-600 dark:text-red-400";
+  if (pct >= 0.8) return "text-success";
+  if (pct >= 0.6) return "text-warning";
+  return "text-danger";
 };
 
 const getScoreBg = (score: number, total: number) => {
   const pct = total > 0 ? score / total : 0;
-  if (pct >= 0.8) return "bg-emerald-500/10 border-emerald-500/30";
-  if (pct >= 0.6) return "bg-amber-500/10 border-amber-500/30";
-  return "bg-red-500/10 border-red-500/30";
+  if (pct >= 0.8) return "bg-success/10 border-success/30";
+  if (pct >= 0.6) return "bg-warning/10 border-warning/30";
+  return "bg-danger/10 border-danger/30";
 };
 
 const PAGE_SIZE = 5;
@@ -268,22 +268,22 @@ const QBank = () => {
           {/* Header */}
           <div className="space-y-4">
             <div className="flex items-center gap-3">
-              <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-teal-100 to-teal-200 dark:from-teal-900/30 dark:to-teal-800/30 flex items-center justify-center">
-                <FlaskConical className="w-6 h-6 text-teal-600 dark:text-teal-400" />
+              <div className="w-12 h-12 rounded-xl bg-primary/15 flex items-center justify-center">
+                <FlaskConical className="w-6 h-6 text-primary" />
               </div>
               <div>
-                <p className="font-mono text-[11px] font-medium tracking-widest uppercase text-teal-600 dark:text-teal-400">
+                <p className="font-mono text-[11px] font-medium tracking-widest uppercase text-primary">
                   QBank · USMLE-style
                 </p>
-                <h1 className="text-2xl lg:text-3xl font-serif font-medium leading-tight tracking-tight text-slate-900 dark:text-slate-100">
+                <h1 className="text-2xl lg:text-3xl font-serif font-medium leading-tight tracking-tight text-foreground">
                   Practice questions,{" "}
-                  <span className="italic text-teal-600 dark:text-teal-400">
+                  <span className="italic text-primary">
                     built to stick.
                   </span>
                 </h1>
               </div>
             </div>
-            <p className="text-sm text-slate-600 dark:text-slate-400 leading-relaxed">
+            <p className="text-sm text-muted-foreground leading-relaxed">
               NBME blueprints, clinical guidelines, human-verified. Instant feedback on
               every answer.
             </p>
@@ -291,23 +291,23 @@ const QBank = () => {
 
           {/* Stats Grid */}
           <div className="grid grid-cols-3 gap-3">
-            <div className="rounded-xl border border-slate-200 bg-gradient-to-br from-white to-slate-50 p-4 text-center shadow-sm dark:from-slate-800 dark:to-slate-900 dark:border-slate-700">
-              <p className="text-3xl font-serif font-medium text-teal-600 leading-none dark:text-teal-400">
+            <div className="rounded-xl border border-border bg-card p-4 text-center shadow-sm">
+              <p className="text-3xl font-serif font-medium text-primary leading-none">
                 {questionCount}
               </p>
-              <p className="font-mono text-[10px] text-slate-500 mt-1 dark:text-slate-400">questions</p>
+              <p className="font-mono text-[10px] text-muted-foreground mt-1">questions</p>
             </div>
-            <div className="rounded-xl border border-slate-200 bg-gradient-to-br from-white to-slate-50 p-4 text-center shadow-sm dark:from-slate-800 dark:to-slate-900 dark:border-slate-700">
-              <p className="text-2xl font-serif font-medium text-slate-900 leading-none dark:text-slate-100">
+            <div className="rounded-xl border border-border bg-card p-4 text-center shadow-sm">
+              <p className="text-2xl font-serif font-medium text-foreground leading-none">
                 Step 1
               </p>
-              <p className="font-mono text-[10px] text-slate-500 mt-1 dark:text-slate-400">&amp; Step 2</p>
+              <p className="font-mono text-[10px] text-muted-foreground mt-1">&amp; Step 2</p>
             </div>
-            <div className="rounded-xl border border-slate-200 bg-gradient-to-br from-white to-slate-50 p-4 text-center shadow-sm dark:from-slate-800 dark:to-slate-900 dark:border-slate-700">
-              <p className="text-3xl font-serif font-medium text-slate-900 leading-none dark:text-slate-100">
+            <div className="rounded-xl border border-border bg-card p-4 text-center shadow-sm">
+              <p className="text-3xl font-serif font-medium text-foreground leading-none">
                 {availableSystems.length > 0 ? availableSystems.length : "—"}
               </p>
-              <p className="font-mono text-[10px] text-slate-500 mt-1 dark:text-slate-400">
+              <p className="font-mono text-[10px] text-muted-foreground mt-1">
                 {availableSystems.length === 1 ? "system" : "systems"}
               </p>
             </div>
@@ -322,10 +322,10 @@ const QBank = () => {
             ].map(({ icon: Icon, label }) => (
               <div
                 key={label}
-                className="inline-flex items-center gap-1.5 border border-slate-200 rounded-full bg-white px-3 py-1.5 dark:bg-slate-800 dark:border-slate-700"
+                className="inline-flex items-center gap-1.5 border border-border rounded-full bg-card px-3 py-1.5"
               >
-                <Icon className="w-3 h-3 text-teal-600 dark:text-teal-400" />
-                <span className="font-mono text-[11px] text-slate-600 dark:text-slate-400">
+                <Icon className="w-3 h-3 text-primary" />
+                <span className="font-mono text-[11px] text-muted-foreground">
                   {label}
                 </span>
               </div>
@@ -334,15 +334,15 @@ const QBank = () => {
 
           {/* Sign In Card */}
           {isAnonymous || !user ? (
-            <div className="rounded-2xl border border-slate-200 bg-gradient-to-br from-white to-slate-50 p-6 text-center shadow-sm dark:from-slate-800 dark:to-slate-900 dark:border-slate-700 space-y-4">
-              <div className="flex items-center justify-center w-10 h-10 rounded-xl border border-slate-200 bg-white mx-auto dark:bg-slate-800 dark:border-slate-700">
-                <LogIn className="w-4 h-4 text-teal-600 dark:text-teal-400" />
+            <div className="rounded-2xl border border-border bg-card p-6 text-center shadow-sm space-y-4">
+              <div className="flex items-center justify-center w-10 h-10 rounded-xl border border-border bg-card mx-auto">
+                <LogIn className="w-4 h-4 text-primary" />
               </div>
               <div className="space-y-1">
-                <p className="text-sm font-medium text-slate-900 dark:text-slate-100">
+                <p className="text-sm font-medium text-foreground">
                   Sign in to access QBank
                 </p>
-                <p className="text-xs text-slate-600 dark:text-slate-400">
+                <p className="text-xs text-muted-foreground">
                   Create a free account to start answering questions and track
                   your progress.
                 </p>
@@ -350,7 +350,7 @@ const QBank = () => {
               <button
                 type="button"
                 onClick={() => navigate("/dashboard")}
-                className="w-full h-11 rounded-lg bg-teal-500 text-white text-sm font-medium hover:bg-teal-600 transition-colors flex items-center justify-center gap-2"
+                className="w-full h-11 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors flex items-center justify-center gap-2"
               >
                 <LogIn className="w-4 h-4" />
                 Sign In to Start
@@ -360,24 +360,24 @@ const QBank = () => {
             <>
               {/* Resume Session Card */}
               {hasSavedSession && savedSessionMeta && (
-                <div className="space-y-3 rounded-xl border-l-4 border-l-teal-500 border border-slate-200 bg-gradient-to-r from-teal-50 to-white p-4 dark:from-teal-950/20 dark:to-slate-900 dark:border-slate-700">
+                <div className="space-y-3 rounded-xl border-l-4 border-l-primary border border-border bg-primary/5 p-4">
                   <div className="flex items-center gap-3">
-                    <div className="flex items-center justify-center w-9 h-9 rounded-lg border border-slate-200 bg-white flex-shrink-0 dark:bg-slate-800 dark:border-slate-700">
-                      <History className="w-4 h-4 text-teal-600 dark:text-teal-400" />
+                    <div className="flex items-center justify-center w-9 h-9 rounded-lg border border-border bg-card flex-shrink-0">
+                      <History className="w-4 h-4 text-primary" />
                     </div>
                     <div>
-                      <p className="text-sm font-medium text-slate-900 dark:text-slate-100">
+                      <p className="text-sm font-medium text-foreground">
                         Resume previous session
                       </p>
-                      <p className="font-mono text-[11px] text-slate-600 dark:text-slate-400 mt-0.5">
+                      <p className="font-mono text-[11px] text-muted-foreground mt-0.5">
                         {savedSessionMeta.system} · {savedSessionMeta.answered}/{savedSessionMeta.total} answered
                       </p>
                     </div>
                   </div>
 
-                  <div className="w-full h-1 rounded-full bg-slate-200 overflow-hidden dark:bg-slate-700">
+                  <div className="w-full h-1 rounded-full bg-border overflow-hidden">
                     <div
-                      className="transition-all h-full rounded-full bg-teal-500"
+                      className="transition-all h-full rounded-full bg-primary"
                       style={{
                         width: `${savedSessionMeta.total > 0 ? (savedSessionMeta.answered / savedSessionMeta.total) * 100 : 0}%`,
                       }}
@@ -388,7 +388,7 @@ const QBank = () => {
                     <button
                       type="button"
                       onClick={handleResume}
-                      className="flex-1 h-9.5 rounded-lg bg-teal-500 text-white text-sm font-medium hover:bg-teal-600 transition-colors flex items-center justify-center gap-1.5"
+                      className="flex-1 h-9.5 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors flex items-center justify-center gap-1.5"
                     >
                       <ChevronRight className="w-4 h-4" />
                       Continue
@@ -396,7 +396,7 @@ const QBank = () => {
                     <button
                       type="button"
                       onClick={handleDiscard}
-                      className="h-9.5 px-4 rounded-lg border border-slate-200 bg-transparent text-slate-600 text-sm font-medium hover:bg-slate-50 transition-colors dark:border-slate-700 dark:text-slate-400 dark:hover:bg-slate-800"
+                      className="h-9.5 px-4 rounded-lg border border-border bg-transparent text-muted-foreground text-sm font-medium hover:bg-secondary transition-colors"
                     >
                       Discard
                     </button>
@@ -405,17 +405,17 @@ const QBank = () => {
               )}
 
               {/* Configuration Card */}
-              <div className="space-y-5 rounded-2xl border border-slate-200 bg-gradient-to-br from-white to-slate-50 p-5 shadow-sm dark:from-slate-800 dark:to-slate-900 dark:border-slate-700">
+              <div className="space-y-5 rounded-2xl border border-border bg-card p-5 shadow-sm">
                 {/* System Selector */}
                 <div>
-                  <p className="font-mono text-[11px] font-medium tracking-widest uppercase text-slate-500 mb-2 dark:text-slate-400">System</p>
+                  <p className="font-mono text-[11px] font-medium tracking-widest uppercase text-muted-foreground mb-2">System</p>
                   <div className="flex flex-wrap gap-2">
                     {availableSystems.length === 0 ? (
                       [100, 88].map((w) => (
                         <div
                           key={w}
                           style={{ width: `${w}px` }}
-                          className="h-7 rounded-full bg-slate-200 animate-pulse dark:bg-slate-700"
+                          className="h-7 rounded-full bg-border animate-pulse"
                         />
                       ))
                     ) : (
@@ -426,8 +426,8 @@ const QBank = () => {
                           onClick={() => handleSystemChange(system)}
                           className={`inline-flex items-center gap-2 h-8 px-4 rounded-lg text-sm font-medium transition-all duration-200 ${
                             selectedSystem === system
-                              ? "bg-teal-500 border-teal-500 text-white shadow-md"
-                              : "bg-white border-slate-200 text-slate-700 hover:border-teal-300 hover:text-teal-700 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-300 dark:hover:border-teal-500 dark:hover:text-teal-300"
+                              ? "bg-primary border-primary text-primary-foreground shadow-md"
+                              : "bg-card border-border text-muted-foreground hover:border-primary hover:text-primary"
                           } border`}
                         >
                           {selectedSystem === system && <Check className="w-4 h-4" />}
@@ -441,14 +441,14 @@ const QBank = () => {
                 {/* Filter - Flagged Only */}
                 {flaggedCount > 0 && (
                   <div>
-                    <p className="font-mono text-[11px] font-medium tracking-widest uppercase text-slate-500 mb-2 dark:text-slate-400">Filter</p>
+                    <p className="font-mono text-[11px] font-medium tracking-widest uppercase text-muted-foreground mb-2">Filter</p>
                     <button
                       type="button"
                       onClick={() => setFlaggedOnly((v) => !v)}
                       className={`inline-flex items-center gap-2 h-8 px-4 rounded-lg text-sm font-medium transition-all duration-200 ${
                         flaggedOnly
-                          ? "bg-amber-500/10 border-amber-500 text-amber-600 dark:bg-amber-500/20 dark:text-amber-400"
-                          : "bg-white border-slate-200 text-slate-600 hover:border-slate-300 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-400 dark:hover:border-slate-600"
+                          ? "bg-warning/10 border-warning text-warning"
+                          : "bg-card border-border text-muted-foreground hover:border-input"
                       } border`}
                     >
                       <Flag className="h-3 w-3" fill={flaggedOnly ? "currentColor" : "none"} />
@@ -459,14 +459,14 @@ const QBank = () => {
 
                 {/* Domain Selector */}
                 <div className={flaggedOnly ? "opacity-50 pointer-events-none" : ""}>
-                  <p className="font-mono text-[11px] font-medium tracking-widest uppercase text-slate-500 mb-2 dark:text-slate-400">Domain</p>
+                  <p className="font-mono text-[11px] font-medium tracking-widest uppercase text-muted-foreground mb-2">Domain</p>
                   <div className="flex flex-wrap gap-2">
                     {availableDomains.length === 0 ? (
                       [80, 96, 72, 88].map((w) => (
                         <div
                           key={w}
                           style={{ width: `${w}px` }}
-                          className="h-7 rounded-full bg-slate-200 animate-pulse dark:bg-slate-700"
+                          className="h-7 rounded-full bg-border animate-pulse"
                         />
                       ))
                     ) : (
@@ -476,8 +476,8 @@ const QBank = () => {
                           onClick={selectAll}
                           className={`inline-flex items-center gap-2 h-8 px-4 rounded-lg text-sm font-medium transition-all duration-200 ${
                             selectedDomains.length === 0
-                              ? "bg-teal-500 border-teal-500 text-white shadow-md"
-                              : "bg-white border-slate-200 text-slate-700 hover:border-teal-300 hover:text-teal-700 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-300 dark:hover:border-teal-500 dark:hover:text-teal-300"
+                              ? "bg-primary border-primary text-primary-foreground shadow-md"
+                              : "bg-card border-border text-muted-foreground hover:border-primary hover:text-primary"
                           } border`}
                         >
                           {selectedDomains.length === 0 && <Check className="w-4 h-4" />}
@@ -490,8 +490,8 @@ const QBank = () => {
                             onClick={() => toggleDomain(domain)}
                             className={`inline-flex items-center gap-2 h-8 px-4 rounded-lg text-sm font-medium transition-all duration-200 ${
                               selectedDomains.includes(domain)
-                                ? "bg-teal-500 border-teal-500 text-white shadow-md"
-                                : "bg-white border-slate-200 text-slate-700 hover:border-teal-300 hover:text-teal-700 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-300 dark:hover:border-teal-500 dark:hover:text-teal-300"
+                                ? "bg-primary border-primary text-primary-foreground shadow-md"
+                                : "bg-card border-border text-muted-foreground hover:border-primary hover:text-primary"
                             } border`}
                           >
                             {selectedDomains.includes(domain) && <Check className="w-4 h-4" />}
@@ -506,8 +506,8 @@ const QBank = () => {
                 {/* Question Count Slider */}
                 <div className={`space-y-2 ${flaggedOnly ? "opacity-50 pointer-events-none" : ""}`}>
                   <div className="flex items-center justify-between">
-                    <p className="font-mono text-[11px] font-medium tracking-widest uppercase text-slate-500 dark:text-slate-400">Questions</p>
-                    <span className="font-mono text-xs font-semibold text-teal-600 px-2 py-0.5 border border-teal-500 rounded-lg bg-teal-50 dark:text-teal-400 dark:bg-teal-950/20">
+                    <p className="font-mono text-[11px] font-medium tracking-widest uppercase text-muted-foreground">Questions</p>
+                    <span className="font-mono text-xs font-semibold text-primary px-2 py-0.5 border border-primary rounded-lg bg-primary/10">
                       {questionLimit}
                     </span>
                   </div>
@@ -518,14 +518,14 @@ const QBank = () => {
                     step={5}
                     value={questionLimit}
                     onChange={(e) => setQuestionLimit(Number(e.target.value))}
-                    className="w-full h-1.5 rounded-full appearance-none cursor-pointer accent-teal-500 bg-slate-200 dark:bg-slate-700"
+                    className="w-full h-1.5 rounded-full appearance-none cursor-pointer accent-teal-500 bg-border"
                   />
-                  <div className="flex justify-between font-mono text-[10px] text-slate-400 dark:text-slate-500">
+                  <div className="flex justify-between font-mono text-[10px] text-muted-foreground">
                     <span>5</span>
                     <span>{effectiveSliderMax}</span>
                   </div>
                   {selectedDomains.length > 0 && (
-                    <p className="text-[11px] text-slate-500 text-center mt-1 dark:text-slate-400">
+                    <p className="text-[11px] text-muted-foreground text-center mt-1">
                       {availableForSelection} question{availableForSelection !== 1 ? "s" : ""} available in selected domains
                     </p>
                   )}
@@ -537,7 +537,7 @@ const QBank = () => {
                 type="button"
                 onClick={handleStart}
                 disabled={questionCount === 0 || (flaggedOnly ? flaggedCount === 0 : effectiveSliderMax === 0)}
-                className="w-full h-11 rounded-lg bg-teal-500 text-white text-sm font-medium hover:bg-teal-600 transition-colors flex items-center justify-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed shadow-md"
+                className="w-full h-11 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors flex items-center justify-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed shadow-md"
               >
                 <FlaskConical className="w-4 h-4" />
                 Start Session · {flaggedOnly ? flaggedCount : questionLimit} Questions
@@ -549,8 +549,8 @@ const QBank = () => {
           {!isAnonymous && user && (
             <div className="w-full space-y-4 pt-2 lg:hidden">
               <div className="flex items-center gap-2 mb-3">
-                <History className="w-3.5 h-3.5 text-slate-500" />
-                <p className="font-mono text-[11px] font-medium tracking-widest uppercase text-slate-500 dark:text-slate-400">
+                <History className="w-3.5 h-3.5 text-muted-foreground" />
+                <p className="font-mono text-[11px] font-medium tracking-widest uppercase text-muted-foreground">
                   Session History
                 </p>
               </div>
@@ -560,13 +560,13 @@ const QBank = () => {
                   {[1, 2, 3].map((i) => (
                     <div
                       key={i}
-                      className="h-16 rounded-lg border border-slate-200 bg-slate-100 animate-pulse dark:bg-slate-800 dark:border-slate-700"
+                      className="h-16 rounded-lg border border-border bg-secondary animate-pulse"
                     />
                   ))}
                 </div>
               ) : !sessionHistory || sessionHistory.rows.length === 0 ? (
-                <div className="rounded-xl border border-slate-200 bg-gradient-to-br from-white to-slate-50 p-4 text-center dark:from-slate-800 dark:to-slate-900 dark:border-slate-700">
-                  <p className="text-xs text-slate-600 dark:text-slate-400">
+                <div className="rounded-xl border border-border bg-card p-4 text-center">
+                  <p className="text-xs text-muted-foreground">
                     No sessions yet — complete your first session to see your history here.
                   </p>
                 </div>
@@ -580,23 +580,23 @@ const QBank = () => {
                         return (
                           <div
                             key={s.id}
-                            className="w-full rounded-lg px-4 py-3 flex items-center justify-between gap-3 border border-red-500/30 bg-red-500/5"
+                            className="w-full rounded-lg px-4 py-3 flex items-center justify-between gap-3 border border-danger/30 bg-danger/5"
                           >
-                            <p className="text-xs font-medium text-slate-900 dark:text-slate-100">Delete this session?</p>
+                            <p className="text-xs font-medium text-foreground">Delete this session?</p>
                             <div className="flex items-center gap-2 shrink-0">
                               <button
                                 onClick={() => setPendingDeleteId(null)}
-                                className="text-xs text-slate-600 hover:text-slate-900 transition-colors px-2 py-1 dark:text-slate-400 dark:hover:text-slate-100"
+                                className="text-xs text-muted-foreground hover:text-foreground transition-colors px-2 py-1"
                               >
                                 Cancel
                               </button>
                               <button
                                 onClick={() => handleDeleteSession(s.id)}
                                 disabled={isDeleting}
-                                className="flex items-center gap-1.5 rounded-md bg-red-500/10 border border-red-500/40 text-red-600 dark:text-red-400 hover:bg-red-500/20 text-xs font-medium px-3 py-1.5 transition-colors disabled:opacity-50"
+                                className="flex items-center gap-1.5 rounded-md bg-danger/10 border border-danger/40 text-danger hover:bg-danger/20 text-xs font-medium px-3 py-1.5 transition-colors disabled:opacity-50"
                               >
                                 {isDeleting ? (
-                                  <span className="h-3 w-3 rounded-full border-2 border-red-400/40 border-t-red-500 animate-spin" />
+                                  <span className="h-3 w-3 rounded-full border-2 border-danger/40 border-t-red-500 animate-spin" />
                                 ) : (
                                   <Trash2 className="h-3 w-3" />
                                 )}
@@ -611,7 +611,7 @@ const QBank = () => {
                         <button
                           key={s.id}
                           onClick={() => navigate(`/qbank/summary?session=${s.id}`)}
-                          className="group w-full rounded-xl border border-slate-200 bg-gradient-to-br from-white to-slate-50 p-3 flex items-center gap-3.5 text-left hover:border-teal-300 transition-colors dark:from-slate-800 dark:to-slate-900 dark:border-slate-700 dark:hover:border-teal-500 shadow-sm"
+                          className="group w-full rounded-xl border border-border bg-card p-3 flex items-center gap-3.5 text-left hover:border-primary transition-colors shadow-sm"
                         >
                           <div
                             className={`flex flex-col items-center justify-center rounded-lg border px-3 py-1.5 shrink-0 ${getScoreBg(s.score, s.total)}`}
@@ -619,21 +619,21 @@ const QBank = () => {
                             <span className={`text-base font-semibold tabular-nums leading-none ${getScoreColor(s.score, s.total)}`}>
                               {pct}%
                             </span>
-                            <span className="text-[10px] text-slate-500/60 mt-0.5 dark:text-slate-400/60">
+                            <span className="text-[10px] text-muted-foreground mt-0.5">
                               {s.score}/{s.total}
                             </span>
                           </div>
 
                           <div className="flex-1 min-w-0 space-y-0.5">
-                            <p className="text-sm font-semibold text-slate-900 truncate dark:text-slate-100">
+                            <p className="text-sm font-semibold text-foreground truncate">
                               {s.system}
                             </p>
                             <div className="flex items-center gap-3">
-                              <span className="flex items-center gap-1 text-[11px] text-slate-500/60 dark:text-slate-400/60">
+                              <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
                                 <Clock className="h-3 w-3" />
                                 {formatSessionTime(s.total_time_ms)}
                               </span>
-                              <span className="text-[11px] text-slate-400/40 dark:text-slate-500/40">
+                              <span className="text-[11px] text-muted-foreground">
                                 {formatSessionDate(s.ended_at)}
                               </span>
                             </div>
@@ -653,13 +653,13 @@ const QBank = () => {
                                 setPendingDeleteId(s.id);
                               }
                             }}
-                            className="shrink-0 p-1.5 rounded-md text-slate-400/40 hover:text-red-500 hover:bg-red-500/10 transition-colors cursor-pointer"
+                            className="shrink-0 p-1.5 rounded-md text-muted-foreground hover:text-danger hover:bg-danger/10 transition-colors cursor-pointer"
                             aria-label="Delete session"
                           >
                             <Trash2 className="h-3.5 w-3.5" />
                           </span>
 
-                          <ChevronRight className="h-4 w-4 text-slate-400/30 group-hover:text-teal-500/60 transition-colors shrink-0" />
+                          <ChevronRight className="h-4 w-4 text-muted-foreground group-hover:text-primary transition-colors shrink-0" />
                         </button>
                       );
                     })}
@@ -669,17 +669,17 @@ const QBank = () => {
                     <button
                       onClick={() => setPage((p) => Math.max(0, p - 1))}
                       disabled={page === 0}
-                      className="text-xs font-medium text-slate-500/60 hover:text-slate-900 disabled:opacity-30 disabled:cursor-not-allowed transition-colors dark:text-slate-400/60 dark:hover:text-slate-100"
+                      className="text-xs font-medium text-muted-foreground hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
                     >
                       ← Previous
                     </button>
-                    <span className="text-[11px] text-slate-400/40 dark:text-slate-500/40">
+                    <span className="text-[11px] text-muted-foreground">
                       Page {page + 1}
                     </span>
                     <button
                       onClick={() => setPage((p) => p + 1)}
                       disabled={!sessionHistory.hasMore}
-                      className="text-xs font-medium text-slate-500/60 hover:text-slate-900 disabled:opacity-30 disabled:cursor-not-allowed transition-colors dark:text-slate-400/60 dark:hover:text-slate-100"
+                      className="text-xs font-medium text-muted-foreground hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
                     >
                       Next →
                     </button>
@@ -694,8 +694,8 @@ const QBank = () => {
         {!isAnonymous && user && (
           <div className="hidden lg:block w-80 xl:w-96 space-y-4">
             <div className="flex items-center gap-2 mb-3">
-              <History className="w-3.5 h-3.5 text-slate-500" />
-              <p className="font-mono text-[11px] font-medium tracking-widest uppercase text-slate-500 dark:text-slate-400">
+              <History className="w-3.5 h-3.5 text-muted-foreground" />
+              <p className="font-mono text-[11px] font-medium tracking-widest uppercase text-muted-foreground">
                 Session History
               </p>
             </div>
@@ -705,13 +705,13 @@ const QBank = () => {
                 {[1, 2, 3].map((i) => (
                   <div
                     key={i}
-                    className="h-16 rounded-lg border border-slate-200 bg-slate-100 animate-pulse dark:bg-slate-800 dark:border-slate-700"
+                    className="h-16 rounded-lg border border-border bg-secondary animate-pulse"
                   />
                 ))}
               </div>
             ) : !sessionHistory || sessionHistory.rows.length === 0 ? (
-              <div className="rounded-xl border border-slate-200 bg-gradient-to-br from-white to-slate-50 p-4 text-center dark:from-slate-800 dark:to-slate-900 dark:border-slate-700">
-                <p className="text-xs text-slate-600 dark:text-slate-400">
+              <div className="rounded-xl border border-border bg-card p-4 text-center">
+                <p className="text-xs text-muted-foreground">
                   No sessions yet — complete your first session to see your history here.
                 </p>
               </div>
@@ -725,23 +725,23 @@ const QBank = () => {
                       return (
                         <div
                           key={s.id}
-                          className="w-full rounded-lg px-4 py-3 flex items-center justify-between gap-3 border border-red-500/30 bg-red-500/5"
+                          className="w-full rounded-lg px-4 py-3 flex items-center justify-between gap-3 border border-danger/30 bg-danger/5"
                         >
-                          <p className="text-xs font-medium text-slate-900 dark:text-slate-100">Delete this session?</p>
+                          <p className="text-xs font-medium text-foreground">Delete this session?</p>
                           <div className="flex items-center gap-2 shrink-0">
                             <button
                               onClick={() => setPendingDeleteId(null)}
-                              className="text-xs text-slate-600 hover:text-slate-900 transition-colors px-2 py-1 dark:text-slate-400 dark:hover:text-slate-100"
+                              className="text-xs text-muted-foreground hover:text-foreground transition-colors px-2 py-1"
                             >
                               Cancel
                             </button>
                             <button
                               onClick={() => handleDeleteSession(s.id)}
                               disabled={isDeleting}
-                              className="flex items-center gap-1.5 rounded-md bg-red-500/10 border border-red-500/40 text-red-600 dark:text-red-400 hover:bg-red-500/20 text-xs font-medium px-3 py-1.5 transition-colors disabled:opacity-50"
+                              className="flex items-center gap-1.5 rounded-md bg-danger/10 border border-danger/40 text-danger hover:bg-danger/20 text-xs font-medium px-3 py-1.5 transition-colors disabled:opacity-50"
                             >
                               {isDeleting ? (
-                                <span className="h-3 w-3 rounded-full border-2 border-red-400/40 border-t-red-500 animate-spin" />
+                                <span className="h-3 w-3 rounded-full border-2 border-danger/40 border-t-red-500 animate-spin" />
                               ) : (
                                 <Trash2 className="h-3 w-3" />
                               )}
@@ -756,7 +756,7 @@ const QBank = () => {
                       <button
                         key={s.id}
                         onClick={() => navigate(`/qbank/summary?session=${s.id}`)}
-                        className="group w-full rounded-xl border border-slate-200 bg-gradient-to-br from-white to-slate-50 p-3 flex items-center gap-3.5 text-left hover:border-teal-300 transition-colors dark:from-slate-800 dark:to-slate-900 dark:border-slate-700 dark:hover:border-teal-500 shadow-sm"
+                        className="group w-full rounded-xl border border-border bg-card p-3 flex items-center gap-3.5 text-left hover:border-primary transition-colors shadow-sm"
                       >
                         <div
                           className={`flex flex-col items-center justify-center rounded-lg border px-3 py-1.5 shrink-0 ${getScoreBg(s.score, s.total)}`}
@@ -764,21 +764,21 @@ const QBank = () => {
                           <span className={`text-base font-semibold tabular-nums leading-none ${getScoreColor(s.score, s.total)}`}>
                             {pct}%
                           </span>
-                          <span className="text-[10px] text-slate-500/60 mt-0.5 dark:text-slate-400/60">
+                          <span className="text-[10px] text-muted-foreground mt-0.5">
                             {s.score}/{s.total}
                           </span>
                         </div>
 
                         <div className="flex-1 min-w-0 space-y-0.5">
-                          <p className="text-sm font-semibold text-slate-900 truncate dark:text-slate-100">
+                          <p className="text-sm font-semibold text-foreground truncate">
                             {s.system}
                           </p>
                           <div className="flex items-center gap-3">
-                            <span className="flex items-center gap-1 text-[11px] text-slate-500/60 dark:text-slate-400/60">
+                            <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
                               <Clock className="h-3 w-3" />
                               {formatSessionTime(s.total_time_ms)}
                             </span>
-                            <span className="text-[11px] text-slate-400/40 dark:text-slate-500/40">
+                            <span className="text-[11px] text-muted-foreground">
                               {formatSessionDate(s.ended_at)}
                             </span>
                           </div>
@@ -798,13 +798,13 @@ const QBank = () => {
                               setPendingDeleteId(s.id);
                             }
                           }}
-                          className="shrink-0 p-1.5 rounded-md text-slate-400/40 hover:text-red-500 hover:bg-red-500/10 transition-colors cursor-pointer"
+                          className="shrink-0 p-1.5 rounded-md text-muted-foreground hover:text-danger hover:bg-danger/10 transition-colors cursor-pointer"
                           aria-label="Delete session"
                         >
                           <Trash2 className="h-3.5 w-3.5" />
                         </span>
 
-                        <ChevronRight className="h-4 w-4 text-slate-400/30 group-hover:text-teal-500/60 transition-colors shrink-0" />
+                        <ChevronRight className="h-4 w-4 text-muted-foreground group-hover:text-primary transition-colors shrink-0" />
                       </button>
                     );
                   })}
@@ -814,17 +814,17 @@ const QBank = () => {
                   <button
                     onClick={() => setPage((p) => Math.max(0, p - 1))}
                     disabled={page === 0}
-                    className="text-xs font-medium text-slate-500/60 hover:text-slate-900 disabled:opacity-30 disabled:cursor-not-allowed transition-colors dark:text-slate-400/60 dark:hover:text-slate-100"
+                    className="text-xs font-medium text-muted-foreground hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
                   >
                     ← Previous
                   </button>
-                  <span className="text-[11px] text-slate-400/40 dark:text-slate-500/40">
+                  <span className="text-[11px] text-muted-foreground">
                     Page {page + 1}
                   </span>
                   <button
                     onClick={() => setPage((p) => p + 1)}
                     disabled={!sessionHistory.hasMore}
-                    className="text-xs font-medium text-slate-500/60 hover:text-slate-900 disabled:opacity-30 disabled:cursor-not-allowed transition-colors dark:text-slate-400/60 dark:hover:text-slate-100"
+                    className="text-xs font-medium text-muted-foreground hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
                   >
                     Next →
                   </button>

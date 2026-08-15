@@ -466,7 +466,7 @@ const QBankSummary = () => {
                       <span className="text-[11px] text-muted-foreground">{q.domain}</span>
                       <span className="text-[11px] font-semibold shrink-0" style={{ color: diffColor }}>{q.difficulty}</span>
                     </div>
-                    <p className="text-[11px] text-muted-foreground/60 leading-snug truncate">{stemSnippet}</p>
+                    <p className="text-[11px] text-muted-foreground leading-snug truncate">{stemSnippet}</p>
                   </div>
                   <div className="shrink-0 flex items-center gap-2 mt-0.5">
                     {!isCorrect && ans && (
@@ -475,11 +475,11 @@ const QBankSummary = () => {
                       </span>
                     )}
                     {ans && (
-                      <span className="text-[10px] text-muted-foreground/50">
+                      <span className="text-[10px] text-muted-foreground">
                         {Math.round((ans.time_taken_ms ?? 0) / 1000)}s
                       </span>
                     )}
-                    <ChevronRight className="h-3 w-3 text-muted-foreground/30 group-hover:text-muted-foreground/60 transition-colors" />
+                    <ChevronRight className="h-3 w-3 text-muted-foreground group-hover:text-foreground transition-colors" />
                   </div>
                 </button>
               );
