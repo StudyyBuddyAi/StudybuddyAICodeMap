@@ -604,9 +604,79 @@ export type Database = {
             referencedColumns: ["id"]
           }
         ]
+}
+    rag_memory_state: {
+      Row: {
+        user_id: string
+        current_window_id: string
+        turn_count: number
+        created_at: string
+        updated_at: string
       }
+      Insert: {
+        user_id: string
+        current_window_id?: string
+        turn_count?: number
+        created_at?: string
+        updated_at?: string
+      }
+      Update: {
+        user_id?: string
+        current_window_id?: string
+        turn_count?: number
+        created_at?: string
+        updated_at?: string
+      }
+      Relationships: [
+        {
+          foreignKeyName: "rag_memory_state_user_id_fkey"
+          columns: ["user_id"]
+          isOneToOne: false
+          referencedRelation: "users"
+          referencedColumns: ["id"]
+        }
+      ]
     }
-    Views: {
+    rag_conversation_memory: {
+      Row: {
+        id: string
+        user_id: string
+        window_id: string
+        turn_number: number
+        question: string
+        answer: string
+        created_at: string
+      }
+      Insert: {
+        id?: string
+        user_id: string
+        window_id: string
+        turn_number: number
+        question: string
+        answer: string
+        created_at?: string
+      }
+      Update: {
+        id?: string
+        user_id?: string
+        window_id?: string
+        turn_number?: number
+        question?: string
+        answer?: string
+        created_at?: string
+      }
+      Relationships: [
+        {
+          foreignKeyName: "rag_conversation_memory_user_id_fkey"
+          columns: ["user_id"]
+          isOneToOne: false
+          referencedRelation: "users"
+          referencedColumns: ["id"]
+        }
+      ]
+    }
+  }
+  Views: {
       [_ in never]: never
     }
     Functions: {

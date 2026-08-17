@@ -38,31 +38,16 @@ const log = (event: string, fields: Record<string, unknown> = {}) => {
   console.log(JSON.stringify({ fn: "rag-generate", event, ...fields }));
 };
 
-// We keep a module-level reference so flushTraces() can reach it.
-let _langSmithClient: LangSmithClient | null = null;
-
-async function flushTraces() {
+async function flushTraces(client: LangSmithClient | null) {
   try {
-    // 1. Await LangChain's internal callback-manager queue
     await awaitAllCallbacks();
+    if (client) {
+      await client.awaitPendingTraceBatches();
+    }
     log("callbacks_flushed_ok");
   } catch (flushErr: unknown) {
     const flushMsg = flushErr instanceof Error ? flushErr.message : String(flushErr);
     log("callbacks_flush_error", { err: flushMsg });
-  }
-
-  // 2. Await LangSmithClient's own HTTP batch queue — this is the
-  //    critical step: the client batches POSTs to api.smith.langchain.com
-  //    independently of LangChain's callback manager, so without this
-  //    the Deno isolate can die before the traces actually leave the process.
-  if (_langSmithClient) {
-    try {
-      await _langSmithClient.awaitPendingTraceBatches();
-      log("langsmith_batches_flushed_ok");
-    } catch (batchErr: unknown) {
-      const batchMsg = batchErr instanceof Error ? batchErr.message : String(batchErr);
-      log("langsmith_batches_flush_error", { err: batchMsg });
-    }
   }
 }
 
@@ -78,16 +63,14 @@ serve(async (req: Request) => {
     const supabaseUrl = Deno.env.get("SUPABASE_URL");
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
     const openRouterApiKey = Deno.env.get("OPENROUTER_API_KEY");
-  // Optional secret that allows secure diagnostics without exposing keys.
-  const ragDebugToken = Deno.env.get("RAG_DEBUG_TOKEN");
 
-  if (!supabaseUrl || !serviceRoleKey || !openRouterApiKey) {
-    log("missing_env_vars");
-    return new Response(
-      JSON.stringify({ error: { code: "CONFIG_ERROR", message: "Server environment misconfigured" } }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
-  }
+    if (!supabaseUrl || !serviceRoleKey || !openRouterApiKey) {
+      log("missing_env_vars");
+      return new Response(
+        JSON.stringify({ error: { code: "CONFIG_ERROR", message: "Server environment misconfigured" } }),
+        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
 
     // LangSmith tracing: بمجرد ما تحط الـ secrets التالية على Supabase،
     // كل استدعاء LangChain تحت رح يترسل تلقائياً لـ LangSmith كـ trace:
@@ -143,64 +126,74 @@ serve(async (req: Request) => {
     const langsmithProject =
       Deno.env.get("LANGSMITH_PROJECT") ?? Deno.env.get("LANGCHAIN_PROJECT") ?? "default";
 
-    let tracers: LangChainTracer[] = [];
+    const langsmithClient = langsmithApiKey
+      ? new LangSmithClient({
+          apiKey: langsmithApiKey,
+          apiUrl: "https://api.smith.langchain.com",
+        })
+      : null;
 
-    // small helper to mask secrets before logging/returning diagnostics
-    const maskKey = (k: string | undefined | null) => {
-      if (!k) return null;
-      if (k.length <= 8) return "****";
-      return `${k.slice(0, 4)}...${k.slice(-4)}`;
-    };
+    const tracers = langsmithClient
+      ? [new LangChainTracer({ projectName: langsmithProject, client: langsmithClient })]
+      : [];
 
-    if (langsmithApiKey) {
-      _langSmithClient = new LangSmithClient({
-        apiKey: langsmithApiKey,
-        apiUrl: "https://api.smith.langchain.com",
-      });
-
-      tracers = [
-        new LangChainTracer({
-          projectName: langsmithProject,
-          client: _langSmithClient,
-        }),
-      ];
-
-      log("langsmith_tracer_configured", { project: langsmithProject, keyMask: maskKey(langsmithApiKey) });
-    } else {
+    if (!langsmithApiKey) {
       log("langsmith_key_missing");
     }
 
-    // Secure diagnostics: if the caller provides a debugToken matching RAG_DEBUG_TOKEN
-    // the function will return non-secret diagnostics that help debug tracing issues.
-    // To use: set RAG_DEBUG_TOKEN in your project secrets, then POST { "debugToken": "<token>" }.
-    if (typeof body === "object" && (body as any).debugToken && ragDebugToken && (body as any).debugToken === ragDebugToken) {
-      const diag: Record<string, unknown> = {
-        langsmithConfigured: !!langsmithApiKey,
-        langsmithProject,
-        langsmithKeyMask: maskKey(langsmithApiKey),
-        langchainTracingV2: Deno.env.get("LANGCHAIN_TRACING_V2") === "true",
-      };
+    // ── Conversation Memory: نافذة منزلقة من 10 أسئلة لكل مستخدم ─────
+    // بعد السؤال العاشر، السؤال الحادي عشر بيبدأ نافذة جديدة (نسيان كامل)
+    // بس البيانات القديمة تضل بالجدول (ما بتنمسح أبداً).
+    let conversationHistory: { role: "user" | "assistant"; content: string }[] = [];
+    let memoryWindowId: string | null = null;
+    let memoryTurnCount = 0;
 
-      try {
-        await awaitAllCallbacks();
-        (diag as any).callbacksFlushed = true;
-      } catch (e: unknown) {
-        (diag as any).callbacksFlushError = e instanceof Error ? e.message : String(e);
+    if (userId !== "anonymous") {
+      const { data: stateRow } = await supabaseAdmin
+        .from("rag_memory_state")
+        .select("current_window_id, turn_count")
+        .eq("user_id", userId)
+        .maybeSingle();
+
+      if (!stateRow) {
+        // أول سؤال لهاد المستخدم على الإطلاق
+        const { data: newState } = await supabaseAdmin
+          .from("rag_memory_state")
+          .insert({ user_id: userId })
+          .select("current_window_id, turn_count")
+          .single();
+        memoryWindowId = newState?.current_window_id ?? null;
+        memoryTurnCount = 0;
+      } else if (stateRow.turn_count >= 10) {
+        // وصلنا لـ 10 أسئلة بهاي النافذة → السؤال الجاي يبدأ نافذة جديدة (نسيان)
+        const { data: resetState } = await supabaseAdmin
+          .from("rag_memory_state")
+          .update({ current_window_id: crypto.randomUUID(), turn_count: 0, updated_at: new Date().toISOString() })
+          .eq("user_id", userId)
+          .select("current_window_id, turn_count")
+          .single();
+        memoryWindowId = resetState?.current_window_id ?? null;
+        memoryTurnCount = 0;
+      } else {
+        memoryWindowId = stateRow.current_window_id;
+        memoryTurnCount = stateRow.turn_count;
       }
 
-      if (_langSmithClient) {
-        try {
-          await _langSmithClient.awaitPendingTraceBatches();
-          (diag as any).langsmithBatchesFlushed = true;
-        } catch (e: unknown) {
-          (diag as any).langsmithBatchesFlushError = e instanceof Error ? e.message : String(e);
+      if (memoryWindowId) {
+        const { data: historyRows } = await supabaseAdmin
+          .from("rag_conversation_memory")
+          .select("question, answer")
+          .eq("user_id", userId)
+          .eq("window_id", memoryWindowId)
+          .order("turn_number", { ascending: true });
+
+        for (const row of historyRows ?? []) {
+          conversationHistory.push({ role: "user", content: row.question });
+          conversationHistory.push({ role: "assistant", content: row.answer });
         }
       }
 
-      return new Response(JSON.stringify({ diagnostics: diag }), {
-        status: 200,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      log("memory_window_resolved", { windowId: memoryWindowId, turnCount: memoryTurnCount });
     }
 
     // ── 2. Create Query Embedding (عبر LangChain) ───────────────────
@@ -208,15 +201,11 @@ serve(async (req: Request) => {
 
     let queryEmbedding: number[];
     try {
-      // Pass tracers so the embedding call is also recorded in LangSmith
-      queryEmbedding = await embeddings.embedQuery(query, {
-        callbacks: tracers,
-        runName: "rag-generate-embedding",
-      });
+      queryEmbedding = await embeddings.embedQuery(query);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Failed to create query embedding";
       log("embedding_failed", { err: message });
-      await flushTraces();
+      await flushTraces(langsmithClient);
       return new Response(
         JSON.stringify({
           error: { code: "EMBEDDING_FAILED", message, refundQuota: true },
@@ -245,11 +234,8 @@ serve(async (req: Request) => {
     let context = "";
     let sources: RagSource[] = [];
 
-    if (matches.length > 0) {
-      // Populate context and sources whenever any matches are returned from the DB.
-      // `grounded` remains a strict flag indicating whether top match meets the
-      // similarity threshold; even when below threshold we still surface the
-      // retrieved sources so the caller can inspect them.
+    if (matches.length > 0 && matches[0].similarity >= threshold) {
+      grounded = true;
       context = matches
         .map(
           (chunk, i) =>
@@ -267,13 +253,16 @@ serve(async (req: Request) => {
         content: chunk.content,
         metadata: {},
       }));
-
-      grounded = matches[0].similarity >= threshold;
     }
 
-    const systemPrompt = grounded
-      ? `You are StudyBuddy AI, a medical study assistant. Use ONLY the following retrieved reference material to answer the user's request. When information is present in the retrieved material, answer using that material and DO NOT invent or infer additional facts. Always include inline citations referencing the exact source(s) you used in square brackets using this format: "[Source 1: Guideline Name - Section Title]". After the main answer, append a clear "SOURCES" section that lists each retrieved source in order with its index, guideline name, section title (if any), and source URL (if any). If the retrieved material does not fully answer the user's question, explicitly say so and list what remains unknown. Do not fabricate sources; do not claim evidence you do not have.\n\nContext:\n${context}`
+    let systemPrompt = grounded
+      ? `You are StudyBuddy AI, a medical study assistant. Use ONLY the following retrieved reference material to answer the user's request. Always cite and reference the source guideline name (e.g., "[Source: Guideline Name - Section Title]") when citing facts in your answer. If the context does not fully cover the topic, say so explicitly rather than guessing.\n\nContext:\n${context}`
       : `You are StudyBuddy AI, a medical study assistant. No specific reference material was found in the knowledge base for this topic. Answer using your general medical knowledge, and note that this response is not grounded in a verified source.`;
+
+    // ── Fix 3: إذا في تاريخ محادثة، خبّر الموديل يستخدمه ──
+    if (conversationHistory.length > 0) {
+      systemPrompt += `\n\nIMPORTANT: You have access to the previous conversation history between you and this user (provided as prior user/assistant message pairs). Use this context to understand follow-up questions, resolve pronouns (e.g., "it", "that", "the same"), and maintain continuity. If the user refers to something from a previous turn, answer in that context.`;
+    }
 
     // ── 5. Call AI Provider (Chat Completion) عبر LangChain ─────────
     log("completion_start", { grounded, matchesCount: matches.length });
@@ -283,6 +272,7 @@ serve(async (req: Request) => {
       const response = await chatModel.invoke(
         [
           { role: "system", content: systemPrompt },
+          ...conversationHistory,
           { role: "user", content: query },
         ],
         { callbacks: tracers, runName: "rag-generate-completion" }
@@ -291,7 +281,7 @@ serve(async (req: Request) => {
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "AI provider request failed";
       log("completion_failed", { err: message });
-      await flushTraces();
+      await flushTraces(langsmithClient);
       return new Response(
         JSON.stringify({
           error: { code: "AI_PROVIDER_FAILED", message, refundQuota: true },
@@ -314,13 +304,36 @@ serve(async (req: Request) => {
         .then(({ error: logErr }) => {
           if (logErr) log("audit_log_failed", { err: logErr });
         });
+
+      // ── Fix 1 + 2: حفظ هاد الدور بالذاكرة — لازم ننتظرهم قبل ما نرجع الـ Response ──
+      // بدون await الـ Deno isolate بينقتل قبل ما توصل الكتابة لـ Supabase
+      if (memoryWindowId) {
+        const [memResult, stateResult] = await Promise.all([
+          supabaseAdmin
+            .from("rag_conversation_memory")
+            .insert({
+              user_id: userId,
+              window_id: memoryWindowId,
+              turn_number: memoryTurnCount + 1,
+              question: query,
+              answer,
+            }),
+          supabaseAdmin
+            .from("rag_memory_state")
+            .update({ turn_count: memoryTurnCount + 1, updated_at: new Date().toISOString() })
+            .eq("user_id", userId)
+            .eq("current_window_id", memoryWindowId),  // Fix 2: حماية من الكتابة على نافذة قديمة
+        ]);
+        if (memResult.error) log("memory_save_failed", { err: memResult.error });
+        if (stateResult.error) log("memory_state_update_failed", { err: stateResult.error });
+      }
     }
 
     log("rag_success", { elapsedMs: Date.now() - startedAt, grounded, sourcesCount: sources.length });
 
     // مهم بالـ Edge Functions: ننتظر إرسال أي traces معلقة لـ LangSmith
     // قبل ما نرجع الـ response ويتقفل الـ isolate، وإلا الـ traces بتنضاع
-    await flushTraces();
+    await flushTraces(langsmithClient);
 
     // ── 7. Return Success Response ──────────────────────────────────
     return new Response(
@@ -334,9 +347,6 @@ serve(async (req: Request) => {
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Internal server error";
     log("unexpected_error", { err: message });
-
-    // Even on unexpected errors, try to flush any partial traces
-    await flushTraces();
 
     return new Response(
       JSON.stringify({ error: { code: "INTERNAL_ERROR", message } }),

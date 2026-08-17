@@ -177,10 +177,13 @@ export function useAuth() {
       }
     });
 
-    const { data: subscription } = supabase.auth.onAuthStateChange((_event, newSession) => {
+    const { data: subscription } = supabase.auth.onAuthStateChange((event, newSession) => {
       setSession(newSession);
       setUser(newSession?.user ?? null);
       setLoading(false);
+
+      // If user confirms email via magic link, event will be USER_UPDATED
+      // The session will be refreshed automatically by Supabase
     });
 
     return () => {
@@ -191,32 +194,66 @@ export function useAuth() {
 
   const isAnonymous = Boolean(session?.user?.is_anonymous);
 
-  const signUp = async (email: string, password: string): Promise<{ error: string | null }> => {
+  const signUp = async (
+    email: string,
+    password: string
+  ): Promise<{ error: string | null; needsVerification: boolean; email?: string }> => {
     if (isAnonymous) {
       const { data, error } = await supabase.auth.updateUser({ email, password });
-      if (error) return { error: error.message };
-      const upgradedUserId = data.user?.id ?? session?.user?.id;
-      if (upgradedUserId) {
-        try {
-          await migrateLocalCardsToServer(upgradedUserId);
-        } catch {
-          toast({
-            title: "Couldn't sync local cards to your account, please try again later",
-            variant: "destructive",
-          });
-        }
-        try {
-          await migrateLocalStudyHistoryToServer(upgradedUserId);
-        } catch {
-          toast({
-            title: "Couldn't sync local study history to your account, please try again later",
-            variant: "destructive",
-          });
-        }
-      }
-      return { error: null };
+      if (error) return { error: error.message, needsVerification: false };
+      // updateUser for email change also requires verification
+      return { error: null, needsVerification: true, email };
     }
-    const { error } = await supabase.auth.signUp({ email, password });
+    const { data, error } = await supabase.auth.signUp({ email, password });
+    if (error) {
+      // Check if error indicates email already registered
+      if (error.message.includes("already registered") || error.message.includes("already exists")) {
+        return { error: "An account with this email already exists", needsVerification: false };
+      }
+      return { error: error.message, needsVerification: false };
+    }
+    // If no session returned, email confirmation is required
+    const needsVerification = !data.session;
+    return { error: null, needsVerification, email: data.user?.email };
+  };
+
+  const verifyOtp = async (
+    email: string,
+    token: string,
+    type: "signup" | "email_change" = "signup"
+  ): Promise<{ error: string | null }> => {
+    const { error } = await supabase.auth.verifyOtp({ email, token, type });
+    if (error) return { error: error.message };
+
+    // On successful verification, run migrations for anonymous upgrades
+    const { data: { user } } = await supabase.auth.getUser();
+    if (user && isAnonymous) {
+      try {
+        await migrateLocalCardsToServer(user.id);
+      } catch {
+        toast({
+          title: "Couldn't sync local cards to your account, please try again later",
+          variant: "destructive",
+        });
+      }
+      try {
+        await migrateLocalStudyHistoryToServer(user.id);
+      } catch {
+        toast({
+          title: "Couldn't sync local study history to your account, please try again later",
+          variant: "destructive",
+        });
+      }
+    }
+
+    return { error: null };
+  };
+
+  const resendSignUpOtp = async (
+    email: string,
+    type: "signup" | "email_change" = "signup"
+  ): Promise<{ error: string | null }> => {
+    const { error } = await supabase.auth.resend({ type, email });
     return { error: error?.message ?? null };
   };
 
@@ -283,5 +320,17 @@ export function useAuth() {
     return { error: error?.message ?? null };
   };
 
-  return { user, session, loading, isAnonymous, signUp, signIn, signOut, resetPasswordForEmail, updatePassword };
+  return {
+    user,
+    session,
+    loading,
+    isAnonymous,
+    signUp,
+    signIn,
+    signOut,
+    resetPasswordForEmail,
+    updatePassword,
+    verifyOtp,
+    resendSignUpOtp,
+  };
 }

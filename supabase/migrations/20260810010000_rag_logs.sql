@@ -13,7 +13,7 @@ create table if not exists public.rag_logs (
 alter table public.rag_logs enable row level security;
 
 -- Users can read their own logs
-create policy "Users can read own rag logs"
+create policy if not exists "Users can read own rag logs"
   on public.rag_logs
   for select
   using (auth.uid() = user_id);
