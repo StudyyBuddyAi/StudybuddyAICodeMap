@@ -408,9 +408,7 @@ const RagSearch = () => {
               style={{
                 display: "flex",
                 flexDirection: "column",
-                smDirection: "row",
                 alignItems: "start",
-                smItems: "center",
                 justifyContent: "space-between",
                 background: data.grounded
                   ? "linear-gradient(90deg, rgba(16, 185, 129, 0.06) 0%, transparent 100%)"
@@ -438,9 +436,9 @@ const RagSearch = () => {
                   }}
                 >
                   {data.grounded ? (
-                    <BookOpenCheck className="w-5 h-5 text-emerald-400 animate-pulse" />
+                    <BookOpenCheck className="w-5 h-5 text-success animate-pulse" />
                   ) : (
-                    <AlertTriangle className="w-5 h-5 text-amber-400" />
+                    <AlertTriangle className="w-5 h-5 text-warning" />
                   )}
                 </div>
                 <div>
@@ -496,7 +494,7 @@ const RagSearch = () => {
                   }}
                   className="hover:bg-muted"
                 >
-                  {copied ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4 text-muted-foreground" />}
+                  {copied ? <Check className="w-4 h-4 text-success" /> : <Copy className="w-4 h-4 text-muted-foreground" />}
                   {copied ? "Copied!" : "Copy Output"}
                 </button>
               </div>
@@ -591,7 +589,7 @@ const RagSearch = () => {
                             {/* Similarity Score Pillar */}
                             <div className="text-right">
                               <div className="text-[10px] uppercase font-mono font-bold text-muted-foreground tracking-wider mb-0.5">Similarity</div>
-                              <div className="text-sm font-mono font-bold text-emerald-400">
+                              <div className="text-sm font-mono font-bold text-success">
                                 {(source.similarity * 100).toFixed(1)}%
                               </div>
                             </div>

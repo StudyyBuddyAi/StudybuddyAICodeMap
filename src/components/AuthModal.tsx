@@ -120,8 +120,9 @@ const AuthModal = ({ open, onOpenChange }: AuthModalProps) => {
       setPendingVerification(true);
       setPendingEmail(email ?? signUpEmail);
       setOtpType(isAnonymous ? "email_change" : "signup");
-      setSignUpEmail("");
-      setSignUpPassword("");
+      // The typed password lives here from the form step through the OTP step,
+      // where verifyOtp applies it once the user is no longer anonymous. In
+      // memory only — never persisted anywhere. Cleared in handleVerifyOtp.
     } else {
       toast({ title: "Account created" });
       setSignUpEmail("");
@@ -138,7 +139,7 @@ const AuthModal = ({ open, onOpenChange }: AuthModalProps) => {
       return;
     }
     setOtpLoading(true);
-    const { error } = await verifyOtp(pendingEmail, otpCode, otpType);
+    const { error } = await verifyOtp(pendingEmail, otpCode, signUpPassword, otpType);
     setOtpLoading(false);
     if (error) {
       setOtpError(error);
@@ -148,6 +149,8 @@ const AuthModal = ({ open, onOpenChange }: AuthModalProps) => {
     setPendingVerification(false);
     setPendingEmail("");
     setOtpCode("");
+    setSignUpEmail("");
+    setSignUpPassword("");
     onOpenChange(false);
   };
 

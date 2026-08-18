@@ -114,5 +114,4 @@ const DashboardHero = ({
     </Card>
   );
 };
-
 export default DashboardHero;

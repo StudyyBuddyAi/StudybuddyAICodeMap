@@ -14,6 +14,7 @@ import ResetPassword from "./pages/ResetPassword.tsx";
 
 // Route pages are lazy-loaded so the heavy page chunks (Sheets, Flashcards,
 // QBank family) are only fetched on navigation instead of in the initial bundle.
+const Home = lazy(() => import("./pages/Home.tsx"));
 const Dashboard = lazy(() => import("./pages/Dashboard.tsx"));
 const Library = lazy(() => import("./pages/Library.tsx"));
 const Roadmap = lazy(() => import("./pages/Roadmap.tsx"));
@@ -59,6 +60,7 @@ const AppRoutes = () => {
       <Suspense fallback={<PageLoader context="generic" />}>
         <Routes location={displayLocation}>
           <Route path="/" element={<Index />} />
+          <Route path="/home" element={<Home />} />
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/roadmap" element={<Roadmap />} />
           <Route path="/sheets" element={<Sheets />} />

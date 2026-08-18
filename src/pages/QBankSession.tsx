@@ -203,7 +203,7 @@ const StethoscopePulse = ({ difficulty }: { difficulty: Difficulty }) => {
 
   return (
     <div className="flex items-center gap-2">
-      <FlaskConical className="h-3.5 w-3.5 text-muted-foreground/60" />
+      <FlaskConical className="h-3.5 w-3.5 text-muted-foreground" />
 
       <div className="flex items-end gap-[3px]" aria-label={`Difficulty: ${cfg.label}`}>
         {[0, 1, 2].map((i) => {
@@ -462,7 +462,7 @@ const MediaBlock = ({ media, context, onOpen }: MediaBlockProps) => {
                 </p>
               )}
               {m.license === 'CC-BY' && m.attribution && (
-                <p className="text-[10px] text-muted-foreground/50 leading-relaxed">
+                <p className="text-[10px] text-muted-foreground leading-relaxed">
                   {m.attribution}
                 </p>
               )}
@@ -577,7 +577,7 @@ const QuestionNavigator = ({
               const isSkipped = q ? skippedIds.includes(q.id) : false;
               const isFlaggedQ = q ? flaggedIds.has(q.id) : false;
 
-              let bg = "bg-muted/30 text-muted-foreground/40 border-border/20";
+              let bg = "bg-muted/30 text-muted-foreground border-border/20";
               if (isCurrent || isReviewingThis) {
                 bg = "bg-primary/20 text-primary border-primary/50";
               } else if (isAnswered) {

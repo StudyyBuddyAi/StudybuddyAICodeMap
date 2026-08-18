@@ -23,6 +23,23 @@
     <meta name="twitter:image" content="/og-preview.png" />
 
     <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+    <meta name="color-scheme" content="light dark" />
+
+    <!-- Applies the stored theme before first paint. Without this every route
+         flashes light while React boots, and routes that never mount a
+         ThemeToggle (/reset-password, /404) would ignore the stored choice
+         entirely. Kept inline and synchronous on purpose. -->
+    <script>
+      (function () {
+        try {
+          var saved = localStorage.getItem("theme");
+          var dark = saved
+            ? saved === "dark"
+            : window.matchMedia("(prefers-color-scheme: dark)").matches;
+          document.documentElement.classList.toggle("dark", dark);
+        } catch (e) {}
+      })();
+    </script>
 </head>
 
   <body>

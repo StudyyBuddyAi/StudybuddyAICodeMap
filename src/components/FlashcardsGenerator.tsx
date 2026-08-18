@@ -9,7 +9,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { History, Loader2, Layers, PenLine } from "lucide-react";
+import { History, Loader2, Layers, PenLine, Search, X, Check, Sparkles, ChevronRight, ArrowRight, Brain, Heart, Activity, Stethoscope } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useFlashcardDeck } from "@/hooks/use-flashcard-deck";
 import { useUsageLimit, MAX_DAILY_CARDS } from "@/hooks/use-usage-limit";
@@ -39,6 +39,28 @@ interface FlashcardsGeneratorProps {
 }
 
 const RECENT_FLASHCARD_TOPICS_KEY = "sb_recent_flashcard_topics_v1";
+
+const POPULAR_TOPICS = [
+  { label: "Myocardial Infarction", icon: "💔", category: "Cardiology" },
+  { label: "Pneumonia", icon: "🫁", category: "Pulmonology" },
+  { label: "Diabetic Ketoacidosis", icon: "🍬", category: "Endocrinology" },
+  { label: "Ischemic Stroke", icon: "🧠", category: "Neurology" },
+  { label: "Nephrotic Syndrome", icon: "🫀", category: "Nephrology" },
+  { label: "Sepsis", icon: "🚑", category: "Critical Care" },
+];
+
+const CARD_COUNT_OPTIONS = [
+  { value: "5", label: "5 cards", description: "Quick review" },
+  { value: "10", label: "10 cards", description: "Standard session" },
+  { value: "20", label: "20 cards", description: "Deep dive" },
+  { value: "30", label: "30 cards", description: "Comprehensive" },
+];
+
+const EXAM_MODES = [
+  { value: "General", label: "General", description: "Broad medical knowledge" },
+  { value: "USMLE Step 1", label: "Step 1", description: "Basic sciences" },
+  { value: "USMLE Step 2", label: "Step 2", description: "Clinical knowledge" },
+];
 
 const FlashcardsGenerator = ({ onGeneratingChange, onGenerated }: FlashcardsGeneratorProps) => {
   const [topic, setTopic] = useState("");
@@ -71,7 +93,12 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated }: FlashcardsGene
     refresh: refreshUsage,
   } = useUsageLimit();
   const { premiumRemaining, isPremiumHookActive } = usePremiumHook();
-  const { preferredModel, setPreferredModel, saving: modelSaving } = useModelPreference();
+  const {
+    preferredModel,
+    setPreferredModel,
+    saving: modelSaving,
+    isLoading: modelLoading,
+  } = useModelPreference();
   const { user, isAnonymous } = useAuth();
   const {
     canUseCitation,
@@ -292,127 +319,135 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated }: FlashcardsGene
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
-    <Card className="glass-card animate-fade-in rounded-xl">
-      <CardContent className="px-4 py-5 space-y-4">
+    <Card className="glass-card animate-fade-in rounded-2xl border border-border bg-card shadow-sm">
+      <CardContent className="p-6 space-y-6">
         {!isLoggedIn && (
           <CitationCTABanner onSignInClick={() => setAuthModalOpen(true)} />
         )}
 
-        <div className="space-y-1.5">
-          <label className="block text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-            Topic
-          </label>
-          {!showTextarea ? (
-            <div className="rounded-lg border border-border bg-background p-3 space-y-2.5">
-              <p className="text-xs font-medium text-muted-foreground">
-                Pick a topic to start — or type your own
-              </p>
-              <div className="flex flex-wrap gap-1.5">
-                {[
-                  "Myocardial Infarction",
-                  "Pneumonia",
-                  "Ischemic Stroke",
-                  "Diabetic Ketoacidosis",
-                  "Nephrotic Syndrome",
-                ].map((label) => (
-                  <button
-                    key={label}
-                    type="button"
-                    onClick={() => {
-                      setTopic(label);
-                      setShowTextarea(false);
-                      handleGenerate(label);
-                    }}
-                    className="inline-flex h-7 items-center px-2.5 rounded-md text-xs font-medium border border-border bg-card text-foreground/80 hover:border-primary/50 hover:text-primary transition-colors cursor-pointer"
-                  >
-                    {label}
-                  </button>
-                ))}
-                <button
-                  type="button"
-                  onClick={() => setShowTextarea(true)}
-                  className="inline-flex h-7 items-center gap-1.5 px-2.5 rounded-md text-xs font-medium border border-dashed border-border bg-transparent text-muted-foreground hover:border-primary/40 hover:text-primary transition-colors cursor-pointer"
-                >
-                  <PenLine className="h-3.5 w-3.5" />
-                  Type my own topic
-                </button>
-              </div>
-            </div>
-          ) : (
+        {/* Step 1: Topic Selection */}
+        <div className="space-y-4">
+          <div className="flex items-center gap-2">
+            <div className="flex items-center justify-center w-7 h-7 rounded-full bg-primary text-primary-foreground text-xs font-bold">1</div>
+            <h2 className="text-sm font-serif font-semibold text-foreground">Medical Topic</h2>
+          </div>
+          
+          <div className="space-y-3">
             <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
               <Textarea
-                autoFocus
-                placeholder="Enter a topic to drill (e.g., 'DKA', 'Heart failure pharmacology')"
+                placeholder="Search or type a medical topic (e.g., Heart Failure, Pneumonia, Diabetes...)"
                 value={topic}
                 onChange={(e) => setTopic(e.target.value)}
-                className="min-h-[80px] resize-y text-sm leading-relaxed"
+                className="min-h-[80px] pl-10 pr-10 text-sm leading-relaxed rounded-xl border-border focus:border-primary focus:ring-2 focus:ring-primary"
               />
               {topic && (
                 <button
                   type="button"
-                  onClick={() => { setTopic(""); setShowTextarea(false); }}
-                  className="absolute top-2 right-2 text-muted-foreground/50 hover:text-muted-foreground transition-colors text-lg leading-none"
+                  onClick={() => setTopic("")}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-muted-foreground hover:text-foreground transition-colors"
                   aria-label="Clear"
                 >
-                  ×
+                  <X className="w-4 h-4" />
                 </button>
               )}
             </div>
-          )}
-        </div>
-
-        <div className="space-y-1">
-          <label className="block text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-            Exam Mode
-          </label>
-          <div className="flex flex-wrap gap-1.5">
-            {[
-              { value: "General", label: "General" },
-              { value: "USMLE Step 1", label: "Step 1" },
-              { value: "USMLE Step 2", label: "Step 2" },
-            ].map((opt) => {
-              const active = examMode === opt.value;
-              return (
-                <button
-                  key={opt.value}
-                  type="button"
-                  onClick={() => setExamMode(opt.value)}
-                  aria-pressed={active}
-                  className={`inline-flex h-7 items-center px-2.5 rounded-md border text-xs font-medium transition-colors cursor-pointer ${
-                    active
-                      ? "bg-primary/10 border-primary/40 text-primary"
-                      : "bg-card border-border text-muted-foreground hover:border-primary/30 hover:text-foreground"
-                  }`}
-                >
-                  {opt.label}
-                </button>
-              );
-            })}
+            
+            <div className="pt-2">
+              <p className="font-mono text-[11px] font-medium tracking-widest uppercase text-muted-foreground mb-3">Popular Topics</p>
+              <div className="grid grid-cols-2 gap-2">
+                {POPULAR_TOPICS.slice(0, 6).map(({ label, icon, category }) => (
+                  <button
+                    key={label}
+                    type="button"
+                    onClick={() => { setTopic(label); setShowTextarea(false); }}
+                    className="group flex flex-col items-center gap-1.5 p-3 rounded-xl border border-border bg-card hover:border-primary hover:shadow-sm transition-all duration-200"
+                  >
+                    <span className="text-xl">{icon}</span>
+                    <div className="text-center">
+                      <p className="text-xs font-medium text-foreground group-hover:text-primary leading-tight">{label}</p>
+                      <p className="text-[10px] text-muted-foreground">{category}</p>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
         </div>
 
-        <div className="space-y-1">
-          <label className="block text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-            Number of cards
-          </label>
-          <Select value={cardCount} onValueChange={setCardCount}>
-            <SelectTrigger className="h-8 text-xs">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="5">5 cards</SelectItem>
-              <SelectItem value="10">10 cards</SelectItem>
-              <SelectItem value="12">12 cards</SelectItem>
-              <SelectItem value="15">15 cards</SelectItem>
-              <SelectItem value="20">20 cards</SelectItem>
-            </SelectContent>
-          </Select>
+        {/* Step 2: Configure */}
+        <div className="space-y-4">
+          <div className="flex items-center gap-2">
+            <div className="flex items-center justify-center w-7 h-7 rounded-full bg-info text-primary-foreground text-xs font-bold">2</div>
+            <h2 className="text-sm font-serif font-semibold text-foreground">Configure</h2>
+          </div>
+          
+          <div className="space-y-4">
+            {/* Exam Mode */}
+            <div className="space-y-2">
+              <label className="block font-mono text-[11px] font-medium tracking-widest uppercase text-muted-foreground">
+                Exam Mode
+              </label>
+              <div className="flex flex-wrap gap-2">
+                {EXAM_MODES.map((opt) => {
+                  const active = examMode === opt.value;
+                  return (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      onClick={() => setExamMode(opt.value)}
+                      aria-pressed={active}
+                      className={`inline-flex flex-col items-start gap-1 p-3 rounded-lg border text-left transition-all duration-200 ${
+                        active
+                          ? "bg-info-soft border-info text-info"
+                          : "bg-card border-border text-muted-foreground hover:border-info hover:text-info"
+                      }`}
+                    >
+                      <span className="text-sm font-medium">{opt.label}</span>
+                      <span className="text-[10px] text-muted-foreground">{opt.description}</span>
+                      {active && <Check className="w-3 h-3 text-info" />}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Number of Cards */}
+            <div className="space-y-2">
+              <label className="block font-mono text-[11px] font-medium tracking-widest uppercase text-muted-foreground">
+                Number of Cards
+              </label>
+              <div className="grid grid-cols-2 gap-2">
+                {CARD_COUNT_OPTIONS.map((opt) => {
+                  const active = cardCount === opt.value;
+                  return (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      onClick={() => setCardCount(opt.value)}
+                      aria-pressed={active}
+                      className={`inline-flex flex-col items-start gap-1 p-3 rounded-lg border text-left transition-all duration-200 ${
+                        active
+                          ? "bg-primary/10 border-primary text-primary"
+                          : "bg-card border-border text-muted-foreground hover:border-primary hover:text-primary"
+                      }`}
+                    >
+                      <span className="text-sm font-medium">{opt.label}</span>
+                      <span className="text-[10px] text-muted-foreground">{opt.description}</span>
+                      {active && <Check className="w-3 h-3 text-primary" />}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
         </div>
 
+        {/* Generate Button */}
         <Button
-          className="w-full h-10 text-sm font-medium rounded-lg"
+          className="w-full h-12 text-sm font-semibold rounded-xl bg-primary hover:bg-primary/90 text-primary-foreground shadow-md hover:shadow-lg transition-all duration-200"
           onClick={() => handleGenerate()}
-          disabled={loading}
+          disabled={loading || !topic.trim()}
         >
           {loading ? (
             <>
@@ -421,68 +456,64 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated }: FlashcardsGene
             </>
           ) : (
             <>
-              <Layers className="mr-2 h-4 w-4" />
-              Generate Cards
+              <Sparkles className="mr-2 h-4 w-4" />
+              Generate Flashcards
+              <ArrowRight className="ml-2 h-4 w-4" />
             </>
           )}
         </Button>
 
+        {/* Usage Indicator */}
         {!pro && (
-          <div className="text-center text-xs text-muted-foreground space-y-1">
+          <div className="rounded-lg bg-secondary border border-border p-3 text-center">
             {isCardsLimited ? (
-              <span className="text-amber-500 dark:text-amber-400 font-medium block">
+              <span className="text-warning font-medium text-xs block">
                 Daily limit reached ·{" "}
                 <button
                   type="button"
-                  className="underline hover:text-amber-400 transition-colors"
+                  className="underline hover:text-warning transition-colors"
                   onClick={() => setGoProOpen(true)}
                 >
-                  Go Pro for Claude + unlimited
+                  Upgrade for unlimited
                 </button>
               </span>
             ) : (
-              <span className="block">{remaining} / {MAX_DAILY_CARDS} cards generations today · Resets at midnight</span>
-            )}
-            {isPremiumHookActive ? (
-              <span className="text-violet-400 font-medium block">
-                ✦ {premiumRemaining} Claude generation{premiumRemaining !== 1 ? "s" : ""} left ·{" "}
-                <button
-                  type="button"
-                  className="underline hover:text-violet-300 transition-colors"
-                  onClick={() => setGoProOpen(true)}
-                >
-                  Go Pro for unlimited Claude
-                </button>
+              <span className="text-muted-foreground text-xs block">
+                {remaining} / {MAX_DAILY_CARDS} cards today · Resets at midnight
               </span>
-            ) : !isCardsLimited ? (
-              <span className="text-muted-foreground/60 block">Powered by GPT-OSS 20B</span>
-            ) : null}
+            )}
+            {isPremiumHookActive && (
+              <span className="text-info font-medium text-xs block mt-1">
+                ✦ {premiumRemaining} Claude generation{premiumRemaining !== 1 ? "s" : ""} left
+              </span>
+            )}
           </div>
         )}
         {pro && (
-          <div className="text-center text-xs text-muted-foreground">
-            <span className="text-primary font-medium">
-              ✦ Powered by {preferredModel === "claude" ? "Claude Haiku 4.5" : "GPT-OSS 20B"}
+          <div className="rounded-lg bg-primary/10 border border-primary/30 p-3 text-center">
+            <span className="text-primary font-medium text-xs">
+              ✦ Pro: {preferredModel === "claude" ? "Claude Haiku 4.5" : "GPT-OSS 20B"}
             </span>
             <span className="mx-2 opacity-40">·</span>
             <button
               type="button"
               className="underline hover:text-foreground transition-colors"
               onClick={() => setPreferredModel(preferredModel === "claude" ? "gpt-oss" : "claude")}
-              disabled={modelSaving}
+              disabled={modelSaving || modelLoading}
             >
               Switch to {preferredModel === "claude" ? "GPT-OSS 20B" : "Claude Haiku 4.5"}
             </button>
           </div>
         )}
 
+        {/* Recent Topics */}
         {recentTopics.length > 0 && (
-          <div className="space-y-1.5 pt-1 border-t border-border">
-            <p className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wider text-muted-foreground pt-2.5">
+          <div className="space-y-3 pt-4 border-t border-border">
+            <p className="flex items-center gap-2 font-mono text-[11px] font-medium tracking-widest uppercase text-muted-foreground">
               <History className="h-3 w-3" />
-              Recent
+              Recent Topics
             </p>
-            <div className="flex flex-wrap gap-1.5 max-h-16 overflow-y-auto">
+            <div className="flex flex-wrap gap-2">
               {recentTopics.map((t) => (
                 <button
                   key={t}
@@ -493,8 +524,9 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated }: FlashcardsGene
                     setShowTextarea(false);
                     handleGenerate(t);
                   }}
-                  className="max-w-full truncate inline-flex h-7 items-center px-2.5 rounded-md text-xs font-medium border border-border bg-card text-muted-foreground hover:border-primary/40 hover:text-primary transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-default"
+                  className="max-w-full truncate inline-flex items-center gap-1.5 h-8 px-3 rounded-lg border border-border bg-card text-muted-foreground text-xs font-medium hover:border-primary hover:text-primary transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-default"
                 >
+                  <ChevronRight className="h-3 w-3" />
                   {t}
                 </button>
               ))}

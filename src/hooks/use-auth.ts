@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { Session, User } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
+import { isDisposableEmail } from "@/lib/email-domains";
 
 const STORAGE_KEY = "studybuddy_decks_v1";
 const HISTORY_STORAGE_KEY = "studybuddy_history";
@@ -198,12 +199,20 @@ export function useAuth() {
     email: string,
     password: string
   ): Promise<{ error: string | null; needsVerification: boolean; email?: string }> => {
+    if (isDisposableEmail(email)) {
+      return { error: "Please use a permanent email address.", needsVerification: false };
+    }
+
+    // Signup is two-phase because GoTrue refuses to set a password on an anonymous
+    // user: updateUser({ email }) writes to `email_change` (not `email`) and leaves
+    // is_anonymous true until the OTP is confirmed. The password is applied in
+    // verifyOtp, once the user is no longer anonymous.
     if (isAnonymous) {
-      const { data, error } = await supabase.auth.updateUser({ email, password });
+      const { error } = await supabase.auth.updateUser({ email });
       if (error) return { error: error.message, needsVerification: false };
-      // updateUser for email change also requires verification
       return { error: null, needsVerification: true, email };
     }
+
     const { data, error } = await supabase.auth.signUp({ email, password });
     if (error) {
       // Check if error indicates email already registered
@@ -220,16 +229,23 @@ export function useAuth() {
   const verifyOtp = async (
     email: string,
     token: string,
+    password: string,
     type: "signup" | "email_change" = "signup"
   ): Promise<{ error: string | null }> => {
     const { error } = await supabase.auth.verifyOtp({ email, token, type });
     if (error) return { error: error.message };
 
-    // On successful verification, run migrations for anonymous upgrades
-    const { data: { user } } = await supabase.auth.getUser();
-    if (user && isAnonymous) {
+    // The anonymous-upgrade path above could not set the password before
+    // verification, so apply it now that the user is no longer anonymous.
+    const { error: passwordError } = await supabase.auth.updateUser({ password });
+    if (passwordError) return { error: passwordError.message };
+
+    const { data: { user: confirmedUser } } = await supabase.auth.getUser();
+    const uid = confirmedUser?.id;
+
+    if (uid) {
       try {
-        await migrateLocalCardsToServer(user.id);
+        await migrateLocalCardsToServer(uid);
       } catch {
         toast({
           title: "Couldn't sync local cards to your account, please try again later",
@@ -237,7 +253,7 @@ export function useAuth() {
         });
       }
       try {
-        await migrateLocalStudyHistoryToServer(user.id);
+        await migrateLocalStudyHistoryToServer(uid);
       } catch {
         toast({
           title: "Couldn't sync local study history to your account, please try again later",
@@ -303,14 +319,20 @@ export function useAuth() {
     return { error: null };
   };
 
+  // Re-establish an anonymous session immediately: the anon sign-in at mount only
+  // runs inside the initial getSession() branch, so without this the app is left
+  // with no JWT on an app route and every RLS-backed query fails until a reload.
   const signOut = async (): Promise<{ error: string | null }> => {
     const { error } = await supabase.auth.signOut();
+    if (!error) {
+      await supabase.auth.signInAnonymously();
+    }
     return { error: error?.message ?? null };
   };
 
   const resetPasswordForEmail = async (email: string): Promise<{ error: string | null }> => {
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: "https://www.studyybuddyai.com/reset-password",
+      redirectTo: `${import.meta.env.VITE_SITE_URL}/reset-password`,
     });
     return { error: error?.message ?? null };
   };

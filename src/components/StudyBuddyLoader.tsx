@@ -37,7 +37,7 @@ const StudyBuddyLoader = ({
       </div>
 
       {message && (
-        <p className="text-xs font-medium text-muted-foreground/60 tracking-wide">
+        <p className="text-xs font-medium text-muted-foreground tracking-wide">
           {message}
         </p>
       )}

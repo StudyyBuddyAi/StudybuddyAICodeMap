@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef } from "react";
+import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { BookOpen, Brain, History, Loader2, PenLine, Settings2, Stethoscope, X } from "lucide-react";
-import SectionSkeleton from "@/components/SectionSkeleton";
+import { AlertTriangle, ArrowRight, BookOpen, Brain, Check, ChevronRight, FileDown, History, Loader2, Play, Search, Settings2, Share2, Sparkles, Stethoscope, X, Zap } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import OutputSection, { type CitationState } from "@/components/OutputSection";
 import { useUsageLimit, MAX_DAILY_SHEETS } from "@/hooks/use-usage-limit";
@@ -13,7 +13,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { callMedicalNotes } from "@/lib/callMedicalNotes";
 import { useFlashcardDeck } from "@/hooks/use-flashcard-deck";
 import { parseFlashcardsFromOutput } from "@/lib/parse-flashcards";
-import { sanitizeJsonOutput } from "@/lib/sanitize-json";
+import { parsePartialSheet, parseSheetOutput } from "@/lib/parse-partial-sheet";
 import {
   type GeneratedSheet,
   parseStoredSheet,
@@ -28,6 +28,7 @@ import { startTopProgress, finishTopProgress } from "@/components/TopProgressBar
 import { useStudyHistory, type StudyHistoryItem } from "@/hooks/use-study-history";
 import { usePersona, type Persona } from "@/hooks/use-persona";
 import { timeAgo } from "@/lib/utils";
+import { sheetToPlainText } from "@/lib/sheet-to-text";
 
 export interface SheetGeneratorPrefill {
   input: string;
@@ -41,6 +42,22 @@ interface SheetGeneratorProps {
 
 const RECENT_TOPICS_KEY = "sb_recent_topics_v1";
 
+/**
+ * Stand-in for the moments before the first section lands, so the document
+ * renders its full structure from the first frame instead of swapping a
+ * placeholder block out for the real one.
+ */
+const EMPTY_SHEET: GeneratedSheet = {
+  overview: "",
+  memoryHooks: [],
+  clinicalApproach: "",
+  keyPoints: [],
+  examTraps: [],
+  flashcards: [],
+  referenceNote: "",
+};
+const EMPTY_SHEET_JSON = JSON.stringify(EMPTY_SHEET);
+
 interface PillGroupProps {
   label: string;
   options: { value: string; label: string }[];
@@ -50,58 +67,26 @@ interface PillGroupProps {
 
 /** Inline pill toggle group — all options visible, tap to select. */
 const PillGroup = ({ label, options, value, onChange }: PillGroupProps) => (
-  <div style={{ marginBottom: 4 }}>
-    <label
-      style={{
-        display: "block",
-        fontFamily: "var(--font-mono)",
-        fontSize: 11,
-        fontWeight: 500,
-        letterSpacing: "0.12em",
-        textTransform: "uppercase",
-        color: "var(--fg-muted)",
-        marginBottom: 6,
-      }}
-    >
+  <div className="mb-4">
+    <label className="block font-mono text-[11px] font-medium tracking-widest uppercase text-muted-foreground mb-2">
       {label}
     </label>
-    <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+    <div className="flex flex-wrap gap-2">
       {options.map((opt) => {
         const active = value === opt.value;
         return (
           <button
-            key={opt.value}
+            key={opt.value} 
             type="button"
             onClick={() => onChange(opt.value)}
             aria-pressed={active}
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              height: 28,
-              padding: "0 10px",
-              borderRadius: "var(--radius-sm)",
-              border: active
-                ? "1px solid var(--accent)"
-                : "1px solid var(--border)",
-              background: active ? "var(--accent-soft)" : "var(--bg-elevated)",
-              color: active ? "var(--accent)" : "var(--fg-muted)",
-              fontFamily: "var(--font-sans)",
-              fontSize: 12,
-              fontWeight: 500,
-              cursor: "pointer",
-              transition: "all var(--dur-micro) var(--ease-out)",
-            }}
-            onMouseEnter={(e) => {
-              if (active) return;
-              e.currentTarget.style.borderColor = "var(--border-strong)";
-              e.currentTarget.style.color = "var(--fg)";
-            }}
-            onMouseLeave={(e) => {
-              if (active) return;
-              e.currentTarget.style.borderColor = "var(--border)";
-              e.currentTarget.style.color = "var(--fg-muted)";
-            }}
+            className={`inline-flex items-center gap-2 h-9 px-4 rounded-lg text-sm font-medium transition-all duration-200 ${
+              active
+                ? "bg-primary border-primary text-primary-foreground shadow-md"
+                : "bg-card border-border text-muted-foreground hover:border-primary hover:text-primary"
+            } border`}
           >
+            {active && <Check className="w-4 h-4" />}
             {opt.label}
           </button>
         );
@@ -134,9 +119,22 @@ function sectionHasContent(sheet: GeneratedSheet, key: string): boolean {
  * Sticky right-rail navigator. Lists the sheet's non-empty sections, smooth-
  * scrolls to a section on click, and highlights the section the reader is on
  * via an IntersectionObserver watching each `[data-section-key]` card.
+ *
+ * While streaming (`readyKeys` given) it lists every section up front, greying
+ * the ones still to come — the rail has to hold its width from the first frame
+ * or it squeezes the document out from under the reader when it appears.
  */
-const SheetSectionNav = ({ sheet }: { sheet: GeneratedSheet }) => {
-  const items = SECTION_NAV_ITEMS.filter((it) => sectionHasContent(sheet, it.key));
+const SheetSectionNav = ({
+  sheet,
+  readyKeys,
+}: {
+  sheet: GeneratedSheet;
+  readyKeys?: string[];
+}) => {
+  const streaming = readyKeys !== undefined;
+  const items = streaming
+    ? SECTION_NAV_ITEMS
+    : SECTION_NAV_ITEMS.filter((it) => sectionHasContent(sheet, it.key));
   const [activeKey, setActiveKey] = useState<string>(items[0]?.key ?? "");
 
   useEffect(() => {
@@ -172,53 +170,29 @@ const SheetSectionNav = ({ sheet }: { sheet: GeneratedSheet }) => {
   if (!items.length) return null;
 
   return (
-    <div style={{ paddingTop: 4 }}>
-      <p
-        style={{
-          fontFamily: "var(--font-mono)",
-          fontSize: 11,
-          fontWeight: 500,
-          letterSpacing: "0.14em",
-          textTransform: "uppercase",
-          color: "var(--fg-muted)",
-          marginBottom: 12,
-          paddingLeft: 12,
-        }}
-      >
+    <div className="pt-1">
+      <p className="font-mono text-[11px] font-medium tracking-widest uppercase text-muted-foreground mb-3 pl-3">
         On this sheet
       </p>
-      <nav style={{ display: "flex", flexDirection: "column" }}>
+      <nav className="flex flex-col">
         {items.map((it) => {
-          const active = activeKey === it.key;
+          const pending = streaming && !readyKeys!.includes(it.key);
+          const active = !pending && activeKey === it.key;
           return (
             <button
               key={it.key}
               type="button"
+              disabled={pending}
               onClick={() => scrollToSection(it.key)}
               aria-current={active ? "true" : undefined}
-              style={{
-                border: "none",
-                borderLeft: active
-                  ? "2px solid var(--accent)"
-                  : "2px solid var(--border)",
-                padding: "6px 0 6px 12px",
-                textAlign: "left",
-                fontFamily: "var(--font-sans)",
-                fontSize: 13,
-                lineHeight: 1.3,
-                fontWeight: active ? 500 : 400,
-                color: active ? "var(--accent)" : "var(--fg-muted)",
-                background: "transparent",
-                cursor: "pointer",
-                transition:
-                  "color var(--dur-micro) var(--ease-out), border-color var(--dur-micro) var(--ease-out)",
-              }}
-              onMouseEnter={(e) => {
-                if (!active) e.currentTarget.style.color = "var(--fg)";
-              }}
-              onMouseLeave={(e) => {
-                if (!active) e.currentTarget.style.color = "var(--fg-muted)";
-              }}
+              className={`border-none border-l-2 bg-transparent py-1.5 pl-3 text-left text-sm transition-all duration-200 ${
+                active
+                  ? "border-l-primary text-primary font-medium"
+                  : pending
+                  ? // Not streamed in yet: dimmer than a live entry, and inert.
+                    "border-l-border text-muted-foreground/50 cursor-default"
+                  : "border-l-border text-muted-foreground hover:text-foreground"
+              }`}
             >
               {it.label}
             </button>
@@ -233,38 +207,29 @@ const SheetSectionNav = ({ sheet }: { sheet: GeneratedSheet }) => {
 
 // ── Empty state ──────────────────────────────────────────────────────────────
 
-const QUICKSTART_TOPICS = ["Heart Failure", "Pneumonia", "Diabetic Ketoacidosis"];
+const QUICKSTART_TOPICS = [
+  { label: "Heart Failure", icon: "❤️", category: "Cardiology" },
+  { label: "Pneumonia", icon: "🫁", category: "Pulmonology" },
+  { label: "Diabetic Ketoacidosis", icon: "🍬", category: "Endocrinology" },
+  { label: "Ischemic Stroke", icon: "🧠", category: "Neurology" },
+  { label: "Nephrotic Syndrome", icon: "🫘", category: "Nephrology" },
+  { label: "Myocardial Infarction", icon: "💔", category: "Cardiology" },
+];
 
 const QuickstartChips = ({ onStartTopic }: { onStartTopic: (label: string) => void }) => (
   <div className="flex flex-wrap justify-center gap-2">
-    {QUICKSTART_TOPICS.map((label) => (
+    {QUICKSTART_TOPICS.map(({ label, icon, category }) => (
       <button
         key={label}
         type="button"
         onClick={() => onStartTopic(label)}
-        style={{
-          padding: "8px 16px",
-          borderRadius: "var(--radius-md)",
-          border: "1px solid var(--border)",
-          background: "transparent",
-          fontFamily: "var(--font-sans)",
-          fontSize: 13,
-          fontWeight: 500,
-          color: "var(--fg-muted)",
-          cursor: "pointer",
-          transition:
-            "border-color var(--dur-micro) var(--ease-out), color var(--dur-micro) var(--ease-out)",
-        }}
-        onMouseEnter={(e) => {
-          e.currentTarget.style.borderColor = "var(--accent)";
-          e.currentTarget.style.color = "var(--accent)";
-        }}
-        onMouseLeave={(e) => {
-          e.currentTarget.style.borderColor = "var(--border)";
-          e.currentTarget.style.color = "var(--fg-muted)";
-        }}
+        className="group flex flex-col items-center gap-2 p-4 rounded-xl border border-border bg-card hover:border-primary hover:shadow-md transition-all duration-200"
       >
-        {label}
+        <span className="text-2xl">{icon}</span>
+        <div className="text-center">
+          <p className="text-sm font-medium text-foreground group-hover:text-primary">{label}</p>
+          <p className="text-[11px] text-muted-foreground">{category}</p>
+        </div>
       </button>
     ))}
   </div>
@@ -307,47 +272,16 @@ const SheetsEmptyState = ({ onStartTopic, onSelectHistory }: SheetsEmptyStatePro
   // New users (no history): the original topic-picker empty state.
   if (history.length === 0) {
     return (
-      <div
-        className="animate-fade-in"
-        style={{
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          justifyContent: "center",
-          gap: 20,
-          borderRadius: "var(--radius-lg)",
-          border: "1px dashed var(--border-strong)",
-          padding: "80px 24px",
-          textAlign: "center",
-        }}
-      >
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            width: 48,
-            height: 48,
-            borderRadius: "var(--radius-lg)",
-            background: "var(--accent-soft)",
-          }}
-        >
-          <Stethoscope style={{ width: 24, height: 24, color: "var(--accent)" }} />
+      <div className="animate-fade-in flex flex-col items-center justify-center gap-6 rounded-2xl border border-border bg-card px-8 py-16 text-center shadow-sm">
+        <div className="flex items-center justify-center w-20 h-20 rounded-3xl bg-primary/15 shadow-lg">
+          <Stethoscope className="w-10 h-10 text-primary" />
         </div>
-        <div>
-          <p
-            style={{
-              fontFamily: "var(--font-sans)",
-              fontSize: 14,
-              fontWeight: 500,
-              color: "var(--fg)",
-              marginBottom: 4,
-            }}
-          >
-            Pick a topic to generate your study sheet
-          </p>
-          <p style={{ fontSize: 13, color: "var(--fg-muted)" }}>
-            Your sheet will build here, section by section.
+        <div className="space-y-3">
+          <h3 className="text-xl font-serif font-semibold text-foreground">
+            Start Your Study Journey
+          </h3>
+          <p className="text-base text-muted-foreground max-w-md">
+            Choose a medical topic below or type your own to generate a comprehensive study sheet with AI-powered insights.
           </p>
         </div>
         <QuickstartChips onStartTopic={onStartTopic} />
@@ -359,11 +293,12 @@ const SheetsEmptyState = ({ onStartTopic, onSelectHistory }: SheetsEmptyStatePro
   const recent = history.slice(0, 4);
   return (
     <div className="animate-fade-in space-y-6">
-      <div className="space-y-3">
-        <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-          Continue studying
-        </p>
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-serif font-semibold text-foreground">Continue Studying</h3>
+          <span className="text-xs text-muted-foreground">{recent.length} recent sheets</span>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
           {recent.map((item) => {
             const chips = [item.modeInfo?.examMode, item.modeInfo?.difficulty]
               .filter(Boolean)
@@ -373,37 +308,20 @@ const SheetsEmptyState = ({ onStartTopic, onSelectHistory }: SheetsEmptyStatePro
                 key={item.id}
                 type="button"
                 onClick={() => onSelectHistory(item)}
-                style={{
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: 6,
-                  borderRadius: "var(--radius-md)",
-                  border: "1px solid var(--border)",
-                  background: "var(--bg-elevated)",
-                  padding: "14px 16px",
-                  textAlign: "left",
-                  cursor: "pointer",
-                  transition:
-                    "border-color var(--dur-micro) var(--ease-out), transform var(--dur-micro) var(--ease-out)",
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.borderColor = "var(--border-strong)";
-                  e.currentTarget.style.transform = "translateY(-2px)";
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.borderColor = "var(--border)";
-                  e.currentTarget.style.transform = "none";
-                }}
+                className="group flex flex-col gap-2 rounded-xl border border-border bg-card p-4 text-left hover:border-primary hover:shadow-md hover:-translate-y-0.5 transition-all duration-200"
               >
-                <p className="truncate" style={{ fontSize: 13, fontWeight: 500, color: "var(--fg)" }}>
-                  {item.topic}
-                </p>
+                <div className="flex items-start justify-between gap-2">
+                  <p className="truncate text-sm font-medium text-foreground group-hover:text-primary leading-tight">
+                    {item.topic}
+                  </p>
+                  <ChevronRight className="w-4 h-4 text-muted-foreground group-hover:text-primary flex-shrink-0" />
+                </div>
                 {chips && (
-                  <p className="truncate" style={{ fontSize: 11, color: "var(--fg-muted)" }}>
+                  <p className="truncate text-xs text-muted-foreground">
                     {chips}
                   </p>
                 )}
-                <p style={{ fontSize: 11, color: "var(--fg-subtle)", marginTop: "auto", paddingTop: 4 }}>
+                <p className="text-xs text-muted-foreground mt-auto pt-1">
                   {timeAgo(item.timestamp)}
                 </p>
               </button>
@@ -412,20 +330,12 @@ const SheetsEmptyState = ({ onStartTopic, onSelectHistory }: SheetsEmptyStatePro
         </div>
       </div>
 
-      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-        <div style={{ flex: 1, height: 1, background: "var(--border)" }} />
-        <span
-          style={{
-            fontFamily: "var(--font-mono)",
-            fontSize: 11,
-            letterSpacing: "0.1em",
-            textTransform: "uppercase",
-            color: "var(--fg-muted)",
-          }}
-        >
+      <div className="flex items-center gap-4">
+        <div className="flex-1 h-px bg-border" />
+        <span className="font-mono text-[11px] tracking-widest uppercase text-muted-foreground">
           or start fresh
         </span>
-        <div style={{ flex: 1, height: 1, background: "var(--border)" }} />
+        <div className="flex-1 h-px bg-border" />
       </div>
 
       <QuickstartChips onStartTopic={onStartTopic} />
@@ -450,11 +360,17 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
   const [modelUsed, setModelUsed] = useState<"flash" | "gpt-oss" | "claude" | undefined>(undefined);
   const [loading, setLoading] = useState(false);
   const [deckSaved, setDeckSaved] = useState(false);
-  const [loadingMsg, setLoadingMsg] = useState("");
-  const [pendingOutput, setPendingOutput] = useState<string | null>(null);
+  // Sections whose JSON has fully arrived, so the renderer knows how much of a
+  // still-streaming sheet is safe to show.
+  const [streamedKeys, setStreamedKeys] = useState<string[]>([]);
+  // The response was damaged and only part of it could be salvaged — the reader
+  // is told rather than being handed a silently short sheet.
+  const [sheetIncomplete, setSheetIncomplete] = useState(false);
+  // Identifies the sheet on screen, so the section navigator resets its active
+  // item per sheet rather than when `topic` happens to arrive mid-stream.
+  const [generationId, setGenerationId] = useState(0);
   // A prefilled topic (e.g. a Roadmap chip) must land in a visible textarea —
   // otherwise the picker renders and silently overwrites it on the next click.
-  const [showTextarea, setShowTextarea] = useState(!!prefill?.input);
   const [citationState, setCitationState] = useState<CitationState>("idle");
   const [citations, setCitations] = useState<CitationResult[]>([]);
   const [authModalOpen, setAuthModalOpen] = useState(false);
@@ -471,6 +387,7 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
   });
   const outputRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
+  const navigate = useNavigate();
 
   const recordRecentTopic = (topic: string) => {
     const trimmed = topic.trim().slice(0, 60);
@@ -491,7 +408,12 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
 
   const { sheetCount, isSheetLimited, isProUser: pro, refresh: refreshUsage } = useUsageLimit();
   const { premiumRemaining, isPremiumHookActive } = usePremiumHook();
-  const { preferredModel, setPreferredModel, saving: modelSaving } = useModelPreference();
+  const {
+    preferredModel,
+    setPreferredModel,
+    saving: modelSaving,
+    isLoading: modelLoading,
+  } = useModelPreference();
   const { user, isAnonymous } = useAuth();
   const {
     canUseCitation,
@@ -519,8 +441,9 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
     setSheet(null);
     setLegacyOutput("");
     setDeckSaved(false);
-    setPendingOutput(null);
-    setShowTextarea(false);
+    setStreamedKeys([]);
+    setSheetIncomplete(false);
+    setGenerationId((id) => id + 1);
     setCitationState("idle");
     setCitations([]);
 
@@ -567,6 +490,10 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
       const decoder = new TextDecoder();
       let textBuffer = "";
       let fullText = "";
+      // Sections rendered so far. The sheet arrives as one JSON object, so we
+      // repair the truncated tail each chunk and reveal a section only once its
+      // field has closed — see parsePartialSheet.
+      let revealedCount = 0;
 
       while (true) {
         const { done, value } = await reader.read();
@@ -590,6 +517,14 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
             const content = parsed.choices?.[0]?.delta?.content;
             if (content) {
               fullText += content;
+              // Re-render only when another section finishes — at most once per
+              // section for the whole stream, so no mid-word reflow.
+              const partial = parsePartialSheet(fullText);
+              if (partial && partial.completeKeys.length > revealedCount) {
+                revealedCount = partial.completeKeys.length;
+                setSheet(partial.sheet);
+                setStreamedKeys(partial.completeKeys);
+              }
             }
           } catch {
             textBuffer = line + "\n" + textBuffer;
@@ -598,8 +533,24 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
         }
       }
 
+      // Authoritative parse, degrading in steps rather than all at once: a
+      // single unescaped quote from the model used to discard the whole sheet
+      // and dump raw JSON at the reader.
       const rawText = fullText || "";
-      setPendingOutput(rawText);
+      const result = parseSheetOutput(rawText);
+      if (result) {
+        setSheet(result.sheet);
+        setLegacyOutput("");
+        setSheetIncomplete(result.status === "partial");
+      } else if (revealedCount === 0) {
+        // Not a JSON sheet at all — hand it to the legacy text renderer.
+        setSheet(null);
+        setLegacyOutput(rawText);
+      } else {
+        // Unparseable tail, but sections did stream. Keep them.
+        setSheetIncomplete(true);
+      }
+      setLoading(false);
 
       // Citation lookup — runs after stream completes. Serves from the local
       // topic cache when available (no quota consumed); otherwise the edge
@@ -630,8 +581,6 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
       }
     } catch (e: unknown) {
       setLoading(false);
-      setLoadingMsg("");
-      setPendingOutput(null);
       toast({
         title: "Error",
         description: e instanceof Error && e.message ? e.message : "Failed to generate study material",
@@ -664,57 +613,6 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
       window.removeEventListener("studybuddy:enhancement-saved", handleEnhancementSaved);
   }, []);
 
-  useEffect(() => {
-    if (!loading) return;
-
-    const steps = [
-      "Reading topic…",
-      "Structuring notes…",
-      "Finding exam traps…",
-      "Adding memory hooks…",
-      "Finalizing your sheet…",
-    ];
-
-    let currentStep = 0;
-    let allStepsDone = false;
-    setLoadingMsg(steps[0]);
-
-    const interval = setInterval(() => {
-      currentStep += 1;
-
-      if (currentStep < steps.length) {
-        setLoadingMsg(steps[currentStep]);
-      } else {
-        allStepsDone = true;
-        setLoadingMsg(steps[steps.length - 1]);
-      }
-
-      if (allStepsDone) {
-        setPendingOutput((pending) => {
-          if (pending !== null) {
-            clearInterval(interval);
-            const cleaned = sanitizeJsonOutput(pending);
-            try {
-              const parsed = JSON.parse(cleaned) as GeneratedSheet;
-              setSheet(parsed);
-              setLegacyOutput("");
-            } catch {
-              // JSON parse failed — fall back to legacy text renderer
-              setSheet(null);
-              setLegacyOutput(pending);
-            }
-            setLoading(false);
-            setLoadingMsg("");
-            return null;
-          }
-          return pending;
-        });
-      }
-    }, 1000);
-
-    return () => clearInterval(interval);
-  }, [loading]); // eslint-disable-line react-hooks/exhaustive-deps
-
   // Persona buttons are the generation trigger — there is no separate submit.
   const generateWithPersona = (p: Persona) => {
     setPersona(p);
@@ -725,10 +623,42 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
 
   const startTopic = (label: string) => {
     setNotes(label);
-    setShowTextarea(false);
     setDeckSaved(false);
     setConfigDrawerOpen(false);
     generate(label);
+  };
+
+  /**
+   * Share the sheet's text. There is no per-sheet route to link to, so this
+   * shares the content itself: the native share sheet where available (mobile),
+   * clipboard everywhere else.
+   */
+  const handleShare = async () => {
+    const text = sheetToPlainText(sheet, legacyOutput, notes);
+    if (!text.trim()) {
+      toast({ title: "Nothing to share yet", variant: "destructive" });
+      return;
+    }
+
+    const title = sheet?.topic?.trim() || notes.trim().slice(0, 60) || "Study sheet";
+
+    if (navigator.share) {
+      try {
+        await navigator.share({ title, text });
+        return;
+      } catch (e: unknown) {
+        // The user dismissing the native sheet is not an error worth surfacing.
+        if (e instanceof Error && e.name === "AbortError") return;
+        // Anything else (unsupported payload, permission) falls through to copy.
+      }
+    }
+
+    try {
+      await navigator.clipboard.writeText(text);
+      toast({ title: "Study sheet copied to clipboard" });
+    } catch {
+      toast({ title: "Couldn't copy the sheet", variant: "destructive" });
+    }
   };
 
   // Load a saved sheet straight from history (no regeneration) — mirrors how the
@@ -741,9 +671,10 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
       setLength(item.modeInfo.length || "Concise");
     }
     setNotes(item.input);
-    setShowTextarea(false);
     setConfigDrawerOpen(false);
     setDeckSaved(false);
+    setSheetIncomplete(false);
+    setGenerationId((id) => id + 1);
     setModelUsed(undefined);
     setCitationState("idle");
     setCitations([]);
@@ -760,254 +691,270 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
   };
 
   const configurator = (
-      <div
-        className="animate-fade-in"
-        style={{
-          border: "1px solid var(--border)",
-          borderRadius: "var(--radius-lg)",
-          background: "var(--bg-elevated)",
-          padding: "20px 20px 24px",
-        }}
-      >
-        <div className="space-y-4">
-          {!isLoggedIn && (
-            <CitationCTABanner onSignInClick={() => setAuthModalOpen(true)} />
-          )}
-          <div className="space-y-1.5">
-            <label
-              style={{
-                display: "block",
-                fontFamily: "var(--font-mono)",
-                fontSize: 11,
-                fontWeight: 500,
-                letterSpacing: "0.14em",
-                textTransform: "uppercase",
-                color: "var(--fg-muted)",
-                marginBottom: 8,
-              }}
-            >
-              Medical Notes
-            </label>
-            {!showTextarea ? (
-              <div
-                style={{
-                  borderRadius: "var(--radius-md)",
-                  border: "1px solid var(--border)",
-                  background: "var(--bg)",
-                  padding: "12px 12px 14px",
-                }}
-              >
-                <p
-                  style={{
-                    fontFamily: "var(--font-mono)",
-                    fontSize: 11,
-                    color: "var(--fg-muted)",
-                    marginBottom: 10,
-                    letterSpacing: "0.06em",
-                  }}
-                >
-                  Pick a topic to start — or type your own
-                </p>
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                  {[
-                    { emoji: "❤️", label: "Heart Failure" },
-                    { emoji: "🫁", label: "Pneumonia" },
-                    { emoji: "🧠", label: "Ischemic Stroke" },
-                    { emoji: "🍬", label: "Diabetic Ketoacidosis" },
-                    { emoji: "🫘", label: "Nephrotic Syndrome" },
-                  ].map(({ emoji, label }) => (
-                    <button
-                      key={label}
-                      type="button"
-                      onClick={() => startTopic(label)}
-                      style={{
-                        display: "inline-flex",
-                        alignItems: "center",
-                        gap: 6,
-                        height: 28,
-                        padding: "0 10px",
-                        borderRadius: "var(--radius-sm)",
-                        border: "1px solid var(--border)",
-                        background: "var(--bg)",
-                        color: "var(--fg)",
-                        fontFamily: "var(--font-sans)",
-                        fontSize: 12,
-                        fontWeight: 500,
-                        cursor: "pointer",
-                        transition:
-                          "border-color var(--dur-micro) var(--ease-out), color var(--dur-micro) var(--ease-out)",
-                      }}
-                      onMouseEnter={(e) => {
-                        e.currentTarget.style.borderColor = "var(--accent)";
-                        e.currentTarget.style.color = "var(--accent)";
-                      }}
-                      onMouseLeave={(e) => {
-                        e.currentTarget.style.borderColor = "var(--border)";
-                        e.currentTarget.style.color = "var(--fg)";
-                      }}
-                    >
-                      <span aria-hidden>{emoji}</span>
-                      <span>{label}</span>
-                    </button>
-                  ))}
-                  <button
-                    type="button"
-                    onClick={() => setShowTextarea(true)}
-                    style={{
-                      display: "inline-flex",
-                      alignItems: "center",
-                      gap: 6,
-                      height: 28,
-                      padding: "0 10px",
-                      borderRadius: "var(--radius-sm)",
-                      border: "1px dashed var(--border-strong)",
-                      background: "transparent",
-                      color: "var(--fg-muted)",
-                      fontFamily: "var(--font-sans)",
-                      fontSize: 12,
-                      fontWeight: 500,
-                      cursor: "pointer",
-                      transition:
-                        "border-color var(--dur-micro) var(--ease-out), color var(--dur-micro) var(--ease-out)",
-                    }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.borderColor = "var(--accent)";
-                      e.currentTarget.style.color = "var(--accent)";
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.borderColor = "var(--border-strong)";
-                      e.currentTarget.style.color = "var(--fg-muted)";
-                    }}
-                  >
-                    <PenLine style={{ width: 12, height: 12 }} />
-                    Type my own topic
-                  </button>
-                </div>
-              </div>
-            ) : (
+      <div className="animate-fade-in space-y-6">
+        {!isLoggedIn && (
+          <CitationCTABanner onSignInClick={() => setAuthModalOpen(true)} />
+        )}
+
+        {/* ── Step 1: Topic Selection ── */}
+        <div className="rounded-2xl border border-border bg-card p-6 shadow-sm">
+          <div className="space-y-4">
+            <div className="flex items-center gap-2">
+              <div className="flex items-center justify-center w-7 h-7 rounded-full bg-primary text-primary-foreground text-xs font-bold">1</div>
+              <h2 className="text-lg font-serif font-semibold text-foreground">Medical Topic</h2>
+            </div>
+            
+            <div className="space-y-3">
               <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                 <Textarea
-                  autoFocus
-                  placeholder="Paste notes, type a topic, or say what you want to study…"
+                  placeholder="Search or type a medical topic (e.g., Heart Failure, Pneumonia, Diabetes...)"
                   value={notes}
                   onChange={(e) => setNotes(e.target.value)}
-                  className="min-h-[100px] resize-y text-sm leading-relaxed"
+                  className="min-h-[80px] pl-10 pr-10 text-sm leading-relaxed rounded-xl border-border focus:border-primary focus:ring-2 focus:ring-primary"
                 />
                 {notes && (
                   <button
                     type="button"
-                    onClick={() => { setNotes(""); setShowTextarea(false); }}
-                    className="absolute top-2 right-2 text-muted-foreground/50 hover:text-muted-foreground transition-colors text-lg leading-none"
+                    onClick={() => setNotes("")}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-muted-foreground hover:text-foreground transition-colors"
                     aria-label="Clear"
                   >
-                    ×
+                    <X className="w-4 h-4" />
                   </button>
                 )}
               </div>
+              
+              <div className="pt-2">
+                <p className="font-mono text-[11px] font-medium tracking-widest uppercase text-muted-foreground mb-3">Popular Topics</p>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                  {QUICKSTART_TOPICS.slice(0, 6).map(({ label, icon, category }) => (
+                    <button
+                      key={label}
+                      type="button"
+                      onClick={() => setNotes(label)}
+                      className="group flex flex-col items-center gap-1.5 p-3 rounded-xl border border-border bg-card hover:border-primary hover:shadow-sm transition-all duration-200"
+                    >
+                      <span className="text-xl">{icon}</span>
+                      <div className="text-center">
+                        <p className="text-xs font-medium text-foreground group-hover:text-primary leading-tight">{label}</p>
+                        <p className="text-[10px] text-muted-foreground">{category}</p>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* ── Step 2: Customize ── */}
+        <div className="rounded-2xl border border-border bg-card p-6 shadow-sm">
+          <div className="space-y-4">
+            <div className="flex items-center gap-2">
+              <div className="flex items-center justify-center w-7 h-7 rounded-full bg-border text-muted-foreground text-xs font-bold">2</div>
+              <h2 className="text-lg font-serif font-semibold text-foreground">Customize</h2>
+            </div>
+            
+            <div className="space-y-4">
+              <PillGroup
+                label="Exam Mode"
+                value={examMode}
+                onChange={setExamMode}
+                options={[
+                  { value: "General", label: "General" },
+                  { value: "USMLE Step 1", label: "Step 1" },
+                  { value: "USMLE Step 2", label: "Step 2" },
+                ]}
+              />
+              <PillGroup
+                label="Difficulty"
+                value={difficulty}
+                onChange={setDifficulty}
+                options={[
+                  { value: "Basic", label: "Basic" },
+                  { value: "Medium", label: "Intermediate" },
+                  { value: "Advanced", label: "Advanced" },
+                ]}
+              />
+              <PillGroup
+                label="Focus"
+                value={focus}
+                onChange={setFocus}
+                options={[
+                  { value: "Quick Revision", label: "Quick Revision" },
+                  { value: "Deep Understanding", label: "Deep Understanding" },
+                  { value: "Clinical Reasoning", label: "Clinical Reasoning" },
+                ]}
+              />
+              <PillGroup
+                label="Length"
+                value={length}
+                onChange={setLength}
+                options={[
+                  { value: "Concise", label: "Concise" },
+                  { value: "Moderate", label: "Moderate" },
+                  { value: "Detailed", label: "Detailed" },
+                ]}
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* ── Step 3: AI Perspective ── */}
+        <div className="rounded-2xl border border-border bg-card p-6 shadow-sm">
+          <div className="space-y-4">
+            <div className="flex items-center gap-2">
+              <div className="flex items-center justify-center w-7 h-7 rounded-full bg-info text-primary-foreground text-xs font-bold">3</div>
+              <h2 className="text-lg font-serif font-semibold text-foreground">AI Perspective</h2>
+            </div>
+            
+            <div className="grid grid-cols-1 gap-3">
+              {[
+                {
+                  id: "student" as Persona,
+                  label: "Student",
+                  sub: "Build intuition and memory hooks for exam prep",
+                  Icon: BookOpen,
+                  color: "blue",
+                },
+                {
+                  id: "clinician" as Persona,
+                  label: "Clinician",
+                  sub: "Apply to patient care decisions and clinical practice",
+                  Icon: Stethoscope,
+                  color: "teal",
+                },
+                {
+                  id: "expert" as Persona,
+                  label: "Expert",
+                  sub: "Deep mechanisms, nuance, and edge cases",
+                  Icon: Brain,
+                  color: "violet",
+                },
+              ].map(({ id, label, sub, Icon, color }) => {
+                const active = persona === id;
+                return (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => !loading && generateWithPersona(id)}
+                    disabled={loading}
+                    aria-pressed={active}
+                    className={`relative group w-full flex items-start gap-4 p-4 rounded-xl text-left transition-all duration-200 ${
+                      active
+                        ? "border-2 shadow-md " + (color === "blue" ? "border-success bg-success-soft" : color === "teal" ? "border-primary bg-primary/10" : "border-info bg-info-soft")
+                        : "border border-border bg-card hover:border-input hover:shadow-sm"
+                    } ${loading ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
+                  >
+                    {active && (
+                      <div className={`absolute -top-2 -right-2 w-6 h-6 rounded-full flex items-center justify-center ${
+                        color === "blue" ? "bg-success" : color === "teal" ? "bg-primary" : "bg-info"
+                      }`}>
+                        <Check className="w-4 h-4 text-primary-foreground" />
+                      </div>
+                    )}
+                    <span className={`flex items-center justify-center w-10 h-10 rounded-lg flex-shrink-0 transition-colors ${
+                      active
+                        ? (color === "blue" ? "bg-success" : color === "teal" ? "bg-primary" : "bg-info")
+                        : "bg-secondary"
+                    }`}>
+                      {loading && active ? (
+                        <Loader2 className="w-5 h-5 text-primary-foreground animate-spin" />
+                      ) : (
+                        <Icon className={`w-5 h-5 ${
+                          active ? "text-primary-foreground" : "text-muted-foreground"
+                        }`} />
+                      )}
+                    </span>
+                    <div className="flex-1 min-w-0">
+                      <p className={`text-sm font-semibold leading-tight mb-1 ${
+                        active
+                          ? (color === "blue" ? "text-success" : color === "teal" ? "text-primary" : "text-info")
+                          : "text-foreground"
+                      }`}>
+                        {loading && active ? "Generating…" : label}
+                      </p>
+                      <p className="text-xs text-muted-foreground leading-relaxed">
+                        {sub}
+                      </p>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+
+        {/* ── Generate CTA ── */}
+        <Button
+          onClick={() => generate()}
+          disabled={loading || !notes.trim()}
+          className="w-full h-12 rounded-xl bg-primary text-primary-foreground font-semibold text-base shadow-lg hover:shadow-xl transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+        >
+          <Sparkles className="w-5 h-5" />
+          Generate Study Sheet
+          <ArrowRight className="w-5 h-5" />
+        </Button>
+
+        {pro && (
+          <div className="flex items-center justify-center gap-2 rounded-xl border border-primary/30 bg-primary/10 px-4 py-2.5">
+            <span className="h-1.5 w-1.5 rounded-full bg-primary" />
+            <p className="text-sm font-medium text-primary">
+              Unlimited access active
+            </p>
+          </div>
+        )}
+
+        {!pro && (
+          <div className="text-center text-xs text-muted-foreground space-y-1">
+            {isSheetLimited ? (
+              <span className="text-warning font-medium block">
+                Daily limit reached ·{" "}
+                <button
+                  type="button"
+                  className="underline hover:text-warning transition-colors"
+                  onClick={() => setGoProOpen(true)}
+                >
+                  Go Pro for Claude + unlimited
+                </button>
+              </span>
+            ) : (
+              <span>{sheetCount} / {MAX_DAILY_SHEETS} uses today · Resets at midnight</span>
             )}
+            {isPremiumHookActive ? (
+              <span className="text-info font-medium block">
+                ✦ {premiumRemaining} Claude generation{premiumRemaining !== 1 ? "s" : ""} left ·{" "}
+                <button
+                  type="button"
+                  className="underline hover:text-info transition-colors"
+                  onClick={() => setGoProOpen(true)}
+                >
+                  Go Pro for unlimited Claude
+                </button>
+              </span>
+            ) : !isSheetLimited ? (
+              <span className="text-muted-foreground block">
+                Powered by GPT-OSS 20B
+              </span>
+            ) : null}
           </div>
-
-          <div className="space-y-3">
-            <PillGroup
-              label="Exam Mode"
-              value={examMode}
-              onChange={setExamMode}
-              options={[
-                { value: "General", label: "General" },
-                { value: "USMLE Step 1", label: "Step 1" },
-                { value: "USMLE Step 2", label: "Step 2" },
-              ]}
-            />
-            <PillGroup
-              label="Difficulty"
-              value={difficulty}
-              onChange={setDifficulty}
-              options={[
-                { value: "Basic", label: "Basic" },
-                { value: "Medium", label: "Medium" },
-                { value: "Advanced", label: "Advanced" },
-              ]}
-            />
-            <PillGroup
-              label="Focus"
-              value={focus}
-              onChange={setFocus}
-              options={[
-                { value: "Quick Revision", label: "Quick Revision" },
-                { value: "Deep Understanding", label: "Deep Understanding" },
-                { value: "Clinical Reasoning", label: "Clinical Reasoning" },
-              ]}
-            />
-            <PillGroup
-              label="Length"
-              value={length}
-              onChange={setLength}
-              options={[
-                { value: "Concise", label: "Concise" },
-                { value: "Moderate", label: "Moderate" },
-                { value: "Detailed", label: "Detailed" },
-              ]}
-            />
-          </div>
-
-          {pro && (
-            <div className="flex items-center justify-center gap-2 rounded-lg border border-border bg-card px-4 py-2.5">
-              <span className="h-1.5 w-1.5 rounded-full bg-primary" />
-              <p className="text-sm font-medium text-foreground">
-                Unlimited access active
-              </p>
-            </div>
-          )}
-
-          {!pro && (
-            <div className="text-center text-xs text-muted-foreground space-y-1">
-              {isSheetLimited ? (
-                <span className="text-amber-500 dark:text-amber-400 font-medium block">
-                  Daily limit reached ·{" "}
-                  <button
-                    type="button"
-                    className="underline hover:text-amber-400 transition-colors"
-                    onClick={() => setGoProOpen(true)}
-                  >
-                    Go Pro for Claude + unlimited
-                  </button>
-                </span>
-              ) : (
-                <span>{sheetCount} / {MAX_DAILY_SHEETS} uses today · Resets at midnight</span>
-              )}
-              {isPremiumHookActive ? (
-                <span className="text-violet-400 font-medium block">
-                  ✦ {premiumRemaining} Claude generation{premiumRemaining !== 1 ? "s" : ""} left ·{" "}
-                  <button
-                    type="button"
-                    className="underline hover:text-violet-300 transition-colors"
-                    onClick={() => setGoProOpen(true)}
-                  >
-                    Go Pro for unlimited Claude
-                  </button>
-                </span>
-              ) : !isSheetLimited ? (
-                <span className="text-muted-foreground/60 block">
-                  Powered by GPT-OSS 20B
-                </span>
-              ) : null}
-            </div>
-          )}
-          {pro && (
-            <div className="rounded-lg border border-border bg-card px-4 py-3 space-y-2">
-              <p className="text-xs font-medium text-muted-foreground text-center">
-                AI Model
-              </p>
-              <div className="flex items-center justify-center">
-                <div className="inline-flex items-center rounded-lg bg-muted p-0.5">
-                  <button
-                    type="button"
-                    onClick={() => setPreferredModel("gpt-oss")}
-                    disabled={modelSaving}
-                    className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
-                      preferredModel !== "claude"
-                        ? "bg-background text-foreground shadow-sm"
-                        : "text-muted-foreground hover:text-foreground"
+        )}
+        {pro && (
+          <div className="rounded-xl border border-border bg-secondary px-4 py-3 space-y-2">
+            <p className="text-xs font-medium text-muted-foreground text-center">
+              AI Model
+            </p>
+            <div className="flex items-center justify-center">
+              <div className="inline-flex items-center rounded-lg bg-card p-0.5 shadow-sm">
+                <button
+                  type="button"
+                  onClick={() => setPreferredModel("gpt-oss")}
+                  disabled={modelSaving || modelLoading}
+                  className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                    !modelLoading && preferredModel === "gpt-oss"
+                      ? "bg-card text-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground"
                     }`}
                   >
                     GPT-OSS 20B
@@ -1015,10 +962,10 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
                   <button
                     type="button"
                     onClick={() => setPreferredModel("claude")}
-                    disabled={modelSaving}
+                    disabled={modelSaving || modelLoading}
                     className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
-                      preferredModel === "claude"
-                        ? "bg-background text-foreground shadow-sm"
+                      !modelLoading && preferredModel === "claude"
+                        ? "bg-card text-foreground shadow-sm"
                         : "text-muted-foreground hover:text-foreground"
                     }`}
                   >
@@ -1027,211 +974,32 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
                 </div>
               </div>
               {modelSaving && (
-                <p className="text-[11px] text-muted-foreground/50 text-center">Saving preference…</p>
+                <p className="text-[11px] text-muted-foreground text-center">Saving preference…</p>
               )}
             </div>
           )}
 
-          {/* ── Persona tier buttons (generation trigger) ── */}
-          <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 4 }}>
-            <label
-              style={{
-                display: "block",
-                fontFamily: "var(--font-mono)",
-                fontSize: 11,
-                fontWeight: 500,
-                letterSpacing: "0.12em",
-                textTransform: "uppercase",
-                color: "var(--fg-muted)",
-                marginBottom: 2,
-              }}
-            >
-              Generate as
-            </label>
-
-            {(
-              [
-                {
-                  id: "student" as Persona,
-                  label: "Student",
-                  sub: "Build intuition and memory hooks",
-                  Icon: BookOpen,
-                },
-                {
-                  id: "clinician" as Persona,
-                  label: "Clinician",
-                  sub: "Apply to patient care decisions",
-                  Icon: Stethoscope,
-                },
-                {
-                  id: "expert" as Persona,
-                  label: "Expert",
-                  sub: "Mechanisms, nuance, edge cases",
-                  Icon: Brain,
-                },
-              ] as const
-            ).map(({ id, label, sub, Icon }) => {
-              const active = persona === id;
-              return (
+        {recentTopics.length > 0 && (
+          <div className="pt-4 border-t border-border mt-4">
+            <p className="flex items-center gap-1.5 font-mono text-[11px] font-medium tracking-widest uppercase text-muted-foreground mb-2 pt-2">
+              <History className="w-3 h-3" />
+              Recent Topics
+            </p>
+            <div className="flex flex-wrap gap-2 max-h-16 overflow-y-auto">
+              {recentTopics.map((topic) => (
                 <button
-                  key={id}
+                  key={topic}
                   type="button"
-                  onClick={() => !loading && generateWithPersona(id)}
                   disabled={loading}
-                  aria-pressed={active}
-                  style={{
-                    width: "100%",
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 10,
-                    padding: "10px 14px",
-                    borderRadius: "var(--radius-md)",
-                    border: active
-                      ? "1px solid var(--accent)"
-                      : "1px solid var(--border)",
-                    background: active ? "var(--accent-soft)" : "var(--bg)",
-                    cursor: loading ? "not-allowed" : "pointer",
-                    opacity: loading ? 0.6 : 1,
-                    transition:
-                      "border-color var(--dur-micro) var(--ease-out), background var(--dur-micro) var(--ease-out)",
-                    textAlign: "left",
-                  }}
-                  onMouseEnter={(e) => {
-                    if (loading || active) return;
-                    e.currentTarget.style.borderColor = "var(--border-strong)";
-                  }}
-                  onMouseLeave={(e) => {
-                    if (loading || active) return;
-                    e.currentTarget.style.borderColor = "var(--border)";
-                  }}
+                  onClick={() => setNotes(topic)}
+                  className="truncate max-w-full px-2.5 py-1 rounded-lg border border-border bg-secondary text-muted-foreground text-xs font-medium hover:border-primary hover:text-primary transition-all duration-200 disabled:opacity-50 disabled:cursor-default"
                 >
-                  {/* Icon */}
-                  <span
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      width: 28,
-                      height: 28,
-                      borderRadius: "var(--radius-sm)",
-                      background: active ? "var(--accent)" : "var(--bg-elevated)",
-                      flexShrink: 0,
-                      transition: "background var(--dur-micro) var(--ease-out)",
-                    }}
-                  >
-                    {loading && active ? (
-                      <Loader2
-                        style={{ width: 14, height: 14, color: "var(--bg)" }}
-                        className="animate-spin"
-                      />
-                    ) : (
-                      <Icon
-                        style={{
-                          width: 14,
-                          height: 14,
-                          color: active ? "var(--bg)" : "var(--fg-muted)",
-                        }}
-                      />
-                    )}
-                  </span>
-
-                  {/* Text */}
-                  <span style={{ display: "flex", flexDirection: "column", gap: 1, minWidth: 0 }}>
-                    <span
-                      style={{
-                        fontFamily: "var(--font-sans)",
-                        fontSize: 13,
-                        fontWeight: 500,
-                        color: active ? "var(--accent)" : "var(--fg)",
-                        lineHeight: 1.2,
-                      }}
-                    >
-                      {loading && active ? "Generating…" : label}
-                    </span>
-                    <span
-                      style={{
-                        fontFamily: "var(--font-sans)",
-                        fontSize: 11,
-                        color: "var(--fg-muted)",
-                        lineHeight: 1.3,
-                      }}
-                    >
-                      {sub}
-                    </span>
-                  </span>
+                  {topic}
                 </button>
-              );
-            })}
-          </div>
-
-          {recentTopics.length > 0 && (
-            <div style={{ paddingTop: 16, borderTop: "1px solid var(--border)", marginTop: 8 }}>
-              <p
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 6,
-                  fontFamily: "var(--font-mono)",
-                  fontSize: 11,
-                  fontWeight: 500,
-                  letterSpacing: "0.12em",
-                  textTransform: "uppercase",
-                  color: "var(--fg-muted)",
-                  marginBottom: 8,
-                  paddingTop: 8,
-                }}
-              >
-                <History style={{ width: 12, height: 12 }} />
-                Recent
-              </p>
-              <div
-                style={{
-                  display: "flex",
-                  flexWrap: "wrap",
-                  gap: 6,
-                  maxHeight: 64,
-                  overflowY: "auto",
-                }}
-              >
-                {recentTopics.map((topic) => (
-                  <button
-                    key={topic}
-                    type="button"
-                    disabled={loading}
-                    onClick={() => startTopic(topic)}
-                    className="truncate"
-                    style={{
-                      maxWidth: "100%",
-                      padding: "4px 10px",
-                      borderRadius: "var(--radius-sm)",
-                      border: "1px solid var(--border)",
-                      background: "var(--bg)",
-                      color: "var(--fg-muted)",
-                      fontFamily: "var(--font-sans)",
-                      fontSize: 12,
-                      fontWeight: 500,
-                      cursor: loading ? "default" : "pointer",
-                      opacity: loading ? 0.5 : 1,
-                      transition:
-                        "border-color var(--dur-micro) var(--ease-out), color var(--dur-micro) var(--ease-out)",
-                    }}
-                    onMouseEnter={(e) => {
-                      if (loading) return;
-                      e.currentTarget.style.borderColor = "var(--accent)";
-                      e.currentTarget.style.color = "var(--accent)";
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.borderColor = "var(--border)";
-                      e.currentTarget.style.color = "var(--fg-muted)";
-                    }}
-                  >
-                    {topic}
-                  </button>
-                ))}
-              </div>
+              ))}
             </div>
-          )}
-        </div>
+          </div>
+        )}
       </div>
   );
 
@@ -1246,57 +1014,21 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
       {/* ── 1px divider between config and document ── */}
       <div
         aria-hidden
-        className="hidden lg:block lg:w-px lg:shrink-0 lg:self-stretch"
-        style={{ background: "var(--border)" }}
+        className="hidden lg:block lg:w-px lg:shrink-0 lg:self-stretch bg-border"
       />
 
       {/* ── Middle pane: living document (fluid, fills its lane) ── */}
       <div ref={outputRef} className="min-w-0 lg:flex-1 lg:px-8">
       <div className="w-full space-y-6">
-      {loading && !sheet && !legacyOutput && (
-        <div className="space-y-6 animate-fade-in">
-          <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "0 4px" }}>
-            <Loader2
-              className="animate-spin"
-              style={{ width: 14, height: 14, color: "var(--accent)" }}
-            />
-            <p
-              style={{
-                fontFamily: "var(--font-sans)",
-                fontSize: 14,
-                fontWeight: 500,
-                color: "var(--fg)",
-                transition: "all 300ms",
-              }}
-            >
-              {loadingMsg}
-            </p>
-            <p style={{ fontSize: 12, color: "var(--fg-subtle)" }}>
-              Takes a little longer during peak hours — hang tight
-            </p>
-          </div>
-          {/* Document structure forming — skeletons mirror the incoming sections */}
-          <div className="space-y-6">
-            {[0, 1, 2, 3, 4].map((i) => (
-              <div
-                key={i}
-                className="section-reveal"
-                style={{ animationDelay: `${i * 150}ms` }}
-              >
-                <SectionSkeleton variant="sheet-section" />
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
       {!loading && !sheet && !legacyOutput && (
         <SheetsEmptyState onStartTopic={startTopic} onSelectHistory={loadHistoryItem} />
       )}
 
-      {(sheet || legacyOutput) && (
+      {/* Rendered from the first frame of a generation, so the sheet's seven
+          sections are laid out once and filled in — never added or removed. */}
+      {(loading || sheet || legacyOutput) && (
         <OutputSection
-          output={sheet ? JSON.stringify(sheet) : legacyOutput}
+          output={sheet ? JSON.stringify(sheet) : legacyOutput || EMPTY_SHEET_JSON}
           inputText={notes}
           modeInfo={{ examMode, difficulty, focus, length }}
           citations={citations}
@@ -1310,14 +1042,37 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
             isLoggedIn ? setGoProOpen(true) : setAuthModalOpen(true)
           }
           citationIsLoggedIn={isLoggedIn}
+          isStreaming={loading}
+          streamedKeys={streamedKeys}
         />
       )}
 
-      {(sheet || legacyOutput) && (
-        <div className="flex justify-center pt-2">
+      {/* The response was damaged mid-flight. Say so rather than let a short
+          sheet pass for a complete one — this is medical content. */}
+      {!loading && sheetIncomplete && (
+        <div className="animate-fade-in flex items-center gap-3 rounded-xl border border-border border-l-[3px] border-l-warning bg-card px-4 py-3">
+          <AlertTriangle className="h-[15px] w-[15px] shrink-0 text-warning" />
+          <p className="flex-1 text-[13px] leading-relaxed text-muted-foreground">
+            This sheet was cut short — some sections may be missing.
+          </p>
           <Button
             variant="outline"
-            className="h-9 rounded-lg font-medium text-sm px-5"
+            size="sm"
+            className="h-8 shrink-0 text-xs"
+            onClick={() => generate()}
+          >
+            Regenerate
+          </Button>
+        </div>
+      )}
+
+      {/* Flashcards stream in last, so this stays hidden until the sheet is whole. */}
+      {!loading && (sheet || legacyOutput) && (
+        <div className="flex flex-wrap justify-center gap-3 pt-4">
+
+          <Button
+            variant="outline"
+            className="h-10 rounded-xl font-medium text-sm px-4 border-border hover:border-primary hover:text-primary hover:bg-primary/10 flex items-center gap-2"
             disabled={deckSaved}
             onClick={() => {
               try {
@@ -1333,7 +1088,6 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
                   setDeckSaved(true);
                   toast({ title: `${parsed.length} cards saved to your library` });
                 } else if (legacyOutput) {
-                  // Legacy fallback for old text-blob sheets
                   const parsed = parseFlashcardsFromOutput(legacyOutput, notes);
                   if (parsed.length) {
                     saveCards(parsed);
@@ -1350,7 +1104,39 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
               }
             }}
           >
-            {deckSaved ? "✓ Deck saved" : "＋ Save deck to library"}
+            <Zap className="w-4 h-4" />
+            {deckSaved ? "✓ Flashcards Saved" : "Generate Flashcards"}
+          </Button>
+          
+          <Button
+            variant="outline"
+            className="h-10 rounded-xl font-medium text-sm px-4 border-border hover:border-info hover:text-info hover:bg-info-soft flex items-center gap-2"
+            onClick={() => navigate("/qbank")}
+          >
+            <Play className="w-4 h-4" />
+            Practice QBank
+          </Button>
+
+          {/* No "Save" here: OutputSection already renders a working SaveButton
+              at the top of the document. A second one would keep its own
+              `saved` state and drift out of sync with the first. */}
+
+          <Button
+            variant="outline"
+            className="h-10 rounded-xl font-medium text-sm px-4 border-border hover:border-input hover:text-foreground hover:bg-secondary flex items-center gap-2"
+            onClick={() => window.print()}
+          >
+            <FileDown className="w-4 h-4" />
+            Export PDF
+          </Button>
+
+          <Button
+            variant="outline"
+            className="h-10 rounded-xl font-medium text-sm px-4 border-border hover:border-input hover:text-foreground hover:bg-secondary flex items-center gap-2"
+            onClick={handleShare}
+          >
+            <Share2 className="w-4 h-4" />
+            Share
           </Button>
         </div>
       )}
@@ -1360,15 +1146,22 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
       {/* ── Right pane: section navigator. Only at 2xl+ (≥1536px), where the
           content area is wide enough that a third column doesn't squeeze the
           document — below that we stay 2-column (config + fluid document). ── */}
-      {sheet && (
+      {/* Present for the whole generation. Appearing at the end would take 240px
+          back from the document just as the reader settles into it. */}
+      {(loading || sheet) && (
         <>
           <div
             aria-hidden
-            className="hidden 2xl:block 2xl:w-px 2xl:shrink-0 2xl:self-stretch"
-            style={{ background: "var(--border)" }}
+            className="hidden 2xl:block 2xl:w-px 2xl:shrink-0 2xl:self-stretch bg-border"
           />
           <div className="hidden 2xl:block 2xl:w-[240px] 2xl:shrink-0 2xl:sticky 2xl:top-6 2xl:self-start 2xl:pl-6">
-            <SheetSectionNav key={sheet.topic ?? "sheet"} sheet={sheet} />
+            {/* A stable object, not a fresh literal — the observer effect keys
+                off `sheet`, so a new identity each render would rebind it. */}
+            <SheetSectionNav
+              key={generationId}
+              sheet={sheet ?? EMPTY_SHEET}
+              readyKeys={loading ? streamedKeys : undefined}
+            />
           </div>
         </>
       )}
@@ -1398,7 +1191,7 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
         onClick={() => setConfigDrawerOpen(false)}
       />
       <div
-        className={`absolute inset-y-0 left-0 w-[320px] overflow-y-auto bg-background border-r border-border p-4 motion-safe:transition-transform motion-safe:duration-[250ms] motion-safe:ease-out ${
+        className={`absolute inset-y-0 left-0 w-[320px] overflow-y-auto bg-card border-r border-border p-4 motion-safe:transition-transform motion-safe:duration-[250ms] motion-safe:ease-out ${
           configDrawerOpen ? "translate-x-0" : "-translate-x-full"
         }`}
       >

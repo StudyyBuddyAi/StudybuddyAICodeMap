@@ -54,6 +54,15 @@
     --accent-soft: var(--teal-100);
     --signal: var(--coral-600);
 
+    /* Clinical navy — the landing page's own accent, distinct from the teal the
+       app uses. Tokenised so the marketing page can follow the theme; whether
+       navy and teal should be reconciled is a brand decision, not a bug. */
+    --brand: #0F4C81;
+    --brand-soft: #D2E4FF;
+    --brand-soft-fg: #0369A1;
+    --brand-on: #FFFFFF;
+    --brand-pill: rgba(255, 255, 255, .15);
+
     /* Inverse surface for Research + code */
     --surface-inverse: #0E1116;
     --surface-inverse-2: #1C2128;
@@ -61,6 +70,7 @@
     --fg-on-inverse-muted: #A6A192;
     --border-on-inverse: #22272F;
     --accent-on-inverse: var(--teal-300);
+    --signal-on-inverse: #F8A3A3;
 
     /* Type */
     --font-display: "Newsreader", "Source Serif Pro", Georgia, serif;
@@ -113,6 +123,13 @@
     --accent-hover: var(--teal-300);
     --accent-soft: rgba(43, 165, 165, .14);
     --highlight: #E0CA5A;
+    /* Navy is unreadable on a near-black page, so dark mode lifts it into the
+       light end of the same hue and flips the on-brand foreground. */
+    --brand: #8EBDF9;
+    --brand-soft: rgba(142, 189, 249, .14);
+    --brand-soft-fg: #A9CDFB;
+    --brand-on: #0B0D10;
+    --brand-pill: rgba(255, 255, 255, .10);
     --shadow-2: 0 12px 32px -12px rgba(0, 0, 0, .5), 0 2px 4px rgba(0, 0, 0, .25);
     --shadow-ink: 0 8px 24px -8px rgba(0, 0, 0, .6);
 }
