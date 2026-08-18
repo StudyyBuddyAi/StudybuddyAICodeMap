@@ -1,7 +1,5 @@
 # StudyBuddy AI — Implementation Summary and Change Log
 
-> AI-powered study platform built for medical students. Live at [studybuddyai.com](https://studyybuddyai.com)
-
 ## Executive Summary
 
 This branch represents a major product evolution for StudyBuddy AI: from a general study assistant into a more clinical, grounded, and evidence-aware learning platform. The work focused on three strategic goals:

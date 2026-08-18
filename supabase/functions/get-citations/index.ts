@@ -300,6 +300,7 @@ serve(async (req) => {
   let quotaConsumedUser: string | null = null;
 
   try {
+    const startedAt = Date.now();
     // ── JWT verification ───────────────────────────────────────────────────
     // Identity must be proven before any work is done. The client sends the
     // user's Supabase access token as the Authorization bearer.
@@ -373,6 +374,16 @@ serve(async (req) => {
     const result = await fetchPubMed(topic, NCBI_API_KEY, specialty);
     const citations = result ? [result] : [];
 
+    log("lookup_complete", {
+      userId: user.id,
+      isAnonymous,
+      isProUser,
+      specialty: specialty?.name ?? null,
+      citations: citations.length,
+      quotaConsumed,
+      elapsedMs: Date.now() - startedAt,
+    });
+
     // Refund on failed/empty lookup — no quota burned for undelivered results.
     if (quotaConsumed && citations.length === 0) {
       try {
@@ -382,7 +393,10 @@ serve(async (req) => {
 
     return json({ citations });
   } catch (e) {
-    console.error("get-citations error:", e);
+    log("error", {
+      error: e instanceof Error ? e.message : String(e),
+      elapsedMs: Date.now() - startedAt,
+    });
     // Refund the consumed unit so a crashed lookup never burns quota.
     if (quotaConsumed) {
       try {

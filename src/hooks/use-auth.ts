@@ -178,10 +178,13 @@ export function useAuth() {
       }
     });
 
-    const { data: subscription } = supabase.auth.onAuthStateChange((_event, newSession) => {
+    const { data: subscription } = supabase.auth.onAuthStateChange((event, newSession) => {
       setSession(newSession);
       setUser(newSession?.user ?? null);
       setLoading(false);
+
+      // If user confirms email via magic link, event will be USER_UPDATED
+      // The session will be refreshed automatically by Supabase
     });
 
     return () => {
@@ -192,42 +195,48 @@ export function useAuth() {
 
   const isAnonymous = Boolean(session?.user?.is_anonymous);
 
-  // Signup is two-phase because GoTrue refuses to set a password on an anonymous
-  // user: updateUser({ email }) writes to `email_change` (not `email`) and leaves
-  // is_anonymous true until the OTP is confirmed. So we send the code here and
-  // apply the password in confirmSignUp once the user is no longer anonymous.
-  const startSignUp = async (
+  const signUp = async (
     email: string,
     password: string
-  ): Promise<{ error: string | null; otpType: "email_change" | "signup" | null }> => {
+  ): Promise<{ error: string | null; needsVerification: boolean; email?: string }> => {
     if (isDisposableEmail(email)) {
-      return { error: "Please use a permanent email address.", otpType: null };
+      return { error: "Please use a permanent email address.", needsVerification: false };
     }
 
+    // Signup is two-phase because GoTrue refuses to set a password on an anonymous
+    // user: updateUser({ email }) writes to `email_change` (not `email`) and leaves
+    // is_anonymous true until the OTP is confirmed. The password is applied in
+    // verifyOtp, once the user is no longer anonymous.
     if (isAnonymous) {
       const { error } = await supabase.auth.updateUser({ email });
-      if (error) return { error: error.message, otpType: null };
-      return { error: null, otpType: "email_change" };
+      if (error) return { error: error.message, needsVerification: false };
+      return { error: null, needsVerification: true, email };
     }
 
-    const { error } = await supabase.auth.signUp({ email, password });
-    if (error) return { error: error.message, otpType: null };
-    return { error: null, otpType: "signup" };
+    const { data, error } = await supabase.auth.signUp({ email, password });
+    if (error) {
+      // Check if error indicates email already registered
+      if (error.message.includes("already registered") || error.message.includes("already exists")) {
+        return { error: "An account with this email already exists", needsVerification: false };
+      }
+      return { error: error.message, needsVerification: false };
+    }
+    // If no session returned, email confirmation is required
+    const needsVerification = !data.session;
+    return { error: null, needsVerification, email: data.user?.email };
   };
 
-  const confirmSignUp = async (
+  const verifyOtp = async (
     email: string,
     token: string,
     password: string,
-    otpType: "email_change" | "signup"
+    type: "signup" | "email_change" = "signup"
   ): Promise<{ error: string | null }> => {
-    const { error: verifyError } = await supabase.auth.verifyOtp({
-      email,
-      token,
-      type: otpType,
-    });
-    if (verifyError) return { error: verifyError.message };
+    const { error } = await supabase.auth.verifyOtp({ email, token, type });
+    if (error) return { error: error.message };
 
+    // The anonymous-upgrade path above could not set the password before
+    // verification, so apply it now that the user is no longer anonymous.
     const { error: passwordError } = await supabase.auth.updateUser({ password });
     if (passwordError) return { error: passwordError.message };
 
@@ -258,9 +267,9 @@ export function useAuth() {
 
   const resendSignUpOtp = async (
     email: string,
-    otpType: "email_change" | "signup"
+    type: "signup" | "email_change" = "signup"
   ): Promise<{ error: string | null }> => {
-    const { error } = await supabase.auth.resend({ type: otpType, email });
+    const { error } = await supabase.auth.resend({ type, email });
     return { error: error?.message ?? null };
   };
 
@@ -334,8 +343,16 @@ export function useAuth() {
   };
 
   return {
-    user, session, loading, isAnonymous,
-    startSignUp, confirmSignUp, resendSignUpOtp,
-    signIn, signOut, resetPasswordForEmail, updatePassword,
+    user,
+    session,
+    loading,
+    isAnonymous,
+    signUp,
+    signIn,
+    signOut,
+    resetPasswordForEmail,
+    updatePassword,
+    verifyOtp,
+    resendSignUpOtp,
   };
 }
