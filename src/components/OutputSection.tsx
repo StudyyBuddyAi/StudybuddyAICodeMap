@@ -1,7 +1,7 @@
 import { useRef, useEffect, useState, useCallback } from "react";
 import { useNavigate, type NavigateFunction } from "react-router-dom";
 import { callMedicalNotes } from "@/lib/callMedicalNotes";
-import { callRagAnon } from "@/lib/callRagAnon";
+import { callRagAnon, type RagAnonResponse } from "@/lib/callRagAnon";
 import {
   BookOpen,
   Check,
@@ -1002,7 +1002,7 @@ const OutputSection = ({
 
   // RAG (anonymous) state for Reference Note inline lookups
   const [ragLoading, setRagLoading] = useState(false);
-  const [ragResult, setRagResult] = useState<any | null>(null);
+  const [ragResult, setRagResult] = useState<RagAnonResponse | null>(null);
   const [ragError, setRagError] = useState<string | null>(null);
   const [ragExpanded, setRagExpanded] = useState<Record<string, boolean>>({});
 
@@ -1610,7 +1610,7 @@ const OutputSection = ({
                         <div style={{ marginTop: 10 }}>
                           <div style={{ fontSize: 12, color: "var(--fg)", marginBottom: 6 }}><strong>Sources</strong></div>
                           <ul style={{ paddingLeft: 16, margin: 0 }}>
-                            {ragResult.sources.map((s: any) => (
+                            {ragResult.sources.map((s) => (
                               <li key={s.id} style={{ marginBottom: 8 }}>
                                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>
                                   <div style={{ fontSize: 13, fontWeight: 600 }}>{s.guidelineName || s.sourceName}</div>

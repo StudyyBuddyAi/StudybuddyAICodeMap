@@ -144,7 +144,7 @@ serve(async (req: Request) => {
     // ── Conversation Memory: نافذة منزلقة من 10 أسئلة لكل مستخدم ─────
     // بعد السؤال العاشر، السؤال الحادي عشر بيبدأ نافذة جديدة (نسيان كامل)
     // بس البيانات القديمة تضل بالجدول (ما بتنمسح أبداً).
-    let conversationHistory: { role: "user" | "assistant"; content: string }[] = [];
+    const conversationHistory: { role: "user" | "assistant"; content: string }[] = [];
     let memoryWindowId: string | null = null;
     let memoryTurnCount = 0;
 

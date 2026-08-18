@@ -24,10 +24,10 @@ async function main() {
 
   if (sample && sample.length > 0) {
     const row = sample[0];
-    const embeddingArray = (row.embedding as any);
-    const dimension = typeof embeddingArray === "string" 
-      ? embeddingArray.split(",").length 
-      : Array.isArray(embeddingArray) ? embeddingArray.length : "unknown";
+    const embeddingArray = row.embedding as unknown;
+    const dimension = typeof embeddingArray === "string"
+      ? embeddingArray.split(",").length
+      : Array.isArray(embeddingArray) ? (embeddingArray as unknown[]).length : "unknown";
       
     console.log("Sample Guideline Chunk:");
     console.log("ID:", row.id);
