@@ -24,6 +24,10 @@ export interface MedicalNotesParams {
   sectionKey?: string;
   sectionItems?: unknown[];
   enhanceTopic?: string;
+  // Grounding controls (sheet/cards modes only — ignored by explain/enhance).
+  useGrounding?: boolean;
+  topK?: number;
+  threshold?: number;
   // Entitlement fields kept for backwards compatibility: the medical-notes
   // edge function now derives identity/entitlement from the verified JWT +
   // profiles and IGNORES these values. Keep the fields so existing callers

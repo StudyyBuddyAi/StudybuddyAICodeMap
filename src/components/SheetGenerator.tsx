@@ -1,10 +1,11 @@
 import { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { BookOpen, Brain, History, Loader2, PenLine, Settings2, Stethoscope, X } from "lucide-react";
+import { BookOpen, Brain, ChevronDown, ChevronUp, History, Loader2, PenLine, Settings2, Stethoscope, X } from "lucide-react";
 import SectionSkeleton from "@/components/SectionSkeleton";
 import { useToast } from "@/hooks/use-toast";
 import OutputSection, { type CitationState } from "@/components/OutputSection";
+import SheetSources from "@/components/SheetSources";
 import { useUsageLimit, MAX_DAILY_SHEETS } from "@/hooks/use-usage-limit";
 import { useCitationUsage } from "@/hooks/use-citation-usage";
 import { usePremiumHook } from "@/hooks/use-premium-hook";
@@ -16,6 +17,7 @@ import { parseFlashcardsFromOutput } from "@/lib/parse-flashcards";
 import { sanitizeJsonOutput } from "@/lib/sanitize-json";
 import {
   type GeneratedSheet,
+  type SheetSource,
   parseStoredSheet,
   isJsonSheet,
 } from "@/types/generated-sheet";
@@ -120,6 +122,7 @@ const SECTION_NAV_ITEMS: { key: string; label: string }[] = [
   { key: "examTraps", label: "Exam Traps" },
   { key: "flashcards", label: "Flashcards" },
   { key: "referenceNote", label: "Reference Note" },
+  { key: "sources", label: "Sources" },
 ];
 
 /** A section is worth listing only if it actually has content in the sheet. */
@@ -439,6 +442,10 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
   const [focus, setFocus] = useState(prefill?.modeInfo?.focus ?? "Quick Revision");
   const [length, setLength] = useState(prefill?.modeInfo?.length ?? "Concise");
   const [examMode, setExamMode] = useState(prefill?.modeInfo?.examMode ?? "General");
+  const [useGrounding, setUseGrounding] = useState(true);
+  const [groundingTopK, setGroundingTopK] = useState(8);
+  const [groundingThreshold, setGroundingThreshold] = useState(0.6);
+  const [groundingSettingsOpen, setGroundingSettingsOpen] = useState(false);
   const [sheet, setSheet] = useState<GeneratedSheet | null>(
     prefill?.output ? parseStoredSheet(prefill.output) : null
   );
@@ -470,6 +477,12 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
     }
   });
   const outputRef = useRef<HTMLDivElement>(null);
+  // Captured from the stream's __meta frame — read via ref (not state) by the
+  // loading-message effect below so it never sees a stale closure value.
+  const groundingResultRef = useRef<{ grounded: boolean; sources: SheetSource[] }>({
+    grounded: false,
+    sources: [],
+  });
   const { toast } = useToast();
 
   const recordRecentTopic = (topic: string) => {
@@ -523,6 +536,7 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
     setShowTextarea(false);
     setCitationState("idle");
     setCitations([]);
+    groundingResultRef.current = { grounded: false, sources: [] };
 
     setTimeout(() => {
       outputRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -540,6 +554,9 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
         isAnonymous: isAnonymous ?? false,
         isPro: pro,
         preferredModel: pro ? preferredModel : undefined,
+        useGrounding,
+        topK: groundingTopK,
+        threshold: groundingThreshold,
       });
 
       const xModel = response.headers.get("X-Model-Used") ?? "";
@@ -587,6 +604,13 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
 
           try {
             const parsed = JSON.parse(jsonStr);
+            if (parsed.__meta) {
+              groundingResultRef.current = {
+                grounded: !!parsed.__meta.grounded,
+                sources: Array.isArray(parsed.__meta.sources) ? parsed.__meta.sources : [],
+              };
+              continue;
+            }
             const content = parsed.choices?.[0]?.delta?.content;
             if (content) {
               fullText += content;
@@ -668,6 +692,7 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
     if (!loading) return;
 
     const steps = [
+      "Searching your guidelines…",
       "Reading topic…",
       "Structuring notes…",
       "Finding exam traps…",
@@ -696,7 +721,8 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
             const cleaned = sanitizeJsonOutput(pending);
             try {
               const parsed = JSON.parse(cleaned) as GeneratedSheet;
-              setSheet(parsed);
+              const { grounded, sources } = groundingResultRef.current;
+              setSheet({ ...parsed, grounded, sources });
               setLegacyOutput("");
             } catch {
               // JSON parse failed — fall back to legacy text renderer
@@ -948,6 +974,124 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
                 { value: "Detailed", label: "Detailed" },
               ]}
             />
+          </div>
+
+          <div style={{ marginBottom: 4 }}>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 8,
+                marginBottom: 6,
+              }}
+            >
+              <button
+                type="button"
+                onClick={() => setGroundingSettingsOpen((v) => !v)}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6,
+                  background: "none",
+                  border: "none",
+                  padding: 0,
+                  cursor: "pointer",
+                  fontFamily: "var(--font-mono)",
+                  fontSize: 11,
+                  fontWeight: 500,
+                  letterSpacing: "0.12em",
+                  textTransform: "uppercase",
+                  color: "var(--fg-muted)",
+                }}
+              >
+                {groundingSettingsOpen ? (
+                  <ChevronUp style={{ width: 12, height: 12 }} />
+                ) : (
+                  <ChevronDown style={{ width: 12, height: 12 }} />
+                )}
+                Guideline Sources
+              </button>
+              <label
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6,
+                  fontFamily: "var(--font-sans)",
+                  fontSize: 12,
+                  fontWeight: 500,
+                  color: "var(--fg-muted)",
+                  cursor: "pointer",
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={useGrounding}
+                  onChange={(e) => setUseGrounding(e.target.checked)}
+                  style={{ width: 14, height: 14, accentColor: "var(--accent)", cursor: "pointer" }}
+                />
+                Use my guideline library
+              </label>
+            </div>
+
+            {groundingSettingsOpen && (
+              <div
+                className="animate-fade-in"
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 12,
+                  borderRadius: "var(--radius-md)",
+                  border: "1px solid var(--border)",
+                  background: "var(--bg-elevated)",
+                  padding: "12px 14px",
+                  opacity: useGrounding ? 1 : 0.5,
+                  pointerEvents: useGrounding ? "auto" : "none",
+                  transition: "opacity var(--dur-micro) var(--ease-out)",
+                }}
+              >
+                <div>
+                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+                    <span style={{ fontFamily: "var(--font-sans)", fontSize: 12, color: "var(--fg-muted)" }}>
+                      Sources to use
+                    </span>
+                    <span style={{ fontFamily: "var(--font-mono)", fontSize: 12, fontWeight: 600, color: "var(--accent)" }}>
+                      {groundingTopK}
+                    </span>
+                  </div>
+                  <input
+                    type="range"
+                    min={1}
+                    max={10}
+                    step={1}
+                    value={groundingTopK}
+                    onChange={(e) => setGroundingTopK(Number(e.target.value))}
+                    className="w-full accent-accent"
+                    style={{ height: 6, borderRadius: 3 }}
+                  />
+                </div>
+                <div>
+                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+                    <span style={{ fontFamily: "var(--font-sans)", fontSize: 12, color: "var(--fg-muted)" }}>
+                      Match strictness
+                    </span>
+                    <span style={{ fontFamily: "var(--font-mono)", fontSize: 12, fontWeight: 600, color: "var(--accent)" }}>
+                      {Math.round(groundingThreshold * 100)}%
+                    </span>
+                  </div>
+                  <input
+                    type="range"
+                    min={0.4}
+                    max={0.9}
+                    step={0.05}
+                    value={groundingThreshold}
+                    onChange={(e) => setGroundingThreshold(Number(e.target.value))}
+                    className="w-full accent-accent"
+                    style={{ height: 6, borderRadius: 3 }}
+                  />
+                </div>
+              </div>
+            )}
           </div>
 
           {pro && (
@@ -1312,6 +1456,8 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
           citationIsLoggedIn={isLoggedIn}
         />
       )}
+
+      {sheet && !!sheet.sources?.length && <SheetSources sheet={sheet} />}
 
       {(sheet || legacyOutput) && (
         <div className="flex justify-center pt-2">

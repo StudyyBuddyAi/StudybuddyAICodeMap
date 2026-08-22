@@ -1,6 +1,5 @@
 import { useRef, useEffect, useState, useCallback } from "react";
 import { callMedicalNotes } from "@/lib/callMedicalNotes";
-import { callRagAnon } from "@/lib/callRagAnon";
 import {
   BookOpen,
   Check,
@@ -632,6 +631,40 @@ function EvidenceBadge({ onClick }: { onClick: () => void }) {
   );
 }
 
+function GroundingBadge({ grounded, sourcesCount, onClick }: { grounded: boolean; sourcesCount: number; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={grounded ? onClick : undefined}
+      title={
+        grounded
+          ? "This sheet was built from your guideline library — see Sources"
+          : "No guideline in your library matched this topic — answered from general medical knowledge"
+      }
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 4,
+        padding: "2px 8px",
+        borderRadius: "var(--radius-pill)",
+        border: grounded ? "1px solid var(--border)" : "1px solid var(--border)",
+        borderLeft: grounded ? "2px solid var(--accent)" : "2px solid var(--border-strong)",
+        background: grounded ? "var(--accent-soft)" : "var(--bg)",
+        fontFamily: "var(--font-mono)",
+        fontSize: 11,
+        fontWeight: 500,
+        color: grounded ? "var(--accent)" : "var(--fg-muted)",
+        cursor: grounded ? "pointer" : "default",
+        marginLeft: 8,
+        transition: "background var(--dur-micro) var(--ease-out)",
+      }}
+    >
+      <BookOpen style={{ width: 10, height: 10 }} />
+      {grounded ? `Verified sources · ${sourcesCount}` : "General knowledge"}
+    </button>
+  );
+}
+
 function RegenerateButton({ sectionKey }: { sectionKey: string }) {
   return (
     <button
@@ -1007,35 +1040,6 @@ const OutputSection = ({
   const referenceNoteRef = useRef<HTMLDivElement>(null);
   const [showNudge, setShowNudge] = useState(() => !localStorage.getItem("sb_first_sheet_seen"));
 
-  // RAG (anonymous) state for Reference Note inline lookups
-  const [ragLoading, setRagLoading] = useState(false);
-  const [ragResult, setRagResult] = useState<any | null>(null);
-  const [ragError, setRagError] = useState<string | null>(null);
-  const [ragExpanded, setRagExpanded] = useState<Record<string, boolean>>({});
-
-  const toggleRagExpanded = (id: string) => {
-    setRagExpanded((prev) => ({ ...prev, [id]: !prev[id] }));
-  };
-
-  const runRag = async () => {
-    setRagError(null);
-    setRagResult(null);
-    setRagLoading(true);
-    try {
-      const q = (sheet && sheet.topic) || inputText || (isJson && sheet?.referenceNote) || "";
-      if (!q) {
-        setRagError("No query available to run RAG");
-        return;
-      }
-      const resp = await callRagAnon({ query: String(q), feature: "sheet" });
-      setRagResult(resp);
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : String(e);
-      setRagError(msg || "RAG request failed");
-    } finally {
-      setRagLoading(false);
-    }
-  };
   const [disclaimerCollapsed, setDisclaimerCollapsed] = useState(() =>
     sessionStorage.getItem("sb_disclaimer_collapsed") === "1"
   );
@@ -1226,6 +1230,12 @@ const OutputSection = ({
 
   const scrollToReference = () => {
     referenceNoteRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+
+  const scrollToSources = () => {
+    document
+      .querySelector('[data-section-key="sources"]')
+      ?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
   useEffect(() => {
@@ -1495,6 +1505,13 @@ const OutputSection = ({
                 {key === "overview" && modelUsed && (
                   <ModelBadge model={modelUsed} isPro={isPro} />
                 )}
+                {key === "overview" && (
+                  <GroundingBadge
+                    grounded={!!sheet.grounded}
+                    sourcesCount={sheet.sources?.length ?? 0}
+                    onClick={scrollToSources}
+                  />
+                )}
               </div>
               <div className="flex items-center gap-1">
                 <Check
@@ -1528,61 +1545,6 @@ const OutputSection = ({
                   <div className="text-sm text-muted-foreground leading-relaxed">
                     {sheet.referenceNote}
                   </div>
-
-                  {/* RAG lookup button for anonymous users (and logged-in users too) */}
-                  <div style={{ marginTop: 12, display: "flex", gap: 8, alignItems: "center" }}>
-                    <button
-                      type="button"
-                      onClick={runRag}
-                      disabled={ragLoading}
-                      className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full border border-border/50 bg-background/40 text-xs font-medium text-muted-foreground hover:text-foreground hover:border-primary/40 transition-colors"
-                    >
-                      {ragLoading ? "Searching references…" : "Find references (RAG)"}
-                    </button>
-                    {ragError && <span style={{ color: "var(--signal)", fontSize: 13 }}>{ragError}</span>}
-                  </div>
-
-                  {ragResult && (
-                    <div style={{ marginTop: 12, border: "1px solid var(--border)", borderRadius: 8, padding: 12, background: "var(--bg-elevated)" }}>
-                      <div style={{ fontSize: 13, color: "var(--fg)", marginBottom: 8 }}>
-                        <strong>RAG Answer</strong>
-                      </div>
-                      <div style={{ fontSize: 13, color: "var(--fg-muted)", lineHeight: 1.6 }}>
-                        {ragResult.answer}
-                      </div>
-
-                      {Array.isArray(ragResult.sources) && ragResult.sources.length > 0 && (
-                        <div style={{ marginTop: 10 }}>
-                          <div style={{ fontSize: 12, color: "var(--fg)", marginBottom: 6 }}><strong>Sources</strong></div>
-                          <ul style={{ paddingLeft: 16, margin: 0 }}>
-                            {ragResult.sources.map((s: any) => (
-                              <li key={s.id} style={{ marginBottom: 8 }}>
-                                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>
-                                  <div style={{ fontSize: 13, fontWeight: 600 }}>{s.guidelineName || s.sourceName}</div>
-                                  <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                                    {s.sourceUrl && (
-                                      <a href={s.sourceUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, color: "var(--accent)" }}>
-                                        Open source
-                                      </a>
-                                    )}
-                                    <button type="button" onClick={() => toggleRagExpanded(s.id)} style={{ fontSize: 12, color: "var(--fg-muted)", background: "none", border: "none", cursor: "pointer" }}>
-                                      {ragExpanded[s.id] ? "Hide excerpt" : "Show excerpt"}
-                                    </button>
-                                  </div>
-                                </div>
-                                {s.sectionTitle && <div style={{ fontSize: 12, color: "var(--fg-muted)" }}>{s.sectionTitle}</div>}
-                                {ragExpanded[s.id] && s.content && (
-                                  <div style={{ marginTop: 8, fontSize: 13, color: "var(--fg-muted)", whiteSpace: "pre-wrap", borderLeft: "2px solid var(--border)", paddingLeft: 8 }}>
-                                    {s.content}
-                                  </div>
-                                )}
-                              </li>
-                            ))}
-                          </ul>
-                        </div>
-                      )}
-                    </div>
-                  )}
 
                   {citationState && citationState !== "idle" && citationState !== "hidden" && (
                     <div className="mt-3">

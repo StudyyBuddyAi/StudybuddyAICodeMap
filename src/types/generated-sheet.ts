@@ -11,6 +11,15 @@ export interface EnhancementResult {
   createdAt: string;
 }
 
+export interface SheetSource {
+  id: string;
+  guidelineName: string;
+  sectionTitle: string | null;
+  sourceUrl: string | null;
+  similarity: number;
+  content: string;
+}
+
 export interface GeneratedSheet {
   topic?: string; // normalized topic name, e.g. "Heart Failure"
   overview: string;
@@ -23,6 +32,10 @@ export interface GeneratedSheet {
   // emoji picked by the AI for the topic — extracted from flashcards block
   topicEmoji?: string;
   enhancements?: Record<string, EnhancementResult>; // key = enhancementKey(sourceText, mode)
+  // Grounding metadata from medical-notes' __meta SSE frame. Absent on legacy
+  // sheets and on sheets generated with grounding turned off.
+  grounded?: boolean;
+  sources?: SheetSource[];
 }
 
 // Lightweight type used when loading a saved sheet from study_history.

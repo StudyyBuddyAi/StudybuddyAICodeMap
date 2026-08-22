@@ -1,10 +1,11 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { makeEmbeddings, embedQuery, retrieveChunks, type RagChunk } from "../_shared/rag.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
-  "Access-Control-Expose-Headers": "x-model-used, x-is-premium",
+  "Access-Control-Expose-Headers": "x-model-used, x-is-premium, x-grounded",
 };
 
 // Structured, machine-parseable logs (visible in Supabase edge-fn logs).
@@ -132,7 +133,7 @@ serve(async (req) => {
     const { notes, difficulty, focus, length, examMode, cardsOnly, cardCount, focusCard,
             explainMode,
             enhanceMode, itemText, sectionKey, sectionItems, enhanceTopic,
-            persona } = await req.json();
+            persona, useGrounding, topK, threshold } = await req.json();
 
     if (!notes || typeof notes !== "string" || !notes.trim()) {
       return new Response(
@@ -146,9 +147,81 @@ serve(async (req) => {
     const foc = focus || "Quick Revision";
     const len = length || "Concise";
 
-    const referenceNote = mode.startsWith("USMLE")
-      ? "Exam-aligned with high-yield USMLE resources (e.g., First Aid, guidelines)."
-      : "Based on standard medical references and clinical guidelines.";
+    const OPENROUTER_API_KEY = Deno.env.get("OPENROUTER_API_KEY");
+    if (!OPENROUTER_API_KEY) {
+      throw new Error("OPENROUTER_API_KEY is not configured");
+    }
+
+    // ── GROUNDING: retrieve guideline_chunks context for sheet/cards modes ──
+    // Retrieval is fail-open: any embedding/RPC failure just falls back to an
+    // ungrounded generation. It must never error out or burn quota on its own.
+    // explain/enhance modes stay ungrounded — they're single-item follow-ups,
+    // not full generations, and conversation memory is deliberately not ported
+    // here (sheets are one-shot, not a chat).
+    const groundingEligible = !enhanceMode && !explainMode;
+    const useGroundingFlag = typeof useGrounding === "boolean" ? useGrounding : true;
+    const rawTopK = typeof topK === "number" ? topK : 8;
+    const rawThreshold = typeof threshold === "number" ? threshold : 0.60;
+    const groundingTopK = Math.min(Math.max(Math.round(rawTopK), 1), 10);
+    const groundingThreshold = Math.min(Math.max(rawThreshold, 0.40), 0.90);
+
+    // Search string is the user's notes/topic alone — examMode/focus/difficulty
+    // are style axes with no semantic counterpart in the guideline corpus and
+    // measurably lower cosine similarity, which matters near a 0.60 threshold.
+    // They still shape the prompt below, just not the embedding input.
+    const searchString = notes.trim();
+
+    let ragChunks: RagChunk[] = [];
+    let grounded = false;
+
+    if (groundingEligible && useGroundingFlag) {
+      try {
+        const embeddings = makeEmbeddings(OPENROUTER_API_KEY);
+        const queryEmbedding = await embedQuery(embeddings, searchString);
+        const result = await retrieveChunks(authClient, queryEmbedding, groundingTopK, groundingThreshold);
+        ragChunks = result.chunks;
+        grounded = result.grounded;
+      } catch (retrievalErr: unknown) {
+        const msg = retrievalErr instanceof Error ? retrievalErr.message : String(retrievalErr);
+        log("retrieval_failed", { err: msg });
+        ragChunks = [];
+        grounded = false;
+      }
+
+      // Fire-and-forget audit row — never blocks or fails generation.
+      authClient
+        .from("rag_logs")
+        .insert({
+          user_id: user.id,
+          feature: cardsOnly ? "cards" : "sheet",
+          query: searchString,
+          grounded,
+          source_ids: ragChunks.map((c) => c.id),
+        })
+        .then(({ error: logErr }) => {
+          if (logErr) log("rag_log_failed", { err: logErr });
+        });
+    }
+
+    const groundingContextBlock = grounded
+      ? `Context from verified clinical guidelines (retrieved from our database):
+---
+${ragChunks
+        .map(
+          (c, i) =>
+            `[source ${i + 1}: ${c.guidelineName}${c.sectionTitle ? " — " + c.sectionTitle : ""}]\n${c.content}`
+        )
+        .join("\n\n")}
+---
+Rules:
+- Build your output primarily from this context. It outranks your own knowledge on any conflict.
+- You may add well-established general knowledge only to fill gaps the context does not cover.
+- Do not invent guideline names, numbers, or citations that are not in the context above.`
+      : `No verified guideline context matched this topic. Answer from general medical knowledge.`;
+
+    const referenceNote = grounded
+      ? `<Name the retrieved guideline(s) verbatim, e.g. "Based on: ${ragChunks[0]?.guidelineName ?? "the retrieved guideline"}". Use the exact guideline name(s) from the Context above — never invent a different source.>`
+      : "Based on general medical knowledge — no source document matched this topic.";
 
     let systemPrompt: string;
 
@@ -175,6 +248,8 @@ RULES: Under 180 words total. No markdown. No flashcards or full sheets. Start w
     const gptOssCardsPrompt = (count: number) => `You are a medical educator. Generate exactly ${count} USMLE-style flashcards on the given topic.
 
 Mode: ${mode} | Difficulty: ${diff}
+
+${groundingContextBlock}
 
 Think through the highest-yield concepts for this topic, then output ONLY the flashcards in the exact format below. No preamble, no commentary, no explanations outside the cards.
 
@@ -287,6 +362,8 @@ Start your response with { and end with }. Nothing else.`;
 
     const gptOssSheetPrompt = `${personaPreamble(persona, mode, diff, foc, len)}
 
+${groundingContextBlock}
+
 Before writing anything: identify the core medical concept from the input, reason through the highest-yield facts for this persona, then generate the full output below.
 
 ${sheetSchemaBlock}`;
@@ -365,6 +442,8 @@ Write EXACTLY 2 sentences: patient presentation + clinical decision it drives. M
 
 Mode: ${mode} | Difficulty: ${diff}
 
+${groundingContextBlock}
+
 INPUT HANDLING:
 The user input may be one of three types:
 1. Raw medical notes — extract the core topic(s) and generate flashcards based on them.
@@ -403,6 +482,8 @@ HARD RULES:
 
     const haikuSheetPrompt = `${personaPreamble(persona, mode, diff, foc, len)}
 
+${groundingContextBlock}
+
 INPUT HANDLING:
 The user input may be one of three types:
 1. Raw medical notes — extract the core topic(s) and generate study material based on them.
@@ -438,11 +519,6 @@ ${sheetSchemaBlock}`;
       : focusCard && !cardsOnly
       ? `Focus specifically on this concept: ${focusCard}\n\nTopic: ${notes}`
       : notes;
-
-    const OPENROUTER_API_KEY = Deno.env.get("OPENROUTER_API_KEY");
-    if (!OPENROUTER_API_KEY) {
-      throw new Error("OPENROUTER_API_KEY is not configured");
-    }
 
     // ── SERVER-SIDE IDENTITY & ENTITLEMENT ──────────────────────────────────
     // The JWT was verified above (authClient.auth.getUser). Pro status, account
@@ -532,6 +608,16 @@ ${sheetSchemaBlock}`;
       ? { provider: { order: ["Anthropic"], allow_fallbacks: true } }
       : {};
 
+    // ── SERVER-SIDE DAILY QUOTA ────────────────────────────────────────────
+    // Sheets and cards count toward the free/anon daily cap; explain and enhance
+    // do not. Pro users are uncapped (determined server-side, not from the body).
+    // Consume before calling OpenRouter; refund below if the upstream call fails
+    // so failed generations never burn quota.
+    const DAILY_CAP = 5;
+    const quotaEligible = !explainMode && !enhanceMode;
+    const usageKind = cardsOnly ? "cards" : "sheet";
+    let quotaConsumed = false;
+
     log("generation_start", {
       userId: user.id,
       isAnonymous,
@@ -543,17 +629,9 @@ ${sheetSchemaBlock}`;
       explainMode: !!explainMode,
       enhanceMode: enhanceMode ?? null,
       quotaEligible,
+      grounded,
+      groundingEligible,
     });
-
-    // ── SERVER-SIDE DAILY QUOTA ────────────────────────────────────────────
-    // Sheets and cards count toward the free/anon daily cap; explain and enhance
-    // do not. Pro users are uncapped (determined server-side, not from the body).
-    // Consume before calling OpenRouter; refund below if the upstream call fails
-    // so failed generations never burn quota.
-    const DAILY_CAP = 5;
-    const quotaEligible = !explainMode && !enhanceMode;
-    const usageKind = cardsOnly ? "cards" : "sheet";
-    let quotaConsumed = false;
 
     if (quotaEligible) {
       // isProUser is derived above from the verified identity + profiles row,
@@ -655,6 +733,15 @@ ${sheetSchemaBlock}`;
     let buffer = "";
 
     const transform = new TransformStream<Uint8Array, Uint8Array>({
+      start(controller) {
+        // Retrieval already completed above (before the OpenRouter fetch), so
+        // grounding status/sources can go out before any model bytes arrive.
+        controller.enqueue(
+          encoder.encode(
+            `data: ${JSON.stringify({ __meta: { grounded, sources: ragChunks } })}\n\n`
+          )
+        );
+      },
       transform(chunk, controller) {
         buffer += decoder.decode(chunk, { stream: true });
         const events = buffer.split(/\r?\n\r?\n/);
@@ -703,6 +790,7 @@ ${sheetSchemaBlock}`;
         "Content-Type": "text/event-stream",
         "X-Model-Used": model,
         "X-Is-Premium": isPremiumGeneration ? "true" : "false",
+        "X-Grounded": grounded ? "true" : "false",
       },
     });
   } catch (e) {

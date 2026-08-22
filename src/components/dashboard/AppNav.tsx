@@ -11,7 +11,6 @@ import {
   LogOut,
   LogIn,
   Sparkles,
-  BookOpen,
   Menu,
   X,
 } from "lucide-react";
@@ -39,7 +38,6 @@ const navItems = [
   { to: "/sheets", label: "Sheets", icon: FileText },
   { to: "/flashcards", label: "Flashcards", icon: Layers },
   { to: "/qbank", label: "QBank", icon: FlaskConical },
-  { to: "/guidelines", label: "Guidelines", icon: BookOpen },
   { to: "/library", label: "Library", icon: LibraryIcon },
 ];
 

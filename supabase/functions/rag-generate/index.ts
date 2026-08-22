@@ -1,9 +1,10 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.8";
-import { ChatOpenAI, OpenAIEmbeddings } from "npm:@langchain/openai@0.3.0";
+import { ChatOpenAI } from "npm:@langchain/openai@0.3.0";
 import { awaitAllCallbacks } from "npm:@langchain/core@0.3.0/callbacks/promises";
 import { LangChainTracer } from "npm:@langchain/core@0.3.0/tracers/tracer_langchain";
 import { Client as LangSmithClient } from "npm:langsmith@0.3.6";
+import { makeEmbeddings, embedQuery, retrieveChunks, type RagChunk } from "../_shared/rag.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -11,16 +12,6 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
   "Access-Control-Expose-Headers": "x-model-used",
 };
-
-interface GuidelineChunkMatch {
-  id: string;
-  guideline_id: string;
-  guideline_name: string;
-  section_title: string | null;
-  content: string;
-  source_url: string | null;
-  similarity: number;
-}
 
 interface RagSource {
   id: string;
@@ -107,11 +98,7 @@ serve(async (req: Request) => {
     }
 
     // ── LangChain clients (عبر OpenRouter، متل ما كانوا بالـ fetch القديم) ──
-    const embeddings = new OpenAIEmbeddings({
-      apiKey: openRouterApiKey,
-      configuration: { baseURL: "https://openrouter.ai/api/v1" },
-      modelName: "text-embedding-3-small",
-    });
+    const embeddings = makeEmbeddings(openRouterApiKey);
 
     const chatModel = new ChatOpenAI({
       apiKey: openRouterApiKey,
@@ -144,7 +131,7 @@ serve(async (req: Request) => {
     // ── Conversation Memory: نافذة منزلقة من 10 أسئلة لكل مستخدم ─────
     // بعد السؤال العاشر، السؤال الحادي عشر بيبدأ نافذة جديدة (نسيان كامل)
     // بس البيانات القديمة تضل بالجدول (ما بتنمسح أبداً).
-    let conversationHistory: { role: "user" | "assistant"; content: string }[] = [];
+    const conversationHistory: { role: "user" | "assistant"; content: string }[] = [];
     let memoryWindowId: string | null = null;
     let memoryTurnCount = 0;
 
@@ -201,7 +188,7 @@ serve(async (req: Request) => {
 
     let queryEmbedding: number[];
     try {
-      queryEmbedding = await embeddings.embedQuery(query);
+      queryEmbedding = await embedQuery(embeddings, query);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Failed to create query embedding";
       log("embedding_failed", { err: message });
@@ -217,39 +204,35 @@ serve(async (req: Request) => {
     // ── 3. Vector Search via Supabase RPC ───────────────────────────
     log("rpc_search_start", { topK, threshold });
 
-    const { data: chunks, error: rpcError } = await supabaseAdmin.rpc("match_guideline_chunks", {
-      query_embedding: queryEmbedding,
-      match_threshold: threshold,
-      match_count: topK,
-    });
-
-    if (rpcError) {
+    let ragChunks: RagChunk[] = [];
+    let grounded = false;
+    try {
+      const result = await retrieveChunks(supabaseAdmin, queryEmbedding, topK, threshold);
+      ragChunks = result.chunks;
+      grounded = result.grounded;
+    } catch (rpcError: unknown) {
       log("rpc_search_failed", { rpcError });
     }
 
-    const matches: GuidelineChunkMatch[] = Array.isArray(chunks) ? chunks : [];
-
-    // ── 4. Evaluate Retrieval Quality & Build System Prompt ──────────
-    let grounded = false;
+    // ── 4. Build System Prompt from Retrieved Chunks ──────────
     let context = "";
     let sources: RagSource[] = [];
 
-    if (matches.length > 0 && matches[0].similarity >= threshold) {
-      grounded = true;
-      context = matches
+    if (grounded) {
+      context = ragChunks
         .map(
           (chunk, i) =>
-            `[Source ${i + 1}: ${chunk.guideline_name}${chunk.section_title ? " - " + chunk.section_title : ""}]\n${chunk.content}`
+            `[Source ${i + 1}: ${chunk.guidelineName}${chunk.sectionTitle ? " - " + chunk.sectionTitle : ""}]\n${chunk.content}`
         )
         .join("\n\n");
 
-      sources = matches.map((chunk) => ({
+      sources = ragChunks.map((chunk) => ({
         id: chunk.id,
         similarity: chunk.similarity,
-        guidelineName: chunk.guideline_name,
-        sourceName: chunk.guideline_name,
-        sectionTitle: chunk.section_title ?? null,
-        sourceUrl: chunk.source_url ?? null,
+        guidelineName: chunk.guidelineName,
+        sourceName: chunk.guidelineName,
+        sectionTitle: chunk.sectionTitle,
+        sourceUrl: chunk.sourceUrl,
         content: chunk.content,
         metadata: {},
       }));
@@ -265,7 +248,7 @@ serve(async (req: Request) => {
     }
 
     // ── 5. Call AI Provider (Chat Completion) عبر LangChain ─────────
-    log("completion_start", { grounded, matchesCount: matches.length });
+    log("completion_start", { grounded, matchesCount: ragChunks.length });
 
     let answer: string;
     try {
