@@ -1,5 +1,8 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { makeEmbeddings, embedQuery, retrieveChunks, type RagChunk } from "../_shared/rag.ts";
+import { traceable } from "npm:langsmith@0.3.6/traceable";
+import { Client as LangSmithClient } from "npm:langsmith@0.3.6";
+import { awaitAllCallbacks } from "npm:@langchain/core@0.3.0/callbacks/promises";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -13,6 +16,22 @@ const corsHeaders = {
 const log = (event: string, fields: Record<string, unknown> = {}) => {
   console.log(JSON.stringify({ fn: "medical-notes", event, ...fields }));
 };
+
+/**
+ * Sends any pending LangSmith trace batches before the response finishes and
+ * the Deno isolate is torn down. Mirrors rag-generate's flushTraces — never
+ * throws, since a tracing hiccup must never fail a generation.
+ */
+async function flushLangsmith(client: LangSmithClient | null) {
+  if (!client) return;
+  try {
+    await awaitAllCallbacks();
+    await client.awaitPendingTraceBatches();
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    log("langsmith_flush_error", { err: msg });
+  }
+}
 
 function sanitizeJsonOutput(raw: string): string {
   // Strip markdown code fences if the model wraps the JSON
@@ -171,22 +190,67 @@ serve(async (req) => {
     // They still shape the prompt below, just not the embedding input.
     const searchString = notes.trim();
 
+    // ── LangSmith tracing for the retrieval step ────────────────────────────
+    // embedQuery is a plain Embeddings call (not a Runnable), so it has no
+    // {callbacks} option the way rag-generate's chatModel.invoke does — traced
+    // explicitly instead via traceable(), covering both the embedding call and
+    // the pgvector search as one "retriever" run. Explicit client + tracingEnabled
+    // (not ambient env-var auto-detection, which is unreliable inside Deno Edge
+    // Functions — see the same note in rag-generate).
+    const langsmithApiKey = Deno.env.get("LANGSMITH_API_KEY") ?? Deno.env.get("LANGCHAIN_API_KEY");
+    const langsmithProject =
+      Deno.env.get("LANGSMITH_PROJECT") ?? Deno.env.get("LANGCHAIN_PROJECT") ?? "default";
+    const langsmithClient = langsmithApiKey
+      ? new LangSmithClient({ apiKey: langsmithApiKey, apiUrl: "https://api.smith.langchain.com" })
+      : null;
+
+    const runGroundingRetrieval = traceable(
+      async (query: string, topKArg: number, thresholdArg: number) => {
+        const embeddings = makeEmbeddings(OPENROUTER_API_KEY);
+        const queryEmbedding = await embedQuery(embeddings, query);
+        const result = await retrieveChunks(authClient, queryEmbedding, topKArg, thresholdArg);
+        return {
+          grounded: result.grounded,
+          sourceCount: result.chunks.length,
+          sources: result.chunks.map((c) => ({
+            guidelineName: c.guidelineName,
+            sectionTitle: c.sectionTitle,
+            similarity: Number(c.similarity.toFixed(4)),
+          })),
+          chunks: result.chunks,
+        };
+      },
+      {
+        name: "medical-notes-grounding-retrieval",
+        run_type: "retriever",
+        client: langsmithClient ?? undefined,
+        tracingEnabled: !!langsmithClient,
+        project_name: langsmithProject,
+        // Keep full chunk content out of the LangSmith-visible output — the
+        // real return value (used below) still carries it for the caller.
+        processOutputs: (outputs) => ({
+          grounded: outputs.grounded,
+          sourceCount: outputs.sourceCount,
+          sources: outputs.sources,
+        }),
+      }
+    );
+
     let ragChunks: RagChunk[] = [];
     let grounded = false;
 
     if (groundingEligible && useGroundingFlag) {
       try {
-        const embeddings = makeEmbeddings(OPENROUTER_API_KEY);
-        const queryEmbedding = await embedQuery(embeddings, searchString);
-        const result = await retrieveChunks(authClient, queryEmbedding, groundingTopK, groundingThreshold);
-        ragChunks = result.chunks;
-        grounded = result.grounded;
+        const traced = await runGroundingRetrieval(searchString, groundingTopK, groundingThreshold);
+        ragChunks = traced.chunks;
+        grounded = traced.grounded;
       } catch (retrievalErr: unknown) {
         const msg = retrievalErr instanceof Error ? retrievalErr.message : String(retrievalErr);
         log("retrieval_failed", { err: msg });
         ragChunks = [];
         grounded = false;
       }
+      await flushLangsmith(langsmithClient);
 
       // Fire-and-forget audit row — never blocks or fails generation.
       authClient
