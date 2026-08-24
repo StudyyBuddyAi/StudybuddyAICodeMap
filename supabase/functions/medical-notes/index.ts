@@ -1,5 +1,14 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { makeEmbeddings, embedQuery, retrieveChunks, type RagChunk } from "../_shared/rag.ts";
+import {
+  openMemoryWindow,
+  readMemoryTurns,
+  writeUserTurn,
+  completeTurn,
+  MEMORY_FOLLOWUP_INSTRUCTION,
+  trim500,
+  type MemoryTurn,
+} from "../_shared/memory.ts";
 import { traceable } from "npm:langsmith@0.3.6/traceable";
 import { Client as LangSmithClient } from "npm:langsmith@0.3.6";
 import { awaitAllCallbacks } from "npm:@langchain/core@0.3.0/callbacks/promises";
@@ -8,7 +17,7 @@ const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
-  "Access-Control-Expose-Headers": "x-model-used, x-is-premium, x-grounded",
+  "Access-Control-Expose-Headers": "x-model-used, x-is-premium, x-retrieved-chunks",
 };
 
 // Structured, machine-parseable logs (visible in Supabase edge-fn logs).
@@ -119,8 +128,11 @@ serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
+  // Hoisted above the try block: the catch handler reads this on any early
+  // throw, and a value declared inside try is not in scope for catch.
+  const startedAt = Date.now();
+
   try {
-    const startedAt = Date.now();
     // ── JWT verification ───────────────────────────────────────────────────
     // Reject missing/invalid tokens before doing any work. The client sends the
     // user's Supabase access token as the Authorization bearer.
@@ -152,7 +164,7 @@ serve(async (req) => {
     const { notes, difficulty, focus, length, examMode, cardsOnly, cardCount, focusCard,
             explainMode,
             enhanceMode, itemText, sectionKey, sectionItems, enhanceTopic,
-            persona, useGrounding, topK, threshold } = await req.json();
+            persona, useGrounding, topK, threshold, useMemory } = await req.json();
 
     if (!notes || typeof notes !== "string" || !notes.trim()) {
       return new Response(
@@ -175,8 +187,8 @@ serve(async (req) => {
     // Retrieval is fail-open: any embedding/RPC failure just falls back to an
     // ungrounded generation. It must never error out or burn quota on its own.
     // explain/enhance modes stay ungrounded — they're single-item follow-ups,
-    // not full generations, and conversation memory is deliberately not ported
-    // here (sheets are one-shot, not a chat).
+    // not full generations. (Conversation memory, below, is a separate
+    // concern and does cover all four modes — see the MEMORY section.)
     const groundingEligible = !enhanceMode && !explainMode;
     const useGroundingFlag = typeof useGrounding === "boolean" ? useGrounding : true;
     const rawTopK = typeof topK === "number" ? topK : 8;
@@ -237,35 +249,43 @@ serve(async (req) => {
     );
 
     let ragChunks: RagChunk[] = [];
-    let grounded = false;
 
     if (groundingEligible && useGroundingFlag) {
       try {
         const traced = await runGroundingRetrieval(searchString, groundingTopK, groundingThreshold);
         ragChunks = traced.chunks;
-        grounded = traced.grounded;
       } catch (retrievalErr: unknown) {
         const msg = retrievalErr instanceof Error ? retrievalErr.message : String(retrievalErr);
         log("retrieval_failed", { err: msg });
         ragChunks = [];
-        grounded = false;
       }
       await flushLangsmith(langsmithClient);
 
       // Fire-and-forget audit row — never blocks or fails generation.
+      // rag_logs.grounded stays a boolean column (not migrated) — write
+      // "did retrieval return anything", which is all that column ever meant.
       authClient
         .from("rag_logs")
         .insert({
           user_id: user.id,
           feature: cardsOnly ? "cards" : "sheet",
           query: searchString,
-          grounded,
+          grounded: ragChunks.length > 0,
           source_ids: ragChunks.map((c) => c.id),
         })
         .then(({ error: logErr }) => {
           if (logErr) log("rag_log_failed", { err: logErr });
         });
     }
+
+    // retrievedChunks is the retrieval *ceiling*, not the final grounding
+    // level — the model hasn't run yet, so it can't have declared
+    // sourceCoverage. The client reconciles this count against the model's
+    // self-reported coverage after the JSON parses (src/lib/grounding.ts):
+    // retrievedChunks === 0 always forces "none"; otherwise the model's
+    // declared level applies, defaulting to "partial" if missing/malformed.
+    const retrievedChunks = ragChunks.length;
+    const grounded = retrievedChunks > 0;
 
     const groundingContextBlock = grounded
       ? `Context from verified clinical guidelines (retrieved from our database):
@@ -280,12 +300,39 @@ ${ragChunks
 Rules:
 - Build your output primarily from this context. It outranks your own knowledge on any conflict.
 - You may add well-established general knowledge only to fill gaps the context does not cover.
-- Do not invent guideline names, numbers, or citations that are not in the context above.`
-      : `No verified guideline context matched this topic. Answer from general medical knowledge.`;
+- Do not invent guideline names, numbers, or citations that are not in the context above.
+- Fill every field of the JSON output below from standard medical knowledge even where this Context
+  is silent. Never leave a field empty, never truncate the sheet, and never refuse to answer — report
+  any gap honestly in "sourceCoverage" instead (see the OUTPUT section below).`
+      : `No verified guideline context matched this topic. Answer from general medical knowledge, and
+still fill every field of the JSON output below completely — never leave a field empty, never truncate
+the sheet, and never refuse to answer.`;
 
     const referenceNote = grounded
-      ? `<Name the retrieved guideline(s) verbatim, e.g. "Based on: ${ragChunks[0]?.guidelineName ?? "the retrieved guideline"}". Use the exact guideline name(s) from the Context above — never invent a different source.>`
-      : "Based on general medical knowledge — no source document matched this topic.";
+      ? `<Choose based on your own "sourceCoverage.level" below. If "full": "Based on: <guideline name(s) from the Context, verbatim>". If "partial": "Partly based on: <guideline name(s) from the Context, verbatim>. Sections not covered by our library were written from general medical knowledge." Never invent a guideline name not in the Context above.>`
+      : "Not covered by our reference library — written from general medical knowledge. Verify before exam or clinical use.";
+
+    // ── MEMORY: 10-turn sliding window, shared across sheet/cards/explain/enhance ──
+    // All four modes read the same per-user window so a follow-up ("explain
+    // that again more simply") resolves regardless of which mode asked it.
+    // enhance reads history but never writes a turn or advances the counter —
+    // it's quota-exempt and fires several times per sheet, so counting it
+    // would evict the actual sheet topic from the window before the user
+    // asks the follow-up this feature exists for.
+    // Fail-open, same as grounding: any read/write failure just proceeds
+    // without memory — it must never error out or burn quota on its own.
+    const useMemoryFlag = typeof useMemory === "boolean" ? useMemory : true;
+    const memoryWritable = useMemoryFlag && !enhanceMode;
+
+    let memoryTurns: MemoryTurn[] = [];
+    let memoryWindow: { windowId: string; turnCount: number } | null = null;
+
+    if (useMemoryFlag) {
+      memoryWindow = await openMemoryWindow(authClient, user.id);
+      if (memoryWindow) {
+        memoryTurns = await readMemoryTurns(authClient, user.id, memoryWindow.windowId);
+      }
+    }
 
     let systemPrompt: string;
 
@@ -386,8 +433,20 @@ OUTPUT — return exactly this JSON shape:
       "answer": "<1-2 sentence answer>"
     }
   ],
-  "referenceNote": "${referenceNote}"
+  "referenceNote": "${referenceNote}",
+  "sourceCoverage": {
+    "level": "full | partial | none",
+    "uncovered": ["<zero or more of: overview, clinicalApproach, keyPoints, examTraps, memoryHooks, flashcards>"]
+  }
 }
+
+SOURCE COVERAGE — report honestly, after writing the rest of the sheet:
+- "full": every section above rests on the provided Context. "uncovered" is empty.
+- "partial": one or more sections were written mainly from your own medical knowledge because the
+  Context did not cover them. List those section names in "uncovered".
+- "none": the Context was empty or irrelevant to this topic. List every section in "uncovered".
+- When in doubt, choose the weaker level. Over-claiming source backing is the worst possible error here —
+  worse than under-claiming it.
 
 LENGTH GATE — apply strictly based on the Length setting "${len}":
 
@@ -666,6 +725,10 @@ ${sheetSchemaBlock}`;
       systemPrompt = isHaiku ? haikuSheetPrompt : gptOssSheetPrompt;
     }
 
+    if (memoryTurns.length > 0) {
+      systemPrompt += MEMORY_FOLLOWUP_INSTRUCTION;
+    }
+
     const providerRouting = model.startsWith("openai/gpt-oss")
       ? { provider: { order: ["Cerebras", "Groq"], allow_fallbacks: true } }
       : model === "anthropic/claude-haiku-4.5"
@@ -693,8 +756,11 @@ ${sheetSchemaBlock}`;
       explainMode: !!explainMode,
       enhanceMode: enhanceMode ?? null,
       quotaEligible,
-      grounded,
+      retrievedChunks,
       groundingEligible,
+      useMemory: useMemoryFlag,
+      memoryWindowId: memoryWindow?.windowId ?? null,
+      memoryTurnsInPrompt: memoryTurns.length / 2,
     });
 
     if (quotaEligible) {
@@ -722,6 +788,25 @@ ${sheetSchemaBlock}`;
       }
     }
 
+    // Claims this turn's number (and rolls the window over if it's full) and
+    // writes the user side, awaited, before the OpenRouter fetch — so a
+    // concurrent request or a stream that dies mid-flight can never reuse or
+    // skip a turn_number. See _shared/memory.ts for the CAS this relies on.
+    // The question is `notes` (not `userContent`) for every writable mode —
+    // sheet/explain already store the raw topic/card question there; the
+    // "Focus specifically..." wrapper userContent adds for sheet mode is a
+    // prompt-shaping detail, not part of what the turn should remember.
+    let memoryClaim: { rowId: string; turnNumber: number; windowId: string } | null = null;
+    if (memoryWritable && memoryWindow) {
+      memoryClaim = await writeUserTurn(authClient, user.id, memoryWindow.windowId, memoryWindow.turnCount, notes);
+      log("memory_turn_claimed", {
+        claimed: !!memoryClaim,
+        windowId: memoryClaim?.windowId ?? memoryWindow.windowId,
+        turnNumber: memoryClaim?.turnNumber ?? null,
+        rolledOver: memoryClaim ? memoryClaim.windowId !== memoryWindow.windowId : null,
+      });
+    }
+
     let response: Response;
     try {
       response = await fetch(
@@ -741,6 +826,7 @@ ${sheetSchemaBlock}`;
             max_tokens: 8192,
             messages: [
               { role: "system", content: systemPrompt },
+              ...memoryTurns,
               { role: "user", content: userContent },
             ],
             ...providerRouting,
@@ -795,14 +881,37 @@ ${sheetSchemaBlock}`;
     const decoder = new TextDecoder();
     const encoder = new TextEncoder();
     let buffer = "";
+    let assistantText = "";
+
+    // Builds the assistant-side memory summary for this turn — never the
+    // full sheet JSON, which would exhaust the prompt budget within a few
+    // turns. Trimmed to 500 chars by the caller (completeTurn's caller,
+    // below), same as the user side.
+    function buildMemorySummary(): string {
+      if (explainMode) return assistantText;
+      if (cardsOnly) return `${notes}: ${assistantText}`;
+      // sheet — deliberately not shared with cardsOnly above: the cards text
+      // format has no "overview" field, so it has nothing to parse for.
+      try {
+        const parsed = JSON.parse(sanitizeJsonOutput(assistantText));
+        const topic = typeof parsed?.topic === "string" && parsed.topic.trim() ? parsed.topic : notes;
+        const overview = typeof parsed?.overview === "string" ? parsed.overview : "";
+        return `${topic}: ${overview}`;
+      } catch {
+        return assistantText;
+      }
+    }
 
     const transform = new TransformStream<Uint8Array, Uint8Array>({
       start(controller) {
         // Retrieval already completed above (before the OpenRouter fetch), so
-        // grounding status/sources can go out before any model bytes arrive.
+        // the retrieval count/sources can go out before any model bytes arrive.
+        // This is a count, not a grounding *level* — the model hasn't reported
+        // sourceCoverage yet, so the client reconciles the final level itself
+        // once the sheet JSON parses (src/lib/grounding.ts).
         controller.enqueue(
           encoder.encode(
-            `data: ${JSON.stringify({ __meta: { grounded, sources: ragChunks } })}\n\n`
+            `data: ${JSON.stringify({ __meta: { retrievedChunks, sources: ragChunks } })}\n\n`
           )
         );
       },
@@ -829,6 +938,7 @@ ${sheetSchemaBlock}`;
             const parsed = JSON.parse(payload);
             const text = parsed?.choices?.[0]?.delta?.content;
             if (typeof text !== "string" || text.length === 0) continue;
+            assistantText += text;
             controller.enqueue(
               encoder.encode(`data: ${JSON.stringify(parsed)}\n\n`)
             );
@@ -837,7 +947,7 @@ ${sheetSchemaBlock}`;
           }
         }
       },
-      flush(controller) {
+      async flush(controller) {
         controller.enqueue(encoder.encode("data: [DONE]\n\n"));
         log("generation_stream_end", {
           userId: user.id,
@@ -845,6 +955,14 @@ ${sheetSchemaBlock}`;
           isPremium: isPremiumGeneration,
           elapsedMs: Date.now() - startedAt,
         });
+
+        // Awaited before the controller is considered closed — the Deno
+        // isolate can be torn down the instant the response completes, so a
+        // fire-and-forget write here would silently lose the turn.
+        if (memoryClaim) {
+          const summary = trim500(buildMemorySummary()) || trim500(notes) || "(no answer)";
+          await completeTurn(authClient, memoryClaim.rowId, summary);
+        }
       },
     });
 
@@ -854,7 +972,7 @@ ${sheetSchemaBlock}`;
         "Content-Type": "text/event-stream",
         "X-Model-Used": model,
         "X-Is-Premium": isPremiumGeneration ? "true" : "false",
-        "X-Grounded": grounded ? "true" : "false",
+        "X-Retrieved-Chunks": String(retrievedChunks),
       },
     });
   } catch (e) {

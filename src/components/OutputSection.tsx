@@ -28,9 +28,12 @@ import type { CitationResult } from "@/lib/citation";
 import {
   type GeneratedSheet,
   type EnhancementResult,
+  type GroundingLevel,
   parseStoredSheet,
   isJsonSheet,
 } from "@/types/generated-sheet";
+import { resolveGroundingLevel } from "@/lib/grounding";
+import { useMemoryPreference } from "@/hooks/use-memory-preference";
 
 type EnhanceKind = "enhance" | "expand" | "clinical";
 
@@ -631,36 +634,61 @@ function EvidenceBadge({ onClick }: { onClick: () => void }) {
   );
 }
 
-function GroundingBadge({ grounded, sourcesCount, onClick }: { grounded: boolean; sourcesCount: number; onClick: () => void }) {
+function GroundingBadge({
+  level,
+  sourcesCount,
+  onClick,
+}: {
+  level: GroundingLevel | null;
+  sourcesCount: number;
+  onClick: () => void;
+}) {
+  if (level === null) return null;
+
+  const clickable = level === "full" || level === "partial";
+  const label =
+    level === "full"
+      ? `Verified sources · ${sourcesCount}`
+      : level === "partial"
+      ? `Partly sourced · ${sourcesCount}`
+      : "General knowledge";
+  const title =
+    level === "full"
+      ? "This sheet was built from your guideline library — see Sources"
+      : level === "partial"
+      ? "Part of this sheet was built from your guideline library — see Sources"
+      : "No guideline in your library matched this topic — answered from general medical knowledge";
+
   return (
     <button
       type="button"
-      onClick={grounded ? onClick : undefined}
-      title={
-        grounded
-          ? "This sheet was built from your guideline library — see Sources"
-          : "No guideline in your library matched this topic — answered from general medical knowledge"
-      }
+      onClick={clickable ? onClick : undefined}
+      title={title}
       style={{
         display: "inline-flex",
         alignItems: "center",
         gap: 4,
         padding: "2px 8px",
         borderRadius: "var(--radius-pill)",
-        border: grounded ? "1px solid var(--border)" : "1px solid var(--border)",
-        borderLeft: grounded ? "2px solid var(--accent)" : "2px solid var(--border-strong)",
-        background: grounded ? "var(--accent-soft)" : "var(--bg)",
+        border: "1px solid var(--border)",
+        borderLeft:
+          level === "full"
+            ? "2px solid var(--accent)"
+            : level === "partial"
+            ? "2px solid var(--highlight)"
+            : "2px solid var(--border-strong)",
+        background: level === "full" ? "var(--accent-soft)" : "var(--bg)",
         fontFamily: "var(--font-mono)",
         fontSize: 11,
         fontWeight: 500,
-        color: grounded ? "var(--accent)" : "var(--fg-muted)",
-        cursor: grounded ? "pointer" : "default",
+        color: level === "full" ? "var(--accent)" : level === "partial" ? "var(--fg)" : "var(--fg-muted)",
+        cursor: clickable ? "pointer" : "default",
         marginLeft: 8,
         transition: "background var(--dur-micro) var(--ease-out)",
       }}
     >
       <BookOpen style={{ width: 10, height: 10 }} />
-      {grounded ? `Verified sources · ${sourcesCount}` : "General knowledge"}
+      {label}
     </button>
   );
 }
@@ -794,6 +822,9 @@ const InlineEnhancement = ({
   const [error, setError] = useState<string | null>(null);
   const [closing, setClosing] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
+  // Read-only here — shared across sheet/cards/explain/enhance, and only
+  // Sheets exposes the toggle. See src/hooks/use-memory-preference.ts.
+  const { useMemory } = useMemoryPreference();
 
   const cacheKey = `sb_enhance:${sheetId ?? "unsaved"}:${enhKey}`;
   const mode = kindToMode(enhancement.kind);
@@ -818,6 +849,7 @@ const InlineEnhancement = ({
           userId,
           isAnonymous,
           notes: enhancement.sourceText,
+          useMemory,
         },
         { signal: abortRef.current.signal }
       );
@@ -1507,7 +1539,7 @@ const OutputSection = ({
                 )}
                 {key === "overview" && (
                   <GroundingBadge
-                    grounded={!!sheet.grounded}
+                    level={resolveGroundingLevel(sheet)}
                     sourcesCount={sheet.sources?.length ?? 0}
                     onClick={scrollToSources}
                   />

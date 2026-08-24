@@ -26,6 +26,7 @@ import CitationBadgeList from "@/components/CitationBadgeList";
 import GoProModal from "@/components/GoProModal";
 import AuthModal from "@/components/AuthModal";
 import { startTopProgress, finishTopProgress } from "@/components/TopProgressBar";
+import { useMemoryPreference } from "@/hooks/use-memory-preference";
 
 type CitationState = "idle" | "loading" | "found" | "locked" | "hidden";
 
@@ -34,8 +35,14 @@ export type GeneratedCard = ReturnType<typeof parseFlashcardsFromOutput>[number]
 interface FlashcardsGeneratorProps {
   /** Notifies the page when generation starts/stops so the right pane can show skeletons. */
   onGeneratingChange?: (generating: boolean, topic: string) => void;
-  /** Called with the freshly saved cards once generation completes. */
-  onGenerated?: (cards: GeneratedCard[], topic: string) => void;
+  /**
+   * Called with the freshly saved cards once generation completes.
+   * `retrievedChunks` is the X-Retrieved-Chunks count from medical-notes —
+   * cards mode has no sourceCoverage/full-partial distinction (its output is
+   * plain text, not sheet JSON), but a count of 0 is pure retrieval truth and
+   * is enough on its own to show the "General knowledge" notice.
+   */
+  onGenerated?: (cards: GeneratedCard[], topic: string, retrievedChunks: number) => void;
 }
 
 const RECENT_FLASHCARD_TOPICS_KEY = "sb_recent_flashcard_topics_v1";
@@ -62,6 +69,10 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated }: FlashcardsGene
   });
 
   const activeTopicRef = useRef("");
+  // X-Retrieved-Chunks from the last generation — read via ref (not state),
+  // mirroring activeTopicRef, since it's consumed inside the delayed
+  // onGenerated callback below rather than during render.
+  const retrievedChunksRef = useRef(0);
   const { toast } = useToast();
   const { saveCards } = useFlashcardDeck();
   const {
@@ -78,6 +89,9 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated }: FlashcardsGene
     isLoggedIn,
     refreshCitation,
   } = useCitationUsage();
+  // Read-only here — shared across sheet/cards/explain/enhance, and only
+  // Sheets exposes the toggle. See src/hooks/use-memory-preference.ts.
+  const { useMemory } = useMemoryPreference();
   const remaining = Math.max(0, MAX_DAILY_CARDS - cardsCount);
 
   const recordRecentTopic = (t: string) => {
@@ -118,6 +132,7 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated }: FlashcardsGene
     setGenerating(true, activeTopic);
     setCitationState("idle");
     setCitations([]);
+    retrievedChunksRef.current = 0;
     try {
       const response = await callMedicalNotes({
         notes: activeTopic,
@@ -131,6 +146,7 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated }: FlashcardsGene
         isAnonymous: isAnonymous ?? false,
         isPro: pro,
         preferredModel: pro ? preferredModel : undefined,
+        useMemory,
       });
 
       if (!response.ok) {
@@ -140,6 +156,9 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated }: FlashcardsGene
         }
         throw new Error(err.error || `Error: ${response.status}`);
       }
+
+      const retrievedChunksHeader = Number(response.headers.get("X-Retrieved-Chunks"));
+      retrievedChunksRef.current = Number.isFinite(retrievedChunksHeader) ? retrievedChunksHeader : 0;
 
       // Usage was incremented server-side; refresh the displayed count.
       refreshUsage();
@@ -266,7 +285,7 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated }: FlashcardsGene
               setGenerating(false, "");
               setLoadingMsg("");
               window.dispatchEvent(new CustomEvent("studybuddy:deck-saved"));
-              onGenerated?.(pending, activeTopicRef.current);
+              onGenerated?.(pending, activeTopicRef.current, retrievedChunksRef.current);
             })();
             return null;
           }

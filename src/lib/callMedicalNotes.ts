@@ -28,6 +28,9 @@ export interface MedicalNotesParams {
   useGrounding?: boolean;
   topK?: number;
   threshold?: number;
+  // Conversation memory control — shared across all four modes (sheet, cards,
+  // explain, enhance write/read the same 10-turn window). Default true.
+  useMemory?: boolean;
   // Entitlement fields kept for backwards compatibility: the medical-notes
   // edge function now derives identity/entitlement from the verified JWT +
   // profiles and IGNORES these values. Keep the fields so existing callers

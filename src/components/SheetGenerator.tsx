@@ -6,6 +6,8 @@ import SectionSkeleton from "@/components/SectionSkeleton";
 import { useToast } from "@/hooks/use-toast";
 import OutputSection, { type CitationState } from "@/components/OutputSection";
 import SheetSources from "@/components/SheetSources";
+import GroundingNotice from "@/components/GroundingNotice";
+import { parseSourceCoverage, reconcileGroundingLevel, resolveGroundingLevel, REFERENCE_NOTE_NONE } from "@/lib/grounding";
 import { useUsageLimit, MAX_DAILY_SHEETS } from "@/hooks/use-usage-limit";
 import { useCitationUsage } from "@/hooks/use-citation-usage";
 import { usePremiumHook } from "@/hooks/use-premium-hook";
@@ -29,6 +31,7 @@ import GoProModal from "@/components/GoProModal";
 import { startTopProgress, finishTopProgress } from "@/components/TopProgressBar";
 import { useStudyHistory, type StudyHistoryItem } from "@/hooks/use-study-history";
 import { usePersona, type Persona } from "@/hooks/use-persona";
+import { useMemoryPreference } from "@/hooks/use-memory-preference";
 import { timeAgo } from "@/lib/utils";
 
 export interface SheetGeneratorPrefill {
@@ -479,8 +482,11 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
   const outputRef = useRef<HTMLDivElement>(null);
   // Captured from the stream's __meta frame — read via ref (not state) by the
   // loading-message effect below so it never sees a stale closure value.
-  const groundingResultRef = useRef<{ grounded: boolean; sources: SheetSource[] }>({
-    grounded: false,
+  // retrievedChunks is a retrieval count/ceiling, not the final grounding
+  // level — the model hasn't reported sourceCoverage yet at this point in the
+  // stream. The final level is reconciled once the sheet JSON parses below.
+  const groundingResultRef = useRef<{ retrievedChunks: number; sources: SheetSource[] }>({
+    retrievedChunks: 0,
     sources: [],
   });
   const { toast } = useToast();
@@ -513,6 +519,7 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
   } = useCitationUsage();
   const { saveCards } = useFlashcardDeck();
   const { persona, setPersona } = usePersona();
+  const { useMemory, setUseMemory } = useMemoryPreference();
 
   // `overridePersona` lets a persona button generate with the tier just clicked —
   // `setPersona` state won't have flushed by the time this reads the closure.
@@ -536,7 +543,7 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
     setShowTextarea(false);
     setCitationState("idle");
     setCitations([]);
-    groundingResultRef.current = { grounded: false, sources: [] };
+    groundingResultRef.current = { retrievedChunks: 0, sources: [] };
 
     setTimeout(() => {
       outputRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -557,6 +564,7 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
         useGrounding,
         topK: groundingTopK,
         threshold: groundingThreshold,
+        useMemory,
       });
 
       const xModel = response.headers.get("X-Model-Used") ?? "";
@@ -606,7 +614,8 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
             const parsed = JSON.parse(jsonStr);
             if (parsed.__meta) {
               groundingResultRef.current = {
-                grounded: !!parsed.__meta.grounded,
+                retrievedChunks:
+                  typeof parsed.__meta.retrievedChunks === "number" ? parsed.__meta.retrievedChunks : 0,
                 sources: Array.isArray(parsed.__meta.sources) ? parsed.__meta.sources : [],
               };
               continue;
@@ -721,8 +730,17 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
             const cleaned = sanitizeJsonOutput(pending);
             try {
               const parsed = JSON.parse(cleaned) as GeneratedSheet;
-              const { grounded, sources } = groundingResultRef.current;
-              setSheet({ ...parsed, grounded, sources });
+              const { retrievedChunks, sources } = groundingResultRef.current;
+              const coverage = parseSourceCoverage((parsed as unknown as Record<string, unknown>).sourceCoverage);
+              const groundingLevel = reconcileGroundingLevel(retrievedChunks, coverage);
+              setSheet({
+                ...parsed,
+                groundingLevel,
+                sourceCoverage: coverage ?? undefined,
+                retrievedChunks,
+                sources: groundingLevel === "none" ? [] : sources,
+                referenceNote: groundingLevel === "none" ? REFERENCE_NOTE_NONE : parsed.referenceNote,
+              });
               setLegacyOutput("");
             } catch {
               // JSON parse failed — fall back to legacy text renderer
@@ -1090,6 +1108,34 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
                     style={{ height: 6, borderRadius: 3 }}
                   />
                 </div>
+
+                {/* Independent of grounding — always full opacity/interactive
+                    even while the panel above is dimmed for useGrounding=false. */}
+                <div style={{ opacity: 1, pointerEvents: "auto", borderTop: "1px solid var(--border)", paddingTop: 12 }}>
+                  <label
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 6,
+                      fontFamily: "var(--font-sans)",
+                      fontSize: 12,
+                      fontWeight: 500,
+                      color: "var(--fg-muted)",
+                      cursor: "pointer",
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={useMemory}
+                      onChange={(e) => setUseMemory(e.target.checked)}
+                      style={{ width: 14, height: 14, accentColor: "var(--accent)", cursor: "pointer" }}
+                    />
+                    Remember my recent questions
+                  </label>
+                  <p style={{ fontFamily: "var(--font-sans)", fontSize: 11, color: "var(--fg-subtle)", margin: "4px 0 0 20px" }}>
+                    Resets automatically every 10 questions.
+                  </p>
+                </div>
               </div>
             )}
           </div>
@@ -1436,6 +1482,22 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
 
       {!loading && !sheet && !legacyOutput && (
         <SheetsEmptyState onStartTopic={startTopic} onSelectHistory={loadHistoryItem} />
+      )}
+
+      {sheet && (
+        <GroundingNotice
+          level={resolveGroundingLevel(sheet)}
+          coverage={sheet.sourceCoverage}
+          reason={
+            !useGrounding
+              ? "disabled"
+              : sheet.retrievedChunks === undefined
+              ? undefined
+              : sheet.retrievedChunks === 0
+              ? "no-match"
+              : "not-relevant"
+          }
+        />
       )}
 
       {(sheet || legacyOutput) && (

@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { ArrowRight, BookOpen, Layers, Play, Repeat, Settings2, Shuffle, X } from "lucide-react";
 import DashboardLayout from "@/components/dashboard/DashboardLayout";
 import FlashcardsGenerator, { type GeneratedCard } from "@/components/FlashcardsGenerator";
+import GroundingNotice from "@/components/GroundingNotice";
 import DeckList from "@/components/DeckList";
 import { CardFace, ExplainPanel } from "@/components/StudyMode";
 import { Button } from "@/components/ui/button";
@@ -93,7 +94,12 @@ const Flashcards = () => {
   const [explainScope, setExplainScope] = useState<"card" | "topic">("card");
 
   // ── Review session state (lifted so the left pane can mirror it) ─────
-  const [session, setSession] = useState<{ cards: DeckCard[]; topic: string } | null>(null);
+  // retrievedChunks is only set for a session that came straight out of a
+  // fresh generation (handleGenerated) — deck/due-card reviews leave it
+  // undefined, which correctly renders no grounding notice.
+  const [session, setSession] = useState<{ cards: DeckCard[]; topic: string; retrievedChunks?: number } | null>(
+    null
+  );
   const [index, setIndex] = useState(0);
   const [flipped, setFlipped] = useState(false);
   const [known, setKnown] = useState(0);
@@ -121,12 +127,12 @@ const Flashcards = () => {
   }, [allCards]);
 
   // ── Session lifecycle ─────────────────────────────────────────────────
-  const startSession = (cards: DeckCard[], topic: string) => {
+  const startSession = (cards: DeckCard[], topic: string, retrievedChunks?: number) => {
     if (!cards.length) {
       toast({ title: "No cards to review", variant: "destructive" });
       return;
     }
-    setSession({ cards: cards.slice(), topic });
+    setSession({ cards: cards.slice(), topic, retrievedChunks });
     setIndex(0);
     setFlipped(false);
     setKnown(0);
@@ -172,7 +178,7 @@ const Flashcards = () => {
     }
   };
 
-  const handleGenerated = (cards: GeneratedCard[], topic: string) => {
+  const handleGenerated = (cards: GeneratedCard[], topic: string, retrievedChunks: number) => {
     const now = Date.now();
     const sessionCards: DeckCard[] = cards.map((c) => ({
       id: makeCardId(c.question, c.answer),
@@ -191,7 +197,7 @@ const Flashcards = () => {
       setRightPhase("idle");
       return;
     }
-    startSession(sessionCards, topic);
+    startSession(sessionCards, topic, retrievedChunks);
   };
 
   // ── Review interactions (spaced repetition logic unchanged) ──────────
@@ -379,6 +385,9 @@ const Flashcards = () => {
       </div>
     ) : rightPhase === "reviewing" && session ? (
       <div key="reviewing" className="pane-crossfade mx-auto w-full max-w-[560px] space-y-4">
+        {session.retrievedChunks === 0 && (
+          <GroundingNotice level="none" reason="no-match" />
+        )}
         {/* Thin progress bar above the card */}
         <div className="h-1 w-full rounded-full bg-border overflow-hidden">
           <div
