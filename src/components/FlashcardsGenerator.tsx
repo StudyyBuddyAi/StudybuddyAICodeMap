@@ -11,7 +11,7 @@ import {
 } from "@/components/ui/select";
 import { History, Loader2, Layers, PenLine, Search, X, Check, Sparkles, ChevronRight, ArrowRight, Brain, Heart, Activity, Stethoscope } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { useFlashcardDeck } from "@/hooks/use-flashcard-deck";
+import { useFlashcardDeck, type GroundingMeta } from "@/hooks/use-flashcard-deck";
 import { useUsageLimit, MAX_DAILY_CARDS } from "@/hooks/use-usage-limit";
 import { useCitationUsage } from "@/hooks/use-citation-usage";
 import { usePremiumHook } from "@/hooks/use-premium-hook";
@@ -27,6 +27,10 @@ import GoProModal from "@/components/GoProModal";
 import AuthModal from "@/components/AuthModal";
 import { startTopProgress, finishTopProgress } from "@/components/TopProgressBar";
 import { useMemoryPreference } from "@/hooks/use-memory-preference";
+import { groundingLevelFromCards } from "@/lib/grounding";
+import GroundingNotice from "@/components/GroundingNotice";
+import SheetSources from "@/components/SheetSources";
+import type { GeneratedSheet, SheetSource } from "@/types/generated-sheet";
 
 type CitationState = "idle" | "loading" | "found" | "locked" | "hidden";
 
@@ -57,6 +61,11 @@ const CARD_COUNT_OPTIONS = [
   { value: "30", label: "30 cards", description: "Comprehensive" },
 ];
 
+const GROUNDING_OPTIONS = [
+  { value: true, label: "On", description: "Uses retrieved medical guidelines" },
+  { value: false, label: "Off", description: "General knowledge only" },
+];
+
 const EXAM_MODES = [
   { value: "General", label: "General", description: "Broad medical knowledge" },
   { value: "USMLE Step 1", label: "Step 1", description: "Basic sciences" },
@@ -74,6 +83,17 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated }: FlashcardsGene
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [citationState, setCitationState] = useState<CitationState>("idle");
   const [citations, setCitations] = useState<CitationResult[]>([]);
+  // Grounding controls, mirroring the sheet generator's defaults. topK and
+  // threshold are not exposed in the UI — the toggle is the only user-facing
+  // control; the numbers stay here so they are tunable in one place.
+  const [useGrounding, setUseGrounding] = useState(true);
+  const [groundingTopK] = useState(8);
+  const [groundingThreshold] = useState(0.6);
+  const [pendingGrounding, setPendingGrounding] = useState<GroundingMeta | null>(null);
+  // Whether grounding was on for the run that produced `pendingGrounding` —
+  // separates "we looked and found nothing" from "you turned it off", which
+  // GroundingNotice words very differently.
+  const [pendingGroundingRequested, setPendingGroundingRequested] = useState(true);
   const [goProOpen, setGoProOpen] = useState(false);
   const [recentTopics, setRecentTopics] = useState<string[]>(() => {
     try {
@@ -85,6 +105,12 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated }: FlashcardsGene
   });
 
   const activeTopicRef = useRef("");
+  // Null until the server's __meta event arrives. Staying null means the edge
+  // function ran ungrounded (or predates grounding) — not that it found nothing.
+  const groundingResultRef = useRef<{ retrievedChunks: number; sources: SheetSource[] } | null>(null);
+  // The save happens inside a long-lived interval closure that would capture a
+  // stale `pendingGrounding`. The ref is what that closure actually reads.
+  const pendingGroundingRef = useRef<GroundingMeta | null>(null);
   const { toast } = useToast();
   const { saveCards } = useFlashcardDeck();
   const {
@@ -148,6 +174,10 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated }: FlashcardsGene
     setGenerating(true, activeTopic);
     setCitationState("idle");
     setCitations([]);
+    setPendingGrounding(null);
+    pendingGroundingRef.current = null;
+    setPendingGroundingRequested(useGrounding);
+    groundingResultRef.current = null;
     try {
       const response = await callMedicalNotes({
         notes: activeTopic,
@@ -157,6 +187,9 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated }: FlashcardsGene
         length: "Concise",
         cardsOnly: true,
         cardCount: activeCardCount,
+        useGrounding,
+        topK: groundingTopK,
+        threshold: groundingThreshold,
         useMemory,
         userId: user?.id ?? null,
         isAnonymous: isAnonymous ?? false,
@@ -196,6 +229,19 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated }: FlashcardsGene
           if (jsonStr === "[DONE]") break;
           try {
             const parsed = JSON.parse(jsonStr);
+            // Grounding metadata arrives as one __meta event ahead of any model
+            // bytes. Intercept it before the delta read so it never lands in
+            // fullText and get parsed as a flashcard.
+            if (parsed.__meta) {
+              groundingResultRef.current = {
+                retrievedChunks:
+                  typeof parsed.__meta.retrievedChunks === "number"
+                    ? parsed.__meta.retrievedChunks
+                    : 0,
+                sources: Array.isArray(parsed.__meta.sources) ? parsed.__meta.sources : [],
+              };
+              continue;
+            }
             const content = parsed.choices?.[0]?.delta?.content;
             if (content) fullText += content;
           } catch {
@@ -206,7 +252,23 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated }: FlashcardsGene
       }
 
       const parsed = parseFlashcardsFromOutput(fullText, activeTopic);
+
+      // Retrieval is the ceiling; the per-card [Grounded]/[General] tags decide
+      // whether that ceiling was actually reached. No __meta at all means the
+      // generation ran ungrounded — record that as "none" so the deck is
+      // marked honestly rather than left unlabelled.
+      const grounding = groundingResultRef.current;
+      const groundingMeta: GroundingMeta = grounding
+        ? {
+            retrievedChunks: grounding.retrievedChunks,
+            groundingLevel: groundingLevelFromCards(grounding.retrievedChunks, parsed),
+            sources: grounding.sources,
+          }
+        : { retrievedChunks: 0, groundingLevel: "none", sources: [] };
+
       setPendingCards(parsed);
+      setPendingGrounding(groundingMeta);
+      pendingGroundingRef.current = groundingMeta;
 
       // Citation lookup — runs after cards are saved. Serves from the local
       // topic cache when available (no quota consumed); otherwise the edge
@@ -242,6 +304,8 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated }: FlashcardsGene
       setGenerating(false, "");
       setLoadingMsg("");
       setPendingCards(null);
+      setPendingGrounding(null);
+      pendingGroundingRef.current = null;
       toast({
         title: "Error",
         description: e instanceof Error && e.message ? e.message : "Failed to generate flashcards",
@@ -287,7 +351,7 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated }: FlashcardsGene
           if (pending !== null) {
             clearInterval(interval);
             (async () => {
-              const added = await saveCards(pending);
+              const added = await saveCards(pending, pendingGroundingRef.current ?? undefined);
               localStorage.setItem("sb_first_deck_seen", "1");
               toast({
                 title: added > 0 ? `Added ${added} new cards to your deck` : "No new cards (all duplicates)",
@@ -444,6 +508,35 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated }: FlashcardsGene
                 })}
               </div>
             </div>
+
+            {/* Guideline Grounding */}
+            <div className="space-y-2">
+              <label className="block font-mono text-[11px] font-medium tracking-widest uppercase text-muted-foreground">
+                Guideline Grounding
+              </label>
+              <div className="flex gap-2">
+                {GROUNDING_OPTIONS.map(({ value, label, description }) => {
+                  const active = useGrounding === value;
+                  return (
+                    <button
+                      key={String(value)}
+                      type="button"
+                      onClick={() => setUseGrounding(value)}
+                      aria-pressed={active}
+                      className={`flex-1 inline-flex flex-col items-start gap-1 p-3 rounded-lg border text-left transition-all duration-200 ${
+                        active
+                          ? "bg-primary/10 border-primary text-primary"
+                          : "bg-card border-border text-muted-foreground hover:border-primary hover:text-primary"
+                      }`}
+                    >
+                      <span className="text-sm font-medium">{label}</span>
+                      <span className="text-[10px] text-muted-foreground">{description}</span>
+                      {active && <Check className="w-3 h-3 text-primary" />}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
           </div>
         </div>
 
@@ -548,6 +641,27 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated }: FlashcardsGene
               }
               isLoggedIn={isLoggedIn}
             />
+          </div>
+        )}
+
+        {/* Grounding result for the deck that was just generated */}
+        {!loading && pendingGrounding && (
+          <div className="space-y-3 pt-1">
+            <GroundingNotice
+              level={pendingGrounding.groundingLevel}
+              reason={
+                pendingGrounding.groundingLevel !== "none"
+                  ? undefined
+                  : !pendingGroundingRequested
+                  ? "disabled"
+                  : pendingGrounding.retrievedChunks === 0
+                  ? "no-match"
+                  : "not-relevant"
+              }
+            />
+            {pendingGrounding.sources.length > 0 && (
+              <SheetSources sheet={{ sources: pendingGrounding.sources } as GeneratedSheet} />
+            )}
           </div>
         )}
       </CardContent>

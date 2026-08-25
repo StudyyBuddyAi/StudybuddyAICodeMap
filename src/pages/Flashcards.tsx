@@ -199,6 +199,7 @@ const Flashcards = () => {
       question: c.question,
       answer: c.answer,
       tag: c.tag,
+      grounded: c.grounded,
       topic: c.topic || topic,
       topicEmoji: c.topicEmoji,
       createdAt: now,

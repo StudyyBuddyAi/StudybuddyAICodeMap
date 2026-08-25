@@ -1,10 +1,24 @@
 export type ParsedCard = {
   question: string;
   answer: string;
+  /** Clinical tag only — "Mechanism", "Next Step", … Brackets stripped. */
   tag: string;
+  /**
+   * Whether the model marked this card [Grounded] (drawn from retrieved
+   * guideline context) rather than [General]. Cards produced before the
+   * sourcing tag existed carry no such bracket and default to false — an
+   * untagged card is genuinely unverified, so false is the honest fallback.
+   */
+  grounded: boolean;
   topic: string;
   topicEmoji?: string;
 };
+
+/** Sourcing tags the model writes as the second bracket on every Q: line. */
+const SOURCING_TAGS = new Map<string, boolean>([
+  ["grounded", true],
+  ["general", false],
+]);
 
 /**
  * Parse the FLASHCARDS section from streamed AI output.
@@ -47,17 +61,37 @@ export function parseFlashcardsFromOutput(output: string, topic: string): Parsed
     // Reject cards that are obviously too long (likely two cards merged).
     if (question.length > 800 || answer.length > 800) continue;
 
-    // Extract leading [Tag] from question
+    // Extract the leading bracket run from the question. The prompt asks for
+    // two brackets — one clinical tag, one sourcing tag — but the order isn't
+    // guaranteed and older output has only one, so classify each bracket by
+    // its content rather than by position.
     let tag = "";
-    const tagMatch = question.match(/^\s*\[([^\]]+)\]\s*/);
-    if (tagMatch) {
-      tag = tagMatch[1].trim();
-      question = question.slice(tagMatch[0].length).trim();
+    let grounded: boolean | null = null;
+    const tagBlockMatch = question.match(/^(?:\s*\[[^\]]+\])+/);
+    if (tagBlockMatch) {
+      const tagBlock = tagBlockMatch[0];
+      const rest = question.slice(tagBlock.length).trim();
+      const individualTags = [...tagBlock.matchAll(/\[([^\]]+)\]/g)].map((t) => t[1].trim());
+      const clinicalTags: string[] = [];
+      for (const t of individualTags) {
+        const key = t.toLowerCase();
+        if (SOURCING_TAGS.has(key)) grounded = SOURCING_TAGS.get(key)!;
+        else clinicalTags.push(t);
+      }
+      tag = clinicalTags[0] ?? "";
+      question = rest;
     }
 
     if (!question) continue;
 
-    cards.push({ question, answer, tag, topic: truncatedTopic, topicEmoji });
+    cards.push({
+      question,
+      answer,
+      tag,
+      grounded: grounded ?? false,
+      topic: truncatedTopic,
+      topicEmoji,
+    });
   }
 
   return cards;

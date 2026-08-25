@@ -318,15 +318,21 @@ FLASHCARDS
 
 [one emoji representing the topic on its own line]
 
-Q: [Tag] Question ending with question mark?
+Q: [Mechanism][Grounded] Question text ending with question mark?
 A: Answer in 1-2 sentences maximum.
 
-Q: [Tag] Next question?
+Q: [Next Step][General] Question for a topic not in the context?
 A: Answer.
 
 [blank line between every card — this is mandatory]
 
 TAGS (pick one per card): [Diagnosis] [Mechanism] [Next Step] [Complication] [Association]
+
+SOURCING TAG (mandatory, second bracket on every Q: line):
+- [Grounded] — if this card's content comes directly from the Context above
+- [General]  — if no retrieved context covers this card's content
+
+If no Context was provided, every card must be tagged [General].
 
 EMOJI: Pick one that matches the topic — 🫀 cardiac, 🩸 hematology, 🧠 neuro, 🫁 pulmonary, 🦴 ortho, 🩺 general, 💊 pharmacology, 🧬 genetics, 👁️ ophthalmology, 🤰 OB/GYN, 👶 pediatrics, 🧫 micro, ⚗️ biochem, 🩹 trauma, 🛡️ immunology
 
@@ -334,6 +340,7 @@ HARD RULES:
 - Exactly ${count} cards. No more, no less.
 - Each card: Q: on one line, A: on next line, blank line after.
 - Tags in square brackets at start of every Q: line.
+- Every Q: line must have exactly two bracket tags: one clinical tag, one sourcing tag.
 - Questions end with ?
 - Answers: 1-2 sentences only — never more.
 - No "Q:" or "A:" anywhere inside question or answer text.
@@ -532,15 +539,21 @@ FLASHCARDS
 
 [one emoji representing the topic on its own line]
 
-Q: [Tag] Question ending with question mark?
+Q: [Mechanism][Grounded] Question text ending with question mark?
 A: Answer in 1-2 sentences maximum.
 
-Q: [Tag] Next question?
+Q: [Next Step][General] Question for a topic not in the context?
 A: Answer.
 
 [blank line between every card — this is mandatory]
 
 TAGS (pick one per card): [Diagnosis] [Mechanism] [Next Step] [Complication] [Association]
+
+SOURCING TAG (mandatory, second bracket on every Q: line):
+- [Grounded] — if this card's content comes directly from the Context above
+- [General]  — if no retrieved context covers this card's content
+
+If no Context was provided, every card must be tagged [General].
 
 EMOJI: Pick one that matches the topic — 🫀 cardiac, 🩸 hematology, 🧠 neuro, 🫁 pulmonary, 🦴 ortho, 🩺 general, 💊 pharmacology, 🧬 genetics, 👁️ ophthalmology, 🤰 OB/GYN, 👶 pediatrics, 🧫 micro, ⚗️ biochem, 🩹 trauma, 🛡️ immunology
 
@@ -548,6 +561,7 @@ HARD RULES:
 - Exactly ${count} cards. No more, no less.
 - Each card: Q: on one line, A: on next line, blank line after.
 - Tags in square brackets at start of every Q: line.
+- Every Q: line must have exactly two bracket tags: one clinical tag, one sourcing tag.
 - Questions end with ?
 - Answers: 1-2 sentences only — never more.
 - No "Q:" or "A:" anywhere inside question or answer text.
