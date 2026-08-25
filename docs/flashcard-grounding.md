@@ -231,18 +231,52 @@ pre-existing warnings, 0 errors).
 
 ---
 
-## Deploy steps (not yet run)
+## Deploy status
 
-Both target the shared remote Supabase project `ntubppijiiwahogpnrxx`:
+Both target the shared remote Supabase project `ntubppijiiwahogpnrxx`.
+
+### Migration — APPLIED
+
+`supabase db push` was initially blocked by pre-existing drift in the migration
+history, unrelated to this work:
+
+- remote carried `20260823192809` with no local file (a dashboard-applied
+  squash), and
+- four local migrations (`20260721000000`, `20260805000000`, `20260810010000`,
+  `20260810020000`) showed as unapplied.
+
+Probing the live schema over PostgREST confirmed all four were already present
+(`rag_logs`, `rag_conversation_memory`, `curriculum_topics.yield_tier` all
+resolve), so the history table was stale, not the schema. Repaired with:
 
 ```bash
-supabase db push                              # applies the migration
-supabase functions deploy medical-notes       # ships the sourcing-tag prompt
+supabase migration repair --status applied 20260721000000 20260805000000 20260810010000 20260810020000
+supabase migration repair --status reverted 20260823192809
+supabase db push          # applied 20260825000000 only
 ```
 
-Until the function is deployed, the model won't emit `[Grounded]`/`[General]`,
-so every card parses as ungrounded — the client handles that correctly, it just
-means everything reads "Unverified".
+Only the history table was edited; no schema object was re-created. Verified
+after the push: `cards.grounded` and `decks.grounding_metadata` both resolve.
+
+### Edge function — HELD, deliberately
+
+`supabase functions deploy medical-notes` has **not** been run.
+
+Deploying the sourcing-tag prompt ahead of this frontend would regress the live
+site. `main`'s parser strips only the first bracket:
+
+```ts
+const tagMatch = question.match(/^\s*\[([^\]]+)\]\s*/);
+```
+
+so `[Mechanism][Grounded] Why?` would reach production users as a card question
+reading literally `[Grounded] Why?`. The function should ship **with or after**
+this branch merges — or behind a defensive patch to `main`'s parser.
+
+Until it ships, the model emits no sourcing tag, so every card parses as
+ungrounded and reads "Unverified". Everything else — the toggle, `__meta`
+interception, the notice, the sources panel, deck badges, persistence — is fully
+exercisable today.
 
 ---
 
@@ -255,3 +289,11 @@ means everything reads "Unverified".
 | Grounding toggled **Off** | `useGrounding: false` sent, edge function skips retrieval; notice says the library was turned off for this deck |
 | Pre-migration deck reopened | All cards **Unverified**, session warning appears, deck badge grey |
 | Regenerate a grounded deck | Deck badge and sources refresh rather than showing the previous run's verdict |
+
+> Rows mentioning `[Grounded]` / `[General]` tags depend on the edge function
+> deploy above. Until then, retrieval and the sources panel behave exactly as
+> described, but every card parses as ungrounded, so deck badges read
+> **Unverified** and the deck-level verdict resolves to `none`.
+
+Dev server for manual testing: `npm run dev` → http://localhost:8081/
+(port 8080 was already occupied).
