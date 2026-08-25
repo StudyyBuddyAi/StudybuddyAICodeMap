@@ -23,7 +23,6 @@ const Flashcards = lazy(() => import("./pages/Flashcards.tsx"));
 const QBank = lazy(() => import("./pages/QBank.tsx"));
 const QBankSession = lazy(() => import("./pages/QBankSession.tsx"));
 const QBankSummary = lazy(() => import("./pages/QBankSummary.tsx"));
-const RagSearch = lazy(() => import("./pages/RagSearch.tsx"));
 
 const queryClient = new QueryClient();
 
@@ -70,7 +69,6 @@ const AppRoutes = () => {
             <Route path="/qbank/session" element={<QBankSession />} />
             <Route path="/qbank/summary" element={<QBankSummary />} />
           </Route>
-          <Route path="/guidelines" element={<RagSearch />} />
           <Route path="/library" element={<Library />} />
           <Route path="/reset-password" element={<ResetPassword />} />
           {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}

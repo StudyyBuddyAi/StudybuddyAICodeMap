@@ -26,6 +26,7 @@ import CitationBadgeList from "@/components/CitationBadgeList";
 import GoProModal from "@/components/GoProModal";
 import AuthModal from "@/components/AuthModal";
 import { startTopProgress, finishTopProgress } from "@/components/TopProgressBar";
+import { useMemoryPreference } from "@/hooks/use-memory-preference";
 
 type CitationState = "idle" | "loading" | "found" | "locked" | "hidden";
 
@@ -100,6 +101,8 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated }: FlashcardsGene
     isLoading: modelLoading,
   } = useModelPreference();
   const { user, isAnonymous } = useAuth();
+  // Same shared window as the sheet generator — see use-memory-preference.
+  const { useMemory } = useMemoryPreference();
   const {
     canUseCitation,
     isLoggedIn,
@@ -154,6 +157,7 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated }: FlashcardsGene
         length: "Concise",
         cardsOnly: true,
         cardCount: activeCardCount,
+        useMemory,
         userId: user?.id ?? null,
         isAnonymous: isAnonymous ?? false,
         isPro: pro,
