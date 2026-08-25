@@ -11,6 +11,7 @@ import { getCitationsForTopic } from "@/lib/citation-store";
 import CitationBadgeList from "@/components/CitationBadgeList";
 import { startTopProgress, finishTopProgress } from "@/components/TopProgressBar";
 import { callMedicalNotes } from "@/lib/callMedicalNotes";
+import { useMemoryPreference } from "@/hooks/use-memory-preference";
 
 interface StudyModeProps {
   dueCards: Card[];
@@ -330,6 +331,8 @@ interface ExplainPanelProps {
 export const ExplainPanel = ({ open, scope, card, onClose }: ExplainPanelProps) => {
   const { toast } = useToast();
   const { isSheetLimited } = useUsageLimit();
+  // Same shared 10-turn window as sheets and cards — see use-memory-preference.
+  const { useMemory } = useMemoryPreference();
   const [output, setOutput] = useState("");
   const [loading, setLoading] = useState(false);
   const [started, setStarted] = useState(false);
@@ -366,11 +369,13 @@ export const ExplainPanel = ({ open, scope, card, onClose }: ExplainPanelProps) 
               notes: `CARD QUESTION: ${card.question}\n\nCARD ANSWER: ${card.answer}\n\nTOPIC CONTEXT: ${card.topic}`,
               examMode: "General",
               explainMode: true,
+              useMemory,
             }
           : {
               notes: `Topic: ${card.topic}\n\nQuestion being studied: ${card.question}`,
               examMode: "General",
               explainMode: true,
+              useMemory,
             };
         const response = await callMedicalNotes(body);
         if (!response.ok) {

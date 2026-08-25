@@ -2,7 +2,8 @@ import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { AlertTriangle, ArrowRight, BookOpen, Brain, Check, ChevronRight, FileDown, History, Loader2, Play, Search, Settings2, Share2, Sparkles, Stethoscope, X, Zap } from "lucide-react";
+import { AlertTriangle, ArrowRight, BookOpen, Brain, Check, ChevronDown, ChevronRight, ChevronUp, FileDown, History, Loader2, Play, Search, Settings2, Share2, Sparkles, Stethoscope, X, Zap } from "lucide-react";
+import { Slider } from "@/components/ui/slider";
 import { useToast } from "@/hooks/use-toast";
 import OutputSection, { type CitationState } from "@/components/OutputSection";
 import { useUsageLimit, MAX_DAILY_SHEETS } from "@/hooks/use-usage-limit";
@@ -16,9 +17,13 @@ import { parseFlashcardsFromOutput } from "@/lib/parse-flashcards";
 import { parsePartialSheet, parseSheetOutput } from "@/lib/parse-partial-sheet";
 import {
   type GeneratedSheet,
+  type SheetSource,
   parseStoredSheet,
   isJsonSheet,
 } from "@/types/generated-sheet";
+import GroundingNotice from "@/components/GroundingNotice";
+import SheetSources from "@/components/SheetSources";
+import { reconcileGroundingLevel, resolveGroundingLevel } from "@/lib/grounding";
 import { fetchBestCitation, type CitationResult } from "@/lib/citation";
 import { getCitationsForTopic } from "@/lib/citation-store";
 import CitationCTABanner from "@/components/CitationCTABanner";
@@ -27,6 +32,7 @@ import GoProModal from "@/components/GoProModal";
 import { startTopProgress, finishTopProgress } from "@/components/TopProgressBar";
 import { useStudyHistory, type StudyHistoryItem } from "@/hooks/use-study-history";
 import { usePersona, type Persona } from "@/hooks/use-persona";
+import { useMemoryPreference } from "@/hooks/use-memory-preference";
 import { timeAgo } from "@/lib/utils";
 import { sheetToPlainText } from "@/lib/sheet-to-text";
 
@@ -386,6 +392,25 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
     }
   });
   const outputRef = useRef<HTMLDivElement>(null);
+
+  // ── Grounding ──────────────────────────────────────────────────────────
+  // Ranges mirror the edge function's clamps (topK 1–10, threshold 0.40–0.90),
+  // which re-clamps server-side regardless of what the client sends.
+  const [useGrounding, setUseGrounding] = useState(true);
+  const [groundingTopK, setGroundingTopK] = useState(8);
+  const [groundingThreshold, setGroundingThreshold] = useState(0.6);
+  const [groundingSettingsOpen, setGroundingSettingsOpen] = useState(false);
+  // localStorage-backed and deliberately shared: all four medical-notes modes
+  // write to one 10-turn window per user, so the preference has to be the same
+  // wherever they're called from.
+  const { useMemory, setUseMemory } = useMemoryPreference();
+  // Null until the server's __meta event arrives. Staying null means grounding
+  // was never attempted, so the sheet keeps its pre-grounding appearance —
+  // distinct from an attempt that retrieved nothing ({ retrievedChunks: 0 }).
+  const groundingResultRef = useRef<{ retrievedChunks: number; sources: SheetSource[] } | null>(
+    null
+  );
+
   const { toast } = useToast();
   const navigate = useNavigate();
 
@@ -443,6 +468,11 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
     setDeckSaved(false);
     setStreamedKeys([]);
     setSheetIncomplete(false);
+    groundingResultRef.current = null;
+    // Captured per-generation rather than read at render time: the sheet must
+    // keep describing the settings it was actually built with, even if the
+    // toggle is flipped afterwards.
+    const groundingRequested = useGrounding;
     setGenerationId((id) => id + 1);
     setCitationState("idle");
     setCitations([]);
@@ -459,6 +489,10 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
         length,
         examMode,
         persona: activePersona,
+        useGrounding,
+        topK: groundingTopK,
+        threshold: groundingThreshold,
+        useMemory,
         userId: user?.id ?? null,
         isAnonymous: isAnonymous ?? false,
         isPro: pro,
@@ -514,6 +548,19 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
 
           try {
             const parsed = JSON.parse(jsonStr);
+            // Grounding metadata arrives as a single __meta event ahead of any
+            // model bytes. It must be intercepted before the delta read below
+            // so it never reaches fullText / parsePartialSheet.
+            if (parsed.__meta) {
+              groundingResultRef.current = {
+                retrievedChunks:
+                  typeof parsed.__meta.retrievedChunks === "number"
+                    ? parsed.__meta.retrievedChunks
+                    : 0,
+                sources: Array.isArray(parsed.__meta.sources) ? parsed.__meta.sources : [],
+              };
+              continue;
+            }
             const content = parsed.choices?.[0]?.delta?.content;
             if (content) {
               fullText += content;
@@ -539,7 +586,29 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
       const rawText = fullText || "";
       const result = parseSheetOutput(rawText);
       if (result) {
-        setSheet(result.sheet);
+        // Reconcile the model's self-reported coverage against retrieval truth.
+        // Retrieval can only ever weaken the claim, never strengthen it.
+        const grounding = groundingResultRef.current;
+        const groundedSheet: GeneratedSheet = grounding
+          ? {
+              ...result.sheet,
+              retrievedChunks: grounding.retrievedChunks,
+              sources: grounding.sources,
+              groundingLevel: reconcileGroundingLevel(
+                grounding.retrievedChunks,
+                result.sheet.sourceCoverage ?? null
+              ),
+            }
+          : groundingRequested === false
+          ? // Deliberately turned off. Mark it "none" but leave retrievedChunks
+            // unset — that absence is what tells the notice to say "turned off"
+            // rather than "we don't have this topic".
+            { ...result.sheet, groundingLevel: "none" as const }
+          : // Grounding was on but no __meta arrived (an edge function that
+            // predates this feature). Leave the sheet unmarked so it renders
+            // exactly as it did before, rather than claiming a false verdict.
+            result.sheet;
+        setSheet(groundedSheet);
         setLegacyOutput("");
         setSheetIncomplete(result.status === "partial");
       } else if (revealedCount === 0) {
@@ -797,6 +866,129 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
                   { value: "Detailed", label: "Detailed" },
                 ]}
               />
+              {/* ── Guideline grounding ──
+                  Off skips retrieval entirely: no sources, no grounding badge,
+                  and the sheet reads exactly as it did before this feature.
+                  The tuning sliders live behind a disclosure because the
+                  defaults are right for almost everyone. */}
+              <div className="mb-4">
+                <div className="flex items-center justify-between mb-2">
+                  <label className="font-mono text-[11px] font-medium tracking-widest uppercase text-muted-foreground">
+                    Guideline Grounding
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setGroundingSettingsOpen((v) => !v)}
+                    aria-expanded={groundingSettingsOpen}
+                    className="inline-flex items-center gap-1 text-[11px] font-medium text-muted-foreground hover:text-primary transition-colors"
+                  >
+                    {groundingSettingsOpen ? (
+                      <ChevronUp className="w-3.5 h-3.5" />
+                    ) : (
+                      <ChevronDown className="w-3.5 h-3.5" />
+                    )}
+                    Adjust
+                  </button>
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  {[
+                    { value: "on", label: "On" },
+                    { value: "off", label: "Off" },
+                  ].map((opt) => {
+                    const active = (useGrounding ? "on" : "off") === opt.value;
+                    return (
+                      <button
+                        key={opt.value}
+                        type="button"
+                        onClick={() => setUseGrounding(opt.value === "on")}
+                        aria-pressed={active}
+                        className={`inline-flex items-center gap-2 h-9 px-4 rounded-lg text-sm font-medium transition-all duration-200 border ${
+                          active
+                            ? "bg-primary border-primary text-primary-foreground shadow-md"
+                            : "bg-card border-border text-muted-foreground hover:border-primary hover:text-primary"
+                        }`}
+                      >
+                        {active && <Check className="w-4 h-4" />}
+                        {opt.label}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {groundingSettingsOpen && (
+                  <div
+                    className={`animate-fade-in mt-3 rounded-lg border border-border bg-card p-4 space-y-5 transition-opacity duration-200 ${
+                      useGrounding ? "" : "opacity-50 pointer-events-none"
+                    }`}
+                    aria-hidden={!useGrounding}
+                  >
+                    <div>
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-sm text-muted-foreground">Sources to use</span>
+                        <span className="font-mono text-xs font-semibold text-primary">
+                          {groundingTopK}
+                        </span>
+                      </div>
+                      <Slider
+                        value={[groundingTopK]}
+                        onValueChange={([v]) => setGroundingTopK(v)}
+                        min={1}
+                        max={10}
+                        step={1}
+                        disabled={!useGrounding}
+                        aria-label="Number of guideline sources to retrieve"
+                      />
+                      <p className="mt-1.5 text-[11px] leading-relaxed text-muted-foreground">
+                        How many guideline passages to pull in. More context, but weaker matches.
+                      </p>
+                    </div>
+
+                    <div>
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-sm text-muted-foreground">Match strictness</span>
+                        <span className="font-mono text-xs font-semibold text-primary">
+                          {Math.round(groundingThreshold * 100)}%
+                        </span>
+                      </div>
+                      <Slider
+                        value={[groundingThreshold]}
+                        onValueChange={([v]) => setGroundingThreshold(v)}
+                        min={0.4}
+                        max={0.9}
+                        step={0.05}
+                        disabled={!useGrounding}
+                        aria-label="Minimum similarity for a guideline passage to count"
+                      />
+                      <p className="mt-1.5 text-[11px] leading-relaxed text-muted-foreground">
+                        How close a passage must be to count. Higher means fewer, better matches —
+                        and more sheets landing ungrounded.
+                      </p>
+                    </div>
+
+                    {/* Memory is independent of grounding — it stays fully
+                        interactive even while the sliders above are dimmed
+                        for useGrounding=false. */}
+                    <div className="opacity-100 pointer-events-auto border-t border-border pt-4">
+                      <label className="inline-flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={useMemory}
+                          onChange={(e) => setUseMemory(e.target.checked)}
+                          className="h-3.5 w-3.5 accent-primary cursor-pointer"
+                        />
+                        <span className="text-sm text-muted-foreground">
+                          Remember my recent questions
+                        </span>
+                      </label>
+                      <p className="mt-1 ml-[22px] text-[11px] leading-relaxed text-muted-foreground">
+                        Lets follow-ups refer back to what you just asked. Resets automatically
+                        every 10 questions.
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </div>
@@ -1024,6 +1216,25 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
         <SheetsEmptyState onStartTopic={startTopic} onSelectHistory={loadHistoryItem} />
       )}
 
+      {/* Grounding verdict sits above the sheet — it qualifies everything
+          below it, so it must be read first. Self-hides for "full" and for
+          sheets with no grounding metadata at all (legacy, or grounding off). */}
+      {!loading && sheet && (
+        <GroundingNotice
+          level={resolveGroundingLevel(sheet)}
+          coverage={sheet.sourceCoverage}
+          reason={
+            sheet.groundingLevel !== "none"
+              ? undefined
+              : sheet.retrievedChunks === undefined
+              ? "disabled"
+              : sheet.retrievedChunks === 0
+              ? "no-match"
+              : "not-relevant"
+          }
+        />
+      )}
+
       {/* Rendered from the first frame of a generation, so the sheet's seven
           sections are laid out once and filled in — never added or removed. */}
       {(loading || sheet || legacyOutput) && (
@@ -1046,6 +1257,10 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
           streamedKeys={streamedKeys}
         />
       )}
+
+      {/* Retrieved guideline chunks behind this sheet. Self-hides when the
+          sheet has no sources, so ungrounded sheets are unaffected. */}
+      {!loading && sheet && <SheetSources sheet={sheet} />}
 
       {/* The response was damaged mid-flight. Say so rather than let a short
           sheet pass for a complete one — this is medical content. */}
