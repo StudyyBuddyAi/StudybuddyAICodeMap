@@ -110,8 +110,13 @@ serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
+  // Declared outside the try block so the catch handler below can still read
+  // it — a const declared inside `try { ... }` is out of scope in the
+  // sibling `catch` block and referencing it there throws its own
+  // ReferenceError, masking whatever the original error was.
+  const startedAt = Date.now();
+
   try {
-    const startedAt = Date.now();
     // ── JWT verification ───────────────────────────────────────────────────
     // Reject missing/invalid tokens before doing any work. The client sends the
     // user's Supabase access token as the Authorization bearer.
@@ -706,6 +711,12 @@ ${sheetSchemaBlock}`;
       ? { provider: { order: ["Anthropic"], allow_fallbacks: true } }
       : {};
 
+    // Computed here (ahead of the log call below, which references it) rather
+    // than down in the quota section — referencing a const before its
+    // declaration throws a temporal-dead-zone ReferenceError, which used to
+    // crash every single request at this log call.
+    const quotaEligible = !explainMode && !enhanceMode;
+
     log("generation_start", {
       userId: user.id,
       isAnonymous,
@@ -730,7 +741,6 @@ ${sheetSchemaBlock}`;
     // Consume before calling OpenRouter; refund below if the upstream call fails
     // so failed generations never burn quota.
     const DAILY_CAP = 5;
-    const quotaEligible = !explainMode && !enhanceMode;
     const usageKind = cardsOnly ? "cards" : "sheet";
     let quotaConsumed = false;
 
