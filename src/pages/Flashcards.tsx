@@ -340,14 +340,6 @@ const Flashcards = () => {
           </p>
         </div>
 
-        {/* Guideline sources behind the deck's grounded cards — same component
-            and shape FlashcardsGenerator shows right after generation, kept
-            reachable here since that panel doesn't persist once you navigate
-            into a study session. */}
-        {sessionGroundingMeta && sessionGroundingMeta.sources.length > 0 && (
-          <SheetSources sheet={{ sources: sessionGroundingMeta.sources } as GeneratedSheet} />
-        )}
-
         <div className="border-t border-border" aria-hidden />
 
         <div className="flex flex-col gap-2">
@@ -621,6 +613,14 @@ const Flashcards = () => {
             <p className="text-center text-[11px] text-muted-foreground">
               Tap the card to flip · AI-generated content · Not a substitute for clinical judgment
             </p>
+
+            {/* Guideline sources behind this deck — same component and
+                placement SheetGenerator uses below its document. Self-hides
+                when the deck has no retrieval metadata (ungrounded decks,
+                grounding turned off, or an anonymous user's local-only deck). */}
+            {sessionGroundingMeta && sessionGroundingMeta.sources.length > 0 && (
+              <SheetSources sheet={{ sources: sessionGroundingMeta.sources } as GeneratedSheet} />
+            )}
           </>
         ) : null}
       </div>
