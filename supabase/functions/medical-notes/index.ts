@@ -1,4 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.8";
 import { makeEmbeddings, embedQuery, retrieveChunks, type RagChunk } from "../_shared/rag.ts";
 import {
   openMemoryWindow,
@@ -109,8 +110,13 @@ serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
+  // Declared outside the try block so the catch handler below can still read
+  // it — a const declared inside `try { ... }` is out of scope in the
+  // sibling `catch` block and referencing it there throws its own
+  // ReferenceError, masking whatever the original error was.
+  const startedAt = Date.now();
+
   try {
-    const startedAt = Date.now();
     // ── JWT verification ───────────────────────────────────────────────────
     // Reject missing/invalid tokens before doing any work. The client sends the
     // user's Supabase access token as the Authorization bearer.
@@ -122,7 +128,6 @@ serve(async (req) => {
         { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
-    const { createClient } = await import("https://esm.sh/@supabase/supabase-js@2");
     const authClient = createClient(
       Deno.env.get("SUPABASE_URL")!,
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
@@ -318,15 +323,21 @@ FLASHCARDS
 
 [one emoji representing the topic on its own line]
 
-Q: [Tag] Question ending with question mark?
+Q: [Mechanism][Grounded] Question text ending with question mark?
 A: Answer in 1-2 sentences maximum.
 
-Q: [Tag] Next question?
+Q: [Next Step][General] Question for a topic not in the context?
 A: Answer.
 
 [blank line between every card — this is mandatory]
 
 TAGS (pick one per card): [Diagnosis] [Mechanism] [Next Step] [Complication] [Association]
+
+SOURCING TAG (mandatory, second bracket on every Q: line):
+- [Grounded] — if this card's content comes directly from the Context above
+- [General]  — if no retrieved context covers this card's content
+
+If no Context was provided, every card must be tagged [General].
 
 EMOJI: Pick one that matches the topic — 🫀 cardiac, 🩸 hematology, 🧠 neuro, 🫁 pulmonary, 🦴 ortho, 🩺 general, 💊 pharmacology, 🧬 genetics, 👁️ ophthalmology, 🤰 OB/GYN, 👶 pediatrics, 🧫 micro, ⚗️ biochem, 🩹 trauma, 🛡️ immunology
 
@@ -334,6 +345,7 @@ HARD RULES:
 - Exactly ${count} cards. No more, no less.
 - Each card: Q: on one line, A: on next line, blank line after.
 - Tags in square brackets at start of every Q: line.
+- Every Q: line must have exactly two bracket tags: one clinical tag, one sourcing tag.
 - Questions end with ?
 - Answers: 1-2 sentences only — never more.
 - No "Q:" or "A:" anywhere inside question or answer text.
@@ -532,15 +544,21 @@ FLASHCARDS
 
 [one emoji representing the topic on its own line]
 
-Q: [Tag] Question ending with question mark?
+Q: [Mechanism][Grounded] Question text ending with question mark?
 A: Answer in 1-2 sentences maximum.
 
-Q: [Tag] Next question?
+Q: [Next Step][General] Question for a topic not in the context?
 A: Answer.
 
 [blank line between every card — this is mandatory]
 
 TAGS (pick one per card): [Diagnosis] [Mechanism] [Next Step] [Complication] [Association]
+
+SOURCING TAG (mandatory, second bracket on every Q: line):
+- [Grounded] — if this card's content comes directly from the Context above
+- [General]  — if no retrieved context covers this card's content
+
+If no Context was provided, every card must be tagged [General].
 
 EMOJI: Pick one that matches the topic — 🫀 cardiac, 🩸 hematology, 🧠 neuro, 🫁 pulmonary, 🦴 ortho, 🩺 general, 💊 pharmacology, 🧬 genetics, 👁️ ophthalmology, 🤰 OB/GYN, 👶 pediatrics, 🧫 micro, ⚗️ biochem, 🩹 trauma, 🛡️ immunology
 
@@ -548,6 +566,7 @@ HARD RULES:
 - Exactly ${count} cards. No more, no less.
 - Each card: Q: on one line, A: on next line, blank line after.
 - Tags in square brackets at start of every Q: line.
+- Every Q: line must have exactly two bracket tags: one clinical tag, one sourcing tag.
 - Questions end with ?
 - Answers: 1-2 sentences only — never more.
 - No "Q:" or "A:" anywhere inside question or answer text.
@@ -692,6 +711,12 @@ ${sheetSchemaBlock}`;
       ? { provider: { order: ["Anthropic"], allow_fallbacks: true } }
       : {};
 
+    // Computed here (ahead of the log call below, which references it) rather
+    // than down in the quota section — referencing a const before its
+    // declaration throws a temporal-dead-zone ReferenceError, which used to
+    // crash every single request at this log call.
+    const quotaEligible = !explainMode && !enhanceMode;
+
     log("generation_start", {
       userId: user.id,
       isAnonymous,
@@ -716,7 +741,6 @@ ${sheetSchemaBlock}`;
     // Consume before calling OpenRouter; refund below if the upstream call fails
     // so failed generations never burn quota.
     const DAILY_CAP = 5;
-    const quotaEligible = !explainMode && !enhanceMode;
     const usageKind = cardsOnly ? "cards" : "sheet";
     let quotaConsumed = false;
 

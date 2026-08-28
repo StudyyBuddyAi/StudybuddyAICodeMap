@@ -73,3 +73,22 @@ export function resolveGroundingLevel(sheet: GeneratedSheet): GroundingLevel | n
   if (typeof sheet.grounded === "boolean") return sheet.grounded ? "full" : "none";
   return null;
 }
+
+/**
+ * Grounding level for a freshly generated flashcard deck.
+ *
+ * Cards have no `sourceCoverage` block — each card reports for itself via the
+ * [Grounded]/[General] sourcing tag. Retrieval is still the ceiling: zero
+ * retrieved chunks forces "none" no matter what the model tagged, and chunks
+ * that produced no grounded card are also "none" (the library matched the
+ * query but nothing in it survived into a card).
+ */
+export function groundingLevelFromCards(
+  retrievedChunks: number,
+  cards: readonly { grounded: boolean }[]
+): GroundingLevel {
+  if (retrievedChunks === 0 || cards.length === 0) return "none";
+  const groundedCount = cards.filter((c) => c.grounded).length;
+  if (groundedCount === 0) return "none";
+  return groundedCount === cards.length ? "full" : "partial";
+}

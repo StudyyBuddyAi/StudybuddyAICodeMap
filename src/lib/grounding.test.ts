@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  groundingLevelFromCards,
   parseSourceCoverage,
   reconcileGroundingLevel,
   resolveGroundingLevel,
@@ -124,5 +125,30 @@ describe("parseSheetOutput preserves sourceCoverage", () => {
       JSON.stringify({ overview: "o", referenceNote: "r", flashcards: [] })
     );
     expect(without?.sheet.sourceCoverage).toBeUndefined();
+  });
+});
+
+describe("groundingLevelFromCards", () => {
+  const g = (n: number) => Array.from({ length: n }, () => ({ grounded: true }));
+  const u = (n: number) => Array.from({ length: n }, () => ({ grounded: false }));
+
+  it("returns none when nothing was retrieved, whatever the cards claim", () => {
+    expect(groundingLevelFromCards(0, g(5))).toBe("none");
+  });
+
+  it("returns none when there are no cards", () => {
+    expect(groundingLevelFromCards(8, [])).toBe("none");
+  });
+
+  it("returns none when retrieval matched but no card used it", () => {
+    expect(groundingLevelFromCards(8, u(5))).toBe("none");
+  });
+
+  it("returns full when every card is grounded", () => {
+    expect(groundingLevelFromCards(8, g(5))).toBe("full");
+  });
+
+  it("returns partial when only some cards are grounded", () => {
+    expect(groundingLevelFromCards(8, [...g(3), ...u(2)])).toBe("partial");
   });
 });

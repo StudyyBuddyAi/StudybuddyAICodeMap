@@ -45,6 +45,7 @@ export type Database = {
           created_at: string
           deck_id: string
           due_at: string
+          grounded: boolean
           id: string
           interval_days: number
           last_reviewed_at: string | null
@@ -61,6 +62,7 @@ export type Database = {
           created_at?: string
           deck_id: string
           due_at?: string
+          grounded?: boolean
           id?: string
           interval_days?: number
           last_reviewed_at?: string | null
@@ -77,6 +79,7 @@ export type Database = {
           created_at?: string
           deck_id?: string
           due_at?: string
+          grounded?: boolean
           id?: string
           interval_days?: number
           last_reviewed_at?: string | null
@@ -100,6 +103,7 @@ export type Database = {
       decks: {
         Row: {
           created_at: string
+          grounding_metadata: Json | null
           id: string
           topic: string
           topic_emoji: string | null
@@ -107,6 +111,7 @@ export type Database = {
         }
         Insert: {
           created_at?: string
+          grounding_metadata?: Json | null
           id?: string
           topic: string
           topic_emoji?: string | null
@@ -114,6 +119,7 @@ export type Database = {
         }
         Update: {
           created_at?: string
+          grounding_metadata?: Json | null
           id?: string
           topic?: string
           topic_emoji?: string | null

@@ -1292,14 +1292,33 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
             onClick={() => {
               try {
                 if (sheet?.flashcards?.length) {
+                  // A sheet's cards inherit the sheet's grounding, narrowed by
+                  // the model's own coverage report: "full" means the library
+                  // carried the whole sheet, "partial" only counts when the
+                  // flashcards section wasn't one of the parts it missed.
+                  const level = resolveGroundingLevel(sheet);
+                  const flashcardsUncovered =
+                    sheet.sourceCoverage?.uncovered?.includes("flashcards") ?? false;
+                  const cardsGrounded =
+                    level === "full" || (level === "partial" && !flashcardsUncovered);
                   const parsed = sheet.flashcards.map((c) => ({
                     question: c.question,
                     answer: c.answer,
                     tag: c.tag,
+                    grounded: cardsGrounded,
                     topic: notes.trim().slice(0, 60),
                     topicEmoji: sheet.topicEmoji,
                   }));
-                  saveCards(parsed);
+                  saveCards(
+                    parsed,
+                    level
+                      ? {
+                          retrievedChunks: sheet.retrievedChunks ?? 0,
+                          groundingLevel: level,
+                          sources: sheet.sources ?? [],
+                        }
+                      : undefined
+                  );
                   setDeckSaved(true);
                   toast({ title: `${parsed.length} cards saved to your library` });
                 } else if (legacyOutput) {
