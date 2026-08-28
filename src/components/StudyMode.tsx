@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { X, BookOpen, Layers, ArrowLeft, RotateCcw, AlertTriangle } from "lucide-react";
+import { X, BookOpen, Layers, ArrowLeft, RotateCcw, AlertTriangle, CheckCircle2 } from "lucide-react";
 import { getTagColors } from "@/lib/tag-colors";
 import type { Card } from "@/hooks/use-flashcard-deck";
 import { useToast } from "@/hooks/use-toast";
@@ -123,15 +123,24 @@ const StudyMode = ({ dueCards, onReview, onClose }: StudyModeProps) => {
           </div>
         ) : current ? (
           <div className="w-full max-w-xl space-y-4 md:space-y-6">
-            {ungroundedCount > 0 && (
-              <div className="flex items-start gap-2 px-4 py-3 rounded-lg border border-warning/40 bg-warning/10 text-warning text-xs">
-                <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-                <span>
-                  {allUngrounded
-                    ? "These cards were generated from general medical knowledge — verify before exam use."
-                    : `${ungroundedCount} of ${sessionCards.length} cards use general knowledge, not a verified guideline.`}
-                </span>
-              </div>
+            {sessionCards.length > 0 && (
+              ungroundedCount > 0 ? (
+                <div className="flex items-start gap-2 px-4 py-3 rounded-lg border border-warning/40 bg-warning/10 text-warning text-xs">
+                  <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                  <span>
+                    {allUngrounded
+                      ? "These cards were generated from general medical knowledge — verify before exam use."
+                      : `${ungroundedCount} of ${sessionCards.length} cards use general knowledge, not a verified guideline.`}
+                  </span>
+                </div>
+              ) : (
+                <div className="flex items-start gap-2 px-4 py-3 rounded-lg border border-success/40 bg-success/10 text-success text-xs">
+                  <CheckCircle2 className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                  <span>
+                    All {sessionCards.length} {sessionCards.length === 1 ? "card is" : "cards are"} grounded in the guideline library.
+                  </span>
+                </div>
+              )
             )}
             {/* Card with flip — tap to flip; keyed wrapper drives slide transitions */}
             <div
@@ -271,9 +280,17 @@ export const CardFace = ({
         >
           {card.tag || "Card"}
         </span>
-        {/* Only the ungrounded case gets a badge — a "Grounded" chip on every
-            other card would be noise on the one surface meant to stay quiet. */}
-        {!card.grounded && (
+        {/* Every card states its grounding status explicitly — same color
+            convention as DeckGroundingBadge in DeckList.tsx. */}
+        {card.grounded ? (
+          <span
+            title="Generated from and verified against a specific clinical guideline"
+            className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium uppercase tracking-wider border border-success/40 bg-success/10 text-success"
+          >
+            <CheckCircle2 className="w-2.5 h-2.5" />
+            Grounded
+          </span>
+        ) : (
           <span
             title="Generated from general medical knowledge — not verified against a specific guideline"
             className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium uppercase tracking-wider border border-warning/40 bg-warning/10 text-warning"

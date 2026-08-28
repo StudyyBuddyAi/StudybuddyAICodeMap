@@ -1,14 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { ArrowRight, BookOpen, Layers, Play, Repeat, Settings2, Shuffle, X, Sparkles, Check, ChevronRight, ArrowLeft, RotateCcw, Bookmark } from "lucide-react";
+import { ArrowRight, BookOpen, Layers, Play, Repeat, Settings2, Shuffle, X, Sparkles, Check, ChevronRight, ArrowLeft, RotateCcw, Bookmark, AlertTriangle, CheckCircle2 } from "lucide-react";
 import DashboardLayout from "@/components/dashboard/DashboardLayout";
 import FlashcardsGenerator, { type GeneratedCard } from "@/components/FlashcardsGenerator";
 import DeckList from "@/components/DeckList";
 import { CardFace, ExplainPanel } from "@/components/StudyMode";
+import SheetSources from "@/components/SheetSources";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { useFlashcardDeck, makeCardId, type Card as DeckCard } from "@/hooks/use-flashcard-deck";
+import { useFlashcardDeck, makeCardId, useDeckGrounding, type Card as DeckCard } from "@/hooks/use-flashcard-deck";
 import { useToast } from "@/hooks/use-toast";
+import type { GeneratedSheet } from "@/types/generated-sheet";
 
 const RECENT_DECK_LIMIT = 5;
 
@@ -77,6 +79,13 @@ const Flashcards = () => {
   const [unsure, setUnsure] = useState(0);
   const [done, setDone] = useState(false);
   const [slidePhase, setSlidePhase] = useState<"idle" | "exit">("idle");
+
+  // Deck-level retrieval metadata (sources) for the active session's topic —
+  // the per-card grounded/ungrounded counts below come straight from
+  // session.cards and don't need this fetch, only the guideline source list does.
+  const { data: sessionGroundingMeta } = useDeckGrounding(session?.topic ?? null);
+  const sessionGroundedCount = session ? session.cards.filter((c) => c.grounded).length : 0;
+  const sessionUngroundedCount = session ? session.cards.length - sessionGroundedCount : 0;
 
   const { totalDecks, recentDeckCards } = useMemo(() => {
     const latestByTopic = new Map<string, number>();
@@ -288,6 +297,28 @@ const Flashcards = () => {
           {session.topic}
         </p>
 
+        {/* Persistent grounding summary — this is the one place in Study Mode
+            that states the positive count, not just a warning when something's
+            ungrounded (see docs/flashcard-grounding.md, "silence = grounded"
+            per-card design; this session-level line makes that legible). */}
+        {session.cards.length > 0 && (
+          sessionUngroundedCount > 0 ? (
+            <div className="flex items-start gap-1.5 text-[11px] text-warning">
+              <AlertTriangle className="w-3 h-3 shrink-0 mt-0.5" />
+              <span>
+                {sessionUngroundedCount === session.cards.length
+                  ? "Generated from general medical knowledge — verify before exam use."
+                  : `${sessionUngroundedCount} of ${session.cards.length} cards use general knowledge, not a verified guideline.`}
+              </span>
+            </div>
+          ) : (
+            <div className="flex items-start gap-1.5 text-[11px] text-success">
+              <CheckCircle2 className="w-3 h-3 shrink-0 mt-0.5" />
+              <span>All {session.cards.length} cards are grounded in the guideline library.</span>
+            </div>
+          )
+        )}
+
         <div className="flex flex-col gap-2">
           <p className="text-xs text-muted-foreground">
             Card {Math.min(index + 1, total)} of {total}
@@ -308,6 +339,14 @@ const Flashcards = () => {
             ✗ Unsure: <span className="tabular-nums">{unsure}</span>
           </p>
         </div>
+
+        {/* Guideline sources behind the deck's grounded cards — same component
+            and shape FlashcardsGenerator shows right after generation, kept
+            reachable here since that panel doesn't persist once you navigate
+            into a study session. */}
+        {sessionGroundingMeta && sessionGroundingMeta.sources.length > 0 && (
+          <SheetSources sheet={{ sources: sessionGroundingMeta.sources } as GeneratedSheet} />
+        )}
 
         <div className="border-t border-border" aria-hidden />
 
