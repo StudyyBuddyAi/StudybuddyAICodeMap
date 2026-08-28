@@ -2,16 +2,18 @@ import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { X, BookOpen, Layers, ArrowLeft, RotateCcw, AlertTriangle, CheckCircle2 } from "lucide-react";
 import { getTagColors } from "@/lib/tag-colors";
-import type { Card } from "@/hooks/use-flashcard-deck";
+import { type Card, useDeckGrounding } from "@/hooks/use-flashcard-deck";
 import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useUsageLimit } from "@/hooks/use-usage-limit";
 import GoProModal from "@/components/GoProModal";
 import { getCitationsForTopic } from "@/lib/citation-store";
 import CitationBadgeList from "@/components/CitationBadgeList";
+import SheetSources from "@/components/SheetSources";
 import { startTopProgress, finishTopProgress } from "@/components/TopProgressBar";
 import { callMedicalNotes } from "@/lib/callMedicalNotes";
 import { useMemoryPreference } from "@/hooks/use-memory-preference";
+import type { GeneratedSheet } from "@/types/generated-sheet";
 
 interface StudyModeProps {
   dueCards: Card[];
@@ -51,6 +53,12 @@ const StudyMode = ({ dueCards, onReview, onClose }: StudyModeProps) => {
 
   const current = sessionCards[index];
   const progress = sessionCards.length === 0 ? 0 : (reviewedCount / sessionCards.length) * 100;
+
+  // Scoped to whichever card is on screen, not the whole session — a due-cards
+  // or all-cards review can span multiple decks/topics, so there's no single
+  // session-wide source list that would always be correct. react-query caches
+  // by topic, so flipping between cards of the same deck doesn't refetch.
+  const { data: currentCardGrounding } = useDeckGrounding(current?.topic ?? null);
 
   // Cards written before grounding existed default to grounded=false, so this
   // count is honest about them too: nothing in this session was checked
@@ -234,6 +242,13 @@ const StudyMode = ({ dueCards, onReview, onClose }: StudyModeProps) => {
             <p className="text-center text-xs text-muted-foreground">
               Card {index + 1} of {sessionCards.length}
             </p>
+
+            {/* Guideline sources behind the current card's deck — same
+                component SheetGenerator renders below the document; self-hides
+                when the current card's deck has no retrieval metadata. */}
+            {currentCardGrounding && currentCardGrounding.sources.length > 0 && (
+              <SheetSources sheet={{ sources: currentCardGrounding.sources } as GeneratedSheet} />
+            )}
           </div>
         ) : null}
       </div>
