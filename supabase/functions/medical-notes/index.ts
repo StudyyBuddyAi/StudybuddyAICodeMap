@@ -1,11 +1,26 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
+const ALLOWED_ORIGINS = new Set([
+  "https://studyybuddyai.com",
+  "https://www.studyybuddyai.com",
+  "http://localhost:8080",
+]);
+
+const BASE_CORS_HEADERS: Record<string, string> = {
   "Access-Control-Allow-Headers":
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
   "Access-Control-Expose-Headers": "x-model-used, x-is-premium",
 };
+
+// Origin-aware CORS. Only allowlisted origins get Access-Control-Allow-Origin;
+// anything else gets no CORS headers (browser denies the cross-origin call).
+function buildCorsHeaders(req: Request): Record<string, string> {
+  const origin = req.headers.get("Origin");
+  if (!origin || !ALLOWED_ORIGINS.has(origin)) {
+    return { ...BASE_CORS_HEADERS };
+  }
+  return { ...BASE_CORS_HEADERS, "Access-Control-Allow-Origin": origin };
+}
 
 // Structured, machine-parseable logs (visible in Supabase edge-fn logs).
 // Metadata only — never log notes/topic content, tokens, or keys.
@@ -20,6 +35,25 @@ function sanitizeJsonOutput(raw: string): string {
     cleaned = cleaned.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
   }
   return cleaned;
+}
+
+// Best-effort per-instance burst limiter. Deno isolates are ephemeral (a
+// module-level Map does not survive cold starts and is not shared across
+// instances), so this only flattens bursts — it is NOT a distributed limit.
+// The daily usage_records quota is the authoritative control.
+const BURST_LIMIT_PER_MINUTE = 10;
+const burstBuckets = new Map<string, number[]>();
+
+function checkBurstLimit(userId: string, nowMs: number): boolean {
+  const cutoff = nowMs - 60_000;
+  const recent = (burstBuckets.get(userId) ?? []).filter((t) => t > cutoff);
+  if (recent.length >= BURST_LIMIT_PER_MINUTE) {
+    burstBuckets.set(userId, recent);
+    return false;
+  }
+  recent.push(nowMs);
+  burstBuckets.set(userId, recent);
+  return true;
 }
 
 /**
@@ -96,7 +130,7 @@ EXPERT PERSONA RULES:
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
-    return new Response(null, { headers: corsHeaders });
+    return new Response(null, { headers: buildCorsHeaders(req) });
   }
 
   try {
@@ -109,7 +143,7 @@ serve(async (req) => {
     if (!token) {
       return new Response(
         JSON.stringify({ error: "invalid_token" }),
-        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        { status: 401, headers: { ...buildCorsHeaders(req), "Content-Type": "application/json" } }
       );
     }
     const { createClient } = await import("https://esm.sh/@supabase/supabase-js@2");
@@ -121,7 +155,15 @@ serve(async (req) => {
     if (authError || !user) {
       return new Response(
         JSON.stringify({ error: "invalid_token" }),
-        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        { status: 401, headers: { ...buildCorsHeaders(req), "Content-Type": "application/json" } }
+      );
+    }
+
+    // ── Burst rate limit (best-effort, per-instance) ────────────────────────
+    if (!checkBurstLimit(user.id, Date.now())) {
+      return new Response(
+        JSON.stringify({ error: "rate_limited" }),
+        { status: 429, headers: { ...buildCorsHeaders(req), "Content-Type": "application/json", "Retry-After": "60" } }
       );
     }
 
@@ -137,7 +179,7 @@ serve(async (req) => {
     if (!notes || typeof notes !== "string" || !notes.trim()) {
       return new Response(
         JSON.stringify({ error: "Notes are required" }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        { status: 400, headers: { ...buildCorsHeaders(req), "Content-Type": "application/json" } }
       );
     }
 
@@ -573,13 +615,13 @@ ${sheetSchemaBlock}`;
           console.error("consume_usage failed:", consumeError);
           return new Response(
             JSON.stringify({ error: "quota_check_failed" }),
-            { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+            { status: 500, headers: { ...buildCorsHeaders(req), "Content-Type": "application/json" } }
           );
         }
         if (!consumeResult?.allowed) {
           return new Response(
             JSON.stringify({ error: "quota_exceeded" }),
-            { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+            { status: 429, headers: { ...buildCorsHeaders(req), "Content-Type": "application/json" } }
           );
         }
         quotaConsumed = true;
@@ -631,7 +673,7 @@ ${sheetSchemaBlock}`;
       if (response.status === 429) {
         return new Response(
           JSON.stringify({ error: "Rate limit exceeded. Please try again in a moment." }),
-          { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          { status: 429, headers: { ...buildCorsHeaders(req), "Content-Type": "application/json" } }
         );
       }
       if (response.status === 400) {
@@ -639,20 +681,20 @@ ${sheetSchemaBlock}`;
         console.error("AI 400 error:", t);
         return new Response(
           JSON.stringify({ error: "Bad request to AI service" }),
-          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        { status: 400, headers: { ...buildCorsHeaders(req), "Content-Type": "application/json" } }
         );
       }
       if (response.status === 403) {
         return new Response(
           JSON.stringify({ error: "Invalid or missing API key" }),
-          { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          { status: 403, headers: { ...buildCorsHeaders(req), "Content-Type": "application/json" } }
         );
       }
       const t = await response.text();
       console.error("AI error:", response.status, t);
       return new Response(
         JSON.stringify({ error: "AI service error" }),
-        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        { status: 500, headers: { ...buildCorsHeaders(req), "Content-Type": "application/json" } }
       );
     }
 
@@ -705,7 +747,7 @@ ${sheetSchemaBlock}`;
 
     return new Response(response.body!.pipeThrough(transform), {
       headers: {
-        ...corsHeaders,
+        ...buildCorsHeaders(req),
         "Content-Type": "text/event-stream",
         "X-Model-Used": model,
         "X-Is-Premium": isPremiumGeneration ? "true" : "false",
@@ -716,7 +758,7 @@ ${sheetSchemaBlock}`;
     log("error", { error: message, elapsedMs: Date.now() - startedAt });
     return new Response(
       JSON.stringify({ error: message }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      { status: 500, headers: { ...buildCorsHeaders(req), "Content-Type": "application/json" } }
     );
   }
 });

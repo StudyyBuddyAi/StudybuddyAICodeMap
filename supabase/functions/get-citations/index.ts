@@ -1,10 +1,25 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
+const ALLOWED_ORIGINS = new Set([
+  "https://studyybuddyai.com",
+  "https://www.studyybuddyai.com",
+  "http://localhost:8080",
+]);
+
+const BASE_CORS_HEADERS: Record<string, string> = {
   "Access-Control-Allow-Headers":
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
+
+// Origin-aware CORS. Only allowlisted origins get Access-Control-Allow-Origin;
+// anything else gets no CORS headers (browser denies the cross-origin call).
+function buildCorsHeaders(req: Request): Record<string, string> {
+  const origin = req.headers.get("Origin");
+  if (!origin || !ALLOWED_ORIGINS.has(origin)) {
+    return { ...BASE_CORS_HEADERS };
+  }
+  return { ...BASE_CORS_HEADERS, "Access-Control-Allow-Origin": origin };
+}
 
 // Structured, machine-parseable logs (visible in Supabase edge-fn logs).
 // Metadata only — never log topic content, tokens, or keys.
@@ -283,7 +298,7 @@ function checkBurstLimit(userId: string, nowMs: number): boolean {
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
-    return new Response(null, { headers: corsHeaders });
+    return new Response(null, { headers: buildCorsHeaders(req) });
   }
 
   const json = (
@@ -293,7 +308,7 @@ serve(async (req) => {
   ) =>
     new Response(JSON.stringify(body), {
       status,
-      headers: { ...corsHeaders, "Content-Type": "application/json", ...extraHeaders },
+      headers: { ...buildCorsHeaders(req), "Content-Type": "application/json", ...extraHeaders },
     });
 
   let quotaConsumed = false;

@@ -5,12 +5,30 @@ import { awaitAllCallbacks } from "npm:@langchain/core@0.3.0/callbacks/promises"
 import { LangChainTracer } from "npm:@langchain/core@0.3.0/tracers/tracer_langchain";
 import { Client as LangSmithClient } from "npm:langsmith@0.3.6";
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
+const ALLOWED_ORIGINS = new Set([
+  "https://studyybuddyai.com",
+  "https://www.studyybuddyai.com",
+  "http://localhost:8080",
+]);
+
+const BASE_CORS_HEADERS: Record<string, string> = {
   "Access-Control-Allow-Headers":
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
   "Access-Control-Expose-Headers": "x-model-used",
 };
+
+// Origin-aware CORS. Only allowlisted origins get Access-Control-Allow-Origin;
+// anything else gets no CORS headers (browser denies the cross-origin call).
+function buildCorsHeaders(req: Request): Record<string, string> {
+  const origin = req.headers.get("Origin");
+  if (!origin || !ALLOWED_ORIGINS.has(origin)) {
+    return { ...BASE_CORS_HEADERS };
+  }
+  return { ...BASE_CORS_HEADERS, "Access-Control-Allow-Origin": origin };
+}
+
+const MAX_QUERY_LENGTH = 10_000;
+const MAX_BODY_BYTES = 102_400; // 100 KB
 
 interface GuidelineChunkMatch {
   id: string;
@@ -51,12 +69,51 @@ async function flushTraces(client: LangSmithClient | null) {
   }
 }
 
+/**
+ * Decode a verified JWT's payload (middle segment) to read identity claims.
+ * Used for `is_anonymous`, which the DB also reads via `auth.jwt() ->> 'is_anonymous'`.
+ * Returns {} on any parse failure — never throws.
+ */
+function decodeJwtPayload(token: string): Record<string, unknown> {
+  try {
+    const b64url = token.split(".")[1] ?? "";
+    const pad = b64url.length % 4 === 0 ? "" : "=".repeat(4 - (b64url.length % 4));
+    const b64 = b64url.replace(/-/g, "+").replace(/_/g, "/") + pad;
+    const bin = atob(b64);
+    const bytes = Uint8Array.from(bin, (c) => c.charCodeAt(0));
+    return JSON.parse(new TextDecoder().decode(bytes));
+  } catch {
+    return {};
+  }
+}
+
+// Best-effort per-instance burst limiter. Deno isolates are ephemeral (a
+// module-level Map does not survive cold starts and is not shared across
+// instances), so this only flattens bursts — it is NOT a distributed limit.
+// The daily usage_records quota is the authoritative control.
+const BURST_LIMIT_PER_MINUTE = 10;
+const burstBuckets = new Map<string, number[]>();
+
+function checkBurstLimit(userId: string, nowMs: number): boolean {
+  const cutoff = nowMs - 60_000;
+  const recent = (burstBuckets.get(userId) ?? []).filter((t) => t > cutoff);
+  if (recent.length >= BURST_LIMIT_PER_MINUTE) {
+    burstBuckets.set(userId, recent);
+    return false;
+  }
+  recent.push(nowMs);
+  burstBuckets.set(userId, recent);
+  return true;
+}
+
 serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
-    return new Response(null, { headers: corsHeaders });
+    return new Response(null, { headers: buildCorsHeaders(req) });
   }
 
   const startedAt = Date.now();
+  let quotaConsumed = false;
+  let userId = "";
 
   try {
     // ── 1. Environment & Validation ─────────────────────────────────
@@ -68,7 +125,7 @@ serve(async (req: Request) => {
       log("missing_env_vars");
       return new Response(
         JSON.stringify({ error: { code: "CONFIG_ERROR", message: "Server environment misconfigured" } }),
-        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          { status: 500, headers: { ...buildCorsHeaders(req), "Content-Type": "application/json" } }
       );
     }
 
@@ -79,18 +136,62 @@ serve(async (req: Request) => {
     //   supabase secrets set LANGCHAIN_PROJECT=StudyBuddyAI
     // ما في داعي لأي كود إضافي هون.
 
+    // ── JWT verification ──────────────────────────────────────────────
+    // Reject missing/invalid tokens before doing any work. The client sends the
+    // user's Supabase access token as the Authorization bearer.
     const authHeader = req.headers.get("Authorization") ?? "";
     const token = authHeader.replace(/^Bearer\s+/i, "").trim();
+    if (!token) {
+      return new Response(
+        JSON.stringify({ error: { code: "UNAUTHORIZED", message: "Missing or invalid token" } }),
+        { status: 401, headers: { ...buildCorsHeaders(req), "Content-Type": "application/json" } }
+      );
+    }
 
     const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey);
+    const { data: { user }, error: authError } = await supabaseAdmin.auth.getUser(token);
+    if (authError || !user) {
+      return new Response(
+        JSON.stringify({ error: { code: "UNAUTHORIZED", message: "Missing or invalid token" } }),
+        { status: 401, headers: { ...buildCorsHeaders(req), "Content-Type": "application/json" } }
+      );
+    }
 
-    // Verify JWT to get authenticated user identity if provided
-    let userId = "anonymous";
-    if (token) {
-      const { data: { user } } = await supabaseAdmin.auth.getUser(token);
-      if (user?.id) {
-        userId = user.id;
-      }
+    userId = user.id;
+
+    // ── Burst rate limit (best-effort, per-instance) ──────────────────
+    if (!checkBurstLimit(userId, Date.now())) {
+      return new Response(
+        JSON.stringify({ error: { code: "RATE_LIMITED", message: "Rate limit exceeded" } }),
+        { status: 429, headers: { ...buildCorsHeaders(req), "Content-Type": "application/json", "Retry-After": "60" } }
+      );
+    }
+
+    // ── Server-side identity & entitlement ────────────────────────────
+    // Entitlement is derived from the verified JWT + profiles row,
+    // never from request body fields. Any isPro / isAnonymous / userId
+    // sent in the request body are UI hints at most and are ignored here.
+    const isAnonymous =
+      user.is_anonymous === true || decodeJwtPayload(token).is_anonymous === true;
+
+    const { data: profile } = await supabaseAdmin
+      .from("profiles")
+      .select("is_pro, pro_expires_at")
+      .eq("id", userId)
+      .maybeSingle();
+
+    const isProUser =
+      profile?.is_pro === true &&
+      (profile.pro_expires_at === null ||
+        new Date(profile.pro_expires_at) > new Date());
+
+    const declaredLength = Number(req.headers.get("Content-Length"));
+    if (Number.isFinite(declaredLength) && declaredLength > MAX_BODY_BYTES) {
+      log("body_too_large", { declaredLength });
+      return new Response(
+        JSON.stringify({ error: { code: "INVALID_INPUT", message: "Request body too large" } }),
+        { status: 400, headers: { ...buildCorsHeaders(req), "Content-Type": "application/json" } }
+      );
     }
 
     const body = await req.json().catch(() => ({}));
@@ -102,9 +203,53 @@ serve(async (req: Request) => {
     if (!query) {
       return new Response(
         JSON.stringify({ error: { code: "INVALID_INPUT", message: "Query string is required" } }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        { status: 400, headers: { ...buildCorsHeaders(req), "Content-Type": "application/json" } }
       );
     }
+
+    if (query.length > MAX_QUERY_LENGTH) {
+      log("query_too_long", { queryLength: query.length });
+      return new Response(
+        JSON.stringify({ error: { code: "INVALID_INPUT", message: "Query too long" } }),
+        { status: 400, headers: { ...buildCorsHeaders(req), "Content-Type": "application/json" } }
+      );
+    }
+
+    // ── Server-side daily RAG quota ──────────────────────────────────
+    // Consume before calling AI; refund below if the upstream call fails
+    // so failed generations never burn quota. Pro users are uncapped.
+    const ANON_RAG_LIMIT = 3;
+    const FREE_RAG_LIMIT = 5;
+
+    if (!isProUser) {
+      const ragCap = isAnonymous ? ANON_RAG_LIMIT : FREE_RAG_LIMIT;
+      const { data: consumeResult, error: consumeError } = await supabaseAdmin.rpc(
+        "consume_usage",
+        { p_user: userId, p_kind: "rag", p_cap: ragCap }
+      );
+      if (consumeError) {
+        console.error("consume_usage failed:", consumeError);
+        return new Response(
+          JSON.stringify({ error: { code: "QUOTA_CHECK_FAILED", message: "Quota check failed" } }),
+        { status: 500, headers: { ...buildCorsHeaders(req), "Content-Type": "application/json" } }
+        );
+      }
+      if (!consumeResult?.allowed) {
+        return new Response(
+          JSON.stringify({ error: { code: "QUOTA_EXCEEDED", message: "Daily RAG limit reached" } }),
+          { status: 429, headers: { ...buildCorsHeaders(req), "Content-Type": "application/json" } }
+        );
+      }
+      quotaConsumed = true;
+    }
+
+    log("request_authenticated", {
+      userId,
+      isAnonymous,
+      isProUser,
+      quotaConsumed,
+      queryLength: query.length,
+    });
 
     // ── LangChain clients (عبر OpenRouter، متل ما كانوا بالـ fetch القديم) ──
     const embeddings = new OpenAIEmbeddings({
@@ -141,60 +286,56 @@ serve(async (req: Request) => {
       log("langsmith_key_missing");
     }
 
-    // ── Conversation Memory: نافذة منزلقة من 10 أسئلة لكل مستخدم ─────
-    // بعد السؤال العاشر، السؤال الحادي عشر بيبدأ نافذة جديدة (نسيان كامل)
-    // بس البيانات القديمة تضل بالجدول (ما بتنمسح أبداً).
+    // ── Conversation Memory: sliding window of 10 questions per user ──
+    // After the 10th question, the 11th starts a new window (full reset).
+    // Old data remains in the table (never deleted).
     const conversationHistory: { role: "user" | "assistant"; content: string }[] = [];
     let memoryWindowId: string | null = null;
     let memoryTurnCount = 0;
 
-    if (userId !== "anonymous") {
-      const { data: stateRow } = await supabaseAdmin
+    const { data: stateRow } = await supabaseAdmin
+      .from("rag_memory_state")
+      .select("current_window_id, turn_count")
+      .eq("user_id", userId)
+      .maybeSingle();
+
+    if (!stateRow) {
+      const { data: newState } = await supabaseAdmin
         .from("rag_memory_state")
+        .insert({ user_id: userId })
         .select("current_window_id, turn_count")
+        .single();
+      memoryWindowId = newState?.current_window_id ?? null;
+      memoryTurnCount = 0;
+    } else if (stateRow.turn_count >= 10) {
+      const { data: resetState } = await supabaseAdmin
+        .from("rag_memory_state")
+        .update({ current_window_id: crypto.randomUUID(), turn_count: 0, updated_at: new Date().toISOString() })
         .eq("user_id", userId)
-        .maybeSingle();
-
-      if (!stateRow) {
-        // أول سؤال لهاد المستخدم على الإطلاق
-        const { data: newState } = await supabaseAdmin
-          .from("rag_memory_state")
-          .insert({ user_id: userId })
-          .select("current_window_id, turn_count")
-          .single();
-        memoryWindowId = newState?.current_window_id ?? null;
-        memoryTurnCount = 0;
-      } else if (stateRow.turn_count >= 10) {
-        // وصلنا لـ 10 أسئلة بهاي النافذة → السؤال الجاي يبدأ نافذة جديدة (نسيان)
-        const { data: resetState } = await supabaseAdmin
-          .from("rag_memory_state")
-          .update({ current_window_id: crypto.randomUUID(), turn_count: 0, updated_at: new Date().toISOString() })
-          .eq("user_id", userId)
-          .select("current_window_id, turn_count")
-          .single();
-        memoryWindowId = resetState?.current_window_id ?? null;
-        memoryTurnCount = 0;
-      } else {
-        memoryWindowId = stateRow.current_window_id;
-        memoryTurnCount = stateRow.turn_count;
-      }
-
-      if (memoryWindowId) {
-        const { data: historyRows } = await supabaseAdmin
-          .from("rag_conversation_memory")
-          .select("question, answer")
-          .eq("user_id", userId)
-          .eq("window_id", memoryWindowId)
-          .order("turn_number", { ascending: true });
-
-        for (const row of historyRows ?? []) {
-          conversationHistory.push({ role: "user", content: row.question });
-          conversationHistory.push({ role: "assistant", content: row.answer });
-        }
-      }
-
-      log("memory_window_resolved", { windowId: memoryWindowId, turnCount: memoryTurnCount });
+        .select("current_window_id, turn_count")
+        .single();
+      memoryWindowId = resetState?.current_window_id ?? null;
+      memoryTurnCount = 0;
+    } else {
+      memoryWindowId = stateRow.current_window_id;
+      memoryTurnCount = stateRow.turn_count;
     }
+
+    if (memoryWindowId) {
+      const { data: historyRows } = await supabaseAdmin
+        .from("rag_conversation_memory")
+        .select("question, answer")
+        .eq("user_id", userId)
+        .eq("window_id", memoryWindowId)
+        .order("turn_number", { ascending: true });
+
+      for (const row of historyRows ?? []) {
+        conversationHistory.push({ role: "user", content: row.question });
+        conversationHistory.push({ role: "assistant", content: row.answer });
+      }
+    }
+
+    log("memory_window_resolved", { windowId: memoryWindowId, turnCount: memoryTurnCount });
 
     // ── 2. Create Query Embedding (عبر LangChain) ───────────────────
     log("embedding_start", { userId, queryLength: query.length });
@@ -205,12 +346,18 @@ serve(async (req: Request) => {
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Failed to create query embedding";
       log("embedding_failed", { err: message });
+      // Refund the consumed quota so a failed embedding never burns quota.
+      if (quotaConsumed) {
+        try {
+          await supabaseAdmin.rpc("refund_usage", { p_user: userId, p_kind: "rag" });
+        } catch { /* best effort */ }
+      }
       await flushTraces(langsmithClient);
       return new Response(
         JSON.stringify({
-          error: { code: "EMBEDDING_FAILED", message, refundQuota: true },
+          error: { code: "EMBEDDING_FAILED", message: "Unable to process query", refundQuota: true },
         }),
-        { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        { status: 502, headers: { ...buildCorsHeaders(req), "Content-Type": "application/json" } }
       );
     }
 
@@ -281,55 +428,59 @@ serve(async (req: Request) => {
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "AI provider request failed";
       log("completion_failed", { err: message });
+      // Refund the consumed quota so a failed completion never burns quota.
+      if (quotaConsumed) {
+        try {
+          await supabaseAdmin.rpc("refund_usage", { p_user: userId, p_kind: "rag" });
+        } catch { /* best effort */ }
+      }
       await flushTraces(langsmithClient);
       return new Response(
         JSON.stringify({
-          error: { code: "AI_PROVIDER_FAILED", message, refundQuota: true },
+          error: { code: "AI_PROVIDER_FAILED", message: "Unable to generate response", refundQuota: true },
         }),
-        { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        { status: 502, headers: { ...buildCorsHeaders(req), "Content-Type": "application/json" } }
       );
     }
 
-    // ── 6. Asynchronous Audit Logging ───────────────────────────────
-    if (userId !== "anonymous") {
-      supabaseAdmin
-        .from("rag_logs")
-        .insert({
-          user_id: userId,
-          feature,
-          query,
-          grounded,
-          source_ids: sources.map((s) => s.id),
-        })
-        .then(({ error: logErr }) => {
-          if (logErr) log("audit_log_failed", { err: logErr });
-        });
+    // ── 6. Asynchronous Audit Logging & Conversation Memory ──────────
+    supabaseAdmin
+      .from("rag_logs")
+      .insert({
+        user_id: userId,
+        feature,
+        query,
+        grounded,
+        source_ids: sources.map((s) => s.id),
+      })
+      .then(({ error: logErr }) => {
+        if (logErr) log("audit_log_failed", { err: logErr });
+      });
 
-      // ── Fix 1 + 2: حفظ هاد الدور بالذاكرة — لازم ننتظرهم قبل ما نرجع الـ Response ──
-      // بدون await الـ Deno isolate بينقتل قبل ما توصل الكتابة لـ Supabase
-      if (memoryWindowId) {
-        const [memResult, stateResult] = await Promise.all([
-          supabaseAdmin
-            .from("rag_conversation_memory")
-            .insert({
-              user_id: userId,
-              window_id: memoryWindowId,
-              turn_number: memoryTurnCount + 1,
-              question: query,
-              answer,
-            }),
-          supabaseAdmin
-            .from("rag_memory_state")
-            .update({ turn_count: memoryTurnCount + 1, updated_at: new Date().toISOString() })
-            .eq("user_id", userId)
-            .eq("current_window_id", memoryWindowId),  // Fix 2: حماية من الكتابة على نافذة قديمة
-        ]);
-        if (memResult.error) log("memory_save_failed", { err: memResult.error });
-        if (stateResult.error) log("memory_state_update_failed", { err: stateResult.error });
-      }
+    // Save this turn to conversation memory. Must await before returning
+    // the response so the Deno isolate doesn't kill the write.
+    if (memoryWindowId) {
+      const [memResult, stateResult] = await Promise.all([
+        supabaseAdmin
+          .from("rag_conversation_memory")
+          .insert({
+            user_id: userId,
+            window_id: memoryWindowId,
+            turn_number: memoryTurnCount + 1,
+            question: query,
+            answer,
+          }),
+        supabaseAdmin
+          .from("rag_memory_state")
+          .update({ turn_count: memoryTurnCount + 1, updated_at: new Date().toISOString() })
+          .eq("user_id", userId)
+          .eq("current_window_id", memoryWindowId),
+      ]);
+      if (memResult.error) log("memory_save_failed", { err: memResult.error });
+      if (stateResult.error) log("memory_state_update_failed", { err: stateResult.error });
     }
 
-    log("rag_success", { elapsedMs: Date.now() - startedAt, grounded, sourcesCount: sources.length });
+    log("rag_success", { elapsedMs: Date.now() - startedAt, grounded, sourcesCount: sources.length, quotaConsumed });
 
     // مهم بالـ Edge Functions: ننتظر إرسال أي traces معلقة لـ LangSmith
     // قبل ما نرجع الـ response ويتقفل الـ isolate، وإلا الـ traces بتنضاع
@@ -342,15 +493,25 @@ serve(async (req: Request) => {
         grounded,
         sources,
       }),
-      { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      { status: 200, headers: { ...buildCorsHeaders(req), "Content-Type": "application/json" } }
     );
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Internal server error";
     log("unexpected_error", { err: message });
+    // Refund the consumed quota so a crashed request never burns quota.
+    if (quotaConsumed) {
+      try {
+        const refundClient = createClient(
+          Deno.env.get("SUPABASE_URL")!,
+          Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
+        );
+        await refundClient.rpc("refund_usage", { p_user: userId, p_kind: "rag" });
+      } catch { /* best effort */ }
+    }
 
     return new Response(
-      JSON.stringify({ error: { code: "INTERNAL_ERROR", message } }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      JSON.stringify({ error: { code: "INTERNAL_ERROR", message: "Internal server error" } }),
+      { status: 500, headers: { ...buildCorsHeaders(req), "Content-Type": "application/json" } }
     );
   }
 });
