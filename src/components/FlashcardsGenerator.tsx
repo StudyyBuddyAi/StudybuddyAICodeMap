@@ -137,7 +137,11 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated }: FlashcardsGene
       return;
     }
     if (isCardsLimited) {
-      setGoProOpen(true);
+      if (isAnonymous) {
+        setAuthModalOpen(true);
+      } else {
+        setGoProOpen(true);
+      }
       return;
     }
     recordRecentTopic(activeTopic);
@@ -472,9 +476,15 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated }: FlashcardsGene
                 <button
                   type="button"
                   className="underline hover:text-warning transition-colors"
-                  onClick={() => setGoProOpen(true)}
+                  onClick={() => {
+                    if (isAnonymous) {
+                      setAuthModalOpen(true);
+                    } else {
+                      setGoProOpen(true);
+                    }
+                  }}
                 >
-                  Upgrade for unlimited
+                  {isAnonymous ? "Sign in free to keep going" : "Upgrade for unlimited"}
                 </button>
               </span>
             ) : (

@@ -78,7 +78,9 @@ export async function callRagGenerate(
 
   if (!res.ok) {
     const errorMsg = data?.error?.message || `RAG request failed with status ${res.status}`;
-    throw new Error(errorMsg);
+    const err = new Error(errorMsg) as Error & { code?: string };
+    err.code = data?.error?.code;
+    throw err;
   }
 
   return data as RagGenerateResponse;

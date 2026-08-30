@@ -1,3 +1,4 @@
+import AuthModal from "@/components/AuthModal";
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
@@ -209,6 +210,7 @@ const FAQS = [
 ];
 
 const Index = () => {
+  const [authModalOpen, setAuthModalOpen] = useState(false);
   const navigate = useNavigate();
   const [ready, setReady] = useState(false);
   // Shared with the in-app ThemeToggle so both stay in step; the `.dark` class
@@ -291,7 +293,8 @@ const Index = () => {
             <button
               className="btn btn-primary"
               style={{ backgroundColor: 'var(--fg)', borderColor: 'var(--fg)', color: 'var(--bg-elevated)', borderRadius: '9999px', padding: '10px 20px', fontWeight: '500', display: 'flex', alignItems: 'center', gap: '8px' }}
-              onClick={() => navigate("/dashboard?start=sheet")}
+           //   onClick={() => navigate("/dashboard?start=sheet")}
+              onClick={() => setAuthModalOpen(true)}
             >
               <span className="btn-label">Get early access</span>
               <ArrowRight className="icon" size={16} strokeWidth={1.6} />
@@ -906,7 +909,8 @@ D. Pericarditis`}
               <button
                 className="btn btn-primary btn-lg"
                 style={{ backgroundColor: 'var(--fg)', color: 'var(--bg-elevated)', border: 'none', padding: '14px 28px', borderRadius: '9999px', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}
-                onClick={() => navigate("/dashboard?start=sheet")}
+              //  onClick={() => navigate("/dashboard?start=sheet")}
+              onClick={() => setAuthModalOpen(true)}
               >
                 Get early access
                 <ArrowRight className="icon" size={18} strokeWidth={1.6} />
@@ -925,6 +929,10 @@ D. Pericarditis`}
           </div>
         </section>
       </main>
+      <AuthModal
+  open={authModalOpen}
+  onOpenChange={setAuthModalOpen}
+/>
 
       {/* ---------- Footer ---------- */}
       <footer className="footer py-[60px] sm:py-[60px] px-4">

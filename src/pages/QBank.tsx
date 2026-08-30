@@ -53,7 +53,7 @@ const PAGE_SIZE = 5;
 
 const QBank = () => {
   const navigate = useNavigate();
-  const { user, isAnonymous } = useAuth();
+  const { user } = useAuth();
   const {
     questionCount,
     startSession,
@@ -103,7 +103,7 @@ const QBank = () => {
   };
 
   useEffect(() => {
-    if (!user || isAnonymous) return;
+    if (!user) return;
 
     try {
       const raw = localStorage.getItem("sb_qbank_session");
@@ -123,7 +123,7 @@ const QBank = () => {
     } catch {
       // ignore
     }
-  }, [user, isAnonymous]);
+  }, [user]);
 
   const savedSessionMeta = useMemo(() => {
     try {
@@ -183,7 +183,7 @@ const QBank = () => {
 
   const { data: sessionHistory, isLoading: historyLoading } = useQuery({
     queryKey: ["qbank-sessions", user?.id, page],
-    enabled: !!user && !isAnonymous,
+    enabled: !!user,
     queryFn: async (): Promise<{ rows: SessionRow[]; hasMore: boolean }> => {
       const { data, error } = await supabase
         .from("qbank_sessions")
@@ -333,7 +333,7 @@ const QBank = () => {
           </div>
 
           {/* Sign In Card */}
-          {isAnonymous || !user ? (
+          {!user ? (
             <div className="rounded-2xl border border-border bg-card p-6 text-center shadow-sm space-y-4">
               <div className="flex items-center justify-center w-10 h-10 rounded-xl border border-border bg-card mx-auto">
                 <LogIn className="w-4 h-4 text-primary" />
@@ -546,7 +546,7 @@ const QBank = () => {
           )}
 
           {/* Session History - Mobile */}
-          {!isAnonymous && user && (
+          {user && (
             <div className="w-full space-y-4 pt-2 lg:hidden">
               <div className="flex items-center gap-2 mb-3">
                 <History className="w-3.5 h-3.5 text-muted-foreground" />
@@ -691,7 +691,7 @@ const QBank = () => {
         </div>
 
         {/* Right Panel - Session History (Desktop) */}
-        {!isAnonymous && user && (
+        {user && (
           <div className="hidden lg:block w-80 xl:w-96 space-y-4">
             <div className="flex items-center gap-2 mb-3">
               <History className="w-3.5 h-3.5 text-muted-foreground" />

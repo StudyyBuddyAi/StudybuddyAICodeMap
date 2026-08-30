@@ -1,10 +1,12 @@
 import { useState } from "react";
-import { Search, Sparkles, BookOpen, ExternalLink, CheckCircle2, AlertTriangle, RefreshCw, Copy, Check, SlidersHorizontal, Eye, EyeOff, BookOpenCheck } from "lucide-react";
+import { Search, Sparkles, BookOpen, ExternalLink, CheckCircle2, AlertTriangle, RefreshCw, Copy, Check, SlidersHorizontal, Eye, EyeOff, BookOpenCheck, ArrowRight } from "lucide-react";
 import DashboardLayout from "@/components/dashboard/DashboardLayout";
 import { useRagQuery } from "@/hooks/use-rag-query";
 import { RagGenerateResponse, RagSource } from "@/lib/callRagGenerate";
 import { useToast } from "@/hooks/use-toast";
 import { renderMarkdown } from "@/lib/render-markdown";
+import AuthModal from "@/components/AuthModal";
+import { useAuth } from "@/hooks/use-auth";
 
 const SAMPLE_QUERIES = [
   "First-line treatment for Community-Acquired Pneumonia",
@@ -15,6 +17,8 @@ const SAMPLE_QUERIES = [
 
 const RagSearch = () => {
   const { toast } = useToast();
+  const { isAnonymous } = useAuth();
+  const [authModalOpen, setAuthModalOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [topK, setTopK] = useState(5);
   const [threshold, setThreshold] = useState(0.65);
@@ -54,8 +58,9 @@ const RagSearch = () => {
   const data: RagGenerateResponse | undefined = ragMutation.data;
 
   return (
-    <DashboardLayout wide>
-      <div className="space-y-8 animate-fade-in">
+    <>
+      <DashboardLayout wide>
+        <div className="space-y-8 animate-fade-in">
         {/* Header Section */}
         <div style={{ position: "relative" }}>
           {/* Subtle Background Glow */}
@@ -393,9 +398,24 @@ const RagSearch = () => {
             className="animate-shake"
           >
             <AlertTriangle className="w-5 h-5 flex-shrink-0 mt-0.5" />
-            <div>
+            <div className="flex-1">
               <p className="font-semibold text-sm">Retrieval Diagnostics</p>
               <p className="text-xs opacity-90 mt-1 leading-relaxed">{ragMutation.error.message}</p>
+              {isAnonymous && (ragMutation.error as Error & { code?: string }).code === "QUOTA_EXCEEDED" && (
+                <div className="mt-3 text-xs">
+                  <p className="opacity-90">
+                    You've hit the daily anonymous search limit. Create a free account for more searches.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setAuthModalOpen(true)}
+                    className="mt-2 inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
+                  >
+                    Sign in free
+                    <ArrowRight className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -688,7 +708,9 @@ const RagSearch = () => {
           </div>
         )}
       </div>
-    </DashboardLayout>
+      </DashboardLayout>
+      <AuthModal open={authModalOpen} onOpenChange={setAuthModalOpen} />
+    </>
   );
 };
 

@@ -1,7 +1,7 @@
 import { useRef, useEffect, useState, useCallback } from "react";
 import { useNavigate, type NavigateFunction } from "react-router-dom";
 import { callMedicalNotes } from "@/lib/callMedicalNotes";
-import { callRagAnon, type RagAnonResponse } from "@/lib/callRagAnon";
+import { callRagGenerate, type RagGenerateResponse } from "@/lib/callRagGenerate";
 import {
   BookOpen,
   Check,
@@ -1002,7 +1002,7 @@ const OutputSection = ({
 
   // RAG (anonymous) state for Reference Note inline lookups
   const [ragLoading, setRagLoading] = useState(false);
-  const [ragResult, setRagResult] = useState<RagAnonResponse | null>(null);
+  const [ragResult, setRagResult] = useState<RagGenerateResponse | null>(null);
   const [ragError, setRagError] = useState<string | null>(null);
   const [ragExpanded, setRagExpanded] = useState<Record<string, boolean>>({});
 
@@ -1020,7 +1020,7 @@ const OutputSection = ({
         setRagError("No query available to run RAG");
         return;
       }
-      const resp = await callRagAnon({ query: String(q), feature: "sheet" });
+      const resp = await callRagGenerate({ query: String(q), feature: "sheet" });
       setRagResult(resp);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);

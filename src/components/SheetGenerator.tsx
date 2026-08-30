@@ -433,7 +433,11 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
       return;
     }
     if (isSheetLimited) {
-      setGoProOpen(true);
+      if (isAnonymous) {
+        setAuthModalOpen(true);
+      } else {
+        setGoProOpen(true);
+      }
       return;
     }
     recordRecentTopic(activeNotes);
@@ -914,9 +918,15 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
                 <button
                   type="button"
                   className="underline hover:text-warning transition-colors"
-                  onClick={() => setGoProOpen(true)}
+                  onClick={() => {
+                    if (isAnonymous) {
+                      setAuthModalOpen(true);
+                    } else {
+                      setGoProOpen(true);
+                    }
+                  }}
                 >
-                  Go Pro for Claude + unlimited
+                  {isAnonymous ? "Sign in free to keep going" : "Go Pro for Claude + unlimited"}
                 </button>
               </span>
             ) : (
