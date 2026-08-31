@@ -1,48 +1,36 @@
-import { useEffect, useRef, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   ArrowRight,
   ArrowUpRight,
   BarChart3,
-  BookMarked,
   Check,
+  ChevronDown,
+  CircleDot,
   FileText,
+  HeartPulse,
+  Instagram,
   Laptop,
   Layers,
-  ListChecks,
+  Linkedin,
+  Mail,
+  Menu,
   Moon,
+  Send,
+  Shield,
   Smartphone,
   Sparkles,
-  Sun,
-  Users,
   Stethoscope,
-  Activity,
-  Shield,
-  Zap,
+  Sun,
   Target,
   TrendingUp,
-  HeartPulse,
-  Pill,
+  Users,
+  X,
+  Zap,
 } from "lucide-react";
-import ResponsiveSection from "@/components/ResponsiveSection";
-import { useTheme } from "@/hooks/use-theme";
-import "@/styles/openmed-tokens.css";
-import "@/styles/openmed-components.css";
-
-const APP_STORAGE_KEYS = [
-  "sb_welcomed",
-  "sb_first_sheet_seen",
-  "sb_first_deck_seen",
-  "sb_sheet_hint_dismissed",
-  "studybuddy_decks_v1",
-  "studybuddy_history",
-];
-
-const hasUsedAppBefore = () =>
-  APP_STORAGE_KEYS.some((key) => localStorage.getItem(key) !== null);
-
+import { useNavigate } from "react-router-dom";
+import { ResponsiveCarousel } from "@/components/ResponsiveCarousel";
+import "@/pages/index.css";
 const CONTACT_EMAIL = "mailto:osama200az@gmail.com";
-
 const SOCIALS = {
   instagram: "https://www.instagram.com/getstudybuddyai/",
   linkedin: "https://www.linkedin.com/company/studdybuddyai",
@@ -73,30 +61,6 @@ const STEPS = [
   {
     name: "Review and repeat",
     desc: "Spaced repetition brings back your weak spots. Tap any concept to go deeper, and check the evidence behind it.",
-  },
-];
-
-const STUDY_ANYWHERE = [
-  {
-    icon: Laptop,
-    eyebrow: "Web app",
-    title: "Full feature set in your browser",
-    desc: "Nothing to install. Open it in any browser and start studying.",
-    link: { label: "Open StudyBuddy →", to: "/dashboard" },
-  },
-  {
-    icon: Smartphone,
-    eyebrow: "Mobile-ready",
-    title: "Study between lectures",
-    desc: "Optimized for the ten minutes you get on the go.",
-    link: null,
-  },
-  {
-    icon: Users,
-    eyebrow: "Study groups",
-    title: "Compete with classmates",
-    desc: "Share decks and climb the leaderboard together.",
-    link: null,
   },
 ];
 
@@ -139,46 +103,14 @@ const FEATURES = [
   },
 ];
 
-const SUBJECT_FILTERS = [
-  "All",
-  "Cardiology",
-  "Pharmacology",
-  "Pathology",
-  "Surgery",
-  "Microbiology",
-];
-
+const SUBJECT_FILTERS = ["All", "Cardiology", "Pharmacology", "Pathology", "Surgery", "Microbiology"];
 const SUBJECTS = [
-  {
-    name: "Cardiology",
-    arch: "ECG · Heart failure · Arrhythmias",
-    tags: ["ECG", "Heart failure", "Arrhythmias"],
-  },
-  {
-    name: "Pharmacology",
-    arch: "Mechanisms · Drug interactions · Toxicology",
-    tags: ["Mechanisms", "Drug interactions"],
-  },
-  {
-    name: "Pathology",
-    arch: "Histology · Systemic · Neoplasia",
-    tags: ["Histology", "Systemic"],
-  },
-  {
-    name: "Surgery",
-    arch: "Pre-op assessment · Post-op care · Trauma",
-    tags: ["Pre-op", "Post-op", "Trauma"],
-  },
-  {
-    name: "Microbiology",
-    arch: "Bacteriology · Virology · Parasitology",
-    tags: ["Bacteria", "Viruses", "Parasites"],
-  },
-  {
-    name: "Anatomy",
-    arch: "Gross anatomy · Neuroanatomy · Embryology",
-    tags: ["Gross", "Neuroanatomy"],
-  },
+  { name: "Cardiology", arch: "ECG · Heart failure · Arrhythmias", tags: ["ECG", "Heart failure", "Arrhythmias"] },
+  { name: "Pharmacology", arch: "Mechanisms · Drug interactions · Toxicology", tags: ["Mechanisms", "Drug interactions"] },
+  { name: "Pathology", arch: "Histology · Systemic · Neoplasia", tags: ["Histology", "Systemic"] },
+  { name: "Surgery", arch: "Pre-op assessment · Post-op care · Trauma", tags: ["Pre-op", "Post-op", "Trauma"] },
+  { name: "Microbiology", arch: "Bacteriology · Virology · Parasitology", tags: ["Bacteria", "Viruses", "Parasites"] },
+  { name: "Anatomy", arch: "Gross anatomy · Neuroanatomy · Embryology", tags: ["Gross", "Neuroanatomy"] },
 ];
 
 const FAQS = [
@@ -208,806 +140,504 @@ const FAQS = [
   },
 ];
 
-const Index = () => {
-  const navigate = useNavigate();
-  const [ready, setReady] = useState(false);
-  // Shared with the in-app ThemeToggle so both stay in step; the `.dark` class
-  // itself is applied before paint by the bootstrap script in index.html.
-  const { isDark, toggleTheme } = useTheme();
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [filter, setFilter] = useState("All");
-  const [openFaq, setOpenFaq] = useState<number | null>(null);
-  const rootRef = useRef<HTMLDivElement>(null);
+const TESTIMONIALS = [
+  {
+    name: "Ahmed Hassan",
+    role: "4th Year Medical Student",
+    university: "Cairo University",
+    quote: "StudyBuddy helped me understand cardiology concepts that I struggled with for months. The AI explanations are clearer than my textbooks.",
+    score: 15,
+    avatar: "AH",
+  },
+  {
+    name: "Fatima Al-Rashid",
+    role: "USMLE Step 1 Candidate",
+    university: "King Saud University",
+    quote: "The spaced repetition feature is a game-changer. I went from 60% to 85% in my practice exams within 6 weeks.",
+    score: 25,
+    avatar: "FA",
+  },
+  {
+    name: "Omar Khalil",
+    role: "Final Year Medical Student",
+    university: "University of Jordan",
+    quote: "Finally, a tool built for students in our region. The pricing is perfect and the content quality rivals expensive alternatives.",
+    score: 20,
+    avatar: "OK",
+  },
+];
 
+const FREE_FEATURES = [
+  "AI study sheets (5/day limit)",
+  "Flashcard decks with spaced repetition",
+  "QBank sessions (10 questions/day)",
+  "Basic progress tracking",
+  "Community support",
+];
+
+const PRO_FEATURES = [
+  "Unlimited AI study sheets",
+  "Full QBank access (all questions)",
+  "Advanced spaced repetition analytics",
+  "PubMed citations on every sheet",
+  "Inline Enhance sidebar",
+  "Priority support",
+  "Early access to new features",
+];
+
+function useInView() {
+  const ref = useRef<HTMLDivElement>(null);
+  const [inView, setInView] = useState(false);
   useEffect(() => {
-    const isHomeRoute = window.location.pathname === "/" || window.location.pathname === "/home";
-
-    if (hasUsedAppBefore() && !isHomeRoute) {
-      navigate("/dashboard", { replace: true });
+    const node = ref.current;
+    if (!node || !("IntersectionObserver" in window)) {
+      setInView(true);
       return;
     }
-
-    setReady(true);
-  }, [navigate]);
-
-  // Anchor links need smooth scrolling, but only while this page is mounted.
-  useEffect(() => {
-    document.documentElement.classList.add("openmed-page");
-    return () => {
-      document.documentElement.classList.remove("openmed-page");
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!ready) return;
-    const sections = rootRef.current?.querySelectorAll("[data-screen]");
-    if (!sections?.length) return;
-
     const observer = new IntersectionObserver(
-      (entries) =>
-        entries.forEach((entry) => {
-          if (entry.isIntersecting) {
-            entry.target.classList.add("visible");
-            observer.unobserve(entry.target);
-          }
-        }),
-      { threshold: 0.08 },
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          setInView(true);
+          observer.unobserve(node);
+        }
+      },
+      { threshold: 0.12 },
     );
-    sections.forEach((el) => observer.observe(el));
+    observer.observe(node);
     return () => observer.disconnect();
-  }, [ready]);
+  }, []);
+  return { ref, inView };
+}
 
-  if (!ready) return null;
+function Reveal({
+  children,
+  delay = 0,
+  direction = "up",
+  className = "",
+}: {
+  children: ReactNode;
+  delay?: number;
+  direction?: "up" | "left" | "right" | "scale";
+  className?: string;
+}) {
+  const { ref, inView } = useInView();
+  const transforms = {
+    up: "translateY(34px)",
+    left: "translateX(34px)",
+    right: "translateX(-34px)",
+    scale: "scale(.94)",
+  };
+  return (
+    <div
+      ref={ref}
+      className={`reveal ${className}`}
+      style={{
+        opacity: inView ? 1 : 0,
+        transform: inView ? "translate3d(0,0,0) scale(1)" : transforms[direction],
+        transitionDelay: `${delay}ms`,
+      }}
+    >
+      {children}
+    </div>
+  );
+}
 
-  const visibleSubjects =
-    filter === "All" ? SUBJECTS : SUBJECTS.filter((s) => s.name === filter);
+function AnimatedCounter({ target, suffix = "" }: { target: number; suffix?: string }) {
+  const { ref, inView } = useInView();
+  const [count, setCount] = useState(0);
+  useEffect(() => {
+    if (!inView) return;
+    let frame = 0;
+    const startedAt = performance.now();
+    const animate = (now: number) => {
+      const progress = Math.min((now - startedAt) / 1500, 1);
+      const eased = 1 - Math.pow(1 - progress, 3);
+      setCount(Math.floor(target * eased));
+      if (progress < 1) frame = requestAnimationFrame(animate);
+    };
+    frame = requestAnimationFrame(animate);
+    return () => cancelAnimationFrame(frame);
+  }, [inView, target]);
+  return <span ref={ref}>{count.toLocaleString()}{suffix}</span>;
+}
+
+function Eyebrow({ children, dark = false }: { children: ReactNode; dark?: boolean }) {
+  return (
+    <span className={`eyebrow ${dark ? "eyebrow-dark" : ""}`}>
+      <span className="eyebrow-dot" aria-hidden="true" />
+      {children}
+    </span>
+  );
+}
+
+function ButtonLink({
+  children,
+  href = "#",
+  variant = "primary",
+  onClick,
+  target,
+  rel,
+  testId,
+}: {
+  children: ReactNode;
+  href?: string;
+  variant?: "primary" | "accent" | "ghost" | "dark-ghost";
+  onClick?: () => void;
+  target?: string;
+  rel?: string;
+  testId: string;
+}) {
+  return (
+    <a
+      href={href}
+      className={`button button-${variant}`}
+      onClick={(event) => {
+        if (onClick) {
+          event.preventDefault();
+          onClick();
+        }
+      }}
+      target={target}
+      rel={rel}
+      data-testid={testId}
+    >
+      {children}
+    </a>
+  );
+}
+
+function SectionHeading({
+  eyebrow,
+  title,
+  children,
+  center = false,
+}: {
+  eyebrow: string;
+  title: ReactNode;
+  children?: ReactNode;
+  center?: boolean;
+}) {
+  return (
+    <div className={`section-heading ${center ? "section-heading-center" : ""}`}>
+      <Eyebrow>{eyebrow}</Eyebrow>
+      <h2>{title}</h2>
+      {children ? <p>{children}</p> : null}
+    </div>
+  );
+}
+
+function App() {
+  const navigate = useNavigate();
+  const [isDark, setIsDark] = useState(() => {
+    try {
+      return localStorage.getItem("studybuddy-theme") === "dark";
+    } catch {
+      return false;
+    }
+  });
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [filter, setFilter] = useState("All");
+
+  useEffect(() => {
+    document.documentElement.classList.toggle("dark", isDark);
+    try {
+      localStorage.setItem("studybuddy-theme", isDark ? "dark" : "light");
+    } catch {
+      // Storage can be unavailable in private browsing; theme still works in-memory.
+    }
+  }, [isDark]);
+
+  const visibleSubjects = useMemo(
+    () => (filter === "All" ? SUBJECTS : SUBJECTS.filter((subject) => subject.name === filter)),
+    [filter],
+  );
+  const startStudying = () => navigate("/dashboard?start=sheet");
+  const closeMenu = () => setMenuOpen(false);
 
   return (
-    <div className="openmed" ref={rootRef}>
-      {/* ---------- Header ---------- */}
-      <header className={menuOpen ? "nav menu-open" : "nav"}>
-        <div className="container nav-inner">
-          <Link to="/" className="logo" aria-label="StudyBuddy home" style={{ color: 'var(--brand)' }}>
-            <div className="flex items-center gap-2">
-              <Stethoscope size={24} strokeWidth={2} />
-              <span className="wordmark">StudyBuddy AI</span>
-            </div>
-            <span className="version-tag">BETA</span>
-          </Link>
+    <div className="site-shell">
+      <div className="ambient ambient-one" aria-hidden="true" />
+      <div className="ambient ambient-two" aria-hidden="true" />
 
-          <nav className="nav-menu" id="primaryNav" aria-label="Primary">
-            <ul className="nav-links">
-              {NAV_LINKS.map(({ href, label }) => (
-                <li key={href}>
-                  <a href={href} onClick={() => setMenuOpen(false)}>
-                    {label}
-                  </a>
-                </li>
-              ))}
-            </ul>
+      <header className={`site-header ${menuOpen ? "menu-open" : ""}`}>
+        <div className="container header-inner">
+          <a href="#home" className="brand" onClick={closeMenu} data-testid="link-brand-home" aria-label="StudyBuddy AI home">
+            <span className="brand-mark"><HeartPulse size={18} strokeWidth={2.25} /></span>
+            <span className="brand-name">StudyBuddy <b>AI</b></span>
+            <span className="brand-beta">BETA</span>
+          </a>
+          <nav className="desktop-nav" aria-label="Primary navigation">
+            {NAV_LINKS.map((link) => (
+              <a href={link.href} key={link.href} data-testid={`link-nav-${link.label.toLowerCase().split(" ").join("-")}`}>
+                {link.label}
+              </a>
+            ))}
           </nav>
-
-          <div className="nav-actions">
-            <button
-              className="btn btn-primary"
-              style={{ backgroundColor: 'var(--fg)', borderColor: 'var(--fg)', color: 'var(--bg-elevated)', borderRadius: '9999px', padding: '10px 20px', fontWeight: '500', display: 'flex', alignItems: 'center', gap: '8px' }}
-              onClick={() => navigate("/dashboard?start=sheet")}
-            >
-              <span className="btn-label">Get early access</span>
-              <ArrowRight className="icon" size={16} strokeWidth={1.6} />
+          <div className="header-actions">
+            <button className="theme-button" type="button" onClick={() => setIsDark((value) => !value)} aria-label={isDark ? "Switch to light theme" : "Switch to dark theme"} data-testid="button-theme-toggle">
+              {isDark ? <Sun size={17} /> : <Moon size={17} />}
             </button>
-            <button
-              className="theme-toggle"
-              onClick={toggleTheme}
-              aria-label="Toggle color theme"
-              title="Toggle theme"
-            >
-              {isDark ? (
-                <Sun size={16} strokeWidth={1.6} />
-              ) : (
-                <Moon size={16} strokeWidth={1.6} />
-              )}
-            </button>
-            <button
-              className="nav-toggle"
-              onClick={() => setMenuOpen((open) => !open)}
-              aria-label="Open menu"
-              aria-expanded={menuOpen}
-              aria-controls="primaryNav"
-            >
-              <span className="nav-toggle-bar" aria-hidden="true" />
-              <span className="nav-toggle-bar" aria-hidden="true" />
-              <span className="nav-toggle-bar" aria-hidden="true" />
+            <ButtonLink href="/dashboard?start=sheet" onClick={startStudying} testId="button-header-early-access">
+              <span className="header-cta-label">Get early access</span><ArrowRight size={15} />
+            </ButtonLink>
+            <button className="menu-button" type="button" onClick={() => setMenuOpen((value) => !value)} aria-expanded={menuOpen} aria-controls="mobile-nav" aria-label={menuOpen ? "Close menu" : "Open menu"} data-testid="button-mobile-menu">
+              {menuOpen ? <X size={22} /> : <Menu size={22} />}
             </button>
           </div>
         </div>
+        <nav id="mobile-nav" className="mobile-nav" aria-label="Mobile navigation">
+          {NAV_LINKS.map((link) => (
+            <a href={link.href} key={link.href} onClick={closeMenu} data-testid={`link-mobile-${link.label.toLowerCase().split(" ").join("-")}`}>{link.label}<ArrowUpRight size={14} /></a>
+          ))}
+          <ButtonLink href="/dashboard?start=sheet" onClick={() => { closeMenu(); startStudying(); }} testId="button-mobile-early-access">Start studying <ArrowRight size={15} /></ButtonLink>
+        </nav>
       </header>
 
       <main>
-        {/* ---------- Hero ---------- */}
-        <section id="home" className="hero bg-grid" data-screen style={{ backgroundColor: 'var(--bg)', padding: '60px 0 80px' }}>
-          <div
-            className="container hero-grid"
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 320px), 1fr))',
-              gap: 'clamp(24px, 4vw, 40px)',
-              alignItems: 'center',
-              width: '100%',
-            }}
-          >
-            <div>
-              <div className="eyebrow" style={{ color: 'var(--fg-muted)', textTransform: 'uppercase', fontSize: '12px', fontWeight: '600', letterSpacing: '0.05em', marginBottom: '16px' }}>StudyBuddy AI · Built for Medical Students</div>
-              <h1 className="display-xl hero-title " style={{ color: 'var(--fg)', fontSize: 'clamp(32px, 7vw, 56px)', lineHeight: '1.1', fontWeight: '800', marginBottom: '24px' }}>
-                Study smarter. Score higher.{" "}
-                <span className="serif-italic" style={{ fontFamily: 'Georgia, serif', fontStyle: 'italic', fontWeight: '400', color: 'var(--brand)' }}>Pass.</span>
-              </h1>
-              <p className="body-lg hero-desc" style={{ color: 'var(--fg-muted)', fontSize: 'clamp(15px, 3.2vw, 18px)', lineHeight: '1.6', marginBottom: '32px' }}>
-                StudyBuddy turns your curriculum into AI-powered sheets, questions, and
-                explanations — so{" "}
-                <span
-                  style={{
-                    background: "var(--brand-soft)",
-                    color: "var(--brand)",
-                    padding: "2px 6px",
-                    borderRadius: "4px",
-                    fontWeight: '500'
-                  }}
-                >
-                  every study hour compounds
-                </span>
-                . Built by a medical student, for medical students in MENA and beyond.
-              </p>
-
-              <div className="hero-ctas flex w-full flex-col gap-4 sm:flex-row sm:items-center sm:gap-4 sm:w-auto" style={{ display: 'flex', gap: '16px', marginBottom: '32px', alignItems: 'center' }}>
-                <button
-                  className="btn btn-primary btn-lg w-full sm:w-auto justify-center"
-                  style={{ backgroundColor: 'var(--fg)', borderColor: 'var(--fg)', color: 'var(--bg-elevated)', padding: '14px 28px', borderRadius: '9999px', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '8px' }}
-                  onClick={() => navigate("/dashboard?start=sheet")}
-                >
-                  Start for free
-                  <ArrowRight className="icon" size={18} strokeWidth={1.6} />
-                </button>
-                <a className="btn btn-outline btn-lg w-full sm:w-auto justify-center" href="#playground" style={{ borderColor: 'var(--border-strong)', color: 'var(--fg)', padding: '14px 28px', borderRadius: '9999px', fontWeight: '600', backgroundColor: 'var(--bg-elevated)' }}>
-                  See how it works
-                </a>
-              </div>
-
-              <div className="hero-meta" style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', alignItems: 'center', color: 'var(--fg-muted)', fontSize: '14px' }}>
-                <span className="pip">AI Study Sheets</span>
-                <span>·</span>
-                <span className="pip">Smart QBank</span>
-                <span>·</span>
-                <span className="pip">USMLE-aligned</span>
-                <span>·</span>
-                <span className="pip">Built by an MD</span>
-                <span>·</span>
-                <span className="pip">Free to start</span>
-              </div>
-            </div>
-
-            <div>
-              <div className="phi-card" style={{ backgroundColor: 'var(--surface-inverse)', border: '1px solid var(--border-on-inverse)', borderRadius: '20px', color: 'var(--fg-on-inverse)', overflow: 'hidden', boxShadow: 'var(--shadow-ink)' }}>
-                <div className="phi-head" style={{ padding: '16px 20px', borderBottom: '1px solid var(--border-on-inverse)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '13px', color: 'var(--fg-on-inverse-muted)' }}>
-                  <div className="phi-head-left">
-                    <span>question · cardiology</span>
-                  </div>
-                  <span className="phi-count" style={{ background: 'var(--surface-inverse-2)', padding: '2px 8px', borderRadius: '6px', color: 'var(--fg-on-inverse)' }}>Q 14 / 50</span>
+        <section id="home" className="hero-section">
+          <div className="container hero-grid">
+            <div className="hero-copy">
+              <Reveal>
+                <Eyebrow>Built for medical students · MENA</Eyebrow>
+                <h1>Study smarter.<br />Score <em>higher.</em> Pass.</h1>
+                <p className="hero-lede">StudyBuddy turns your curriculum into AI-powered sheets, questions, and explanations — so every study hour compounds. Built by an MD for medical students across MENA.</p>
+                <div className="hero-actions">
+                  <ButtonLink href="/dashboard?start=sheet" onClick={startStudying} testId="button-hero-start">Start free — no card required <ArrowRight size={18} /></ButtonLink>
+                  <a href="#playground" className="button button-ghost" data-testid="link-hero-how-it-works">See how it works <ChevronDown size={17} /></a>
                 </div>
-                <pre className="phi-body" style={{ padding: '20px', margin: '0', fontFamily: 'monospace', fontSize: '13px', lineHeight: '1.6', color: 'var(--fg-on-inverse)', whiteSpace: 'pre-wrap' }}>
-                  {`A 58-year-old man presents with
-crushing chest pain radiating to
-his left arm for 40 minutes.
-
-ECG shows ST elevation in leads
-II, III, and aVF.
-
-`}
-                  <span className="phi-token revealed" data-k="DATE" style={{ color: 'var(--brand-soft-fg)', fontWeight: '600' }}>
-                    Most likely diagnosis?
-                  </span>
-                  {`
-
-A. NSTEMI
-B. `}
-                  <span className="phi-token revealed" data-k="NAME" style={{ color: 'var(--accent-on-inverse)', fontWeight: '600', backgroundColor: 'rgba(52, 211, 153, 0.1)', padding: '2px 4px', borderRadius: '4px' }}>
-                    Inferior STEMI
-                  </span>
-                  {`
-C. Unstable angina
-D. Pericarditis`}
-                </pre>
-                <div className="phi-foot" style={{ padding: '14px 20px', borderTop: '1px solid var(--border-on-inverse)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px', color: 'var(--fg-on-inverse-muted)' }}>
-                  <span>
-                    Cardiology · <span className="lang-val" style={{ color: 'var(--brand-soft-fg)' }}>USMLE Step 1</span>
-                  </span>
-                  <div className="phi-foot-right" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    <div className="phi-foot-dot" style={{ width: '8px', height: '8px', backgroundColor: 'var(--accent-on-inverse)', borderRadius: '50%' }} />
-                    <span style={{ color: 'var(--accent-on-inverse)' }}>AI explanation ready</span>
-                  </div>
+                <div className="trust-row" data-testid="text-trusted-students">
+                  <span className="avatar-stack" aria-hidden="true"><span>AK</span><span>NR</span><span>LM</span></span>
+                  <span>Trusted by <strong><AnimatedCounter target={12000} suffix="+" /></strong> medical students across 6 countries</span>
                 </div>
-              </div>
-              <div className="hero-caption" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '12px', padding: '0 4px', fontSize: '13px', color: 'var(--fg-muted)' }}>
-                <span>Live QBank question · adaptive mode</span>
-                <span className="play" style={{ color: 'var(--brand)', fontWeight: '600', cursor: 'pointer' }}>▶ try it</span>
-              </div>
+              </Reveal>
             </div>
+            <Reveal direction="left" delay={160} className="hero-visual-wrap">
+              <div className="hero-visual" role="img" aria-label="Sample StudyBuddy question on acute coronary syndrome, showing the correct answer highlighted and an ECG trace">
+                <div className="question-top"><span>QUESTION 14 · CARDIOLOGY</span><span className="question-tag">STEP 1</span></div>
+                <div className="question-body">
+                  <div className="question-meta"><CircleDot size={12} /> Adaptive practice <span>•</span> 0:42</div>
+                  <span className="stem">A 58-year-old man presents with:</span>
+                  <p className="question-text">crushing chest pain radiating to left arm. ECG shows ST elevation in II, III, aVF.</p>
+                  <svg className="ecg-line" viewBox="0 0 400 34" preserveAspectRatio="none" aria-hidden="true"><path d="M0 17 L60 17 L72 4 L84 30 L96 17 L140 17 L152 10 L164 17 L220 17 L232 4 L244 30 L256 17 L400 17" /></svg>
+                  <div className="answer-option"><span>A</span> Anterior STEMI</div>
+                  <div className="answer-option"><span>B</span> Inferior STEMI</div>
+                  <div className="answer-option answer-correct"><Check size={15} /> Inferior STEMI — RCA occlusion</div>
+                  <div className="answer-option"><span>D</span> Unstable angina</div>
+                </div>
+                <div className="question-foot"><span><Sparkles size={13} /> AI explanation ready</span><span>single best answer</span></div>
+              </div>
+              <div className="floating-note floating-note-top"><span className="note-icon"><FileText size={14} /></span><span><b>Study sheet ready</b><small>Acute coronary syndrome</small></span></div>
+              <div className="floating-note floating-note-bottom"><span className="note-icon note-icon-warm"><BarChart3 size={14} /></span><span><b>+15% this week</b><small>Cardiology accuracy</small></span></div>
+            </Reveal>
           </div>
+          <div className="scroll-cue" aria-hidden="true"><span>scroll to explore</span><ChevronDown size={17} /></div>
         </section>
 
-        <ResponsiveSection />
+        <div className="subject-ticker" aria-hidden="true">
+          <div className="ticker-track"><span>Cardiology</span><i>·</i><span>Pharmacology</span><i>·</i><span>Pathology</span><i>·</i><span>Microbiology</span><i>·</i><span>Surgery</span><i>·</i><span>Anatomy</span><i>·</i><span>Cardiology</span><i>·</i><span>Pharmacology</span><i>·</i><span>Pathology</span><i>·</i><span>Microbiology</span><i>·</i><span>Surgery</span><i>·</i><span>Anatomy</span></div>
+        </div>
 
-        {/* ---------- Stat band ---------- */}
-        <section className="statband" aria-label="Traction stats" style={{ backgroundColor: 'var(--brand)', color: 'var(--bg-elevated)', padding: '48px 0' }}>
-          <div className="container" style={{ textAlign: 'center' }}>
-            <div className="statband-head" style={{ display: 'flex', flexDirection: 'column', gap: '8px', alignItems: 'center' }}>
-              <span className="statband-eyebrow" style={{ color: 'var(--brand-soft-fg)', fontSize: '13px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Built for medical students</span>
-              <span className="statband-desc" style={{ color: 'var(--bg-elevated)', fontSize: '24px', fontWeight: '700' }}>
-                One workflow: study, practice, review — across every subject.
-              </span>
-            </div>
-            <p
-              className="body-lg"
-              style={{
-                color: "var(--brand-soft-fg)",
-                maxWidth: "58ch",
-                margin: "16px auto 32px",
-                textAlign: "center",
-                fontSize: "16px"
-              }}
-            >
-              Growing across MENA — medical students using StudyBuddy AI to study smarter,
-              practice better, and walk into exams with confidence.
-            </p>
-            <div className="statband-foot" style={{ display: 'flex', flexDirection: 'column', gap: '16px', alignItems: 'center' }}>
-              <span className="statband-meta" style={{ color: 'var(--bg-elevated)', fontSize: '14px', fontWeight: '500' }}>Every subject, one workflow</span>
-              <span className="statband-pills" style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', justifyContent: 'center' }}>
-                {["Medicine", "Surgery", "Pharmacology", "Pathology", "Microbiology", "Anatomy"].map(
-                  (pill) => (
-                    <span className="statband-pill" key={pill} style={{ backgroundColor: 'var(--brand-pill)', color: 'var(--bg-elevated)', padding: '6px 16px', borderRadius: '9999px', fontSize: '14px', fontWeight: '500' }}>
-                      {pill}
-                    </span>
-                  ),
-                )}
-              </span>
-            </div>
-          </div>
-        </section>
-
-        {/* ---------- How it works ---------- */}
-        <section id="playground" data-screen style={{ backgroundColor: 'var(--bg)', padding: '80px 0' }}>
-          <div className="container mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8">
-            <div className="playground-grid flex max-sm:flex-col md:flex-row" >
-              <div className="playground-lead">
-                <div className="eyebrow" style={{ color: 'var(--fg-muted)', textTransform: 'uppercase', fontSize: '12px', fontWeight: '600', letterSpacing: '0.05em', marginBottom: '12px' }}>How it works</div>
-                <h2 className="display-lg" style={{ color: 'var(--fg)', fontSize: '40px', fontWeight: '800', lineHeight: '1.2', marginBottom: '20px' }}>
-                  Four steps to <span className="serif-italic" style={{ fontFamily: 'Georgia, serif', fontStyle: 'italic', fontWeight: '400', color: 'var(--brand)' }}>mastery</span>.
-                </h2>
-                <p className="body-lg" style={{ color: 'var(--fg-muted)', fontSize: '16px', lineHeight: '1.6', marginBottom: '32px' }}>
-                  No setup, no learning curve. The same loop every time: study, test, review,
-                  repeat.
-                </p>
-                <ul className="playground-list" style={{ listStyle: 'none', padding: '0', display: 'flex', flexDirection: 'column', gap: '20px', marginBottom: '32px' }}>
-                  {STEPS.map(({ name, desc }) => (
-                    <li key={name} style={{ display: 'flex', gap: '16px', alignItems: 'flex-start' }}>
-                      <span className="playground-check" style={{ backgroundColor: 'var(--brand)', width: '28px', height: '28px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: '0', marginTop: '2px' }}>
-                        <Check size={16} strokeWidth={2} color="white" />
-                      </span>
-                      <div>
-                        <code className="code-inline" style={{ color: 'var(--brand)', fontWeight: '700', fontSize: '15px' }}>{name}</code>
-                        <div className="body-sm" style={{ marginTop: '4px', color: 'var(--fg-muted)', fontSize: '14px', lineHeight: '1.5' }}>
-                          {desc}
-                        </div>
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-                <button className="btn btn-primary" style={{ backgroundColor: 'var(--fg)', borderColor: 'var(--fg)', color: 'var(--bg-elevated)', padding: '12px 24px', borderRadius: '9999px', fontWeight: '600', display: 'inline-flex', alignItems: 'center', gap: '8px' }} onClick={() => navigate("/qbank")}>
-                  Explore the QBank
-                  <ArrowUpRight className="icon" size={16} strokeWidth={1.6} />
-                </button>
-              </div>
-
-              {/* Worked question card. This was previously dressed as a code
-                  editor — window dots, a shell prompt and `#` comments — which
-                  is template residue, not something a medical student relates
-                  to. Same layout, clinical chrome. */}
-              <div className="code-panel" style={{ backgroundColor: 'var(--surface-inverse)', border: '1px solid var(--border-on-inverse)', borderRadius: '20px', color: 'var(--fg-on-inverse)', overflow: 'hidden', boxShadow: 'var(--shadow-ink)' }}>
-                <div className="code-head" style={{ padding: '14px 20px', borderBottom: '1px solid var(--border-on-inverse)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span style={{ fontSize: '11px', letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--accent-on-inverse)', fontWeight: 600 }}>
-                    Question 14
-                  </span>
-                  <span className="code-title" style={{ fontSize: '13px', color: 'var(--fg-on-inverse-muted)' }}>Cardiology · Step 1</span>
-                  <span className="code-copy" style={{ fontSize: '12px', background: 'var(--surface-inverse-2)', padding: '2px 8px', borderRadius: '6px', color: 'var(--fg-on-inverse-muted)' }}>14 / 50</span>
-                </div>
-                <div className="code-install" style={{ padding: '12px 20px', borderBottom: '1px solid var(--border-on-inverse)', display: 'flex', gap: '10px', alignItems: 'center', background: 'var(--surface-inverse-2)' }}>
-                  <Stethoscope size={15} strokeWidth={1.8} style={{ color: 'var(--accent-on-inverse)', flexShrink: 0 }} />
-                  <span style={{ color: 'var(--fg-on-inverse)', fontSize: '13px' }}>Acute coronary syndromes</span>
-                </div>
-                <div className="code-tabs" style={{ display: 'flex', borderBottom: '1px solid var(--border-on-inverse)', background: 'var(--surface-inverse-2)', padding: '0 16px' }}>
-                  <span style={{ padding: '10px 16px', color: 'var(--accent-on-inverse)', borderBottom: '2px solid var(--accent-on-inverse)', fontSize: '13px', fontWeight: '600' }}>
-                    Question
-                  </span>
-                  <span style={{ padding: '10px 16px', color: 'var(--fg-on-inverse-muted)', fontSize: '13px' }}>
-                    Explanation
-                  </span>
-                  <span style={{ padding: '10px 16px', color: 'var(--fg-on-inverse-muted)', fontSize: '13px' }}>
-                    Flashcards
-                  </span>
-                </div>
-                <div className="code-body" style={{ padding: '20px', fontSize: '14px', lineHeight: '1.65', color: 'var(--fg-on-inverse)' }}>
-                  <p style={{ margin: '0 0 18px' }}>
-                    A 58-year-old man presents with crushing chest pain. His ECG shows
-                    ST elevation in leads II, III and aVF.
-                  </p>
-
-                  <div style={{ display: 'flex', gap: '10px', alignItems: 'baseline', marginBottom: '6px' }}>
-                    <span style={{ color: 'var(--accent-on-inverse)', fontWeight: 600, minWidth: '62px' }}>Answer</span>
-                    <span>B. Inferior STEMI</span>
-                  </div>
-                  <div style={{ display: 'flex', gap: '10px', alignItems: 'baseline', marginBottom: '18px' }}>
-                    <span style={{ color: 'var(--accent-on-inverse)', fontWeight: 600, minWidth: '62px' }}>Vessel</span>
-                    <span>Right coronary artery <span style={{ color: 'var(--highlight)' }}>(80%)</span></span>
-                  </div>
-
-                  <div style={{ fontSize: '11px', letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--fg-on-inverse-muted)', marginBottom: '8px' }}>
-                    Why not the others
-                  </div>
-                  <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '13px' }}>
-                    {[
-                      ["A. NSTEMI", "no ST elevation"],
-                      ["C. Stable angina", "resolves at rest"],
-                      ["D. Pericarditis", "diffuse elevation"],
-                    ].map(([option, why]) => (
-                      <li key={option} style={{ display: 'flex', gap: '10px' }}>
-                        <span style={{ minWidth: '124px', color: 'var(--fg-on-inverse)' }}>{option}</span>
-                        <span style={{ color: 'var(--signal-on-inverse)' }}>{why}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        {/* ---------- Runtime trio ---------- */}
-        <section id="anywhere" data-screen style={{ padding: '80px 0', backgroundColor: 'var(--bg-elevated)' }}>
+        <section id="playground" className="section section-how">
           <div className="container">
-            <div className="section-head" style={{ marginBottom: '50px', textAlign: 'center' }}>
-              <div className="eyebrow" style={{ color: 'var(--fg-muted)', textTransform: 'uppercase', fontSize: '12px', fontWeight: '600', letterSpacing: '0.05em', marginBottom: '12px' }}>Built to fit your study life</div>
-              <h2 className="display-lg" style={{ maxWidth: "22ch", margin: '0 auto 16px', fontSize: '36px', fontWeight: '800', color: 'var(--fg)' }}>
-                The same experience, everywhere you study.
-              </h2>
-              <p className="body-lg" style={{ maxWidth: "62ch", margin: '0 auto', color: 'var(--fg-muted)', fontSize: '16px', lineHeight: '1.6' }}>
-                Between lectures, on the ward, or at 2am the night before an exam — your
-                sheets, decks, and question history follow you.
-              </p>
-            </div>
-
-            <div className="runtime-grid" style={{ display: 'grid', gap: '24px' }}>
-              {STUDY_ANYWHERE.map(({ icon: Icon, eyebrow, title, desc, link }) => (
-                <div className="runtime-cell" key={eyebrow} style={{ backgroundColor: 'var(--bg)', border: '1px solid var(--border)', borderRadius: '16px', padding: '32px 24px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                  <div className="cell-icon" style={{ width: '44px', height: '44px', borderRadius: '12px', backgroundColor: 'var(--brand-soft)', color: 'var(--brand)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    <Icon size={22} strokeWidth={1.6} />
-                  </div>
-                  <div className="eyebrow muted" style={{ fontSize: '12px', fontWeight: '600', color: 'var(--fg-muted)', textTransform: 'uppercase' }}>{eyebrow}</div>
-                  <h3 className="heading-md" style={{ fontSize: '20px', fontWeight: '700', color: 'var(--fg)' }}>{title}</h3>
-                  <p className="body-sm" style={{ color: 'var(--fg-muted)', fontSize: '14px', lineHeight: '1.6', flex: '1' }}>{desc}</p>
-                  {link ? (
-                    <Link className="link-arrow" to={link.to} style={{ color: 'var(--brand)', fontWeight: '600', fontSize: '14px', display: 'inline-flex', alignItems: 'center', gap: '4px', textDecoration: 'none' }}>
-                      {link.label} →
-                    </Link>
-                  ) : (
-                    <span className="body-sm" style={{ color: "var(--fg-subtle)", fontSize: '14px', fontWeight: '500' }}>
-                      Coming soon
-                    </span>
-                  )}
-                </div>
-              ))}
-            </div>
+            <SectionHeading eyebrow="How it works" title={<>Four steps to <em>mastery.</em></>} center>
+              No setup, no learning curve. The same easy loop — study, test, review, repeat.
+            </SectionHeading>
+            <Reveal>
+              <ResponsiveCarousel
+                className="steps-carousel-wrapper"
+                desktopClassName="steps-grid"
+                mobileItemClassName="step-carousel-slide"
+              >
+                {STEPS.map((step, index) => (
+                  <article className="step-card" key={step.name} data-testid={`card-step-${index + 1}`}>
+                    <div className="step-number">0{index + 1}<span> / 04</span></div>
+                    <div className="step-rule" />
+                    <h3>{step.name}</h3>
+                    <p>{step.desc}</p>
+                    <div className="step-arrow" aria-hidden="true"><ArrowUpRight size={16} /></div>
+                  </article>
+                ))}
+              </ResponsiveCarousel>
+            </Reveal>
           </div>
         </section>
 
-        {/* ---------- Features ---------- */}
-        <section id="features" data-screen style={{ padding: '80px 0', backgroundColor: 'var(--bg)' }}>
+        <section className="dark-band">
+          <div className="dark-grid" aria-hidden="true" />
+          <Reveal className="container dark-band-inner">
+            <Eyebrow dark>One workflow, every subject</Eyebrow>
+            <h2>Study, practice, review —<br /><em>across every subject.</em></h2>
+            <p>Growing across MENA — medical students using StudyBuddy AI to study smarter, practice better, and walk into exams with confidence.</p>
+            <div className="discipline-list">{["Medicine", "Surgery", "Pharmacology", "Pathology", "Microbiology", "Anatomy"].map((discipline) => <span key={discipline}>{discipline}</span>)}</div>
+          </Reveal>
+        </section>
+
+        <section className="section stories-section">
           <div className="container">
-            <div className="section-head" style={{ marginBottom: '50px', textAlign: 'center' }}>
-              <div className="eyebrow" style={{ color: 'var(--fg-muted)', textTransform: 'uppercase', fontSize: '12px', fontWeight: '600', letterSpacing: '0.05em', marginBottom: '12px' }}>Core features</div>
-              <h2 className="display-lg" style={{ maxWidth: "24ch", margin: '0 auto 16px', fontSize: '36px', fontWeight: '800', color: 'var(--fg)' }}>
-                Clinical AI for medical education, built for{" "}
-                <span className="serif-italic" style={{ fontFamily: 'Georgia, serif', fontStyle: 'italic', fontWeight: '400', color: 'var(--brand)' }}>MENA</span>.
-              </h2>
-              <p className="body-lg" style={{ maxWidth: "62ch", margin: '0 auto', color: 'var(--fg-muted)', fontSize: '16px' }}>
-                Every feature exists because a student lost hours to the problem it solves.
-              </p>
-            </div>
-
-            <div className="deid-grid" style={{ display: 'grid', gap: '24px' }}>
-              {FEATURES.map(({ icon: Icon, title, desc, tags }) => (
-                <div className="deid-cell" key={title} style={{ backgroundColor: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: '16px', padding: '28px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
-                  <div className="deid-icon" style={{ width: '36px', height: '36px', borderRadius: '10px', backgroundColor: 'var(--bg-panel)', color: 'var(--fg)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    <Icon size={18} strokeWidth={1.6} />
-                  </div>
-                  <h3 className="heading-sm" style={{ fontSize: '18px', fontWeight: '700', color: 'var(--fg)' }}>{title}</h3>
-                  <p className="body-sm" style={{ color: 'var(--fg-muted)', fontSize: '14px', lineHeight: '1.5', flex: '1' }}>{desc}</p>
-                  <div className="tag-row" style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: 'auto' }}>
-                    {tags.map((tag) => (
-                      <span className="tag" key={tag} style={{ backgroundColor: 'var(--bg-panel)', color: 'var(--fg)', padding: '4px 10px', borderRadius: '6px', fontSize: '12px', fontWeight: '500' }}>
-                        {tag}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
+            <SectionHeading eyebrow="Student-backed stories" title={<>Trusted by medical students across <em>MENA.</em></>} center />
+            <Reveal>
+              <ResponsiveCarousel
+                className="stories-carousel-wrapper"
+                desktopClassName="stories-grid"
+                mobileItemClassName="story-carousel-slide"
+              >
+                {TESTIMONIALS.map((testimonial, index) => (
+                  <article className={`story-card ${index === 1 ? "story-featured" : ""}`} key={testimonial.name} data-testid={`card-testimonial-${index + 1}`}>
+                    <div className="story-mark">“</div>
+                    <div className="star-row" aria-label="5 out of 5 stars"><Sparkles size={14} /><Sparkles size={14} /><Sparkles size={14} /><Sparkles size={14} /><Sparkles size={14} /></div>
+                    <p className="story-quote">{testimonial.quote}</p>
+                    <div className="story-author"><span className="avatar-initials">{testimonial.avatar}</span><span><strong>{testimonial.name}</strong><small>{testimonial.role} · {testimonial.university}</small></span></div>
+                    <span className="score-pill">Exam score improved +{testimonial.score}%</span>
+                  </article>
+                ))}
+              </ResponsiveCarousel>
+            </Reveal>
           </div>
         </section>
 
-        {/* ---------- QBank ---------- */}
-        <section id="qbank" className="bg-panel-section" data-screen style={{ padding: '80px 0', backgroundColor: 'var(--bg-elevated)' }}>
+        <section className="section platform-section">
           <div className="container">
-            <div className="section-head" style={{ marginBottom: '40px' }}>
-              <div className="tail" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
-                <div>
-                  <div className="eyebrow" style={{ color: 'var(--fg-muted)', textTransform: 'uppercase', fontSize: '12px', fontWeight: '600', letterSpacing: '0.05em', marginBottom: '12px' }}>QBank</div>
-                  <h2 className="display-lg" style={{ maxWidth: "18ch", fontSize: '36px', fontWeight: '800', color: 'var(--fg)', lineHeight: '1.2' }}>
-                    High-yield questions, by <span className="serif-italic" style={{ fontFamily: 'Georgia, serif', fontStyle: 'italic', fontWeight: '400', color: 'var(--brand)' }}>subject</span>.
-                  </h2>
-                  <p className="body-lg" style={{ maxWidth: "58ch", marginTop: '16px', color: 'var(--fg-muted)', fontSize: '16px', lineHeight: '1.6' }}>
-                    USMLE-style vignettes with domain filters, session resume, and an
-                    explanation for every distractor.
-                  </p>
-                </div>
-                <button className="btn btn-outline" style={{ borderColor: 'var(--border-strong)', color: 'var(--fg)', padding: '10px 20px', borderRadius: '9999px', fontWeight: '600', backgroundColor: 'var(--bg-elevated)', display: 'flex', alignItems: 'center', gap: '6px' }} onClick={() => navigate("/qbank")}>
-                  Open the QBank
-                  <ArrowUpRight className="icon" size={16} strokeWidth={1.6} />
-                </button>
-              </div>
-            </div>
-
-            <div className="chips" style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', marginBottom: '32px' }}>
-              {SUBJECT_FILTERS.map((name) => (
-                <button
-                  key={name}
-                  className={filter === name ? "chip active" : "chip"}
-                  onClick={() => setFilter(name)}
-                  style={{
-                    padding: '8px 16px',
-                    borderRadius: '9999px',
-                    fontSize: '14px',
-                    fontWeight: '600',
-                    border: '1px solid',
-                    cursor: 'pointer',
-                    backgroundColor: filter === name ? 'var(--fg)' : 'var(--bg-elevated)',
-                    color: filter === name ? 'var(--bg-elevated)' : 'var(--fg)',
-                    borderColor: filter === name ? 'var(--fg)' : 'var(--border-strong)',
-                    transition: 'all 0.2s'
-                  }}
-                >
-                  {name}
-                </button>
-              ))}
-            </div>
-
-            <div className="models-grid grid grid-cols-1 gap-8 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-5 2xl:gap-x-12 2xl:gap-y-16">
-              {visibleSubjects.map(({ name, arch, tags }) => (
-                <Link className="model-cell" to="/qbank" key={name} style={{ backgroundColor: 'var(--bg)', border: '1px solid var(--border)', borderRadius: '16px', padding: '24px', display: 'flex', flexDirection: 'column', gap: '12px', textDecoration: 'none', color: 'inherit' }}>
-                  <div className="heading-sm model-name" style={{ fontSize: '18px', fontWeight: '700', color: 'var(--fg)' }}>{name}</div>
-                  <div className="model-arch" style={{ fontSize: '13px', color: 'var(--fg-muted)' }}>{arch}</div>
-                  <div className="model-tags" style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', margin: '8px 0' }}>
-                    {tags.map((tag) => (
-                      <span className="tag" key={tag} style={{ backgroundColor: 'var(--border)', color: 'var(--fg)', padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '500' }}>
-                        {tag}
-                      </span>
-                    ))}
-                  </div>
-                  <div className="model-foot" style={{ marginTop: 'auto', paddingTop: '12px', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'flex-end' }}>
-                    <span className="open" style={{ color: 'var(--brand)', fontSize: '13px', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                      Open
-                      <ArrowUpRight className="icon" size={12} strokeWidth={1.6} />
-                    </span>
-                  </div>
-                </Link>
-              ))}
-            </div>
+            <SectionHeading eyebrow="Built to fit your study life" title={<>The same experience, <em>everywhere</em> you study.</>} center>
+              Between lectures, on the ward, or 2am the night before an exam — your sheets, decks, and question history follow you.
+            </SectionHeading>
+            <Reveal>
+              <ResponsiveCarousel
+                className="platform-carousel-wrapper"
+                desktopClassName="platform-grid"
+                mobileItemClassName="platform-carousel-slide"
+              >
+                {[
+                  { icon: Laptop, eyebrow: "Web app", title: "Full feature set in your browser", desc: "Nothing to install. Open it in any browser and start studying.", action: "Open StudyBuddy →", test: "link-platform-web" },
+                  { icon: Smartphone, eyebrow: "Mobile-ready", title: "Study between lectures", desc: "Optimized for the ten minutes you get on the go.", action: "Coming soon", test: "text-platform-mobile" },
+                  { icon: Users, eyebrow: "Study groups", title: "Compete with classmates", desc: "Share decks and climb the leaderboard together.", action: "Coming soon", test: "text-platform-groups" },
+                ].map((platform) => {
+                  const Icon = platform.icon;
+                  return <article className="platform-card" key={platform.eyebrow} data-testid={`card-platform-${platform.eyebrow.toLowerCase().replace(" ", "-")}`}><span className="platform-icon"><Icon size={18} /></span><span className="platform-eyebrow">{platform.eyebrow}</span><h3>{platform.title}</h3><p>{platform.desc}</p>{platform.eyebrow === "Web app" ? <button type="button" onClick={startStudying} className="text-action" data-testid={platform.test}>{platform.action}<ArrowRight size={14} /></button> : <span className="coming-soon" data-testid={platform.test}>{platform.action}</span>}</article>;
+                })}
+              </ResponsiveCarousel>
+            </Reveal>
           </div>
         </section>
-
-        {/* ---------- Pricing ---------- */}
-        <section id="pricing" data-screen style={{ padding: '80px 0', backgroundColor: 'var(--bg)' }}>
+        {/* ------- features start--------- */}
+        <section id="features" className="section tinted-section">
           <div className="container">
-            <div className="section-head" style={{ marginBottom: '50px', textAlign: 'center' }}>
-              <div className="eyebrow" style={{ color: 'var(--fg-muted)', textTransform: 'uppercase', fontSize: '12px', fontWeight: '600', letterSpacing: '0.05em', marginBottom: '12px' }}>Pricing</div>
-              <h2 className="display-lg" style={{ maxWidth: "20ch", margin: '0 auto 16px', fontSize: '36px', fontWeight: '800', color: 'var(--fg)' }}>
-                Free at the core. <span className="serif-italic" style={{ fontFamily: 'Georgia, serif', fontStyle: 'italic', fontWeight: '400', color: 'var(--brand)' }}>Real value.</span>
-              </h2>
-              <p className="body-lg" style={{ maxWidth: "66ch", margin: '0 auto', color: 'var(--fg-muted)', fontSize: '16px' }}>
-                Start with everything you need to study. Upgrade only when the limits
-                actually start to bite.
-              </p>
-            </div>
-
-            <div className="product-duo grid grid-cols-2 gap-4 max-w-[900px] mx-auto mb-8" style={{ gap: '30px' }}>
-              <div className="product-card" style={{ backgroundColor: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: '24px', padding: '36px', display: 'flex', flexDirection: 'column', gap: '20px', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)' }}>
-                <div className="product-card-top" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <div className="product-wordmark" style={{ fontSize: '24px', fontWeight: '800', color: 'var(--fg)' }}>Free</div>
-                  <span className="product-badge" style={{ backgroundColor: 'var(--brand-soft)', color: 'var(--brand)', padding: '4px 10px', borderRadius: '9999px', fontSize: '12px', fontWeight: '600' }}>Always free</span>
-                </div>
-                <h3 style={{ fontSize: '20px', fontWeight: '700', color: 'var(--fg)', margin: '0' }}>Everything to get started</h3>
-                <p className="pdesc" style={{ color: 'var(--fg-muted)', fontSize: '14px', lineHeight: '1.6', margin: '0' }}>
-                  AI study sheets, flashcard decks with spaced repetition, QBank sessions,
-                  and progress tracking. No credit card, no account required to begin.
-                </p>
-                <div className="product-built" style={{ fontSize: '13px', color: 'var(--fg)', backgroundColor: 'var(--bg-panel)', padding: '12px', borderRadius: '8px' }}>
-                  Includes a <b>premium AI</b> generation on your first sheet.
-                </div>
-                <button
-                  className="product-cta"
-                  style={{ backgroundColor: 'var(--fg)', color: 'var(--bg-elevated)', border: 'none', padding: '14px', borderRadius: '9999px', fontWeight: '600', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', marginTop: 'auto' }}
-                  onClick={() => navigate("/dashboard?start=sheet")}
-                >
-                  Start for free
-                  <ArrowRight size={16} strokeWidth={1.6} />
-                </button>
-              </div>
-
-              <div className="product-card dark" style={{ backgroundColor: 'var(--surface-inverse)', border: '1px solid var(--border-on-inverse)', color: 'var(--fg-on-inverse)', borderRadius: '24px', padding: '36px', display: 'flex', flexDirection: 'column', gap: '20px', boxShadow: 'var(--shadow-ink)' }}>
-                <div className="product-card-top" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <div className="product-wordmark" style={{ fontSize: '24px', fontWeight: '800' }}>Pro</div>
-                  <span className="product-badge" style={{ backgroundColor: 'var(--surface-inverse-2)', color: 'var(--accent-on-inverse)', padding: '4px 10px', borderRadius: '9999px', fontSize: '12px', fontWeight: '600' }}>$5/mo</span>
-                </div>
-                <h3 style={{ fontSize: '20px', fontWeight: '700', margin: '0' }}>Unlimited everything</h3>
-                <p className="pdesc" style={{ color: 'var(--fg-on-inverse-muted)', fontSize: '14px', lineHeight: '1.6', margin: '0' }}>
-                  Unlimited study sheets, full QBank access, spaced repetition
-                  analytics, PubMed citations, our most advanced medical AI model, and
-                  new subjects as they are added.
-                </p>
-                <div className="product-built" style={{ fontSize: '13px', color: 'var(--fg-on-inverse)', backgroundColor: 'var(--surface-inverse-2)', padding: '12px', borderRadius: '8px' }}>
-                  Our most advanced medical AI model on every study sheet.
-                </div>
-                <a className="product-cta" href={CONTACT_EMAIL} style={{ backgroundColor: 'var(--fg-on-inverse)', color: 'var(--surface-inverse)', border: 'none', padding: '14px', borderRadius: '9999px', fontWeight: '600', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', textDecoration: 'none', marginTop: 'auto' }}>
-                  Get in touch
-                  <ArrowUpRight size={16} strokeWidth={1.6} />
-                </a>
-              </div>
-            </div>
-
-            <div className="deploy-strip" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '16px', backgroundColor: 'var(--bg-elevated)', border: '1px solid var(--border)', padding: '20px 30px', borderRadius: '16px', maxWidth: '900px', margin: '0 auto' }}>
-              <span className="body-sm" style={{ color: 'var(--fg-muted)', fontSize: '14px', fontWeight: '500' }}>
-                Institutional pricing available for medical schools and NGOs.
-              </span>
-              <a className="btn btn-outline" href={CONTACT_EMAIL} style={{ borderColor: 'var(--border-strong)', color: 'var(--fg)', padding: '8px 16px', borderRadius: '9999px', fontWeight: '600', fontSize: '14px', backgroundColor: 'var(--bg-elevated)', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                Contact us
-                <ArrowUpRight className="icon" size={16} strokeWidth={1.6} />
-              </a>
-            </div>
+            <SectionHeading eyebrow="Core features" title={<>Clinical AI for medical education, built for <em>MENA.</em></>} children="Every feature exists because a student lost hours to the problem it solves." />
+            <Reveal className="features-grid">
+              {FEATURES.map((feature, index) => {
+                const Icon = feature.icon;
+                return <article className="feature-card" key={feature.title} data-testid={`card-feature-${index + 1}`}><span className="feature-icon"><Icon size={19} /></span><h3>{feature.title}</h3><p>{feature.desc}</p><div className="tag-row">{feature.tags.map((tag) => <span key={tag}>{tag}</span>)}</div></article>;
+              })}
+            </Reveal>
+            <Reveal>
+              <ResponsiveCarousel
+                className="features-carousel-wrapper"
+                desktopClassName="features-grid"
+                mobileItemClassName="feature-carousel-slide"
+              >
+                {FEATURES.map((feature, index) => {
+                  const Icon = feature.icon;
+                  return <article className="feature-card" key={feature.title} data-testid={`card-feature-mobile-${index + 1}`}><span className="feature-icon"><Icon size={19} /></span><h3>{feature.title}</h3><p>{feature.desc}</p><div className="tag-row">{feature.tags.map((tag) => <span key={tag}>{tag}</span>)}</div></article>;
+                })}
+              </ResponsiveCarousel>
+            </Reveal>
           </div>
         </section>
-
-        {/* ---------- Story ---------- */}
-        <section id="story" className="research" data-screen style={{ padding: '80px 0', backgroundColor: 'var(--bg-elevated)' }}>
-          <div className="container research-grid sm:grid-cols-2 lg:grid-cols-4 gap-12" style={{ display: 'grid' }}>
-            <div>
-              <div className="research-eyebrow" style={{ color: 'var(--fg-muted)', textTransform: 'uppercase', fontSize: '12px', fontWeight: '600', letterSpacing: '0.05em', marginBottom: '12px' }}>Built on evidence · since 2025</div>
-              <h2 className="display-lg" style={{ fontSize: '36px', fontWeight: '800', color: 'var(--fg)', lineHeight: '1.2', marginBottom: '20px' }}>
-                Started as a student problem. Grew into a{" "}
-                <span className="serif-italic" style={{ fontFamily: 'Georgia, serif', fontStyle: 'italic', fontWeight: '400', color: 'var(--brand)' }}>platform</span>.
-              </h2>
-              <p className="body-lg" style={{ color: 'var(--fg-muted)', fontSize: '16px', lineHeight: '1.6', marginBottom: '32px' }}>
-                Every feature in StudyBuddy came from a real pain point — hours lost to
-                passive reading, questions with no feedback, a curriculum with no
-                structure. The problem got mapped before anything got built.
-              </p>
-              <div className="research-ctas" style={{ display: 'flex', gap: '16px', alignItems: 'center' }}>
-                <button
-                  className="research-btn-solid"
-                  style={{ backgroundColor: 'var(--fg)', color: 'var(--bg-elevated)', border: 'none', padding: '12px 24px', borderRadius: '9999px', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}
-                  onClick={() => navigate("/dashboard?start=sheet")}
-                >
-                  Start for free
-                  <ArrowRight size={14} strokeWidth={1.6} />
-                </button>
-                <a className="research-btn-outline" href="#faq" style={{ color: 'var(--fg)', border: '1px solid var(--border-strong)', padding: '12px 24px', borderRadius: '9999px', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '8px', textDecoration: 'none', backgroundColor: 'var(--bg-elevated)' }}>
-                  Read the FAQ
-                  <ArrowUpRight size={14} strokeWidth={1.6} />
-                </a>
-              </div>
+        {/* ------- features end--------- */}
+        {/* ------- qbank start--------- */}
+        <section id="qbank" className="section qbank-section">
+          <div className="container">
+            <SectionHeading eyebrow="QBank" title={<>High-yield questions, by <em>subject.</em></>} children="USMLE-style vignettes with domain filters, session resume, and an explanation for every distractor." />
+            <div className="filter-row" role="tablist" aria-label="Filter QBank subjects">
+              {SUBJECT_FILTERS.map((subject) => <button type="button" role="tab" aria-selected={filter === subject} className={`filter-button ${filter === subject ? "active" : ""}`} onClick={() => setFilter(subject)} key={subject} data-testid={`button-filter-${subject.toLowerCase()}`}>{subject}</button>)}
             </div>
-            <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
-              <div className="research-stat" style={{ backgroundColor: 'var(--bg)', border: '1px solid var(--border)', padding: '24px', borderRadius: '16px' }}>
-                <div className="num" style={{ fontSize: '28px', fontWeight: '800', color: 'var(--fg)', marginBottom: '4px' }}>
-                  USMLE
-                </div>
-                <div className="lbl" style={{ fontSize: '14px', fontWeight: '700', color: 'var(--fg)', marginBottom: '6px' }}>Step 1 &amp; 2 style</div>
-                <div className="sub" style={{ fontSize: '12px', color: 'var(--fg-muted)', lineHeight: '1.4' }}>
-                  Questions tagged by subject and domain out of the box
-                </div>
-              </div>
-              <div className="research-stat" style={{ backgroundColor: 'var(--bg)', border: '1px solid var(--border)', padding: '24px', borderRadius: '16px' }}>
-                <div className="num" style={{ fontSize: '28px', fontWeight: '800', color: 'var(--fg)', marginBottom: '4px' }}>
-                  Adaptive
-                </div>
-                <div className="lbl" style={{ fontSize: '14px', fontWeight: '700', color: 'var(--fg)', marginBottom: '6px' }}>Spaced repetition engine</div>
-                <div className="sub" style={{ fontSize: '12px', color: 'var(--fg-muted)', lineHeight: '1.4' }}>SM-2 algorithm surfaces your weak spots automatically</div>
-              </div>
-              <div className="research-stat" style={{ backgroundColor: 'var(--bg)', border: '1px solid var(--border)', padding: '24px', borderRadius: '16px' }}>
-                <div className="num" style={{ fontSize: '28px', fontWeight: '800', color: 'var(--fg)', marginBottom: '4px' }}>
-                  Free tier
-                </div>
-                <div className="lbl" style={{ fontSize: '14px', fontWeight: '700', color: 'var(--fg)', marginBottom: '6px' }}>No credit card required</div>
-                <div className="sub" style={{ fontSize: '12px', color: 'var(--fg-muted)', lineHeight: '1.4' }}>
-                  Start with the full sheet generator and QBank, no payment needed
-                </div>
-              </div>
-              <div className="research-stat" style={{ backgroundColor: 'var(--bg)', border: '1px solid var(--border)', padding: '24px', borderRadius: '16px' }}>
-                <div className="num" style={{ fontSize: '28px', fontWeight: '800', color: 'var(--fg)', marginBottom: '4px' }}>
-                  MENA-first
-                </div>
-                <div className="lbl" style={{ fontSize: '14px', fontWeight: '700', color: 'var(--fg)', marginBottom: '6px' }}>Built in Gaza</div>
-                <div className="sub" style={{ fontSize: '12px', color: 'var(--fg-muted)', lineHeight: '1.4' }}>Priced and designed for students in underserved markets</div>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        {/* ---------- FAQ ---------- */}
-        <section id="faq" data-screen style={{ padding: '80px 0', backgroundColor: 'var(--bg)' }}>
-          <div className="container faq-grid sm:grid-cols-2 grid-cols-1 max-w-[100%] mx-auto px-4 py-6 sm:py-12" style={{ display: 'grid', gap: '60px' }}>
-            <div className="faq-lead">
-              <div className="eyebrow" style={{ color: 'var(--fg-muted)', textTransform: 'uppercase', fontSize: '12px', fontWeight: '600', letterSpacing: '0.05em', marginBottom: '12px' }}>FAQ</div>
-              <h2 className="display-lg" style={{ fontSize: '36px', fontWeight: '800', color: 'var(--fg)', lineHeight: '1.2', marginBottom: '16px' }}>
-                Questions from students, faculty, and the{" "}
-                <span className="serif-italic" style={{ fontFamily: 'Georgia, serif', fontStyle: 'italic', fontWeight: '400', color: 'var(--brand)' }}>curious</span>.
-              </h2>
-              <p className="body-lg" style={{ color: 'var(--fg-muted)', fontSize: '16px', lineHeight: '1.6' }}>
-                If yours isn't here, email us — it reaches the person who makes StudyBuddy.
-              </p>
-            </div>
-            <div className="faq-list " style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-              {FAQS.map(({ q, a }, i) => (
-                <div className={openFaq === i ? "faq-item open" : "faq-item"} key={q} style={{ backgroundColor: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: '12px', overflow: 'hidden' }}>
+            <Reveal>
+              <ResponsiveCarousel
+                className="subject-carousel-wrapper"
+                desktopClassName="subject-grid"
+                mobileItemClassName="subject-carousel-slide"
+              >
+                {visibleSubjects.map((subject) => (
                   <button
-                    className="faq-row"
-                    onClick={() => setOpenFaq(openFaq === i ? null : i)}
-                    aria-expanded={openFaq === i}
-                    style={{ width: '100%', padding: '20px', background: 'none', border: 'none', display: 'flex', justifyContent: 'space-between', alignItems: 'center', textAlign: 'left', cursor: 'pointer' }}
+                    type="button"
+                    className="subject-card"
+                    key={subject.name}
+                    onClick={startStudying}
+                    data-testid={`button-subject-${subject.name.toLowerCase()}`}
                   >
-                    <div className="heading-sm" style={{ fontSize: '16px', fontWeight: '700', color: 'var(--fg)' }}>{q}</div>
-                    <div className="faq-plus" aria-hidden="true" style={{ fontSize: '20px', fontWeight: '600', color: 'var(--fg-muted)' }}>
-                      {openFaq === i ? '−' : '+'}
+                    <span className="subject-index">{String(SUBJECTS.indexOf(subject) + 1).padStart(2, "0")}</span>
+                    <div>
+                      <h3>{subject.name}</h3>
+                      <p>{subject.arch}</p>
+                      <div className="subject-tags">{subject.tags.map((tag) => <span key={tag}>{tag}</span>)}</div>
                     </div>
+                    <ArrowUpRight className="subject-arrow" size={18} />
                   </button>
-                  {openFaq === i && (
-                    <div className="faq-body" style={{ padding: '0 20px 20px 20px', color: 'var(--fg-muted)', fontSize: '14px', lineHeight: '1.6' }}>
-                      <p style={{ margin: '0' }}>{a}</p>
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
+                ))}
+              </ResponsiveCarousel>
+            </Reveal>
           </div>
         </section>
 
-        {/* ---------- Community CTA ---------- */}
-        <section id="community" className="contribute" data-screen style={{ padding: '80px 0', backgroundColor: 'var(--bg-elevated)', textAlign: 'center' }}>
-          <div className="container" style={{ maxWidth: '800px', margin: '0 auto' }}>
-            <div className="eyebrow" style={{ color: 'var(--fg-muted)', textTransform: 'uppercase', fontSize: '12px', fontWeight: '600', letterSpacing: '0.05em', marginBottom: '12px' }}>Open invitation</div>
-            <h2 className="display-lg contribute-title" style={{ fontSize: '40px', fontWeight: '800', color: 'var(--fg)', marginBottom: '20px', lineHeight: '1.2' }}>
-              Growing across MENA.{" "}
-              <span className="serif-italic" style={{ fontFamily: 'Georgia, serif', fontStyle: 'italic', fontWeight: '400', color: 'var(--brand)' }}>Built with students.</span>
-            </h2>
-            <p className="body-lg contribute-desc" style={{ color: 'var(--fg-muted)', fontSize: '18px', lineHeight: '1.6', marginBottom: '32px' }}>
-              StudyBuddy AI started in Gaza and is growing across the Arab world. If you're
-              a medical student who wants better tools — join the early access list or
-              follow along on Instagram.
-            </p>
-            <div className="contribute-ctas" style={{ display: 'flex', justifyContent: 'center', gap: '16px' }}>
-              <button
-                className="btn btn-primary btn-lg"
-                style={{ backgroundColor: 'var(--fg)', color: 'var(--bg-elevated)', border: 'none', padding: '14px 28px', borderRadius: '9999px', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}
-                onClick={() => navigate("/dashboard?start=sheet")}
-              >
-                Get early access
-                <ArrowRight className="icon" size={18} strokeWidth={1.6} />
-              </button>
-              <a
-                className="btn btn-outline btn-lg"
-                href={SOCIALS.instagram}
-                target="_blank"
-                rel="noopener noreferrer"
-                style={{ color: 'var(--fg)', border: '1px solid var(--border-strong)', padding: '14px 28px', borderRadius: '9999px', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '8px', textDecoration: 'none', backgroundColor: 'var(--bg-elevated)' }}
-              >
-                Follow on Instagram
-                <ArrowUpRight className="icon" size={18} strokeWidth={1.6} />
-              </a>
-            </div>
+        <section id="pricing" className="section tinted-section pricing-section">
+          <div className="container">
+            <SectionHeading eyebrow="Pricing" title={<>Free at the core. <em>Real value</em> where it counts.</>} center>Start with everything you need to study. Upgrade only when the limits actually start to bite.</SectionHeading>
+            <Reveal className="pricing-grid">
+              <article className="pricing-card">
+                <span className="plan-kicker">For getting started</span><h3>Free</h3><div className="price">$0 <small>always free</small></div>
+                <ul>{FREE_FEATURES.map((feature) => <li key={feature}><Check size={16} />{feature}</li>)}</ul>
+                <ButtonLink href="/dashboard?start=sheet" onClick={startStudying} variant="ghost" testId="button-pricing-free">Start for free <ArrowRight size={15} /></ButtonLink>
+              </article>
+              <article className="pricing-card pricing-pro"><span className="popular-badge">MOST POPULAR</span><span className="plan-kicker">For the serious student</span><h3>Pro</h3><div className="price">$5 <small>/ month</small></div>
+                <ul>{PRO_FEATURES.map((feature) => <li key={feature}><Check size={16} />{feature}</li>)}</ul>
+                <ButtonLink href={CONTACT_EMAIL} variant="accent" testId="button-pricing-pro">Get Pro <ArrowRight size={15} /></ButtonLink>
+              </article>
+            </Reveal>
           </div>
+        </section>
+
+        <section className="section timeline-section">
+          <div className="container">
+            <SectionHeading eyebrow="Built as evidence, used since day one" title={<>Started as a student problem. Grew into a <em>platform.</em></>} center />
+            <Reveal className="timeline-grid">
+              {[
+                ["USMLE", "Step 1 & 2", "Question style benchmarked against real exam vignettes, not generic trivia."],
+                ["Adaptive", "Spaced repetition engine", "Self-adjusts to what you keep forgetting, not a fixed 24-hour schedule."],
+                ["Free tier", "No credit card required", "Start with everything you need — upgrade only when the limits start to bite."],
+                ["MENA-first", "Built in Gaza", "Priced and localized for the region it was built to serve."],
+              ].map(([kicker, title, copy]) => <article className="timeline-card" key={kicker}><span>{kicker}</span><h3>{title}</h3><p>{copy}</p></article>)}
+            </Reveal>
+          </div>
+        </section>
+
+        <section id="faq" className="section tinted-section faq-section">
+          <div className="container faq-layout">
+            <SectionHeading eyebrow="FAQ" title={<>Questions from students, faculty, and the <em>curious.</em></>} children="If yours isn't here, email us — it'll likely become the next line on this list." />
+            <Reveal className="faq-list">
+              {FAQS.map((faq, index) => <details className="faq-item" key={faq.q} open={index === 0}><summary data-testid={`button-faq-${index + 1}`}><span>{faq.q}</span><span className="faq-plus" aria-hidden="true">+</span></summary><p>{faq.a}</p></details>)}
+            </Reveal>
+          </div>
+        </section>
+
+        <section className="section final-cta-section">
+          <Reveal className="container">
+            <div className="final-cta"><div className="cta-grid" aria-hidden="true" /><div className="final-cta-inner"><Eyebrow dark>Open invitation</Eyebrow><h2>Growing across MENA.<br />Built with <em>students.</em></h2><p>StudyBuddy AI started in Gaza and is growing across the Arab world. If you're a medical student who wants better tools — join the early access list, or follow along on Instagram.</p><div className="cta-actions"><ButtonLink href="/dashboard?start=sheet" onClick={startStudying} variant="accent" testId="button-final-early-access">Get early access <ArrowRight size={16} /></ButtonLink><ButtonLink href={SOCIALS.instagram} variant="dark-ghost" target="_blank" rel="noopener noreferrer" testId="link-final-instagram">Follow on Instagram <Instagram size={15} /></ButtonLink></div></div></div>
+          </Reveal>
         </section>
       </main>
 
-      {/* ---------- Footer ---------- */}
-      <footer className="footer py-[60px] sm:py-[60px] px-4">
-        <div className="container mx-auto max-w-7xl ">
-          <div className="footer-grid grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8 sm:gap-10 mb-10">
-            <div className="footer-col">
-              <div className="footer-brand mb-4">
-                <span className="wordmark text-[20px] font-extrabold">StudyBuddy AI</span>
-              </div>
-              <p className="body-sm text-[14px] leading-relaxed max-w-[38ch]">
-                AI-powered study tools for medical students in MENA and beyond.
-              </p>
-            </div>
-
-            <div className="footer-col">
-              <div className="footer-col-head font-bold text-[14px] mb-4">Product</div>
-              <ul className="list-none p-0 flex flex-col gap-2.5">
-                <li>
-                  <Link to="/qbank" className="no-underline text-[14px] transition-colors">QBank</Link>
-                </li>
-                <li>
-                  <Link to="/sheets" className="no-underline text-[14px] transition-colors">Study sheets</Link>
-                </li>
-                <li>
-                  <Link to="/flashcards" className="no-underline text-[14px] transition-colors">Flashcards</Link>
-                </li>
-                <li>
-                  <Link to="/roadmap" className="no-underline text-[14px] transition-colors">Roadmap</Link>
-                </li>
-              </ul>
-            </div>
-
-            <div className="footer-col ">
-              <div className="footer-col-head font-bold text-[14px] mb-4">Resources</div>
-              <ul className="list-none p-0 flex flex-col gap-2.5">
-                <li>
-                  <a href="#playground" className="no-underline text-[14px] transition-colors">How it works</a>
-                </li>
-                <li>
-                  <a href="#features" className="no-underline text-[14px] transition-colors">Features</a>
-                </li>
-                <li>
-                  <a href="#pricing" className="no-underline text-[14px] transition-colors">Pricing</a>
-                </li>
-                <li>
-                  <a href="#faq" className="no-underline text-[14px] transition-colors">FAQ</a>
-                </li>
-              </ul>
-            </div>
-
-            <div className="footer-col">
-              <div className="footer-col-head font-bold text-[14px] mb-4">Connect</div>
-              <ul className="list-none p-0 flex flex-col gap-2.5">
-                <li>
-                  <a href={SOCIALS.instagram} target="_blank" rel="noopener noreferrer" className="no-underline text-[14px] transition-colors">
-                    Instagram
-                  </a>
-                </li>
-                <li>
-                  <a href={SOCIALS.linkedin} target="_blank" rel="noopener noreferrer" className="no-underline text-[14px] transition-colors">
-                    LinkedIn
-                  </a>
-                </li>
-                <li>
-                  <a href={SOCIALS.telegram} target="_blank" rel="noopener noreferrer" className="no-underline text-[14px] transition-colors">
-                    Telegram
-                  </a>
-                </li>
-                <li>
-                  <a href={CONTACT_EMAIL} className="no-underline text-[14px] transition-colors">Email us</a>
-                </li>
-              </ul>
-            </div>
+      <footer className="site-footer">
+        <div className="container">
+          <div className="footer-grid">
+            <div className="footer-brand"><a href="#home" className="brand" data-testid="link-footer-home"><span className="brand-mark"><HeartPulse size={18} /></span><span className="brand-name">StudyBuddy <b>AI</b></span></a><p>AI study sheets, decks, and QBank for MENA medical students.</p></div>
+            <div><h4>Product</h4><a href="#playground" data-testid="link-footer-how-it-works">How it works</a><a href="#qbank" data-testid="link-footer-qbank">QBank</a><a href="#features" data-testid="link-footer-features">Features</a><a href="#pricing" data-testid="link-footer-pricing">Pricing</a></div>
+            <div><h4>Resources</h4><a href="#faq" data-testid="link-footer-faq">FAQ</a><a href="#home" data-testid="link-footer-roadmap">Roadmap</a><a href={CONTACT_EMAIL} data-testid="link-footer-email"><Mail size={14} /> Email us</a></div>
+            <div><h4>Connect</h4><a href={SOCIALS.instagram} target="_blank" rel="noopener noreferrer" data-testid="link-footer-instagram"><Instagram size={14} /> Instagram</a><a href={SOCIALS.linkedin} target="_blank" rel="noopener noreferrer" data-testid="link-footer-linkedin"><Linkedin size={14} /> LinkedIn</a><a href={SOCIALS.telegram} target="_blank" rel="noopener noreferrer" data-testid="link-footer-telegram"><Send size={14} /> Telegram</a></div>
           </div>
-
-          <div className="footer-foot pt-5 flex flex-col sm:flex-row justify-between items-center sm:items-start text-[13px] gap-2">
-            <span>© {new Date().getFullYear()} StudyBuddy AI</span>
-            <span>Built by Osama Shihada · Gaza</span>
-          </div>
+          <div className="footer-bottom"><span>© {new Date().getFullYear()} StudyBuddy AI</span><span>Built by medical students, for medical students · Gaza</span><span className="footer-status"><span />Made for the next exam</span></div>
         </div>
       </footer>
     </div>
   );
-};
+}
 
-export default Index;
+export default App;

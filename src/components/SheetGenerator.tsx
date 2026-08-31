@@ -287,10 +287,10 @@ const SheetsEmptyState = ({ onStartTopic, onSelectHistory }: SheetsEmptyStatePro
             Start Your Study Journey
           </h3>
           <p className="text-base text-muted-foreground max-w-md">
-            Choose a medical topic below or type your own to generate a comprehensive study sheet with AI-powered insights.
+            Choose a medical topic or type your own to generate a comprehensive study sheet with AI-powered insights.
           </p>
         </div>
-        <QuickstartChips onStartTopic={onStartTopic} />
+        {/* <QuickstartChips onStartTopic={onStartTopic} /> */}
       </div>
     );
   }
