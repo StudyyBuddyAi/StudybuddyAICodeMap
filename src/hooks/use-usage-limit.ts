@@ -1,9 +1,13 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
+import { LIMITS, isWithinLimit, tierOf } from "@/config/product";
 
-export const MAX_DAILY_SHEETS = 5;
-export const MAX_DAILY_CARDS = 5;
+// Re-exported from src/config/product.ts, which is now the single source for
+// every quota the UI states or enforces. Kept as named exports because the
+// generators import them to render "n / MAX uses today".
+export const MAX_DAILY_SHEETS = LIMITS.sheets.free;
+export const MAX_DAILY_CARDS = LIMITS.cards.free;
 
 interface ProfileRow {
   is_pro: boolean;
@@ -63,8 +67,9 @@ export function useUsageLimit() {
   const cardsCount =
     usageQuery.data?.find((r) => r.kind === "cards")?.count ?? 0;
 
-  const isSheetLimited = sheetCount >= MAX_DAILY_SHEETS && !isProUser;
-  const isCardsLimited = cardsCount >= MAX_DAILY_CARDS && !isProUser;
+  const tier = tierOf({ isPro: !!isProUser, isAnonymous: !!isAnonymous });
+  const isSheetLimited = !isWithinLimit(sheetCount, "sheets", tier);
+  const isCardsLimited = !isWithinLimit(cardsCount, "cards", tier);
 
   // Counts are now incremented server-side (medical-notes edge fn via the
   // consume_usage RPC); the client no longer writes usage_records. `refresh`

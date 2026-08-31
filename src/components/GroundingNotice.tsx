@@ -4,7 +4,7 @@ import type { GroundingLevel, SourceCoverage } from "@/types/generated-sheet";
 
 const CARD_STYLE: React.CSSProperties = {
   border: "1px solid var(--border)",
-  borderLeft: "2px solid var(--highlight)",
+  borderInlineStart: "2px solid var(--highlight)",
   borderRadius: "var(--radius-md)",
   background: "var(--bg-elevated)",
   padding: "14px 16px",

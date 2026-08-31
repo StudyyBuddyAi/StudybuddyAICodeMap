@@ -1,7 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { Card, CardContent } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -11,7 +9,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Library as LibraryIcon, Sparkles, FileText, Trash2, Search, Check, Layers, Clock, Star, Filter, ArrowRight, Heart, Bookmark } from "lucide-react";
+import { Sparkles, FileText, Trash2, Search, Layers } from "lucide-react";
 import DashboardLayout from "@/components/dashboard/DashboardLayout";
 import DeckList from "@/components/DeckList";
 import StudyMode from "@/components/StudyMode";
@@ -110,22 +108,13 @@ const Library = () => {
 
       <div className="space-y-6">
         {/* Header */}
-        <div className="space-y-4">
-          <div className="flex items-center gap-3">
-            <div className="w-12 h-12 rounded-xl bg-primary/15 flex items-center justify-center">
-              <LibraryIcon className="w-6 h-6 text-primary" />
-            </div>
-            <div>
-              <p className="font-mono text-[11px] font-medium tracking-widest uppercase text-primary">
-                Library · Everything you've created
-              </p>
-              <h1 className="text-2xl lg:text-3xl font-serif font-medium leading-tight tracking-tight text-foreground">
-                Your saved{" "}
-                <span className="italic text-primary">sheets and decks.</span>
-              </h1>
-            </div>
-          </div>
-        </div>
+        <header>
+          <p className="ds-label ds-label-accent">Library</p>
+          <h1 className="ds-display mt-2">
+            Your saved{" "}
+            <span className="italic text-primary">sheets and decks.</span>
+          </h1>
+        </header>
 
         {/* Tabs with counts */}
         <Tabs defaultValue="decks" className="w-full">

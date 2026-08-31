@@ -1,5 +1,5 @@
 import { ReactNode, useEffect, useState } from "react";
-import { Flame, FileText, Layers } from "lucide-react";
+import { Flame, FileText, Layers, Brain } from "lucide-react";
 import { useStudyStats } from "@/hooks/use-study-stats";
 import { useSheetsStats } from "@/hooks/use-sheets-stats";
 import { useFlashcardDeck } from "@/hooks/use-flashcard-deck";
@@ -39,49 +39,39 @@ interface StatChipProps {
   icon: ReactNode;
   value: number | null;
   label: string;
-  accent?: boolean;
   suffix?: ReactNode;
-  /** Tailwind bg + text classes for the icon tile; must carry both themes. */
-  iconClassName: string;
 }
 
-const StatChip = ({
-  icon,
-  value,
-  label,
-  accent,
-  suffix,
-  iconClassName,
-}: StatChipProps) => {
+/**
+ * One figure. Deliberately quiet.
+ *
+ * These used to be 48px icon tiles over 28px numerals in bordered cards — three
+ * of them, directly above the tool grid, so the loudest thing on the dashboard
+ * was a set of numbers nobody acts on. Progress is context, not a call to
+ * action: it now reads as a single line of supporting text under the panel that
+ * does have one.
+ */
+const StatChip = ({ icon, value, label, suffix }: StatChipProps) => {
   const animated = useCountUp(value);
 
   return (
-    <div className="items-center flex flex-col bg-card border border-border rounded-lg p-4">
-      <div
-        className={`stats-strip-icon ${iconClassName}`}
-      >
+    <div className="flex items-center gap-2.5">
+      <span className="text-muted-foreground/70" aria-hidden="true">
         {icon}
-      </div>
-
-      <div className="stats-strip-value-row">
-        <span
-          className="stats-strip-value"
-          style={{
-            color: accent ? "var(--accent)" : "var(--fg)",
-          }}
-        >
+      </span>
+      <span className="flex items-baseline gap-1.5">
+        <span className="text-[19px] font-semibold leading-none text-foreground">
           {value === null ? "—" : animated}
         </span>
-        {suffix && <span className="stats-strip-suffix">{suffix}</span>}
-      </div>
-
-      <span className="stats-strip-label">{label}</span>
+        {suffix && <span className="ds-meta">{suffix}</span>}
+        <span className="ds-meta">{label}</span>
+      </span>
     </div>
   );
 };
 
 const StatsStrip = () => {
-  const { streak, isAnonymous } = useStudyStats();
+  const { streak, retentionRate, isAnonymous } = useStudyStats();
   const { sheetsThisWeek } = useSheetsStats();
   const { stats } = useFlashcardDeck();
 
@@ -89,53 +79,44 @@ const StatsStrip = () => {
   const streakLabel = !isAnonymous && streak === 1 ? "day streak" : "days streak";
 
   const sheetsValue = isAnonymous || sheetsThisWeek === null ? null : sheetsThisWeek;
-  const sheetsLabel = "Sheets this week";
 
   const dueValue = isAnonymous ? null : stats.due;
-  const dueLabel = "Cards due today";
 
   return (
-    <div className="animate-fade-in stats-strip-section">
-      
-      {/* Plain heading — this used to carry a chevron that read as expandable
-          but had nothing behind it. */}
-      <div className="stats-strip-header">
-        <span>Your progress</span>
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <StatChip
-          icon={<FileText className="h-7 w-7" />}
-          value={sheetsValue}
-          label={sheetsLabel}
-          iconClassName="bg-primary/15 text-primary"
-        />
-        <StatChip
-          icon={<Layers className="h-7 w-7" />}
-          value={dueValue}
-          label={dueLabel}
-          iconClassName="bg-success-soft text-success"
-        />
-        <StatChip
-          icon={<Flame className="h-7 w-7" />}
-          value={streakValue}
-          label={streakLabel}
-          accent
-          iconClassName="bg-danger-soft text-danger"
-          suffix={
-            streakValue !== null && streakValue > 0 ? (
-              <span aria-hidden="true">days</span>
-            ) : undefined
-          }
-        />
-      </div>
+    <section
+      aria-label="Your progress"
+      className="flex flex-wrap items-center gap-x-7 gap-y-3 border-y border-border py-3.5"
+    >
+      <StatChip
+        icon={<FileText className="h-4 w-4" />}
+        value={sheetsValue}
+        label={sheetsValue === 1 ? "sheet this week" : "sheets this week"}
+      />
+      <StatChip
+        icon={<Layers className="h-4 w-4" />}
+        value={dueValue}
+        label={dueValue === 1 ? "card due" : "cards due"}
+      />
+      <StatChip
+        icon={<Flame className="h-4 w-4" />}
+        value={streakValue}
+        label={streakLabel}
+      />
+      {/* `useStudyStats` has computed retention on every load since it was
+          written, and no screen has ever shown it. It is the single most useful
+          number a spaced-repetition user has: the share of due cards they got
+          right. */}
+      <StatChip
+        icon={<Brain className="h-4 w-4" />}
+        value={isAnonymous ? null : retentionRate}
+        label="retention"
+        suffix="%"
+      />
 
       {isAnonymous && (
-        <p className="stats-strip-anonymous-note">
-          Sign in to track your progress
-        </p>
+        <p className="ds-meta ms-auto">Sign in to track progress</p>
       )}
-    </div>
+    </section>
   );
 };
 

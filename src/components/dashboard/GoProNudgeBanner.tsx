@@ -36,7 +36,7 @@ const GoProNudgeBanner = ({ isRealUser }: { isRealUser: boolean }) => {
           overflow: "hidden",
           background: "var(--bg-elevated)",
           border: "1px solid var(--border)",
-          borderLeft: "3px solid var(--accent)",
+          borderInlineStart: "3px solid var(--accent)",
           borderRadius: "var(--radius-md)",
         }}
       >

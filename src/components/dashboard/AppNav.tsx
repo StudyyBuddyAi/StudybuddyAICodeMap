@@ -86,8 +86,13 @@ const AppNav = ({ onNavigate, onOpenAuth, onOpenAccount }: AppNavProps) => {
     if (onNavigate) onNavigate();
   };
 
-  const isActive = (to: string) =>
-    location.pathname === to || (to !== "/dashboard" && location.pathname.startsWith(to));
+  // "/" and "/dashboard" match exactly; everything else also matches its own
+  // sub-routes (/qbank/session → QBank). Prefix-matching "/" would mark Home
+  // active on every page, so two items claimed aria-current="page" at once.
+  const isActive = (to: string) => {
+    if (to === "/" || to === "/dashboard") return location.pathname === to;
+    return location.pathname === to || location.pathname.startsWith(`${to}/`);
+  };
 
   return (
     <>

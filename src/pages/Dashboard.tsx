@@ -1,233 +1,84 @@
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { FileText, Layers, FlaskConical, Stethoscope } from "lucide-react";
+import { FileText, FlaskConical, Layers, Stethoscope } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import DashboardLayout from "@/components/dashboard/DashboardLayout";
+import TodayPanel from "@/components/dashboard/TodayPanel";
 import StatsStrip from "@/components/dashboard/StatsStrip";
+import PerformancePanel from "@/components/dashboard/PerformancePanel";
 import GoProNudgeBanner from "@/components/dashboard/GoProNudgeBanner";
 import WelcomeModal from "@/components/WelcomeModal";
 import { useAuth } from "@/hooks/use-auth";
 import { useFlashcardDeck } from "@/hooks/use-flashcard-deck";
 import { useSheetsStats } from "@/hooks/use-sheets-stats";
 
-interface ActiveToolCardProps {
+/**
+ * A tool, as a compact row rather than a large card.
+ *
+ * The four tools used to be a 2×2 grid of tall cards — the visual centre of the
+ * page. That put "here is our feature list" where "here is what to do next"
+ * belongs. They are now a dense row beneath TodayPanel: still one tap away,
+ * no longer the headline.
+ */
+interface ToolProps {
   icon: React.ReactNode;
   title: string;
-  description: string;
-  stat: React.ReactNode;
-  ctaLabel: string;
-  onClick: () => void;
+  hint: React.ReactNode;
+  onClick?: () => void;
+  comingSoon?: boolean;
 }
 
-interface ComingSoonCardProps {
-  icon: React.ReactNode;
-  title: string;
-  description: string;
-}
-
-const ActiveToolCard = ({
-  icon,
-  title,
-  description,
-  stat,
-  ctaLabel,
-  onClick,
-}: ActiveToolCardProps) => (
-  <button
-    type="button"
-    onClick={onClick}
-    className="group animate-fade-in text-left"
-    style={{
-      position: "relative",
-      display: "flex",
-      flexDirection: "column",
-      justifyContent: "space-between",
-      borderRadius: "var(--radius-lg)",
-      border: "1px solid var(--border)",
-      background: "var(--bg-elevated)",
-      padding: 24,
-      cursor: "pointer",
-      transition: "border-color var(--dur-base) var(--ease-out), transform var(--dur-base) var(--ease-out)",
-    }}
-    onMouseEnter={e => {
-      (e.currentTarget as HTMLElement).style.borderColor = "var(--border-strong)";
-      (e.currentTarget as HTMLElement).style.transform = "translateY(-2px)";
-    }}
-    onMouseLeave={e => {
-      (e.currentTarget as HTMLElement).style.borderColor = "var(--border)";
-      (e.currentTarget as HTMLElement).style.transform = "none";
-    }}
-  >
-    <div style={{ marginBottom: 20 }}>
-      {/* Icon */}
-      <div style={{
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        width: 36,
-        height: 36,
-        borderRadius: "var(--radius-sm)",
-        border: "1px solid var(--border)",
-        background: "var(--bg)",
-        marginBottom: 16,
-        color: "var(--accent)",
-      }}>
+const Tool = ({ icon, title, hint, onClick, comingSoon }: ToolProps) => {
+  const body = (
+    <>
+      <span
+        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[var(--r-sm)] border border-border bg-background"
+        style={{ color: comingSoon ? "hsl(var(--muted-foreground))" : "hsl(var(--primary))" }}
+      >
         {icon}
-      </div>
-
-      {/* Title + description */}
-      <h3 style={{
-        fontFamily: "var(--font-sans)",
-        fontSize: 15,
-        fontWeight: 600,
-        letterSpacing: "-0.004em",
-        color: "var(--fg)",
-        marginBottom: 6,
-      }}>
-        {title}
-      </h3>
-      <p style={{
-        fontFamily: "var(--font-sans)",
-        fontSize: 13,
-        color: "var(--fg-muted)",
-        lineHeight: 1.55,
-      }}>
-        {description}
-      </p>
-    </div>
-
-    {/* Stat + CTA */}
-    <div style={{
-      display: "flex",
-      alignItems: "flex-end",
-      justifyContent: "space-between",
-      gap: 12,
-      marginTop: 8,
-    }}>
-      <div style={{ fontSize: 13, color: "var(--fg-muted)" }}>{stat}</div>
-      <span style={{
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 4,
-        fontSize: 13,
-        fontWeight: 500,
-        color: "var(--accent)",
-        transition: "gap var(--dur-micro) var(--ease-out)",
-      }}>
-        {ctaLabel}
-        <span style={{ display: "inline-block", transition: "transform var(--dur-micro) var(--ease-out)" }}
-          className="group-hover:translate-x-0.5">→</span>
       </span>
-    </div>
-  </button>
-);
-
-const ComingSoonCard = ({ icon, title, description }: ComingSoonCardProps) => (
-  <div style={{
-    position: "relative",
-    display: "flex",
-    flexDirection: "column",
-    justifyContent: "space-between",
-    borderRadius: "var(--radius-lg)",
-    border: "1px dashed var(--border)",
-    background: "transparent",
-    padding: 24,
-    cursor: "default",
-    opacity: 0.65,
-  }}>
-    <div style={{ marginBottom: 20 }}>
-      <div style={{
-        display: "flex",
-        alignItems: "flex-start",
-        justifyContent: "space-between",
-        marginBottom: 16,
-      }}>
-        <div style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          width: 36,
-          height: 36,
-          borderRadius: "var(--radius-sm)",
-          border: "1px solid var(--border)",
-          background: "var(--bg-elevated)",
-          color: "var(--fg-muted)",
-        }}>
-          {icon}
-        </div>
-        <span style={{
-          display: "inline-flex",
-          alignItems: "center",
-          padding: "2px 8px",
-          borderRadius: "var(--radius-pill)",
-          border: "1px solid var(--border)",
-          background: "var(--bg-elevated)",
-          fontFamily: "var(--font-mono)",
-          fontSize: 10,
-          fontWeight: 500,
-          letterSpacing: "0.1em",
-          textTransform: "uppercase",
-          color: "var(--fg-muted)",
-        }}>
-          Coming Soon
+      <span className="min-w-0 flex-1">
+        <span className="flex items-center gap-2">
+          <span className="ds-body block font-medium text-foreground">{title}</span>
+          {comingSoon && (
+            <span className="ds-label rounded-[var(--r-sm)] border border-border px-1.5 py-0.5">
+              Soon
+            </span>
+          )}
         </span>
-      </div>
+        <span className="ds-meta mt-0.5 block">{hint}</span>
+      </span>
+    </>
+  );
 
-      <h3 style={{
-        fontFamily: "var(--font-sans)",
-        fontSize: 15,
-        fontWeight: 600,
-        letterSpacing: "-0.004em",
-        color: "var(--fg)",
-        marginBottom: 6,
-        opacity: 0.7,
-      }}>
-        {title}
-      </h3>
-      <p style={{
-        fontFamily: "var(--font-sans)",
-        fontSize: 13,
-        color: "var(--fg-muted)",
-        lineHeight: 1.55,
-      }}>
-        {description}
-      </p>
-    </div>
-    <div style={{ marginTop: 8, height: 32 }} />
-  </div>
-);
+  if (comingSoon) {
+    return (
+      <div className="ds-card flex items-center gap-3 opacity-60" aria-disabled="true">
+        {body}
+      </div>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="ds-card ds-card-interactive flex w-full items-center gap-3"
+    >
+      {body}
+    </button>
+  );
+};
 
 const Dashboard = () => {
   const navigate = useNavigate();
   const { isAnonymous } = useAuth();
   const { stats } = useFlashcardDeck();
-  const { sheetsThisWeek, isAnonymous: sheetsAnon } = useSheetsStats();
-
-  const sheetStat = sheetsAnon ? (
-    <span style={{ fontSize: 12, color: "var(--fg-subtle)" }}>
-      Sign in to track your stats
-    </span>
-  ) : sheetsThisWeek === null ? (
-    <span style={{ fontSize: 12, color: "var(--fg-subtle)" }}>Loading…</span>
-  ) : (
-    <span>
-      <span style={{
-        fontSize: 18,
-        fontWeight: 600,
-        fontVariantNumeric: "tabular-nums",
-        color: "var(--fg)",
-      }}>
-        {sheetsThisWeek}
-      </span>
-      <span style={{ fontSize: 12, color: "var(--fg-muted)", marginLeft: 6 }}>
-        sheet{sheetsThisWeek !== 1 ? "s" : ""} this week
-      </span>
-    </span>
-  );
+  const { sheetsThisWeek } = useSheetsStats();
 
   // Dashboard sits outside QBankProvider, so it runs its own count query. The
   // key matches QBankContext's, so React Query serves both from one cache entry.
-  const qbankCountQuery = useQuery({
+  const qbankCount = useQuery({
     queryKey: ["qbank-count"],
     queryFn: async (): Promise<number> => {
       // select("id") not "*": the answer columns are REVOKE'd, so `*` 403s.
@@ -240,104 +91,64 @@ const Dashboard = () => {
     },
   });
 
-  const qbankStat = qbankCountQuery.isLoading ? (
-    <span style={{ fontSize: 12, color: "var(--fg-subtle)" }}>Loading…</span>
-  ) : (
-    <span>
-      <span style={{
-        fontSize: 18,
-        fontWeight: 600,
-        fontVariantNumeric: "tabular-nums",
-        color: "var(--fg)",
-      }}>
-        {qbankCountQuery.data ?? 0}
-      </span>
-      <span style={{ fontSize: 12, color: "var(--fg-muted)", marginLeft: 6 }}>
-        question{qbankCountQuery.data !== 1 ? "s" : ""} ready
-      </span>
-    </span>
-  );
-
-  const flashcardStat = isAnonymous ? (
-    <span style={{ fontSize: 12, color: "var(--fg-subtle)" }}>
-      Sign in to track your stats
-    </span>
-  ) : (
-    <span>
-      <span style={{
-        fontSize: 18,
-        fontWeight: 600,
-        fontVariantNumeric: "tabular-nums",
-        color: "var(--fg)",
-      }}>
-        {stats.due}
-      </span>
-      <span style={{ fontSize: 12, color: "var(--fg-muted)", marginLeft: 6 }}>
-        card{stats.due !== 1 ? "s" : ""} due today
-      </span>
-    </span>
-  );
-
   return (
     <DashboardLayout>
       <WelcomeModal />
 
-      <div className="space-y-8">
+      <div className="ds-stack">
         <GoProNudgeBanner isRealUser={!isAnonymous} />
+
+        <TodayPanel isAnonymous={isAnonymous} />
+
+        {/* Self-hides until there are finished sessions to report on, so a new
+            account is not shown an empty analytics shell. */}
+        <PerformancePanel />
 
         <StatsStrip />
 
-        <div style={{ marginBottom: 4 }}>
-          <p style={{
-            fontFamily: "var(--font-mono)",
-            fontSize: 11,
-            fontWeight: 500,
-            letterSpacing: "0.14em",
-            textTransform: "uppercase",
-            color: "var(--accent)",
-            marginBottom: 4,
-          }}>
-            Tools · Study smarter
-          </p>
-          <p style={{ fontFamily: "var(--font-sans)", fontSize: 13, color: "var(--fg-muted)" }}>
-            Everything you need, in one place
-          </p>
-        </div>
-
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <ActiveToolCard
-            icon={<FileText className="h-5 w-5" />}
-            title="Study Sheet"
-            description="Generate a high-yield, exam-ready study sheet on any medical topic in seconds."
-            stat={sheetStat}
-            ctaLabel="Open"
-            onClick={() => navigate("/sheets")}
-          />
-
-          <ActiveToolCard
-            icon={<Layers className="h-5 w-5" />}
-            title="Flashcards"
-            description="Build a spaced-repetition deck on any topic and drill until it sticks."
-            stat={flashcardStat}
-            ctaLabel="Open"
-            onClick={() => navigate("/flashcards")}
-          />
-
-          <ActiveToolCard
-            icon={<FlaskConical className="h-5 w-5" />}
-            title="QBank"
-            description="USMLE-style questions for Step 1 and Step 2 — built on NBME blueprints and clinical guidelines. Human-verified."
-            stat={qbankStat}
-            ctaLabel="Open"
-            onClick={() => navigate("/qbank")}
-          />
-
-          <ComingSoonCard
-            icon={<Stethoscope className="h-5 w-5" />}
-            title="Clinical Cases"
-            description="Train for OSCE exams with AI-generated clinical cases — history, examination, investigations, and management in one flow."
-          />
-        </div>
+        <section aria-labelledby="tools-heading">
+          <h2 id="tools-heading" className="ds-label mb-3">
+            Create
+          </h2>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <Tool
+              icon={<FileText className="h-4 w-4" />}
+              title="Study sheet"
+              hint={
+                sheetsThisWeek === null
+                  ? "Any medical topic, structured"
+                  : `${sheetsThisWeek} this week`
+              }
+              onClick={() => navigate("/sheets")}
+            />
+            <Tool
+              icon={<Layers className="h-4 w-4" />}
+              title="Flashcards"
+              hint={
+                isAnonymous
+                  ? "Spaced repetition on any topic"
+                  : `${stats.total} cards · ${stats.mastered} mastered`
+              }
+              onClick={() => navigate("/flashcards")}
+            />
+            <Tool
+              icon={<FlaskConical className="h-4 w-4" />}
+              title="QBank"
+              hint={
+                qbankCount.isLoading
+                  ? "USMLE-style vignettes"
+                  : `${qbankCount.data ?? 0} questions ready`
+              }
+              onClick={() => navigate("/qbank")}
+            />
+            <Tool
+              icon={<Stethoscope className="h-4 w-4" />}
+              title="Clinical cases"
+              hint="OSCE-style, end to end"
+              comingSoon
+            />
+          </div>
+        </section>
       </div>
     </DashboardLayout>
   );

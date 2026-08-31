@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
-import { FlaskConical, LogIn, Zap, BookOpen, CheckCircle, History, ChevronRight, Clock, Trash2, Flag, Sparkles, Check, Search, ArrowRight, Stethoscope, Brain, Heart, Activity, Layers } from "lucide-react";
+import { FlaskConical, LogIn, Zap, BookOpen, CheckCircle, History, ChevronRight, Clock, Trash2, Flag, Check } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import DashboardLayout from "@/components/dashboard/DashboardLayout";
 import PageLoader from "@/components/PageLoader";
@@ -8,6 +8,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { useQBankContext } from "@/contexts/QBankContext";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
+import { t } from "@/config/i18n";
 
 interface SessionRow {
   id: string;
@@ -47,6 +48,115 @@ const getScoreBg = (score: number, total: number) => {
   if (pct >= 0.8) return "bg-success/10 border-success/30";
   if (pct >= 0.6) return "bg-warning/10 border-warning/30";
   return "bg-danger/10 border-danger/30";
+};
+
+/**
+ * One row in the session history list.
+ *
+ * Extracted because this markup existed twice, verbatim, for the mobile and
+ * desktop lists (~120 duplicated lines) — so the invalid-nesting bug below
+ * existed twice too.
+ *
+ * The row used to be one <button> with a `<span role="button" tabIndex={0}>`
+ * delete control nested inside it: invalid HTML, and an interactive element
+ * inside an interactive element is not reliably reachable. It is now a plain
+ * container holding two real sibling buttons, which gives two honest tab stops.
+ */
+const SessionHistoryRow = ({
+  session: s,
+  isPendingDelete,
+  isDeleting,
+  onOpen,
+  onRequestDelete,
+  onCancelDelete,
+  onConfirmDelete,
+}: {
+  session: SessionRow;
+  isPendingDelete: boolean;
+  isDeleting: boolean;
+  onOpen: () => void;
+  onRequestDelete: () => void;
+  onCancelDelete: () => void;
+  onConfirmDelete: () => void;
+}) => {
+  const pct = s.total > 0 ? Math.round((s.score / s.total) * 100) : 0;
+
+  if (isPendingDelete) {
+    return (
+      <div className="w-full rounded-lg px-4 py-3 flex items-center justify-between gap-3 border border-danger/30 bg-danger/5">
+        <p className="text-xs font-medium text-foreground">Delete this session?</p>
+        <div className="flex items-center gap-2 shrink-0">
+          <button
+            type="button"
+            onClick={onCancelDelete}
+            className="text-xs text-muted-foreground hover:text-foreground transition-colors px-2 py-1"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={onConfirmDelete}
+            disabled={isDeleting}
+            className="flex items-center gap-1.5 rounded-md bg-danger/10 border border-danger/40 text-danger hover:bg-danger/20 text-xs font-medium px-3 py-1.5 transition-colors disabled:opacity-50"
+          >
+            {isDeleting ? (
+              <span className="h-3 w-3 rounded-full border-2 border-danger/40 border-t-danger animate-spin" />
+            ) : (
+              <Trash2 className="h-3 w-3" />
+            )}
+            Delete
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="group w-full rounded-xl border border-border bg-card p-3 flex items-center gap-3.5 hover:border-primary transition-colors shadow-sm">
+      <button
+        type="button"
+        onClick={onOpen}
+        className="flex flex-1 min-w-0 items-center gap-3.5 text-left"
+      >
+        <span
+          className={`flex flex-col items-center justify-center rounded-lg border px-3 py-1.5 shrink-0 ${getScoreBg(s.score, s.total)}`}
+        >
+          <span className={`text-base font-semibold tabular-nums leading-none ${getScoreColor(s.score, s.total)}`}>
+            {pct}%
+          </span>
+          <span className="text-[10px] text-muted-foreground mt-0.5">
+            {s.score}/{s.total}
+          </span>
+        </span>
+
+        <span className="flex-1 min-w-0 space-y-0.5">
+          <span className="block text-sm font-semibold text-foreground truncate">
+            {s.system}
+          </span>
+          <span className="flex items-center gap-3">
+            <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
+              <Clock className="h-3 w-3" />
+              {formatSessionTime(s.total_time_ms)}
+            </span>
+            <span className="text-[11px] text-muted-foreground">
+              {formatSessionDate(s.ended_at)}
+            </span>
+          </span>
+        </span>
+      </button>
+
+      <button
+        type="button"
+        onClick={onRequestDelete}
+        className="shrink-0 p-1.5 rounded-md text-muted-foreground hover:text-danger hover:bg-danger/10 transition-colors"
+        aria-label={`Delete ${s.system} session`}
+      >
+        <Trash2 className="h-3.5 w-3.5" />
+      </button>
+
+      <ChevronRight className="h-4 w-4 text-muted-foreground group-hover:text-primary transition-colors shrink-0" aria-hidden="true" />
+    </div>
+  );
 };
 
 const PAGE_SIZE = 5;
@@ -204,19 +314,30 @@ const QBank = () => {
   });
 
   const handleStart = async () => {
-    // Brief full-screen hand-off so the session player never snaps in
+    // The 800ms `minDelay` that used to pad this call is gone: it made every
+    // session start slower to disguise how fast it already was.
     setStarting(true);
-    const minDelay = new Promise((resolve) => window.setTimeout(resolve, 800));
-    await Promise.all([
-      startSession({
+    try {
+      await startSession({
         domains: selectedDomains,
         system: selectedSystem,
         limit: flaggedOnly ? flaggedCount : questionLimit,
         questionIds: flaggedOnly ? [...flaggedIds] : undefined,
-      }),
-      minDelay,
-    ]);
-    navigate("/qbank/session");
+      });
+      navigate("/qbank/session");
+    } catch (err) {
+      // Without this the full-screen loader had no exit: a rejected
+      // startSession left the user staring at a spinner with no way back.
+      toast({
+        title: "Couldn't start the session",
+        description:
+          err instanceof Error && err.message
+            ? err.message
+            : "Check your connection and try again.",
+        variant: "destructive",
+      });
+      setStarting(false);
+    }
   };
 
   const handleDeleteSession = async (sessionId: string) => {
@@ -241,7 +362,8 @@ const QBank = () => {
     } catch (err) {
       toast({
         title: "Failed to delete session",
-        description: "Please try again.",
+        description:
+          err instanceof Error && err.message ? err.message : "Please try again.",
         variant: "destructive",
       });
       setPendingDeleteId(null);
@@ -252,7 +374,7 @@ const QBank = () => {
 
   if (starting) {
     return (
-      <DashboardLayout>
+      <DashboardLayout width="app">
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-background animate-fade-in">
           <PageLoader context="qbank" fullPage={false} />
         </div>
@@ -261,33 +383,23 @@ const QBank = () => {
   }
 
   return (
-    <DashboardLayout>
-      <div className="flex flex-col lg:flex-row gap-6 lg:gap-8 min-h-[calc(100vh-8rem)] px-4 lg:px-6 py-6">
+    <DashboardLayout width="app">
+      {({ openAuth }) => (
+      <div className="flex flex-col lg:flex-row gap-6 lg:gap-8 min-h-[calc(100vh-8rem)]">
         {/* Left Panel - Configuration */}
         <div className="flex-1 max-w-2xl mx-auto lg:mx-0 lg:max-w-none space-y-6 animate-fade-in">
           {/* Header */}
-          <div className="space-y-4">
-            <div className="flex items-center gap-3">
-              <div className="w-12 h-12 rounded-xl bg-primary/15 flex items-center justify-center">
-                <FlaskConical className="w-6 h-6 text-primary" />
-              </div>
-              <div>
-                <p className="font-mono text-[11px] font-medium tracking-widest uppercase text-primary">
-                  QBank · USMLE-style
-                </p>
-                <h1 className="text-2xl lg:text-3xl font-serif font-medium leading-tight tracking-tight text-foreground">
-                  Practice questions,{" "}
-                  <span className="italic text-primary">
-                    built to stick.
-                  </span>
-                </h1>
-              </div>
-            </div>
-            <p className="text-sm text-muted-foreground leading-relaxed">
-              NBME blueprints, clinical guidelines, human-verified. Instant feedback on
-              every answer.
+          <header>
+            <p className="ds-label ds-label-accent">QBank · USMLE-style</p>
+            <h1 className="ds-display mt-2">
+              Practice questions,{" "}
+              <span className="italic text-primary">built to stick.</span>
+            </h1>
+            <p className="ds-subtitle mt-2.5 max-w-[54ch]">
+              NBME blueprints, clinical guidelines, human-verified. Instant
+              feedback on every answer.
             </p>
-          </div>
+          </header>
 
           {/* Stats Grid */}
           <div className="grid grid-cols-3 gap-3">
@@ -340,20 +452,21 @@ const QBank = () => {
               </div>
               <div className="space-y-1">
                 <p className="text-sm font-medium text-foreground">
-                  Sign in to access QBank
+                  {t("qbank.requiresAuthTitle")}
                 </p>
                 <p className="text-xs text-muted-foreground">
-                  Create a free account to start answering questions and track
-                  your progress.
+                  {t("qbank.requiresAuthBody")}
                 </p>
               </div>
               <button
                 type="button"
-                onClick={() => navigate("/dashboard")}
+                // Was `navigate("/dashboard")`, which left the page without ever
+                // opening a sign-in form. The layout already mounts AuthModal.
+                onClick={openAuth}
                 className="w-full h-11 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors flex items-center justify-center gap-2"
               >
                 <LogIn className="w-4 h-4" />
-                Sign In to Start
+                {t("qbank.requiresAuthCta")}
               </button>
             </div>
           ) : (
@@ -424,7 +537,7 @@ const QBank = () => {
                           key={system}
                           type="button"
                           onClick={() => handleSystemChange(system)}
-                          className={`inline-flex items-center gap-2 h-8 px-4 rounded-lg text-sm font-medium transition-all duration-200 ${
+                          className={`inline-flex items-center gap-2 h-9 px-4 rounded-lg text-sm font-medium transition-all duration-200 touch-target ${
                             selectedSystem === system
                               ? "bg-primary border-primary text-primary-foreground shadow-md"
                               : "bg-card border-border text-muted-foreground hover:border-primary hover:text-primary"
@@ -445,7 +558,7 @@ const QBank = () => {
                     <button
                       type="button"
                       onClick={() => setFlaggedOnly((v) => !v)}
-                      className={`inline-flex items-center gap-2 h-8 px-4 rounded-lg text-sm font-medium transition-all duration-200 ${
+                      className={`inline-flex items-center gap-2 h-9 px-4 rounded-lg text-sm font-medium transition-all duration-200 touch-target ${
                         flaggedOnly
                           ? "bg-warning/10 border-warning text-warning"
                           : "bg-card border-border text-muted-foreground hover:border-input"
@@ -474,7 +587,7 @@ const QBank = () => {
                         <button
                           type="button"
                           onClick={selectAll}
-                          className={`inline-flex items-center gap-2 h-8 px-4 rounded-lg text-sm font-medium transition-all duration-200 ${
+                          className={`inline-flex items-center gap-2 h-9 px-4 rounded-lg text-sm font-medium transition-all duration-200 touch-target ${
                             selectedDomains.length === 0
                               ? "bg-primary border-primary text-primary-foreground shadow-md"
                               : "bg-card border-border text-muted-foreground hover:border-primary hover:text-primary"
@@ -488,7 +601,7 @@ const QBank = () => {
                             key={domain}
                             type="button"
                             onClick={() => toggleDomain(domain)}
-                            className={`inline-flex items-center gap-2 h-8 px-4 rounded-lg text-sm font-medium transition-all duration-200 ${
+                            className={`inline-flex items-center gap-2 h-9 px-4 rounded-lg text-sm font-medium transition-all duration-200 touch-target ${
                               selectedDomains.includes(domain)
                                 ? "bg-primary border-primary text-primary-foreground shadow-md"
                                 : "bg-card border-border text-muted-foreground hover:border-primary hover:text-primary"
@@ -573,96 +686,18 @@ const QBank = () => {
               ) : (
                 <>
                   <div className="space-y-2">
-                    {sessionHistory.rows.map((s) => {
-                      const pct = s.total > 0 ? Math.round((s.score / s.total) * 100) : 0;
-
-                      if (pendingDeleteId === s.id) {
-                        return (
-                          <div
-                            key={s.id}
-                            className="w-full rounded-lg px-4 py-3 flex items-center justify-between gap-3 border border-danger/30 bg-danger/5"
-                          >
-                            <p className="text-xs font-medium text-foreground">Delete this session?</p>
-                            <div className="flex items-center gap-2 shrink-0">
-                              <button
-                                onClick={() => setPendingDeleteId(null)}
-                                className="text-xs text-muted-foreground hover:text-foreground transition-colors px-2 py-1"
-                              >
-                                Cancel
-                              </button>
-                              <button
-                                onClick={() => handleDeleteSession(s.id)}
-                                disabled={isDeleting}
-                                className="flex items-center gap-1.5 rounded-md bg-danger/10 border border-danger/40 text-danger hover:bg-danger/20 text-xs font-medium px-3 py-1.5 transition-colors disabled:opacity-50"
-                              >
-                                {isDeleting ? (
-                                  <span className="h-3 w-3 rounded-full border-2 border-danger/40 border-t-red-500 animate-spin" />
-                                ) : (
-                                  <Trash2 className="h-3 w-3" />
-                                )}
-                                Delete
-                              </button>
-                            </div>
-                          </div>
-                        );
-                      }
-
-                      return (
-                        <button
-                          key={s.id}
-                          onClick={() => navigate(`/qbank/summary?session=${s.id}`)}
-                          className="group w-full rounded-xl border border-border bg-card p-3 flex items-center gap-3.5 text-left hover:border-primary transition-colors shadow-sm"
-                        >
-                          <div
-                            className={`flex flex-col items-center justify-center rounded-lg border px-3 py-1.5 shrink-0 ${getScoreBg(s.score, s.total)}`}
-                          >
-                            <span className={`text-base font-semibold tabular-nums leading-none ${getScoreColor(s.score, s.total)}`}>
-                              {pct}%
-                            </span>
-                            <span className="text-[10px] text-muted-foreground mt-0.5">
-                              {s.score}/{s.total}
-                            </span>
-                          </div>
-
-                          <div className="flex-1 min-w-0 space-y-0.5">
-                            <p className="text-sm font-semibold text-foreground truncate">
-                              {s.system}
-                            </p>
-                            <div className="flex items-center gap-3">
-                              <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
-                                <Clock className="h-3 w-3" />
-                                {formatSessionTime(s.total_time_ms)}
-                              </span>
-                              <span className="text-[11px] text-muted-foreground">
-                                {formatSessionDate(s.ended_at)}
-                              </span>
-                            </div>
-                          </div>
-
-                          <span
-                            role="button"
-                            tabIndex={0}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setPendingDeleteId(s.id);
-                            }}
-                            onKeyDown={(e) => {
-                              if (e.key === "Enter" || e.key === " ") {
-                                e.stopPropagation();
-                                e.preventDefault();
-                                setPendingDeleteId(s.id);
-                              }
-                            }}
-                            className="shrink-0 p-1.5 rounded-md text-muted-foreground hover:text-danger hover:bg-danger/10 transition-colors cursor-pointer"
-                            aria-label="Delete session"
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </span>
-
-                          <ChevronRight className="h-4 w-4 text-muted-foreground group-hover:text-primary transition-colors shrink-0" />
-                        </button>
-                      );
-                    })}
+                    {sessionHistory.rows.map((s) => (
+                      <SessionHistoryRow
+                        key={s.id}
+                        session={s}
+                        isPendingDelete={pendingDeleteId === s.id}
+                        isDeleting={isDeleting}
+                        onOpen={() => navigate(`/qbank/summary?session=${s.id}`)}
+                        onRequestDelete={() => setPendingDeleteId(s.id)}
+                        onCancelDelete={() => setPendingDeleteId(null)}
+                        onConfirmDelete={() => handleDeleteSession(s.id)}
+                      />
+                    ))}
                   </div>
 
                   <div className="flex items-center justify-between pt-1">
@@ -718,96 +753,18 @@ const QBank = () => {
             ) : (
               <>
                 <div className="space-y-2">
-                  {sessionHistory.rows.map((s) => {
-                    const pct = s.total > 0 ? Math.round((s.score / s.total) * 100) : 0;
-
-                    if (pendingDeleteId === s.id) {
-                      return (
-                        <div
-                          key={s.id}
-                          className="w-full rounded-lg px-4 py-3 flex items-center justify-between gap-3 border border-danger/30 bg-danger/5"
-                        >
-                          <p className="text-xs font-medium text-foreground">Delete this session?</p>
-                          <div className="flex items-center gap-2 shrink-0">
-                            <button
-                              onClick={() => setPendingDeleteId(null)}
-                              className="text-xs text-muted-foreground hover:text-foreground transition-colors px-2 py-1"
-                            >
-                              Cancel
-                            </button>
-                            <button
-                              onClick={() => handleDeleteSession(s.id)}
-                              disabled={isDeleting}
-                              className="flex items-center gap-1.5 rounded-md bg-danger/10 border border-danger/40 text-danger hover:bg-danger/20 text-xs font-medium px-3 py-1.5 transition-colors disabled:opacity-50"
-                            >
-                              {isDeleting ? (
-                                <span className="h-3 w-3 rounded-full border-2 border-danger/40 border-t-red-500 animate-spin" />
-                              ) : (
-                                <Trash2 className="h-3 w-3" />
-                              )}
-                              Delete
-                            </button>
-                          </div>
-                        </div>
-                      );
-                    }
-
-                    return (
-                      <button
+                  {sessionHistory.rows.map((s) => (
+                      <SessionHistoryRow
                         key={s.id}
-                        onClick={() => navigate(`/qbank/summary?session=${s.id}`)}
-                        className="group w-full rounded-xl border border-border bg-card p-3 flex items-center gap-3.5 text-left hover:border-primary transition-colors shadow-sm"
-                      >
-                        <div
-                          className={`flex flex-col items-center justify-center rounded-lg border px-3 py-1.5 shrink-0 ${getScoreBg(s.score, s.total)}`}
-                        >
-                          <span className={`text-base font-semibold tabular-nums leading-none ${getScoreColor(s.score, s.total)}`}>
-                            {pct}%
-                          </span>
-                          <span className="text-[10px] text-muted-foreground mt-0.5">
-                            {s.score}/{s.total}
-                          </span>
-                        </div>
-
-                        <div className="flex-1 min-w-0 space-y-0.5">
-                          <p className="text-sm font-semibold text-foreground truncate">
-                            {s.system}
-                          </p>
-                          <div className="flex items-center gap-3">
-                            <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
-                              <Clock className="h-3 w-3" />
-                              {formatSessionTime(s.total_time_ms)}
-                            </span>
-                            <span className="text-[11px] text-muted-foreground">
-                              {formatSessionDate(s.ended_at)}
-                            </span>
-                          </div>
-                        </div>
-
-                        <span
-                          role="button"
-                          tabIndex={0}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setPendingDeleteId(s.id);
-                          }}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter" || e.key === " ") {
-                              e.stopPropagation();
-                              e.preventDefault();
-                              setPendingDeleteId(s.id);
-                            }
-                          }}
-                          className="shrink-0 p-1.5 rounded-md text-muted-foreground hover:text-danger hover:bg-danger/10 transition-colors cursor-pointer"
-                          aria-label="Delete session"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </span>
-
-                        <ChevronRight className="h-4 w-4 text-muted-foreground group-hover:text-primary transition-colors shrink-0" />
-                      </button>
-                    );
-                  })}
+                        session={s}
+                        isPendingDelete={pendingDeleteId === s.id}
+                        isDeleting={isDeleting}
+                        onOpen={() => navigate(`/qbank/summary?session=${s.id}`)}
+                        onRequestDelete={() => setPendingDeleteId(s.id)}
+                        onCancelDelete={() => setPendingDeleteId(null)}
+                        onConfirmDelete={() => handleDeleteSession(s.id)}
+                      />
+                    ))}
                 </div>
 
                 <div className="flex items-center justify-between pt-1">
@@ -834,6 +791,7 @@ const QBank = () => {
           </div>
         )}
       </div>
+      )}
     </DashboardLayout>
   );
 };

@@ -1,6 +1,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
+import { LIMITS, isWithinLimit, limitFor, tierOf } from "@/config/product";
 
 interface ProfileRow {
   is_pro: boolean;
@@ -11,8 +12,11 @@ interface CitationUsageRow {
   count: number;
 }
 
-const ANON_CITATION_LIMIT = 1;
-const FREE_CITATION_LIMIT = 3;
+// Re-exported from src/config/product.ts, the single source for every quota the
+// UI states or enforces. Kept as named exports so consumers and the parity test
+// keep a stable import path.
+export const ANON_CITATION_LIMIT = LIMITS.citations.anon;
+export const FREE_CITATION_LIMIT = LIMITS.citations.free;
 
 const todayUtc = () => new Date().toISOString().split("T")[0];
 
@@ -68,13 +72,9 @@ export function useCitationUsage() {
       new Date(profile.pro_expires_at) > new Date());
 
   const citationCount = usageQuery.data?.count ?? 0;
-  const citationLimit = isProUser
-    ? Number.POSITIVE_INFINITY
-    : isAnonymous
-    ? ANON_CITATION_LIMIT
-    : FREE_CITATION_LIMIT;
-
-  const canUseCitation = citationCount < citationLimit;
+  const tier = tierOf({ isPro: !!isProUser, isAnonymous: !!isAnonymous });
+  const citationLimit = limitFor("citations", tier);
+  const canUseCitation = isWithinLimit(citationCount, "citations", tier);
 
   const refreshCitation = async (): Promise<void> => {
     await queryClient.invalidateQueries({
@@ -84,6 +84,9 @@ export function useCitationUsage() {
 
   return {
     citationCount,
+    citationLimit,
+    /** Remaining uses today; `Infinity` for Pro. */
+    citationsRemaining: Math.max(0, citationLimit - citationCount),
     canUseCitation,
     isProUser: !!isProUser,
     isLoggedIn: !!user && !isAnonymous,

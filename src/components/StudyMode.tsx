@@ -1,10 +1,23 @@
 import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { X, BookOpen, Layers, ArrowLeft, RotateCcw, AlertTriangle, CheckCircle2 } from "lucide-react";
+import { BookOpen, Layers, ArrowLeft, RotateCcw, AlertTriangle, CheckCircle2 } from "lucide-react";
 import { getTagColors } from "@/lib/tag-colors";
 import { type Card, useDeckGrounding } from "@/hooks/use-flashcard-deck";
 import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
 import { useUsageLimit } from "@/hooks/use-usage-limit";
 import GoProModal from "@/components/GoProModal";
 import { getCitationsForTopic } from "@/lib/citation-store";
@@ -14,6 +27,8 @@ import { startTopProgress, finishTopProgress } from "@/components/TopProgressBar
 import { callMedicalNotes } from "@/lib/callMedicalNotes";
 import { useMemoryPreference } from "@/hooks/use-memory-preference";
 import type { GeneratedSheet } from "@/types/generated-sheet";
+import AIDisclaimer from "@/components/AIDisclaimer";
+import RatingButtons from "@/components/RatingButtons";
 
 interface StudyModeProps {
   dueCards: Card[];
@@ -42,14 +57,6 @@ const StudyMode = ({ dueCards, onReview, onClose }: StudyModeProps) => {
   const [explainOpen, setExplainOpen] = useState(false);
   const [explainScope, setExplainScope] = useState<"card" | "topic">("card");
   const [slidePhase, setSlidePhase] = useState<"idle" | "exit">("idle");
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
 
   const current = sessionCards[index];
   const progress = sessionCards.length === 0 ? 0 : (reviewedCount / sessionCards.length) * 100;
@@ -91,7 +98,24 @@ const StudyMode = ({ dueCards, onReview, onClose }: StudyModeProps) => {
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-background flex flex-col">
+    /*
+      Full-screen review surface. Was a bare `fixed inset-0` div: no focus trap,
+      so Tab walked straight out into the page behind it, and no focus restore
+      on close.
+
+      Radix is safe here precisely because Library renders this conditionally
+      (`{studyOpen && <StudyMode/>}`) — closing already unmounts and ends the
+      session, so unmount-on-close changes nothing. Escape is handled by Radix
+      now; the manual keydown listener that did it is gone.
+    */
+    <Dialog open onOpenChange={(next) => { if (!next) onClose(); }}>
+      <DialogContent
+        className="flex h-screen max-h-screen w-screen max-w-none flex-col gap-0 rounded-none border-0 bg-background p-0 sm:rounded-none"
+      >
+        <DialogTitle className="sr-only">Flashcard review</DialogTitle>
+        <DialogDescription className="sr-only">
+          Review your due flashcards one at a time.
+        </DialogDescription>
       {/* Progress bar */}
       <div className="h-[2px] w-full bg-border">
         <div
@@ -100,12 +124,8 @@ const StudyMode = ({ dueCards, onReview, onClose }: StudyModeProps) => {
         />
       </div>
 
-      {/* Close button */}
-      <div className="flex justify-end p-3">
-        <Button variant="ghost" size="icon" onClick={onClose} aria-label="Close study mode">
-          <X className="h-5 w-5" />
-        </Button>
-      </div>
+      {/* Close: DialogContent renders its own, so no hand-rolled duplicate. */}
+      <div className="h-11 shrink-0" aria-hidden="true" />
 
       <div className="flex-1 flex items-center justify-center px-4 pb-4 md:pb-10 overflow-y-auto">
         {done ? (
@@ -160,7 +180,18 @@ const StudyMode = ({ dueCards, onReview, onClose }: StudyModeProps) => {
                 style={{ perspective: "1000px" }}
                 onClick={handleFlip}
                 role="button"
-                aria-label={flipped ? "Tap to show question" : "Tap to show answer"}
+                aria-label={flipped ? "Show question" : "Show answer"}
+                onKeyDown={(e) => {
+                  // role="button" with no tabIndex and no key handler announced a
+                  // control that could not be reached or activated: the product's
+                  // core loop was mouse-only. Space and Enter are what a real
+                  // <button> responds to.
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    handleFlip();
+                  }
+                }}
+                tabIndex={0}
               >
                 <div
                   className={`flip-card-y-inner relative h-[260px] sm:h-[300px] ${flipped ? "flipped" : ""}`}
@@ -213,35 +244,15 @@ const StudyMode = ({ dueCards, onReview, onClose }: StudyModeProps) => {
                     Explain this card
                   </button>
                 </div>
-                <div className="grid grid-cols-3 gap-2 sm:gap-3">
-                <Button
-                  variant="outline"
-                  onClick={() => handleRate("again")}
-                  className="h-11 rounded-lg font-medium text-red-600 dark:text-red-400 border-red-500/30 hover:bg-red-500/10 hover:text-red-600 dark:hover:text-red-400"
-                >
-                  Still learning
-                </Button>
-                <Button
-                  variant="outline"
-                  onClick={() => handleRate("good")}
-                  className="h-11 rounded-lg font-medium text-emerald-600 dark:text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/10 hover:text-emerald-600 dark:hover:text-emerald-400"
-                >
-                  Got it
-                </Button>
-                <Button
-                  variant="outline"
-                  onClick={() => handleRate("easy")}
-                  className="h-11 rounded-lg font-medium text-primary border-primary/30 hover:bg-primary/10 hover:text-primary"
-                >
-                  Easy
-                </Button>
-                </div>
+                <RatingButtons onRate={handleRate} />
               </div>
             )}
 
             <p className="text-center text-xs text-muted-foreground">
               Card {index + 1} of {sessionCards.length}
             </p>
+
+            <AIDisclaimer variant="short" className="justify-center" />
 
             {/* Guideline sources behind the current card's deck — same
                 component SheetGenerator renders below the document; self-hides
@@ -261,7 +272,8 @@ const StudyMode = ({ dueCards, onReview, onClose }: StudyModeProps) => {
           onClose={() => setExplainOpen(false)}
         />
       )}
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 };
 
@@ -361,8 +373,8 @@ const ExplainContent = ({ output }: { output: string }) => {
         </div>
       )}
       {tip && (
-        <div className="space-y-2.5 rounded-xl border border-amber-500/30 bg-amber-500/5 p-4">
-          <h3 className="text-xs uppercase tracking-wider text-amber-400 font-semibold">
+        <div className="space-y-2.5 rounded-xl border border-warning/30 bg-warning/5 p-4">
+          <h3 className="text-xs uppercase tracking-wider text-warning font-semibold">
             Exam Tip
           </h3>
           <p className="text-sm leading-relaxed text-foreground">{tip}</p>
@@ -498,22 +510,28 @@ export const ExplainPanel = ({ open, scope, card, onClose }: ExplainPanelProps) 
   return (
     <>
     <GoProModal open={goProOpen} onOpenChange={setGoProOpen} />
-    <div
-      className="fixed inset-x-0 bottom-0 top-[15vh] z-50 bg-background border-t border-border rounded-t-xl shadow-2xl flex flex-col"
-      style={{
-        transform: open ? "translateY(0)" : "translateY(100%)",
-        transition: "transform 350ms cubic-bezier(0.4, 0, 0.2, 1)",
-      }}
-    >
-      <div className="flex items-center justify-between px-4 py-3 border-b border-border/40">
-        <Button variant="ghost" size="sm" onClick={onClose} className="text-sm">
-          <ArrowLeft className="h-4 w-4 mr-1.5" />
-          Back to review
-        </Button>
-        <Button variant="ghost" size="icon" onClick={onClose} aria-label="Close">
-          <X className="h-5 w-5" />
-        </Button>
-      </div>
+    {/*
+      Was a hand-rolled `fixed` panel that was always mounted and merely
+      translated off-screen when closed: no focus trap, no focus restore, no
+      Escape handler, and still present in the accessibility tree while
+      invisible. Radix gives all four, and unmounts the content when closed.
+    */}
+    <Sheet open={open} onOpenChange={(next) => { if (!next) onClose(); }}>
+      <SheetContent
+        side="bottom"
+        className="top-[15vh] h-[85vh] gap-0 rounded-t-xl border-t p-0 flex flex-col"
+      >
+        <SheetHeader className="flex-row items-center justify-between space-y-0 border-b border-border/40 px-4 py-3 text-left">
+          <SheetTitle asChild>
+            <Button variant="ghost" size="sm" onClick={onClose} className="text-sm font-normal">
+              <ArrowLeft className="h-4 w-4 mr-1.5" />
+              Back to review
+            </Button>
+          </SheetTitle>
+          <SheetDescription className="sr-only">
+            AI explanation for the card you are reviewing.
+          </SheetDescription>
+        </SheetHeader>
       <div className="flex-1 overflow-y-auto px-4 py-6">
         <div className="mx-auto max-w-2xl">
           {loading && !output && (
@@ -529,11 +547,13 @@ export const ExplainPanel = ({ open, scope, card, onClose }: ExplainPanelProps) 
           {output && (
             <div className="space-y-5 animate-fade-in">
               <ExplainContent output={output} />
+              <AIDisclaimer />
             </div>
           )}
         </div>
       </div>
-    </div>
+      </SheetContent>
+    </Sheet>
     </>
   );
 };

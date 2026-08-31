@@ -1,21 +1,28 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { ArrowRight, BookOpen, Layers, Play, Repeat, Settings2, Shuffle, X, Sparkles, Check, ChevronRight, ArrowLeft, RotateCcw, Bookmark, AlertTriangle, CheckCircle2 } from "lucide-react";
+import { ArrowRight, BookOpen, Layers, Play, Repeat, Settings2, Shuffle, Sparkles, Check, ChevronRight, ArrowLeft, RotateCcw, AlertTriangle, CheckCircle2 } from "lucide-react";
 import DashboardLayout from "@/components/dashboard/DashboardLayout";
 import FlashcardsGenerator, { type GeneratedCard } from "@/components/FlashcardsGenerator";
 import DeckList from "@/components/DeckList";
 import { CardFace, ExplainPanel } from "@/components/StudyMode";
 import SheetSources from "@/components/SheetSources";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
 import { useFlashcardDeck, makeCardId, useDeckGrounding, type Card as DeckCard } from "@/hooks/use-flashcard-deck";
 import { useToast } from "@/hooks/use-toast";
 import type { GeneratedSheet } from "@/types/generated-sheet";
+import AIDisclaimer from "@/components/AIDisclaimer";
+import RatingButtons, { type Rating } from "@/components/RatingButtons";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
+import { useIsTabletBand } from "@/hooks/use-mobile";
 
 const RECENT_DECK_LIMIT = 5;
 
 type RightPhase = "idle" | "generating" | "reviewing";
-type Rating = "again" | "good" | "easy";
 
 const DueCardsReminderStrip = ({
   dueCount,
@@ -37,7 +44,7 @@ const DueCardsReminderStrip = ({
     <button
       type="button"
       onClick={onStartReview}
-      className="h-7 px-3 rounded-lg bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 transition-colors flex items-center gap-1.5 flex-shrink-0"
+      className="h-8 px-3.5 rounded-lg bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 transition-colors flex items-center gap-1.5 flex-shrink-0 touch-target"
     >
       <Play className="w-3 h-3" />
       Review
@@ -66,6 +73,9 @@ const Flashcards = () => {
   const [rightPhase, setRightPhase] = useState<RightPhase>("idle");
   const [genTopic, setGenTopic] = useState("");
   const [configDrawerOpen, setConfigDrawerOpen] = useState(false);
+  // See SheetGenerator: the Sheet portals to <body> and cannot inherit the
+  // trigger's responsive display, so the band is resolved in JS.
+  const inTabletBand = useIsTabletBand();
 
   // ── "Explain this" panel state ────────────────────────────────────────
   const [explainOpen, setExplainOpen] = useState(false);
@@ -75,8 +85,17 @@ const Flashcards = () => {
   const [session, setSession] = useState<{ cards: DeckCard[]; topic: string } | null>(null);
   const [index, setIndex] = useState(0);
   const [flipped, setFlipped] = useState(false);
-  const [known, setKnown] = useState(0);
-  const [unsure, setUnsure] = useState(0);
+  // One counter per rating. These used to be two — `again` was "unsure" and
+  // both `good` and `easy` were lumped into "known", so a card the user marked
+  // "Almost" was reported back to them as Known.
+  const [ratingCounts, setRatingCounts] = useState<Record<Rating, number>>({
+    again: 0,
+    good: 0,
+    easy: 0,
+  });
+  const known = ratingCounts.easy;
+  const almost = ratingCounts.good;
+  const unsure = ratingCounts.again;
   const [done, setDone] = useState(false);
   const [slidePhase, setSlidePhase] = useState<"idle" | "exit">("idle");
 
@@ -142,8 +161,7 @@ const Flashcards = () => {
     setSession({ cards: cards.slice(), topic });
     setIndex(0);
     setFlipped(false);
-    setKnown(0);
-    setUnsure(0);
+    setRatingCounts({ again: 0, good: 0, easy: 0 });
     setDone(false);
     setSlidePhase("idle");
     setRightPhase("reviewing");
@@ -155,8 +173,7 @@ const Flashcards = () => {
     setRightPhase("idle");
     setIndex(0);
     setFlipped(false);
-    setKnown(0);
-    setUnsure(0);
+    setRatingCounts({ again: 0, good: 0, easy: 0 });
     setDone(false);
     setConfigDrawerOpen(false);
   };
@@ -227,7 +244,7 @@ const Flashcards = () => {
   // ── Review interactions (spaced repetition logic unchanged) ──────────
   const current = session?.cards[index];
   const total = session?.cards.length ?? 0;
-  const reviewed = known + unsure;
+  const reviewed = known + almost + unsure;
   const progressPct = total === 0 ? 0 : (reviewed / total) * 100;
 
   const handleFlip = () => {
@@ -239,8 +256,7 @@ const Flashcards = () => {
     if (!session || !current || slidePhase !== "idle") return;
     vibrate(rating);
     reviewCard(current.id, rating); // existing spaced-repetition logic
-    if (rating === "again") setUnsure((u) => u + 1);
-    else setKnown((k) => k + 1);
+    setRatingCounts((prev) => ({ ...prev, [rating]: prev[rating] + 1 }));
     if (index + 1 >= session.cards.length) {
       setDone(true);
       return;
@@ -270,6 +286,31 @@ const Flashcards = () => {
   };
 
   /**
+   * Re-run the whole session from the top, reshuffled.
+   *
+   * The completion screen's "Practice Again" used to call `shuffleRemaining`,
+   * which shuffles `cards.slice(index + 1)` — always empty at session end. It
+   * fired a "Remaining cards shuffled" toast and changed nothing, because
+   * `done` stayed true and `index` stayed at the last card.
+   */
+  const restartSession = () => {
+    setSession((prev) => {
+      if (!prev) return prev;
+      const cards = prev.cards.slice();
+      for (let i = cards.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [cards[i], cards[j]] = [cards[j], cards[i]];
+      }
+      return { ...prev, cards };
+    });
+    setIndex(0);
+    setFlipped(false);
+    setRatingCounts({ again: 0, good: 0, easy: 0 });
+    setDone(false);
+    setSlidePhase("idle");
+  };
+
+  /**
    * The "Generate flashcards" nudge on /sheets navigates here with a topic.
    * FlashcardsGenerator already listens for `studybuddy:generate-flashcards`
    * and is mounted on this page, so hand the topic straight to it. The history
@@ -281,7 +322,9 @@ const Flashcards = () => {
     navigate(location.pathname, { replace: true, state: null });
     window.dispatchEvent(
       new CustomEvent("studybuddy:generate-flashcards", {
-        detail: { topic, cardCount: 12 },
+        // Omit cardCount: the generator's own default is the only value
+        // guaranteed to match one of its offered options.
+        detail: { topic },
       })
     );
   }, [location, navigate]);
@@ -333,10 +376,13 @@ const Flashcards = () => {
 
         <div className="flex flex-col gap-1">
           <p className="text-xs font-medium text-success">
-            ✓ Known: <span className="tabular-nums">{known}</span>
+            ✓ Got it: <span className="tabular-nums">{known}</span>
+          </p>
+          <p className="text-xs font-medium text-warning">
+            ~ Almost: <span className="tabular-nums">{almost}</span>
           </p>
           <p className="text-xs font-medium text-danger">
-            ✗ Unsure: <span className="tabular-nums">{unsure}</span>
+            ✗ Don't know: <span className="tabular-nums">{unsure}</span>
           </p>
         </div>
 
@@ -460,7 +506,7 @@ const Flashcards = () => {
             </h2>
             <p className="text-sm text-muted-foreground mb-6">
               {reviewed} {reviewed === 1 ? "card" : "cards"} reviewed
-              {" · "}✓ {known} known{" · "}✗ {unsure} unsure
+              {" · "}✓ {known} got it{" · "}~ {almost} almost{" · "}✗ {unsure} don't know
             </p>
             
             {/* Post-session actions */}
@@ -474,10 +520,10 @@ const Flashcards = () => {
               </button>
               <button
                 type="button"
-                onClick={shuffleRemaining}
-                className="h-10 px-6 rounded-xl border border-border bg-card text-muted-foreground text-sm font-medium hover:border-input hover:bg-secondary transition-colors"
+                onClick={restartSession}
+                className="inline-flex items-center justify-center gap-2 h-10 px-6 rounded-xl border border-border bg-card text-muted-foreground text-sm font-medium hover:border-input hover:bg-secondary transition-colors"
               >
-                <RotateCcw className="w-4 h-4 mr-2" />
+                <RotateCcw className="w-4 h-4" />
                 Practice Again
               </button>
             </div>
@@ -547,7 +593,18 @@ const Flashcards = () => {
                 className="perspective cursor-pointer select-none"
                 onClick={handleFlip}
                 role="button"
-                aria-label={flipped ? "Tap to show question" : "Tap to show answer"}
+                aria-label={flipped ? "Show question" : "Show answer"}
+                onKeyDown={(e) => {
+                  // role="button" with no tabIndex and no key handler announced a
+                  // control that could not be reached or activated: the product's
+                  // core loop was mouse-only. Space and Enter are what a real
+                  // <button> responds to.
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    handleFlip();
+                  }
+                }}
+                tabIndex={0}
               >
                 <div
                   className={`flip-card-y-inner relative h-[280px] sm:h-[320px] ${flipped ? "flipped" : ""}`}
@@ -573,7 +630,7 @@ const Flashcards = () => {
                 Show Answer
               </button>
             ) : (
-              <div className="space-y-3">
+              <RatingButtons onRate={handleRate}>
                 <div className="flex items-center justify-center">
                   <button
                     type="button"
@@ -584,35 +641,13 @@ const Flashcards = () => {
                     Explain this card
                   </button>
                 </div>
-                <div className="grid grid-cols-3 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => handleRate("again")}
-                    className="h-12 rounded-xl border border-danger/30 bg-danger-soft text-danger text-sm font-medium hover:border-danger/60 transition-colors"
-                  >
-                    ✗ Don't Know
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleRate("good")}
-                    className="h-12 rounded-xl border border-warning/30 bg-warning-soft text-warning text-sm font-medium hover:border-warning/60 transition-colors"
-                  >
-                    ~ Almost
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleRate("easy")}
-                    className="h-12 rounded-xl border border-success/30 bg-success-soft text-success text-sm font-medium hover:border-success/60 transition-colors"
-                  >
-                    ✓ Got It
-                  </button>
-                </div>
-              </div>
+              </RatingButtons>
             )}
 
             <p className="text-center text-[11px] text-muted-foreground">
-              Tap the card to flip · AI-generated content · Not a substitute for clinical judgment
+              Tap the card to flip
             </p>
+            <AIDisclaimer variant="short" className="justify-center" />
 
             {/* Guideline sources behind this deck — same component and
                 placement SheetGenerator uses below its document. Self-hides
@@ -720,17 +755,15 @@ const Flashcards = () => {
     );
 
   return (
-    <DashboardLayout wide>
+    <DashboardLayout width="app">
       <div className="space-y-6">
-        <div className="mb-6">
-          <p className="font-mono text-[11px] font-medium tracking-widest uppercase text-primary mb-2">
-            Flashcards · Spaced repetition
-          </p>
-          <h1 className="text-[clamp(26px,3.5vw,36px)] font-serif font-medium leading-tight tracking-tight text-foreground">
+        <header>
+          <p className="ds-label ds-label-accent">Flashcards</p>
+          <h1 className="ds-display mt-2">
             Study any topic,{" "}
             <span className="italic text-primary">lock it in.</span>
           </h1>
-        </div>
+        </header>
 
         <div className="flex flex-col gap-6 lg:flex-row lg:gap-0 lg:items-start">
           {/* ── Left pane: configurator / session status (drawer on tablet) ── */}
@@ -758,40 +791,28 @@ const Flashcards = () => {
         {session ? "Session" : "Configure"}
       </button>
 
-      {/* ── Tablet-only: slide-out left-pane drawer ── */}
-      <div
-        className={`hidden md:max-lg:block fixed inset-0 z-50 ${
-          configDrawerOpen ? "" : "pointer-events-none"
-        }`}
-        aria-hidden={!configDrawerOpen}
+      {/* ── Tablet-only: slide-out left-pane drawer ──
+          Radix Sheet for the same reasons as the sheet generator's: the old
+          hand-rolled panel stayed mounted, `aria-hidden`, with focusable
+          controls inside it. ── */}
+      <Sheet
+        open={configDrawerOpen && inTabletBand}
+        onOpenChange={setConfigDrawerOpen}
       >
-        <div
-          className={`absolute inset-0 bg-black/50 motion-safe:transition-opacity motion-safe:duration-200 ${
-            configDrawerOpen ? "opacity-100" : "opacity-0"
-          }`}
-          onClick={() => setConfigDrawerOpen(false)}
-        />
-        <div
-          className={`absolute inset-y-0 left-0 w-[320px] overflow-y-auto bg-card border-r border-border p-4 motion-safe:transition-transform motion-safe:duration-[250ms] motion-safe:ease-out ${
-            configDrawerOpen ? "translate-x-0" : "-translate-x-full"
-          }`}
-        >
-          <div className="flex items-center justify-between pb-3">
-            <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+        <SheetContent side="left" className="w-[320px] overflow-y-auto p-4">
+          <SheetHeader className="text-left">
+            <SheetTitle className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
               {session ? "Session" : "Configure"}
-            </span>
-            <button
-              type="button"
-              onClick={() => setConfigDrawerOpen(false)}
-              className="p-1 rounded-md text-muted-foreground hover:text-foreground transition-colors"
-              aria-label="Close"
-            >
-              <X className="h-4 w-4" />
-            </button>
-          </div>
+            </SheetTitle>
+            <SheetDescription className="sr-only">
+              {session
+                ? "Progress and controls for the review session."
+                : "Choose a topic and generation settings."}
+            </SheetDescription>
+          </SheetHeader>
           {leftPaneContent}
-        </div>
-      </div>
+        </SheetContent>
+      </Sheet>
 
       {/* ── "Explain this" panel — AI explanation for the active card ── */}
       {current && (

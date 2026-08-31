@@ -111,6 +111,10 @@
     background: var(--bg-panel);
     border-color: var(--fg);
 }
+/* Matches the inline value the nav CTA carried until Stage 4b; the <=480px
+   rule that shrinks it once .btn-label is hidden can now actually apply. */
+.openmed .nav-actions .btn-primary { padding: 10px 20px; }
+
 .openmed .nav-toggle {
     display: none;
     width: 36px;
@@ -222,7 +226,10 @@
 /* ---------- Hero ---------------------------------------------------------- */
 .openmed .hero {
     position: relative;
-    padding: 88px 0 64px;
+    /* The hero sits directly under the nav rather than after another section,
+       so it takes less top padding than the rhythm and more at the bottom, to
+       separate the fold from what follows. */
+    padding: clamp(40px, 6vw, 72px) 0 clamp(72px, 9vw, 104px);
 }
 .openmed .hero-grid {
     display: grid;
@@ -716,7 +723,14 @@
 .openmed .product-duo {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 24px;
+    gap: 30px;
+    /* Was carried by Tailwind utilities on the element (max-w-[900px] mx-auto
+       mb-8). Those were the only ones on that element doing real work — the
+       grid-cols-* beside them could never apply, since .openmed .product-duo
+       is (0,2,0) and .grid-cols-2 is (0,1,0). Moved here so the layout lives
+       in one place. */
+    max-width: 900px;
+    margin: 0 auto 32px;
 }
 .openmed .product-card {
     display: flex;
@@ -1089,7 +1103,6 @@
     }
     .openmed .nav-links a.active { color: var(--accent); }
     .openmed .nav-links-mobile-only { display: block; }
-    .openmed .hero { padding: 56px 0 40px; }
     .openmed section[data-screen] { padding: 64px 0; }
     .openmed .runtime-grid,
     .openmed .models-grid,
@@ -1108,6 +1121,6 @@
 @media (max-width: 480px) {
     .openmed .version-tag { display: none; }
     .openmed .nav-actions .btn-primary .btn-label { display: none; }
-    .openmed .nav-actions .btn-primary { padding: 9px 10px; }
+    .openmed .nav-actions .btn-primary { padding: 10px 10px; }
     .openmed .wordmark { font-size: 20px; }
 }

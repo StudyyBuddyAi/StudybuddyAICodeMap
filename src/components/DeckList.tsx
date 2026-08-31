@@ -1,5 +1,4 @@
 import { useMemo, useState } from "react";
-import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { MoreVertical } from "lucide-react";
 import {
@@ -20,29 +19,14 @@ import {
 } from "@/components/ui/alert-dialog";
 import { useDeckGrounding, type Card as DeckCard } from "@/hooks/use-flashcard-deck";
 import type { GroundingLevel } from "@/types/generated-sheet";
+// Deck hues encode identity, not status — see the note in categorical-colors.
+import { deckColor } from "@/lib/categorical-colors";
 
 interface DeckListProps {
   cards: DeckCard[];
   onStudyDeck: (topic: string) => void;
   onDeleteDeck: (topic: string) => void;
   onReviewAll: () => void;
-}
-
-const PALETTE = [
-  { bg: "bg-slate-500/20", text: "text-slate-500/80 dark:text-slate-300" },
-  { bg: "bg-violet-500/20", text: "text-violet-500/80 dark:text-violet-300" },
-  { bg: "bg-teal-500/20", text: "text-teal-500/80 dark:text-teal-300" },
-  { bg: "bg-rose-500/20", text: "text-rose-500/80 dark:text-rose-300" },
-  { bg: "bg-amber-500/20", text: "text-amber-500/80 dark:text-amber-300" },
-  { bg: "bg-sky-500/20", text: "text-sky-500/80 dark:text-sky-300" },
-];
-
-function hashTopic(topic: string): number {
-  let h = 0;
-  for (let i = 0; i < topic.length; i++) {
-    h = (h * 31 + topic.charCodeAt(i)) >>> 0;
-  }
-  return h;
 }
 
 interface DeckSummary {
@@ -167,7 +151,7 @@ const DeckList = ({ cards, onStudyDeck, onDeleteDeck, onReviewAll }: DeckListPro
           </div>
           <div className="space-y-1">
             {decks.map((deck) => {
-              const color = PALETTE[hashTopic(deck.topic) % PALETTE.length];
+              const color = deckColor(deck.topic);
               const ratio = deck.total > 0 ? (deck.mastered / deck.total) * 100 : 0;
               const initial = (deck.topic[0] || "?").toUpperCase();
               return (

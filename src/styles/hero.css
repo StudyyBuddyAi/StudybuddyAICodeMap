@@ -1,0 +1,272 @@
+/* =============================================================================
+   The hero.
+
+   Direction: the page opens on a deep ink ground and hands over to warm paper
+   at the fold. Two reasons, both practical rather than decorative.
+
+   Eyes. Students open this at 1am. A full-bleed white page is a flashlight;
+   warm off-white (#E9E4D7) on near-black is the same relationship as text on
+   paper, inverted, and it is what the app's own dark theme already uses. The
+   contrast is deliberately held below maximum — no pure white, no pure black.
+
+   Attention. Everything below the fold is calm and light, so the one dark
+   band reads as the thing to look at without needing a gradient, a glow, or
+   an oversized headline to earn it.
+   ============================================================================= */
+
+.openmed .hero {
+    position: relative;
+    background: var(--surface-inverse);
+    color: var(--fg-on-inverse);
+    padding: clamp(48px, 7vw, 96px) 0 clamp(64px, 8vw, 112px);
+    overflow: hidden;
+}
+
+/* A single, very slow radial bloom behind the demo panel. Not a gradient hero —
+   it is 4% opacity and exists only so the panel does not sit on a flat field. */
+.openmed .hero::before {
+    content: "";
+    position: absolute;
+    inset-block-start: -30%;
+    inset-inline-end: -10%;
+    width: 70ch;
+    height: 70ch;
+    background: radial-gradient(circle, rgba(111, 181, 181, .10), transparent 62%);
+    pointer-events: none;
+}
+
+.openmed .hero > * { position: relative; }
+
+/* The hand-off. A hairline of accent at the boundary, so the transition from
+   ink to paper reads as intentional rather than as two pages stuck together. */
+.openmed .hero::after {
+    content: "";
+    position: absolute;
+    inset-inline: 0;
+    inset-block-end: 0;
+    height: 1px;
+    background: linear-gradient(
+        to right,
+        transparent,
+        var(--accent-on-inverse) 30%,
+        var(--accent-on-inverse) 70%,
+        transparent
+    );
+    opacity: .35;
+}
+
+/* ---------- Hero type ------------------------------------------------------ */
+
+.openmed .hero-eyebrow {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: .16em;
+    text-transform: uppercase;
+    color: var(--accent-on-inverse);
+}
+
+.openmed .hero-title {
+    font-family: var(--font-display);
+    /* 500, not 800: Newsreader ships 400-700, so the old weight was being
+       synthesised by the browser. */
+    font-weight: 500;
+    font-size: clamp(40px, 6.6vw, 68px);
+    line-height: 1.02;
+    letter-spacing: -0.03em;
+    color: var(--fg-on-inverse);
+    margin: 20px 0 0;
+    text-wrap: balance;
+}
+.openmed .hero-title em {
+    font-style: italic;
+    color: var(--accent-on-inverse);
+}
+
+.openmed .hero-desc {
+    font-size: clamp(16px, 1.9vw, 19px);
+    line-height: 1.6;
+    color: var(--fg-on-inverse-muted);
+    max-width: 42ch;
+    margin: 22px 0 0;
+}
+
+.openmed .hero-note {
+    margin: 22px 0 0;
+    font-size: 13px;
+    line-height: 1.6;
+    color: var(--fg-on-inverse-muted);
+    opacity: .8;
+}
+
+/* ---------- Hero actions --------------------------------------------------- */
+
+.openmed .hero-ctas {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-top: 34px;
+}
+
+.openmed .hero-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    height: 48px;
+    padding: 0 24px;
+    border-radius: var(--r-md, 10px);
+    font-family: var(--font-sans);
+    font-size: 15px;
+    font-weight: 500;
+    cursor: pointer;
+    border: 1px solid transparent;
+    transition: background 160ms var(--ease-out), border-color 160ms var(--ease-out),
+                transform 160ms var(--ease-out);
+}
+.openmed .hero-btn--primary {
+    background: var(--accent-on-inverse);
+    color: #08191A;
+}
+.openmed .hero-btn--primary:hover { transform: translateY(-1px); filter: brightness(1.06); }
+.openmed .hero-btn--ghost {
+    background: transparent;
+    border-color: var(--border-on-inverse);
+    color: var(--fg-on-inverse);
+    text-decoration: none;
+}
+.openmed .hero-btn--ghost:hover { border-color: var(--fg-on-inverse-muted); }
+
+/* =============================================================================
+   The demo panel
+   ============================================================================= */
+
+.openmed .hero-demo {
+    background: var(--surface-inverse-2);
+    border: 1px solid var(--border-on-inverse);
+    border-radius: 14px;
+    overflow: hidden;
+    box-shadow: 0 24px 60px -30px rgba(0, 0, 0, .8);
+}
+
+.openmed .hero-demo__bar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 18px;
+    border-bottom: 1px solid var(--border-on-inverse);
+    background: rgba(0, 0, 0, .18);
+}
+.openmed .hero-demo__prompt {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: .16em;
+    text-transform: uppercase;
+    color: var(--fg-on-inverse-muted);
+    flex-shrink: 0;
+}
+.openmed .hero-demo__typed {
+    font-family: var(--font-sans);
+    font-size: 15px;
+    color: var(--fg-on-inverse);
+    min-height: 1.4em;
+    display: inline-flex;
+    align-items: center;
+}
+.openmed .hero-demo__caret {
+    display: inline-block;
+    width: 2px;
+    height: 1.05em;
+    margin-inline-start: 3px;
+    background: var(--accent-on-inverse);
+    animation: hero-caret 1s steps(1) infinite;
+}
+@keyframes hero-caret { 50% { opacity: 0; } }
+
+.openmed .hero-demo__sheet {
+    position: relative;
+    padding: 6px 18px 4px;
+    /* Fixed height so sections landing never move the page. The panel is as
+       tall as its fullest state from the first frame. */
+    min-height: 268px;
+}
+
+.openmed .hero-demo__section {
+    padding: 14px 0;
+    border-block-end: 1px solid var(--border-on-inverse);
+    opacity: 0;
+    transform: translateY(6px);
+    transition: opacity 420ms var(--ease-out), transform 420ms var(--ease-out);
+}
+.openmed .hero-demo__section:last-of-type { border-block-end: none; }
+.openmed .hero-demo__section[data-shown="true"] { opacity: 1; transform: none; }
+
+.openmed .hero-demo__label {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 500;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: var(--accent-on-inverse);
+    margin-bottom: 6px;
+}
+.openmed .hero-demo__line {
+    margin: 0;
+    font-size: 14px;
+    line-height: 1.55;
+    color: var(--fg-on-inverse-muted);
+}
+.openmed .hero-demo__line + .hero-demo__line { margin-top: 3px; }
+
+.openmed .hero-demo__foot {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 18px;
+    border-top: 1px solid var(--border-on-inverse);
+    background: rgba(0, 0, 0, .18);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: .04em;
+    color: var(--fg-on-inverse-muted);
+}
+.openmed .hero-demo__dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--accent-on-inverse);
+    flex-shrink: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .openmed .hero-demo__section { opacity: 1; transform: none; transition: none; }
+    .openmed .hero-demo__caret { animation: none; }
+}
+
+/* ---------- Layout --------------------------------------------------------- */
+
+.openmed .hero-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: clamp(32px, 5vw, 72px);
+    align-items: center;
+}
+@media (max-width: 900px) {
+    .openmed .hero-grid { grid-template-columns: 1fr; gap: 40px; }
+    .openmed .hero-demo__sheet { min-height: 240px; }
+}
+
+/* The nav sits on the ink ground now, not on paper. */
+.openmed .nav {
+    background: color-mix(in srgb, var(--surface-inverse) 88%, transparent);
+    border-bottom-color: var(--border-on-inverse);
+}
+.openmed .nav .wordmark,
+.openmed .nav .logo { color: var(--fg-on-inverse); }
+.openmed .nav-links a { color: var(--fg-on-inverse-muted); }
+.openmed .nav-links a:hover { color: var(--fg-on-inverse); border-bottom-color: var(--border-on-inverse); }
+.openmed .nav .version-tag { color: var(--fg-on-inverse-muted); border-color: var(--border-on-inverse); }
+.openmed .theme-toggle,
+.openmed .nav-toggle { border-color: var(--border-on-inverse); color: var(--fg-on-inverse); }
+.openmed .theme-toggle:hover,
+.openmed .nav-toggle:hover { background: var(--surface-inverse-2); border-color: var(--fg-on-inverse-muted); }
+.openmed .nav-toggle-bar { background: var(--fg-on-inverse); }

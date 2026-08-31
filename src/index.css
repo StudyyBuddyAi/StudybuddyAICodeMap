@@ -1,3 +1,5 @@
+@import "./styles/design-system.css";
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -749,5 +751,27 @@
     padding: 12px;
     background: hsl(var(--secondary));
     border-radius: var(--radius);
+  }
+}
+
+@layer utilities {
+  /**
+   * Guarantees a 44px hit area on touch devices without inflating the visual
+   * size, so desktop density is unchanged. Several filter chips and the
+   * due-cards "Review" button sat at 28-32px, below the WCAG 2.5.8 minimum.
+   */
+  @media (pointer: coarse) {
+    .touch-target {
+      position: relative;
+    }
+    .touch-target::after {
+      content: "";
+      position: absolute;
+      inset: 50% 0 0 0;
+      min-height: 44px;
+      min-width: 44px;
+      transform: translateY(-50%);
+      pointer-events: auto;
+    }
   }
 }

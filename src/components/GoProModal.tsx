@@ -7,6 +7,8 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { MessageCircle, Mail, Sparkles, Check } from "lucide-react";
+import { LIMITS, formatPrice } from "@/config/product";
+import { t } from "@/config/i18n";
 
 interface GoProModalProps {
   open: boolean;
@@ -38,8 +40,13 @@ const GoProModal = ({ open, onOpenChange }: GoProModalProps) => {
           </div>
           <DialogTitle className="text-xl text-foreground font-semibold tracking-tight">Go Pro</DialogTitle>
           <div className="pt-1">
+            {/* Was hard-coded "$4.99" while the landing page and FAQ both said
+                $5. One figure now, from config. */}
             <p className="text-2xl font-semibold tracking-tight text-foreground">
-              $4.99 <span className="text-sm font-medium text-muted-foreground">USD / month</span>
+              {formatPrice()}{" "}
+              <span className="text-sm font-medium text-muted-foreground">
+                USD / month
+              </span>
             </p>
           </div>
           <DialogDescription className="text-sm text-muted-foreground pt-2">
@@ -51,9 +58,11 @@ const GoProModal = ({ open, onOpenChange }: GoProModalProps) => {
 
         <ul className="space-y-2 text-left pt-1">
           {[
-            "Unlimited sheets & flashcard generations",
+            `Unlimited sheets & flashcard generations (free: ${LIMITS.sheets.free} and ${LIMITS.cards.free} a day)`,
             "Claude Haiku 4.5 — Anthropic's fastest model, medically tuned for USMLE",
-            "Publication-backed sources on every generation — cited directly from PubMed",
+            // Was "on every generation", which read as a Pro-only capability and
+            // also contradicted the free tier's real allowance.
+            `${t("citations.proLine")} (free: ${LIMITS.citations.free} a day)`,
             "Priority access to new features",
           ].map((benefit) => (
             <li

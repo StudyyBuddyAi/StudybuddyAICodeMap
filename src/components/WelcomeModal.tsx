@@ -6,6 +6,8 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Sparkles, FileText, Layers, Brain, BookMarked } from "lucide-react";
+import { LIMITS } from "@/config/product";
+import { t } from "@/config/i18n";
 
 const WelcomeModal = () => {
   const [open, setOpen] = useState(false);
@@ -16,14 +18,24 @@ const WelcomeModal = () => {
     if (!seen) setOpen(true);
   }, []);
 
-  const handleClose = () => {
+  /** Mark the modal seen and close it, without moving the user anywhere. */
+  const dismiss = () => {
     localStorage.setItem("sb_welcomed", "1");
     setOpen(false);
-    navigate("/dashboard?start=sheet", { replace: true });
+  };
+
+  /**
+   * The CTA is the only path that navigates. It used to send everyone to
+   * `/dashboard?start=sheet` — a param nothing reads — and it fired on plain
+   * dismissal too, so closing the dialog silently moved the page.
+   */
+  const startFirstSheet = () => {
+    dismiss();
+    navigate("/sheets");
   };
 
   return (
-    <Dialog open={open} onOpenChange={(v) => { if (!v) handleClose(); }}>
+    <Dialog open={open} onOpenChange={(v) => { if (!v) dismiss(); }}>
       <DialogContent className="max-w-sm p-0 overflow-hidden rounded-xl">
         {/* Header */}
         <div className="border-b border-border px-7 pt-7 pb-6 text-center">
@@ -56,8 +68,12 @@ const WelcomeModal = () => {
             },
             {
               icon: BookMarked,
-              title: "Evidence-backed sources on every generation",
-              desc: "Cited directly from PubMed peer-reviewed literature.",
+              // Was "on every generation" — citations are metered per tier, so
+              // that promise broke on the free plan's fourth sheet of the day.
+              title: t("citations.welcomeItem"),
+              desc: t("citations.welcomeItemBody", {
+                free: LIMITS.citations.free,
+              }),
             },
             {
               icon: Brain,
@@ -81,7 +97,7 @@ const WelcomeModal = () => {
         <div className="px-7 pb-7">
           <Button
             className="w-full h-10 rounded-lg font-medium text-sm"
-            onClick={handleClose}
+            onClick={startFirstSheet}
           >
             Generate my first sheet →
           </Button>

@@ -4,7 +4,7 @@ import type { GeneratedSheet, SheetSource } from "@/types/generated-sheet";
 
 const CARD_STYLE: React.CSSProperties = {
   border: "1px solid var(--border)",
-  borderLeft: "3px solid var(--accent)",
+  borderInlineStart: "3px solid var(--accent)",
   borderRadius: "var(--radius-md)",
   background: "var(--bg-elevated)",
   overflow: "hidden",
@@ -121,7 +121,7 @@ const SourceRow = ({ source, index }: SourceRowProps) => {
             </div>
           </div>
 
-          <div style={{ display: "flex", alignItems: "center", gap: 6, borderLeft: "1px solid var(--border)", paddingLeft: 10 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, borderInlineStart: "1px solid var(--border)", paddingInlineStart: 10 }}>
             <button
               type="button"
               onClick={() => setExpanded((v) => !v)}

@@ -54,12 +54,15 @@
     --accent-soft: var(--teal-100);
     --signal: var(--coral-600);
 
-    /* Clinical navy — the landing page's own accent, distinct from the teal the
-       app uses. Tokenised so the marketing page can follow the theme; whether
-       navy and teal should be reconciled is a brand decision, not a bug. */
-    --brand: #0F4C81;
-    --brand-soft: #D2E4FF;
-    --brand-soft-fg: #0369A1;
+    /* Brand — resolved.
+       The landing page used a clinical navy (#0F4C81) while the app ran on
+       teal (#0D6E6E), so the marketing page and the product it sells did not
+       look like the same thing. The product IS the app, so the marketing page
+       follows it rather than the other way round. --brand is kept as an alias so the ~60 call sites on
+       Index.tsx do not each need editing, and so a future rebrand has one knob. */
+    --brand: var(--accent);
+    --brand-soft: var(--accent-soft);
+    --brand-soft-fg: var(--teal-300);
     --brand-on: #FFFFFF;
     --brand-pill: rgba(255, 255, 255, .15);
 
@@ -123,11 +126,11 @@
     --accent-hover: var(--teal-300);
     --accent-soft: rgba(43, 165, 165, .14);
     --highlight: #E0CA5A;
-    /* Navy is unreadable on a near-black page, so dark mode lifts it into the
-       light end of the same hue and flips the on-brand foreground. */
-    --brand: #8EBDF9;
-    --brand-soft: rgba(142, 189, 249, .14);
-    --brand-soft-fg: #A9CDFB;
+    /* Brand follows --accent in both themes now; dark mode's accent is already
+       lifted for a near-black ground, so no separate ramp is needed. */
+    --brand: var(--accent);
+    --brand-soft: var(--accent-soft);
+    --brand-soft-fg: #8FD4D4;
     --brand-on: #0B0D10;
     --brand-pill: rgba(255, 255, 255, .10);
     --shadow-2: 0 12px 32px -12px rgba(0, 0, 0, .5), 0 2px 4px rgba(0, 0, 0, .25);
@@ -264,7 +267,12 @@ html.openmed-page { scroll-behavior: smooth; }
     padding: 0 var(--gutter);
 }
 .openmed main { display: block; }
-.openmed section[data-screen] { padding: 96px 0; }
+/* Section rhythm.
+   The page went from twelve blocks to eight, so each one carries more weight
+   and can afford more air around it. Fluid rather than fixed: 72px on a phone
+   where vertical space is expensive, up to 112px on a wide screen where 80px
+   made adjacent sections read as one continuous scroll. */
+.openmed section[data-screen] { padding: clamp(72px, 9vw, 112px) 0; }
 
 .openmed .bg-grid {
     background-image:

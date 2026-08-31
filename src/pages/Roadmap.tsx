@@ -1,19 +1,24 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { Compass } from "lucide-react";
+import {
+  ArrowRight,
+  Check,
+  Compass,
+  Layers,
+  Search,
+  Sparkles,
+  X,
+} from "lucide-react";
 import DashboardLayout from "@/components/dashboard/DashboardLayout";
 import PageLoader from "@/components/PageLoader";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
-import TpiceRodmap from "@/models/TpiceRodmap";
+import {
+  useCurriculumProgress,
+  type TopicState,
+} from "@/hooks/use-curriculum-progress";
 import {
   FaBone,
   FaBrain,
@@ -39,7 +44,6 @@ interface SystemSection {
  */
 const groupBySystem = (rows: CurriculumTopic[]): SystemSection[] => {
   const sections = new Map<string, SystemSection>();
-
   for (const row of rows) {
     let section = sections.get(row.system);
     if (!section) {
@@ -48,39 +52,41 @@ const groupBySystem = (rows: CurriculumTopic[]): SystemSection[] => {
     }
     if (row.level > 0) section.topics.push(row);
   }
-
   return [...sections.values()].filter((s) => s.topics.length > 0);
 };
 
-const getSectionAppearance = (system: string, index: number) => {
-  const normalized = system.toLowerCase();
-  const tone = index % 2 === 0 ? "blue" : "green";
+const ICON_FOR = [
+  { test: /(cardio|heart)/, icon: FaHeartPulse },
+  { test: /(musculo|skin|bone)/, icon: FaBone },
+  { test: /(hemat|onc|blood)/, icon: FaDroplet },
+  { test: /(psych|brain|neuro)/, icon: FaBrain },
+  { test: /(resp|lung)/, icon: FaLungs },
+  { test: /(endo|horm|thyroid)/, icon: FaCapsules },
+  { test: /(renal|urinary|kidney)/, icon: FaDroplet },
+  { test: /(pedi|child|repro|obgyn|preg|gyne|infect|micro|virus)/, icon: FaShieldHeart },
+] as const;
 
-  const iconMap = [
-    { test: /(cardio|heart)/, icon: FaHeartPulse },
-    { test: /(musculo|skin|bone)/, icon: FaBone },
-    { test: /(hemat|onc|blood)/, icon: FaDroplet },
-    { test: /(psych|brain|neuro)/, icon: FaBrain },
-    { test: /(resp|lung)/, icon: FaLungs },
-    { test: /(pedi|child)/, icon: FaShieldHeart },
-    { test: /(endo|horm|thyroid)/, icon: FaCapsules },
-    { test: /(gastro|digest|intestinal)/, icon: FaStethoscope },
-    { test: /(repro|obgyn|preg|gyne)/, icon: FaShieldHeart },
-    { test: /(infect|micro|virus)/, icon: FaShieldHeart },
-    { test: /(renal|urinary|kidney)/, icon: FaDroplet },
-  ] as const;
+const systemIcon = (system: string) =>
+  ICON_FOR.find(({ test }) => test.test(system.toLowerCase()))?.icon ??
+  FaStethoscope;
 
-  const match = iconMap.find(({ test }) => test.test(normalized));
+/** Yield tier drives emphasis — the curriculum already ranks its own topics. */
+const TIER_LABEL: Record<string, string> = {
+  high: "High yield",
+  medium: "Core",
+  low: "Extra",
+};
 
-  return {
-    tone,
-    Icon: match?.icon ?? (tone === "blue" ? FaHeartPulse : FaStethoscope),
-  };
+const STATE_STYLE: Record<TopicState, { dot: string; label: string }> = {
+  drilled: { dot: "bg-success", label: "Deck built" },
+  studied: { dot: "bg-primary", label: "Sheet saved" },
+  untouched: { dot: "bg-border", label: "Not started" },
 };
 
 const Roadmap = () => {
   const navigate = useNavigate();
-  const [selectedSection, setSelectedSection] = useState<SystemSection | null>(null);
+  const [activeSystem, setActiveSystem] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
 
   const topicsQuery = useQuery({
     queryKey: ["curriculum-topics"],
@@ -99,132 +105,321 @@ const Roadmap = () => {
     () => groupBySystem(topicsQuery.data ?? []),
     [topicsQuery.data]
   );
-  const topicCount = sections.reduce((n, s) => n + s.topics.length, 0);
 
-  // "18 high-yield cardiovascular topics" while only one system ships; drops
-  // the system name once there are several.
-  const countLabel =
-    sections.length === 1
-      ? `${topicCount} high-yield ${sections[0].system.toLowerCase()} topics`
-      : `${topicCount} high-yield topics across ${sections.length} systems`;
+  const allTitles = useMemo(
+    () => sections.flatMap((s) => s.topics.map((t) => t.title)),
+    [sections]
+  );
+  const progress = useCurriculumProgress(allTitles);
 
-  const openSheetFor = (title: string) => {
-    navigate("/sheets", { state: { topic: title } });
+  // Select the first system once the data lands, so the detail pane is never
+  // an empty frame waiting on a click.
+  useEffect(() => {
+    if (!activeSystem && sections.length) setActiveSystem(sections[0].system);
+  }, [sections, activeSystem]);
+
+  const covered = useMemo(
+    () =>
+      allTitles.filter((t) => progress.get(t)?.state !== "untouched").length,
+    [allTitles, progress]
+  );
+
+  /** Coverage for one system, used by the rail's progress bars. */
+  const systemCoverage = (section: SystemSection) => {
+    const done = section.topics.filter(
+      (t) => progress.get(t.title)?.state !== "untouched"
+    ).length;
+    return { done, total: section.topics.length };
   };
 
+  const searching = query.trim().length > 0;
+  const results = useMemo(() => {
+    if (!searching) return [];
+    const q = query.toLowerCase();
+    return sections
+      .flatMap((s) => s.topics.map((t) => ({ topic: t, system: s.system })))
+      .filter(({ topic }) => topic.title.toLowerCase().includes(q))
+      .slice(0, 40);
+  }, [query, sections, searching]);
+
+  const activeSection = sections.find((s) => s.system === activeSystem) ?? null;
+
+  const openSheet = (title: string) =>
+    navigate("/sheets", { state: { topic: title } });
+
   return (
-    <DashboardLayout>
-      <div className="max-w-[100%] space-y-6 px-4 py-6 sm:px-8 lg:px-12">
-        <div className="space-y-1">
-          <h1 className="text-3xl py-2 font-semibold text-primary tracking-tight">
-            Roadmap
-          </h1>
-          <p className="text-sm text-muted-foreground">
-            High-yield topics organized by system. Tap any topic to generate a
-            study sheet.
+    <DashboardLayout width="app">
+      <div className="ds-stack">
+        <header>
+          <p className="ds-label ds-label-accent">Curriculum</p>
+          <h1 className="ds-display mt-2">Roadmap</h1>
+          <p className="ds-subtitle mt-2.5 max-w-[54ch]">
+            Every high-yield topic, by system — and which ones you've already
+            covered.
           </p>
-        </div>
+        </header>
 
         {topicsQuery.isLoading ? (
           <PageLoader context="sheets" />
         ) : topicsQuery.isError ? (
-          <div className="rounded-lg border border-border bg-card p-6 text-center space-y-3">
-            <p className="text-sm font-medium text-foreground">
+          <div className="ds-card text-center">
+            <p className="ds-body font-medium text-foreground">
               Couldn't load the roadmap
             </p>
-            <p className="text-xs text-muted-foreground">
-              Check your connection and try again.
-            </p>
+            <p className="ds-small mt-1">Check your connection and try again.</p>
             <Button
               variant="outline"
               size="sm"
+              className="mt-4"
               onClick={() => topicsQuery.refetch()}
             >
               Retry
             </Button>
           </div>
         ) : sections.length === 0 ? (
-          <div className="rounded-lg border border-border bg-card p-10 text-center space-y-2">
-            <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-xl bg-primary/10">
+          <div className="ds-card py-12 text-center">
+            <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-[var(--r-md)] bg-primary/10">
               <Compass className="h-5 w-5 text-primary" />
             </div>
-            <p className="text-sm font-medium text-foreground">
+            <p className="ds-body mt-4 font-medium text-foreground">
               Curriculum loading soon
             </p>
-            <p className="text-xs text-muted-foreground">
-              High-yield topics are on their way. In the meantime, you can
-              generate a sheet on any topic you like.
+            <p className="ds-small mx-auto mt-1 max-w-[42ch]">
+              High-yield topics are on their way. Meanwhile you can generate a
+              sheet on any topic you like.
             </p>
           </div>
         ) : (
           <>
-            <div className="inline-flex items-center gap-3 rounded-full border border-primary/30 bg-card px-4 py-2.5 ring-1 ring-primary/10">
-              <div className="flex h-6 w-6 items-center justify-center rounded-[10px] border border-primary/20 bg-primary/10 text-primary">
-                <Compass className="h-3.5 w-3.5" />
+            {/* ── Coverage summary + search ─────────────────────────────── */}
+            <div className="flex flex-col gap-4 border-y border-border py-4 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-baseline gap-2.5">
+                <span className="text-[26px] font-semibold leading-none text-foreground">
+                  {covered}
+                </span>
+                <span className="ds-small">
+                  of {allTitles.length} topics covered
+                  <span className="mx-1.5 opacity-40">·</span>
+                  {sections.length} systems
+                </span>
               </div>
-              <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-primary sm:text-xs">
-                {countLabel}
-              </p>
-            </div>
 
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
-              {sections.map((section, index) => {
-                const { tone, Icon } = getSectionAppearance(section.system, index);
-                const isBlue = tone === "blue";
-
-                return (
+              <div className="relative w-full sm:max-w-xs">
+                <Search className="pointer-events-none absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <input
+                  type="search"
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="Search all topics…"
+                  aria-label="Search all curriculum topics"
+                  className="h-10 w-full rounded-[var(--r-md)] border border-border bg-card ps-9 pe-9 text-[14px] text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-primary"
+                />
+                {searching && (
                   <button
                     type="button"
-                    onClick={() => setSelectedSection(section)}
-                    key={section.system}
-                    className="group min-h-[170px] w-full cursor-pointer rounded-[24px] border border-border bg-card p-5 text-left transition-all duration-200 ease-out hover:-translate-y-1 hover:shadow-md hover:border-primary/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                    onClick={() => setQuery("")}
+                    aria-label="Clear search"
+                    className="absolute end-2.5 top-1/2 -translate-y-1/2 rounded-[var(--r-sm)] p-1 text-muted-foreground hover:text-foreground"
                   >
-                    <div className="flex items-start justify-between gap-3">
-                      {/* Two tones alternate purely by index for visual rhythm —
-                          they carry no meaning, so any two theme tokens work. */}
-                      <div
-                        className={`flex h-16 w-16 items-center justify-center rounded-[18px] ${
-                          isBlue
-                            ? "bg-primary/10 text-primary"
-                            : "bg-success-soft text-success"
-                        }`}
-                      >
-                        <Icon className="h-7 w-7" />
-                      </div>
-
-                      <span
-                        className={`inline-flex items-center rounded-full px-4 py-2 text-base font-semibold ${
-                          isBlue
-                            ? "bg-primary/10 text-primary"
-                            : "bg-success-soft text-success"
-                        }`}
-                      >
-                        {section.topics.length} Topics
-                      </span>
-                    </div>
-
-                    <h3 className="mt-8 text-left text-[1.2rem] font-medium leading-none tracking-[-0.04em] text-foreground">
-                      {section.system}
-                    </h3>
+                    <X className="h-4 w-4" />
                   </button>
-                );
-              })}
+                )}
+              </div>
             </div>
 
-            <Dialog open={selectedSection !== null} onOpenChange={() => setSelectedSection(null)}>
-              <DialogContent className="max-h-[86vh] max-w-[1160px] overflow-y-auto border-0 bg-transparent p-0 shadow-none">
-                {selectedSection && (
-                  <TpiceRodmap
-                    section={selectedSection}
-                    onClose={() => setSelectedSection(null)}
-                  />
+            {searching ? (
+              /* ── Search results, flat across every system ─────────────── */
+              <section aria-label="Search results">
+                <p className="ds-label mb-3">
+                  {results.length} {results.length === 1 ? "match" : "matches"}
+                </p>
+                {results.length === 0 ? (
+                  <p className="ds-small">
+                    No topic matches “{query}”. You can still generate a sheet on
+                    it —{" "}
+                    <button
+                      type="button"
+                      onClick={() => openSheet(query.trim())}
+                      className="text-primary underline underline-offset-2"
+                    >
+                      try it anyway
+                    </button>
+                    .
+                  </p>
+                ) : (
+                  <ul className="ds-stack-sm list-none p-0">
+                    {results.map(({ topic, system }) => (
+                      <TopicRow
+                        key={topic.id}
+                        title={topic.title}
+                        tier={topic.yield_tier}
+                        system={system}
+                        progress={progress.get(topic.title)}
+                        onOpen={() => openSheet(topic.title)}
+                      />
+                    ))}
+                  </ul>
                 )}
-              </DialogContent>
-            </Dialog>
+              </section>
+            ) : (
+              /* ── Master / detail. The modal this replaces was a dead end:
+                   you could not compare two systems, and closing it lost your
+                   place. ─────────────────────────────────────────────────── */
+              <div className="grid gap-6 lg:grid-cols-[260px_1fr]">
+                <nav aria-label="Body systems" className="lg:sticky lg:top-6 lg:self-start">
+                  <p className="ds-label mb-2.5">Systems</p>
+                  <ul className="list-none space-y-1 p-0">
+                    {sections.map((section) => {
+                      const { done, total } = systemCoverage(section);
+                      const Icon = systemIcon(section.system);
+                      const active = section.system === activeSystem;
+                      return (
+                        <li key={section.system}>
+                          <button
+                            type="button"
+                            onClick={() => setActiveSystem(section.system)}
+                            aria-current={active ? "true" : undefined}
+                            className={`flex w-full items-center gap-3 rounded-[var(--r-md)] border px-3 py-2.5 text-start transition-colors ${
+                              active
+                                ? "border-primary/40 bg-primary/5"
+                                : "border-transparent hover:bg-secondary"
+                            }`}
+                          >
+                            <Icon
+                              className={`h-4 w-4 shrink-0 ${active ? "text-primary" : "text-muted-foreground"}`}
+                            />
+                            <span className="min-w-0 flex-1">
+                              <span
+                                className={`block truncate text-[14px] ${active ? "font-medium text-foreground" : "text-foreground"}`}
+                              >
+                                {section.system}
+                              </span>
+                              <span className="ds-meta ds-num mt-0.5 block">
+                                {done}/{total}
+                              </span>
+                            </span>
+                            {/* Coverage, at a glance, without a number to read */}
+                            <span
+                              className="h-8 w-1 shrink-0 overflow-hidden rounded-full bg-border"
+                              aria-hidden="true"
+                            >
+                              <span
+                                className="block w-full rounded-full bg-primary transition-all"
+                                style={{
+                                  height: `${total ? (done / total) * 100 : 0}%`,
+                                  marginTop: `${total ? 100 - (done / total) * 100 : 100}%`,
+                                }}
+                              />
+                            </span>
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </nav>
+
+                <section aria-label={`Topics in ${activeSection?.system ?? ""}`}>
+                  {activeSection && (
+                    <>
+                      <div className="mb-3 flex items-end justify-between gap-4">
+                        <div>
+                          <h2 className="ds-title">{activeSection.system}</h2>
+                          <p className="ds-meta mt-1">
+                            {systemCoverage(activeSection).done} of{" "}
+                            {activeSection.topics.length} covered
+                          </p>
+                        </div>
+                      </div>
+
+                      <ul className="ds-stack-sm list-none p-0">
+                        {activeSection.topics.map((topic) => (
+                          <TopicRow
+                            key={topic.id}
+                            title={topic.title}
+                            tier={topic.yield_tier}
+                            progress={progress.get(topic.title)}
+                            onOpen={() => openSheet(topic.title)}
+                          />
+                        ))}
+                      </ul>
+                    </>
+                  )}
+                </section>
+              </div>
+            )}
           </>
         )}
       </div>
     </DashboardLayout>
+  );
+};
+
+/**
+ * One topic. A row, not a card — a curriculum is a list, and forty cards in a
+ * grid is harder to scan than forty lines.
+ */
+const TopicRow = ({
+  title,
+  tier,
+  system,
+  progress,
+  onOpen,
+}: {
+  title: string;
+  tier: string | null;
+  system?: string;
+  progress?: { state: TopicState; cards: number };
+  onOpen: () => void;
+}) => {
+  const state = progress?.state ?? "untouched";
+  const style = STATE_STYLE[state];
+
+  return (
+    <li>
+      <button
+        type="button"
+        onClick={onOpen}
+        className="group flex w-full items-center gap-3 rounded-[var(--r-md)] border border-border bg-card px-3.5 py-3 text-start transition-colors hover:border-primary/40"
+      >
+        <span
+          className={`h-1.5 w-1.5 shrink-0 rounded-full ${style.dot}`}
+          aria-hidden="true"
+        />
+
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-[14px] text-foreground">
+            {title}
+          </span>
+          <span className="ds-meta mt-0.5 flex flex-wrap items-center gap-x-2">
+            {system && <span>{system}</span>}
+            {system && <span className="opacity-40">·</span>}
+            <span>{style.label}</span>
+            {!!progress?.cards && (
+              <>
+                <span className="opacity-40">·</span>
+                <span className="inline-flex items-center gap-1">
+                  <Layers className="h-3 w-3" />
+                  {progress.cards}
+                </span>
+              </>
+            )}
+          </span>
+        </span>
+
+        {tier === "high" && (
+          <span className="ds-label shrink-0 rounded-[var(--r-sm)] border border-warning/40 px-1.5 py-0.5 text-warning">
+            {TIER_LABEL.high}
+          </span>
+        )}
+
+        {state === "untouched" ? (
+          <Sparkles className="h-4 w-4 shrink-0 text-muted-foreground transition-colors group-hover:text-primary" />
+        ) : (
+          <Check className="h-4 w-4 shrink-0 text-success" />
+        )}
+        <ArrowRight className="h-4 w-4 shrink-0 text-muted-foreground transition-colors group-hover:text-primary" />
+      </button>
+    </li>
   );
 };
 

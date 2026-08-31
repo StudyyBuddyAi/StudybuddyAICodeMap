@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { FlaskConical, CheckCircle, XCircle, Clock, RotateCcw, ChevronRight, Flag } from "lucide-react";
 import DashboardLayout from "@/components/dashboard/DashboardLayout";
 import PageLoader from "@/components/PageLoader";
+import AIDisclaimer from "@/components/AIDisclaimer";
 import { useQBankContext } from "@/contexts/QBankContext";
 import { supabase } from "@/integrations/supabase/client";
 import type { Question, QuestionMedia, SessionAnswer } from "@/lib/qbank-types";
@@ -419,9 +420,9 @@ const QBankSummary = () => {
         </div>
 
         <div className="space-y-3">
-          <p style={{ ...MONO_EYEBROW, paddingLeft: 4 }}>Question breakdown</p>
+          <p style={{ ...MONO_EYEBROW, paddingInlineStart: 4 }}>Question breakdown</p>
           {questions.some((q) => summaryFlaggedIds.has(q.id)) && (
-            <div className="flex items-center gap-1.5 rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 text-[11px] font-medium text-amber-600 dark:text-amber-400 w-fit">
+            <div className="flex items-center gap-1.5 rounded-full border border-warning/30 bg-warning/10 px-3 py-1 text-[11px] font-medium text-warning w-fit">
               <Flag className="h-3 w-3" fill="currentColor" />
               {questions.filter((q) => summaryFlaggedIds.has(q.id)).length} flagged for review
             </div>
@@ -442,7 +443,7 @@ const QBankSummary = () => {
                   className="w-full flex items-start gap-3 text-left group"
                   style={{
                     border: "1px solid var(--border)",
-                    borderLeft: isCorrect
+                    borderInlineStart: isCorrect
                       ? "3px solid var(--accent)"
                       : "3px solid var(--signal)",
                     borderRadius: "var(--radius-md)",
@@ -461,7 +462,7 @@ const QBankSummary = () => {
                     <div className="flex items-center gap-2">
                       <span className="text-[11px] font-semibold tabular-nums text-muted-foreground shrink-0">Q{i + 1}</span>
                       {summaryFlaggedIds.has(q.id) && (
-                        <Flag className="h-3 w-3 text-amber-500 shrink-0" fill="currentColor" />
+                        <Flag className="h-3 w-3 text-warning shrink-0" fill="currentColor" />
                       )}
                       <span className="text-[11px] text-muted-foreground">{q.domain}</span>
                       <span className="text-[11px] font-semibold shrink-0" style={{ color: diffColor }}>{q.difficulty}</span>
@@ -470,7 +471,7 @@ const QBankSummary = () => {
                   </div>
                   <div className="shrink-0 flex items-center gap-2 mt-0.5">
                     {!isCorrect && ans && (
-                      <span className="text-[10px] text-red-600 dark:text-red-400 font-medium">
+                      <span className="text-[10px] text-danger font-medium">
                         {ans.selected_option.toUpperCase()} → {q.correct_option.toUpperCase()}
                       </span>
                     )}
@@ -486,6 +487,8 @@ const QBankSummary = () => {
             })}
           </div>
         </div>
+
+        <AIDisclaimer variant="short" />
 
         <div className="flex flex-col sm:flex-row gap-3 pb-8">
           <button type="button" onClick={handleTryAgain} style={DARK_BUTTON_STYLE}>

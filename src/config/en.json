@@ -1,0 +1,46 @@
+{
+  "pricing": {
+    "proBadge": "{{price}}/mo",
+    "proPriceLine": "{{price}} USD / month",
+    "freeBadge": "Always free",
+    "freeTitle": "Everything to get started",
+    "freeBody": "AI study sheets, flashcard decks with spaced repetition, QBank sessions, and progress tracking. A free account takes a minute and needs no card.",
+    "freeNote": "Includes {{sheets}} study sheets and {{cards}} flashcard decks a day.",
+    "proTitle": "Unlimited everything",
+    "proBody": "Unlimited study sheets, full QBank access, spaced repetition analytics, unlimited PubMed citations, our most advanced medical AI model, and new subjects as they are added.",
+    "proNote": "Our most advanced medical AI model on every study sheet."
+  },
+
+  "citations": {
+    "featureTitle": "PubMed Citations",
+    "featureBody": "Study sheets link out to real papers on PubMed. Evidence you can check yourself, not invented references.",
+    "anonOffer": "Try it free — {{anon}} cited generation today, no account needed.",
+    "freeOffer": "{{remaining}} of {{free}} cited generations left today.",
+    "exhausted": "You've used today's cited generations. Go Pro for unlimited.",
+    "proLine": "Unlimited PubMed citations",
+    "welcomeItem": "Evidence-backed sources",
+    "welcomeItemBody": "Cited from PubMed — {{free}} a day free, unlimited on Pro."
+  },
+
+  "qbank": {
+    "requiresAuthTitle": "Create a free account to use the QBank",
+    "requiresAuthBody": "Sessions and scores are saved to your account, so the QBank needs one. It's free and takes a minute.",
+    "requiresAuthCta": "Sign in or create an account"
+  },
+
+  "free": {
+    "planLine": "The free plan includes the AI study sheet generator, flashcard decks and the QBank — no credit card. A free account is required, and daily limits apply ({{sheets}} sheets, {{cards}} decks, {{citations}} cited generations). Pro ({{price}}/mo) removes the limits and unlocks our most advanced medical AI model.",
+    "heroMeta": "Free to start"
+  },
+
+  "roadmap": {
+    "comingSoon": "Coming soon",
+    "notifyCta": "Get notified",
+    "shipped": "Available now"
+  },
+
+  "disclaimer": {
+    "short": "AI-generated — verify before clinical or exam use.",
+    "full": "AI-generated. May contain errors. Not a substitute for clinical judgment."
+  }
+}

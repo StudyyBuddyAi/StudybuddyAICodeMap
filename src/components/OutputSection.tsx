@@ -14,8 +14,6 @@ import {
   Lightbulb,
   Layers,
   Zap,
-  ChevronDown,
-  ChevronUp,
   Sparkles,
   RotateCcw,
   X,
@@ -24,6 +22,7 @@ import CopyButton from "@/components/CopyButton";
 import FlashcardsSection from "@/components/FlashcardsSection";
 import SaveButton from "@/components/SaveButton";
 import SectionSkeleton from "@/components/SectionSkeleton";
+import AIDisclaimer from "@/components/AIDisclaimer";
 import CitationBadgeList from "@/components/CitationBadgeList";
 import { startTopProgress, finishTopProgress } from "@/components/TopProgressBar";
 import type { CitationResult } from "@/lib/citation";
@@ -64,7 +63,7 @@ const ENH_MARK_STYLE: React.CSSProperties = {
 /** Section card chrome — shared by the legacy and JSON renderers. */
 const SECTION_CARD_STYLE: React.CSSProperties = {
   border: "1px solid var(--border)",
-  borderLeft: "3px solid var(--accent)",
+  borderInlineStart: "3px solid var(--accent)",
   borderRadius: "var(--radius-md)",
   background: "var(--bg-elevated)",
   overflow: "hidden",
@@ -421,7 +420,7 @@ function renderRich(
         {inside}
         <sup
           aria-hidden
-          style={{ fontSize: "0.6em", color: "rgba(234,179,8,0.95)", marginLeft: "1px" }}
+          style={{ fontSize: "0.6em", color: "rgba(234,179,8,0.95)", marginInlineStart: "1px" }}
         >
           ✦
         </sup>
@@ -598,7 +597,7 @@ function ModelBadge({ model, isPro }: { model: "flash" | "gpt-oss" | "claude"; i
         fontSize: 11,
         fontWeight: 500,
         color: "var(--fg-muted)",
-        marginLeft: 8,
+        marginInlineStart: 8,
       }}
     >
       <Zap style={{ width: 10, height: 10 }} />
@@ -620,14 +619,14 @@ function EvidenceBadge({ onClick }: { onClick: () => void }) {
         padding: "2px 8px",
         borderRadius: "var(--radius-pill)",
         border: "1px solid var(--border)",
-        borderLeft: "2px solid var(--accent)",
+        borderInlineStart: "2px solid var(--accent)",
         background: "var(--accent-soft)",
         fontFamily: "var(--font-mono)",
         fontSize: 11,
         fontWeight: 500,
         color: "var(--accent)",
         cursor: "pointer",
-        marginLeft: 8,
+        marginInlineStart: 8,
         transition: "background var(--dur-micro) var(--ease-out)",
       }}
     >
@@ -874,7 +873,7 @@ const InlineEnhancement = ({
       <span
         className="block"
         style={{
-          borderLeft: "3px solid var(--accent)",
+          borderInlineStart: "3px solid var(--accent)",
           borderRadius: "0 var(--radius-sm) var(--radius-sm) 0",
           background: "var(--accent-soft)",
           padding: "10px 16px 12px",
@@ -908,7 +907,7 @@ const InlineEnhancement = ({
             style={{
               flexShrink: 0,
               marginTop: -2,
-              marginRight: -4,
+              marginInlineEnd: -4,
               padding: 4,
               borderRadius: "var(--radius-sm)",
               background: "transparent",
@@ -1003,10 +1002,6 @@ const OutputSection = ({
   const ref = useRef<HTMLDivElement>(null);
   const referenceNoteRef = useRef<HTMLDivElement>(null);
   const [showNudge, setShowNudge] = useState(() => !localStorage.getItem("sb_first_sheet_seen"));
-
-  const [disclaimerCollapsed, setDisclaimerCollapsed] = useState(() =>
-    sessionStorage.getItem("sb_disclaimer_collapsed") === "1"
-  );
 
   // Inline enhancement state
   const [activeEnhancements, setActiveEnhancements] = useState<Record<string, ActiveEnhancement>>(() => {
@@ -1184,14 +1179,6 @@ const OutputSection = ({
     []
   );
 
-  const toggleDisclaimer = () => {
-    setDisclaimerCollapsed((prev) => {
-      const next = !prev;
-      sessionStorage.setItem("sb_disclaimer_collapsed", next ? "1" : "0");
-      return next;
-    });
-  };
-
   const scrollToReference = () => {
     referenceNoteRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
@@ -1199,6 +1186,17 @@ const OutputSection = ({
   useEffect(() => {
     if (showNudge) localStorage.setItem("sb_first_sheet_seen", "1");
   }, [showNudge]);
+
+  /**
+   * Identity of the sheet currently on screen.
+   *
+   * SaveButton keeps `saved` in local state and this component is never
+   * unmounted between generations, so without a key the second sheet inherits
+   * the first one's "Saved" state and cannot be saved at all. Keyed on the
+   * topic rather than `output`, which changes on every stream chunk and would
+   * remount the button mid-generation.
+   */
+  const saveKey = `${sheet?.topic ?? ""}::${inputText ?? ""}`;
 
   // Tracks the identity of the *core* sheet content (ignoring enhancements) so we
   // only scroll-to-top for a genuinely new sheet — not when an enhancement is
@@ -1215,8 +1213,6 @@ const OutputSection = ({
     const isNewSheet = sheetIdentityRef.current !== identity;
     sheetIdentityRef.current = identity;
     if (isNewSheet) {
-      setDisclaimerCollapsed(false);
-      sessionStorage.removeItem("sb_disclaimer_collapsed");
       ref.current?.scrollIntoView({ behavior: "smooth", block: "start" });
     }
   }, [output, isStreaming]);
@@ -1251,7 +1247,7 @@ const OutputSection = ({
       <div ref={ref} className="print-document space-y-4">
         <div className="animate-fade-in flex items-center justify-between">
           {modeInfo && <ModeInfoBar modeInfo={modeInfo} />}
-          <SaveButton input={inputText || ""} output={output} modeInfo={modeInfo} />
+          <SaveButton key={saveKey} input={inputText || ""} output={output} modeInfo={modeInfo} />
         </div>
 
         {sections.map(({ title, content }, idx) => {
@@ -1332,7 +1328,7 @@ const OutputSection = ({
           </div>
         )}
 
-        {renderNudgeAndDisclaimer(showNudge, setShowNudge, inputText, disclaimerCollapsed, toggleDisclaimer, navigate)}
+        {renderNudgeAndDisclaimer(showNudge, setShowNudge, inputText, navigate)}
       </div>
     );
   }
@@ -1434,6 +1430,7 @@ const OutputSection = ({
       <div className="animate-fade-in flex items-center justify-between">
         {modeInfo && <ModeInfoBar modeInfo={modeInfo} />}
         <SaveButton
+          key={saveKey}
           input={inputText || ""}
           output={output}
           modeInfo={modeInfo}
@@ -1469,7 +1466,7 @@ const OutputSection = ({
               ...SECTION_CARD_STYLE,
               // A section that hasn't landed keeps a neutral edge, so the
               // accent lighting up is the signal that its content arrived.
-              borderLeft: `3px solid ${
+              borderInlineStart: `3px solid ${
                 ready || writing ? "var(--accent)" : "var(--border)"
               }`,
               // Mid-stream the cards are already mounted and fill in one by
@@ -1595,8 +1592,6 @@ const OutputSection = ({
         showNudge && !isStreaming,
         setShowNudge,
         inputText,
-        disclaimerCollapsed,
-        toggleDisclaimer,
         navigate
       )}
 
@@ -1629,8 +1624,6 @@ function renderNudgeAndDisclaimer(
   showNudge: boolean,
   setShowNudge: (v: boolean) => void,
   inputText: string | undefined,
-  disclaimerCollapsed: boolean,
-  toggleDisclaimer: () => void,
   navigate: NavigateFunction
 ) {
   return (
@@ -1641,7 +1634,7 @@ function renderNudgeAndDisclaimer(
             style={{
               borderRadius: "var(--radius-lg)",
               border: "1px solid var(--border)",
-              borderLeft: "3px solid var(--accent)",
+              borderInlineStart: "3px solid var(--accent)",
               background: "var(--bg-elevated)",
               padding: "20px 24px",
               textAlign: "center",
@@ -1730,72 +1723,7 @@ function renderNudgeAndDisclaimer(
         </div>
       )}
 
-      <div
-        className="animate-fade-in"
-        style={{
-          display: "flex",
-          alignItems: "flex-start",
-          justifyContent: "space-between",
-          gap: 8,
-          paddingTop: 4,
-          marginTop: 8,
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "flex-start", gap: 6, minWidth: 0 }}>
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            style={{
-              width: 13,
-              height: 13,
-              color: "var(--fg-subtle)",
-              marginTop: 1,
-              flexShrink: 0,
-            }}
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <circle cx="12" cy="12" r="10" />
-            <line x1="12" y1="8" x2="12" y2="12" />
-            <line x1="12" y1="16" x2="12.01" y2="16" />
-          </svg>
-          {!disclaimerCollapsed && (
-            <p
-              style={{
-                fontFamily: "var(--font-mono)",
-                fontSize: 10,
-                color: "var(--fg-subtle)",
-                lineHeight: 1.5,
-                letterSpacing: "0.04em",
-              }}
-            >
-              AI-generated · May contain errors · Not a substitute for clinical judgment
-            </p>
-          )}
-        </div>
-        <button
-          type="button"
-          onClick={toggleDisclaimer}
-          aria-label={disclaimerCollapsed ? "Expand disclaimer" : "Collapse disclaimer"}
-          style={{
-            flexShrink: 0,
-            background: "none",
-            border: "none",
-            color: "var(--fg-subtle)",
-            cursor: "pointer",
-            padding: 2,
-          }}
-        >
-          {disclaimerCollapsed ? (
-            <ChevronDown style={{ width: 13, height: 13 }} />
-          ) : (
-            <ChevronUp style={{ width: 13, height: 13 }} />
-          )}
-        </button>
-      </div>
+      <AIDisclaimer className="pt-1 mt-2" />
     </>
   );
 }

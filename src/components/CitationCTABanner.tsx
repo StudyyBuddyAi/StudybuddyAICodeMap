@@ -1,10 +1,35 @@
 import { BookOpen } from "lucide-react";
+import { LIMITS } from "@/config/product";
+import { t } from "@/config/i18n";
 
 interface CitationCTABannerProps {
   onSignInClick: () => void;
+  /** Uses left today. Omit while the count is still loading. */
+  remaining?: number;
 }
 
-const CitationCTABanner = ({ onSignInClick }: CitationCTABannerProps) => {
+/**
+ * Anonymous-user prompt for the citation feature.
+ *
+ * The copy used to read "no account needed" directly beside a button labelled
+ * "Sign In", and never said how much of the free allowance was left. Both are
+ * now stated from config: the offer explains what you get *without* an account,
+ * and the button explains what signing in *adds* — so the two halves agree.
+ */
+const CitationCTABanner = ({
+  onSignInClick,
+  remaining,
+}: CitationCTABannerProps) => {
+  // Anonymous users get so few that the difference between "you have one" and
+  // "you have used it" is the whole message. Until the count loads, state the
+  // allowance rather than guessing at it.
+  const offer =
+    remaining === undefined
+      ? t("citations.anonOffer", { anon: LIMITS.citations.anon })
+      : remaining > 0
+      ? t("citations.anonOffer", { anon: remaining })
+      : t("citations.exhausted");
+
   return (
     <div
       style={{
@@ -14,7 +39,7 @@ const CitationCTABanner = ({ onSignInClick }: CitationCTABannerProps) => {
         padding: "10px 14px",
         borderRadius: "var(--radius-md)",
         border: "1px solid var(--border)",
-        borderLeft: "3px solid var(--accent)",
+        borderInlineStart: "3px solid var(--accent)",
         background: "var(--bg)",
         marginBottom: 16,
       }}
@@ -44,7 +69,10 @@ const CitationCTABanner = ({ onSignInClick }: CitationCTABannerProps) => {
           margin: 0,
         }}
       >
-        Try it free — get 1 cited generation today, no account needed
+        {offer}{" "}
+        <span style={{ color: "var(--fg)" }}>
+          A free account gets {LIMITS.citations.free} a day.
+        </span>
       </p>
       <button
         type="button"
@@ -69,7 +97,7 @@ const CitationCTABanner = ({ onSignInClick }: CitationCTABannerProps) => {
           e.currentTarget.style.borderColor = "var(--border-strong)";
         }}
       >
-        Sign In
+        Sign in
       </button>
     </div>
   );

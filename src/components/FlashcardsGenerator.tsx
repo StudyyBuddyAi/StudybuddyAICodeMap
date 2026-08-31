@@ -2,14 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { History, Loader2, Layers, PenLine, Search, X, Check, Sparkles, ChevronRight, ArrowRight, Brain, Heart, Activity, Stethoscope } from "lucide-react";
+import { History, Loader2, Search, X, Check, Sparkles, ChevronRight, ArrowRight } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useFlashcardDeck, type GroundingMeta } from "@/hooks/use-flashcard-deck";
 import { useUsageLimit, MAX_DAILY_CARDS } from "@/hooks/use-usage-limit";
@@ -61,6 +54,9 @@ const CARD_COUNT_OPTIONS = [
   { value: "30", label: "30 cards", description: "Comprehensive" },
 ];
 
+/** Must be a `value` present in CARD_COUNT_OPTIONS, or no chip renders selected. */
+const DEFAULT_CARD_COUNT = "10";
+
 const GROUNDING_OPTIONS = [
   { value: true, label: "On", description: "Uses retrieved medical guidelines" },
   { value: false, label: "Off", description: "General knowledge only" },
@@ -74,7 +70,10 @@ const EXAM_MODES = [
 
 const FlashcardsGenerator = ({ onGeneratingChange, onGenerated }: FlashcardsGeneratorProps) => {
   const [topic, setTopic] = useState("");
-  const [cardCount, setCardCount] = useState("12");
+  // Must be one of CARD_COUNT_OPTIONS. A value outside that set (this used to
+  // default to "12") leaves every chip unselected while generation silently
+  // uses the orphan number.
+  const [cardCount, setCardCount] = useState(DEFAULT_CARD_COUNT);
   const [examMode, setExamMode] = useState("General");
   const [loading, setLoading] = useState(false);
   const [loadingMsg, setLoadingMsg] = useState("");
@@ -131,6 +130,7 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated }: FlashcardsGene
   const { useMemory } = useMemoryPreference();
   const {
     canUseCitation,
+    citationsRemaining,
     isLoggedIn,
     refreshCitation,
   } = useCitationUsage();
@@ -377,10 +377,17 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated }: FlashcardsGene
     const handler = (e: Event) => {
       const detail = (e as CustomEvent<{ topic: string; cardCount?: number }>).detail;
       if (!detail?.topic) return;
+      // The event crosses a page boundary, so the count is untrusted: snap it to
+      // an offered option rather than letting an orphan value (e.g. 12) leave
+      // every chip unselected while generation quietly uses it.
+      const requested = String(detail.cardCount ?? DEFAULT_CARD_COUNT);
+      const count = CARD_COUNT_OPTIONS.some((o) => o.value === requested)
+        ? requested
+        : DEFAULT_CARD_COUNT;
       setTopic(detail.topic);
       setShowTextarea(true);
-      setCardCount(String(detail.cardCount ?? 5));
-      handleGenerate(detail.topic, detail.cardCount ?? 5);
+      setCardCount(count);
+      handleGenerate(detail.topic, Number(count));
     };
     window.addEventListener("studybuddy:generate-flashcards", handler);
     return () => window.removeEventListener("studybuddy:generate-flashcards", handler);
@@ -390,7 +397,10 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated }: FlashcardsGene
     <Card className="glass-card animate-fade-in rounded-2xl border border-border bg-card shadow-sm">
       <CardContent className="p-6 space-y-6">
         {!isLoggedIn && (
-          <CitationCTABanner onSignInClick={() => setAuthModalOpen(true)} />
+          <CitationCTABanner
+            onSignInClick={() => setAuthModalOpen(true)}
+            remaining={citationsRemaining}
+          />
         )}
 
         {/* Step 1: Topic Selection */}
@@ -404,7 +414,7 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated }: FlashcardsGene
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
               <Textarea
-                placeholder="Search or type a medical topic (e.g., Heart Failure, Pneumonia, Diabetes...)"
+                placeholder="Search or type a medical topic (e.g. Failure, Pneumonia, Diabetes...)"
                 value={topic}
                 onChange={(e) => setTopic(e.target.value)}
                 className="min-h-[80px] pl-10 pr-10 text-sm leading-relaxed rounded-xl border-border focus:border-primary focus:ring-2 focus:ring-primary"

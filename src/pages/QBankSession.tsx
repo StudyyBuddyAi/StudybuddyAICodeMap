@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import DashboardLayout from "@/components/dashboard/DashboardLayout";
 import PageLoader from "@/components/PageLoader";
+import AIDisclaimer from "@/components/AIDisclaimer";
 import { useQBankContext } from "@/contexts/QBankContext";
 import { renderMarkdown } from "@/lib/render-markdown";
 import type { OptionKey, QuestionMedia } from "@/lib/qbank-types";
@@ -177,7 +178,7 @@ const QuestionCounter = ({
             >
               {i + 1}
               {isFlaggedQ && (
-                <span className="absolute -top-1 -right-1 flex h-3 w-3 items-center justify-center rounded-full bg-amber-500 border border-background">
+                <span className="absolute -top-1 -right-1 flex h-3 w-3 items-center justify-center rounded-full bg-warning border border-background">
                   <Flag className="h-1.5 w-1.5 text-white" fill="currentColor" />
                 </span>
               )}
@@ -301,7 +302,7 @@ const ExplanationContent = ({
       style={{
         borderRadius: "var(--radius-md)",
         border: "1px solid var(--border)",
-        borderLeft: "3px solid var(--accent)",
+        borderInlineStart: "3px solid var(--accent)",
         background: "var(--accent-soft)",
         padding: "12px 16px",
       }}
@@ -333,6 +334,10 @@ const ExplanationContent = ({
         {domain}
       </span>
     </div>
+
+    {/* Explanations and teaching points are model-generated; this surface
+        previously carried no notice at all. */}
+    <AIDisclaimer variant="short" className="pt-1" />
   </div>
 );
 
@@ -540,11 +545,11 @@ const QuestionNavigator = ({
 
         <div className="flex items-center gap-4 px-4 pb-3 flex-wrap">
           <div className="flex items-center gap-1.5">
-            <div className="w-3 h-3 rounded-sm bg-emerald-500/20 border border-emerald-500/40" />
+            <div className="w-3 h-3 rounded-sm bg-success/20 border border-success/40" />
             <span className="text-[10px] text-muted-foreground">Correct</span>
           </div>
           <div className="flex items-center gap-1.5">
-            <div className="w-3 h-3 rounded-sm bg-red-500/20 border border-red-500/40" />
+            <div className="w-3 h-3 rounded-sm bg-danger/20 border border-danger/40" />
             <span className="text-[10px] text-muted-foreground">Incorrect</span>
           </div>
           <div className="flex items-center gap-1.5">
@@ -552,12 +557,12 @@ const QuestionNavigator = ({
             <span className="text-[10px] text-muted-foreground">Unanswered</span>
           </div>
           <div className="flex items-center gap-1.5">
-            <div className="w-3 h-3 rounded-sm bg-amber-500/20 border border-amber-500/40" />
+            <div className="w-3 h-3 rounded-sm bg-warning/20 border border-warning/40" />
             <span className="text-[10px] text-muted-foreground">Skipped</span>
           </div>
           <div className="flex items-center gap-1.5">
             <div className="relative w-3 h-3 rounded-sm bg-muted/30 border border-border/20">
-              <span className="absolute -top-0.5 -right-0.5 flex h-2 w-2 items-center justify-center rounded-full bg-amber-500">
+              <span className="absolute -top-0.5 -right-0.5 flex h-2 w-2 items-center justify-center rounded-full bg-warning">
                 <Flag className="h-1 w-1 text-white" fill="currentColor" />
               </span>
             </div>
@@ -582,10 +587,10 @@ const QuestionNavigator = ({
                 bg = "bg-primary/20 text-primary border-primary/50";
               } else if (isAnswered) {
                 bg = isCorrect
-                  ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/40"
-                  : "bg-red-500/15 text-red-600 dark:text-red-400 border-red-500/40";
+                  ? "bg-success/15 text-success border-success/40"
+                  : "bg-danger/15 text-danger border-danger/40";
               } else if (isSkipped) {
-                bg = "bg-amber-500/20 text-amber-400 border-amber-500/40";
+                bg = "bg-warning/20 text-warning border-warning/40";
               }
 
               const canClick = isAnswered || (isSkipped && !isCurrent);
@@ -609,7 +614,7 @@ const QuestionNavigator = ({
                 >
                   {i + 1}
                   {isFlaggedQ && (
-                    <span className="absolute -top-0.5 -right-0.5 flex h-2.5 w-2.5 items-center justify-center rounded-full bg-amber-500 border border-background">
+                    <span className="absolute -top-0.5 -right-0.5 flex h-2.5 w-2.5 items-center justify-center rounded-full bg-warning border border-background">
                       <Flag className="h-1.5 w-1.5 text-white" fill="currentColor" />
                     </span>
                   )}
@@ -662,7 +667,7 @@ const ReviewExplanationDrawer = ({
           <div className="flex items-center gap-2">
             <span
               className={`text-[10px] font-bold ${
-                isCorrect ? "text-emerald-600 dark:text-emerald-400" : "text-red-600 dark:text-red-400"
+                isCorrect ? "text-success" : "text-danger"
               }`}
             >
               {isCorrect ? "✓ Correct" : "✗ Incorrect"}
@@ -884,7 +889,7 @@ const QBankSession = () => {
 
   if (!displayQuestion) {
     return (
-      <DashboardLayout wide>
+      <DashboardLayout width="app">
         <PageLoader context="qbank" />
       </DashboardLayout>
     );
@@ -913,7 +918,7 @@ const QBankSession = () => {
   const displayedNumber = (isReviewing ? reviewIndex! : currentIndex) + 1;
 
   return (
-    <DashboardLayout wide>
+    <DashboardLayout width="app">
       {isReviewing && (() => {
         const fromSummary = !session && !!lastSummary;
         const hasNext = reviewIndex! + 1 < effectiveTotalQuestions;
@@ -1017,8 +1022,8 @@ const QBankSession = () => {
                   disabled={isFlagLoading || !displayQuestion}
                   className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-[11px] font-medium transition-colors ${
                     isFlagged
-                      ? "border-amber-500/50 bg-amber-500/10 text-amber-600 dark:text-amber-400 hover:bg-amber-500/20"
-                      : "border-border bg-card text-muted-foreground hover:border-amber-500/40 hover:text-amber-600 dark:hover:text-amber-400"
+                      ? "border-warning/50 bg-warning/10 text-warning hover:bg-warning/20"
+                      : "border-border bg-card text-muted-foreground hover:border-warning/40 hover:text-warning"
                   } disabled:opacity-50`}
                   aria-label={isFlagged ? "Unflag question" : "Flag for review"}
                 >
@@ -1048,7 +1053,7 @@ const QBankSession = () => {
             <div
               style={{
                 border: "1px solid var(--border)",
-                borderLeft: "3px solid var(--accent)",
+                borderInlineStart: "3px solid var(--accent)",
                 borderRadius: "var(--radius-md)",
                 background: "var(--bg-elevated)",
                 padding: "20px 20px 24px",
@@ -1137,9 +1142,9 @@ const QBankSession = () => {
             {isAnsweredEffective && !isReviewing && (
               unansweredCount > 0 && isLastQuestion ? (
                 <div className="flex flex-col gap-2 pt-1 animate-fade-in">
-                  <div className="flex items-center gap-2 rounded-xl border border-amber-500/20 bg-amber-500/5 px-4 py-3">
-                    <SkipForward className="h-4 w-4 text-amber-400 shrink-0" />
-                    <p className="text-xs text-amber-400 font-medium">
+                  <div className="flex items-center gap-2 rounded-xl border border-warning/20 bg-warning/5 px-4 py-3">
+                    <SkipForward className="h-4 w-4 text-warning shrink-0" />
+                    <p className="text-xs text-warning font-medium">
                       {unansweredCount === 1
                         ? "You have 1 unanswered question — go back and answer it to finish."
                         : `You have ${unansweredCount} unanswered questions — go back and answer them to finish.`}
@@ -1236,9 +1241,9 @@ const QBankSession = () => {
 
               <div className="pt-4">
                 {unansweredCount > 0 && isLastQuestion ? (
-                  <div className="flex items-center gap-2 rounded-xl border border-amber-500/20 bg-amber-500/5 px-4 py-3">
-                    <SkipForward className="h-4 w-4 text-amber-400 shrink-0" />
-                    <p className="text-xs text-amber-400 font-medium">
+                  <div className="flex items-center gap-2 rounded-xl border border-warning/20 bg-warning/5 px-4 py-3">
+                    <SkipForward className="h-4 w-4 text-warning shrink-0" />
+                    <p className="text-xs text-warning font-medium">
                       {unansweredCount === 1
                         ? "You have 1 unanswered question — go back and answer it to finish."
                         : `You have ${unansweredCount} unanswered questions — go back and answer them to finish.`}
@@ -1267,8 +1272,11 @@ const QBankSession = () => {
         </div>
       )}
 
+      {/* lg, not md: the desktop explanation rail only appears at lg+, so a
+          `md:hidden` drawer left 768–1023px with no rationale anywhere on the
+          page while reviewing. Matches the live-answer drawer's breakpoint. */}
       {isReviewing && effectiveAnswerState.status === "answered" && (
-        <div className="md:hidden fixed inset-x-0 bottom-0 z-40">
+        <div className="lg:hidden fixed inset-x-0 bottom-0 z-40">
           <ReviewExplanationDrawer
             explanation={displayQuestion!.explanation}
             teachingPoint={displayQuestion!.teaching_point}

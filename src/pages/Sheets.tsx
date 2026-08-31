@@ -9,51 +9,19 @@ const Sheets = () => {
   const prefill = state?.topic ? { input: state.topic, output: "" } : undefined;
 
   return (
-    <DashboardLayout wide>
-      <div className="space-y-6">
-        <div>
-          <p
-            style={{
-              fontFamily: "var(--font-mono)",
-              fontSize: 11,
-              fontWeight: 500,
-              letterSpacing: "0.14em",
-              textTransform: "uppercase",
-              color: "var(--accent)",
-              marginBottom: 8,
-            }}
-          >
-            Study Sheet · AI-Powered
-          </p>
-          <h1
-            style={{
-              fontFamily: "var(--font-display)",
-              fontSize: "clamp(28px, 4vw, 40px)",
-              fontWeight: 500,
-              lineHeight: 1.1,
-              letterSpacing: "-0.012em",
-              color: "var(--fg)",
-              margin: 0,
-            }}
-          >
+    <DashboardLayout width="app">
+      <div className="ds-stack">
+        <header>
+          <p className="ds-label ds-label-accent">Study sheet</p>
+          <h1 className="ds-display mt-2">
             Generate your{" "}
-            <span style={{ fontStyle: "italic", color: "var(--accent)" }}>
-              study sheet.
-            </span>
+            <span className="italic text-primary">study sheet.</span>
           </h1>
-          <p
-            style={{
-              fontFamily: "var(--font-sans)",
-              fontSize: 16,
-              color: "var(--fg-muted)",
-              marginTop: 10,
-              lineHeight: 1.5,
-            }}
-          >
-            Enter any medical topic — your structured clinical sheet builds section
-            by section.
+          <p className="ds-subtitle mt-2.5 max-w-[54ch]">
+            Enter any medical topic — your structured clinical sheet builds
+            section by section.
           </p>
-        </div>
+        </header>
         <SheetGenerator prefill={prefill} />
       </div>
     </DashboardLayout>

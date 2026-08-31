@@ -1,8 +1,16 @@
 import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
+import { useIsTabletBand } from "@/hooks/use-mobile";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { AlertTriangle, ArrowRight, BookOpen, Brain, Check, ChevronDown, ChevronRight, ChevronUp, FileDown, History, Loader2, Play, Search, Settings2, Share2, Sparkles, Stethoscope, X, Zap } from "lucide-react";
+import { AlertTriangle, ChevronDown, ChevronRight, FileDown, Loader2, Play, Settings2, Share2, Sparkles, Stethoscope, X, Zap } from "lucide-react";
 import { Slider } from "@/components/ui/slider";
 import { useToast } from "@/hooks/use-toast";
 import OutputSection, { type CitationState } from "@/components/OutputSection";
@@ -49,6 +57,13 @@ interface SheetGeneratorProps {
 const RECENT_TOPICS_KEY = "sb_recent_topics_v1";
 
 /**
+ * How long the stream may go silent before it is treated as dead. Generous, so
+ * a slow model or a long sheet is never cut short — this exists to end a hung
+ * connection, not to cap generation time.
+ */
+const STREAM_IDLE_TIMEOUT_MS = 45_000;
+
+/**
  * Stand-in for the moments before the first section lands, so the document
  * renders its full structure from the first frame instead of swapping a
  * placeholder block out for the real one.
@@ -71,28 +86,31 @@ interface PillGroupProps {
   onChange: (value: string) => void;
 }
 
-/** Inline pill toggle group — all options visible, tap to select. */
+/**
+ * Inline pill toggle group.
+ *
+ * Denser than before (h-8, 13px) because these now live inside a disclosure
+ * rather than being the page's main content — they are settings, not choices
+ * the student is asked to make up front.
+ */
 const PillGroup = ({ label, options, value, onChange }: PillGroupProps) => (
-  <div className="mb-4">
-    <label className="block font-mono text-[11px] font-medium tracking-widest uppercase text-muted-foreground mb-2">
-      {label}
-    </label>
-    <div className="flex flex-wrap gap-2">
+  <div>
+    <p className="ds-label mb-2">{label}</p>
+    <div className="flex flex-wrap gap-1.5">
       {options.map((opt) => {
         const active = value === opt.value;
         return (
           <button
-            key={opt.value} 
+            key={opt.value}
             type="button"
             onClick={() => onChange(opt.value)}
             aria-pressed={active}
-            className={`inline-flex items-center gap-2 h-9 px-4 rounded-lg text-sm font-medium transition-all duration-200 ${
+            className={`h-8 rounded-[var(--r-sm)] border px-3 text-[13px] transition-colors ${
               active
-                ? "bg-primary border-primary text-primary-foreground shadow-md"
-                : "bg-card border-border text-muted-foreground hover:border-primary hover:text-primary"
-            } border`}
+                ? "border-primary bg-primary/10 font-medium text-primary"
+                : "border-border text-muted-foreground hover:border-input hover:text-foreground"
+            }`}
           >
-            {active && <Check className="w-4 h-4" />}
             {opt.label}
           </button>
         );
@@ -349,6 +367,68 @@ const SheetsEmptyState = ({ onStartTopic, onSelectHistory }: SheetsEmptyStatePro
   );
 };
 
+/**
+ * The quota line under the generate button.
+ *
+ * Was three separate conditional blocks stacked below the CTA — a limit
+ * warning, a Claude-credits line and a "Powered by GPT-OSS 20B" caption — which
+ * between them could put three lines of small print under the primary action.
+ * One line, stating the single most useful fact for the current state.
+ */
+const UsageLine = ({
+  pro,
+  isSheetLimited,
+  sheetCount,
+  isPremiumHookActive,
+  premiumRemaining,
+  onGoPro,
+}: {
+  pro: boolean;
+  isSheetLimited: boolean;
+  sheetCount: number;
+  isPremiumHookActive: boolean;
+  premiumRemaining: number;
+  onGoPro: () => void;
+}) => {
+  if (pro) {
+    return (
+      <p className="ds-meta mt-2.5 flex items-center gap-1.5">
+        <span className="h-1.5 w-1.5 rounded-full bg-primary" />
+        Unlimited
+      </p>
+    );
+  }
+
+  if (isSheetLimited) {
+    return (
+      <p className="ds-meta mt-2.5 text-warning">
+        Daily limit reached ·{" "}
+        <button type="button" onClick={onGoPro} className="underline">
+          Go Pro for unlimited
+        </button>
+      </p>
+    );
+  }
+
+  return (
+    <p className="ds-meta mt-2.5">
+      <span className="ds-num">
+        {sheetCount}/{MAX_DAILY_SHEETS}
+      </span>{" "}
+      today
+      {isPremiumHookActive && (
+        <>
+          {" · "}
+          <span className="text-info">
+            {premiumRemaining} Claude generation
+            {premiumRemaining !== 1 ? "s" : ""} left
+          </span>
+        </>
+      )}
+    </p>
+  );
+};
+
 const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
   const [notes, setNotes] = useState(prefill?.input ?? "");
   const [difficulty, setDifficulty] = useState(prefill?.modeInfo?.difficulty ?? "Basic");
@@ -382,7 +462,15 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [goProOpen, setGoProOpen] = useState(false);
   // Tablet (768–1023px) slide-out configurator drawer
-  const [configDrawerOpen, setConfigDrawerOpen] = useState(false);
+  // Opens on mount when a topic was handed in (Roadmap chip → /sheets). On
+  // tablet the configurator is `md:max-lg:hidden`, so the seeded topic landed in
+  // a closed drawer and the tap looked like it did nothing. Desktop and phone
+  // show the pane inline, so this only matters in the 768–1023px band — but
+  // opening the drawer there is harmless at any width because it is display:none
+  // outside it.
+  const [configDrawerOpen, setConfigDrawerOpen] = useState(
+    () => !!prefill?.input?.trim()
+  );
   const [recentTopics, setRecentTopics] = useState<string[]>(() => {
     try {
       const stored = JSON.parse(localStorage.getItem(RECENT_TOPICS_KEY) ?? "[]");
@@ -392,6 +480,14 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
     }
   });
   const outputRef = useRef<HTMLDivElement>(null);
+  // The Sheet portals to <body>, so it cannot inherit the trigger's responsive
+  // `display`. Gate it here instead, and it closes itself if the viewport grows
+  // past the band while open (where the configurator is shown inline anyway).
+  const inTabletBand = useIsTabletBand();
+  // Aborts an in-flight generation. The stream had no timeout and no abort: a
+  // connection that dropped mid-response left `loading` true forever, with the
+  // progress bar running and no error and no way to retry.
+  const abortRef = useRef<AbortController | null>(null);
 
   // ── Grounding ──────────────────────────────────────────────────────────
   // Ranges mirror the edge function's clamps (topK 1–10, threshold 0.40–0.90),
@@ -399,7 +495,6 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
   const [useGrounding, setUseGrounding] = useState(true);
   const [groundingTopK, setGroundingTopK] = useState(8);
   const [groundingThreshold, setGroundingThreshold] = useState(0.6);
-  const [groundingSettingsOpen, setGroundingSettingsOpen] = useState(false);
   // localStorage-backed and deliberately shared: all four medical-notes modes
   // write to one 10-turn window per user, so the preference has to be the same
   // wherever they're called from.
@@ -442,14 +537,13 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
   const { user, isAnonymous } = useAuth();
   const {
     canUseCitation,
+    citationsRemaining,
     isLoggedIn,
     refreshCitation,
   } = useCitationUsage();
   const { saveCards } = useFlashcardDeck();
   const { persona, setPersona } = usePersona();
 
-  // `overridePersona` lets a persona button generate with the tier just clicked —
-  // `setPersona` state won't have flushed by the time this reads the closure.
   const generate = async (overrideNotes?: string, overridePersona?: Persona) => {
     const activeNotes = overrideNotes ?? notes;
     const activePersona = overridePersona ?? persona;
@@ -481,6 +575,18 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
       outputRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
     }, 80);
 
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+
+    // Reset on every chunk: this bounds silence, not total duration, so a long
+    // but healthy generation is never cut off.
+    let watchdog = window.setTimeout(() => controller.abort(), STREAM_IDLE_TIMEOUT_MS);
+    const pokeWatchdog = () => {
+      window.clearTimeout(watchdog);
+      watchdog = window.setTimeout(() => controller.abort(), STREAM_IDLE_TIMEOUT_MS);
+    };
+
     try {
       const response = await callMedicalNotes({
         notes: activeNotes,
@@ -497,7 +603,7 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
         isAnonymous: isAnonymous ?? false,
         isPro: pro,
         preferredModel: pro ? preferredModel : undefined,
-      });
+      }, { signal: controller.signal });
 
       const xModel = response.headers.get("X-Model-Used") ?? "";
       const resolvedModel = xModel.includes("gpt-oss")
@@ -532,6 +638,7 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
+        pokeWatchdog();
         textBuffer += decoder.decode(value, { stream: true });
 
         let newlineIndex: number;
@@ -650,11 +757,18 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
       }
     } catch (e: unknown) {
       setLoading(false);
+      const aborted = e instanceof Error && e.name === "AbortError";
       toast({
-        title: "Error",
-        description: e instanceof Error && e.message ? e.message : "Failed to generate study material",
+        title: aborted ? "Generation timed out" : "Error",
+        description: aborted
+          ? "The connection went quiet. Check your network and try again."
+          : e instanceof Error && e.message
+          ? e.message
+          : "Failed to generate study material",
         variant: "destructive",
       });
+    } finally {
+      window.clearTimeout(watchdog);
     }
   };
 
@@ -664,6 +778,10 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
       return () => finishTopProgress();
     }
   }, [loading]);
+
+  // Leaving the page mid-generation should cancel it, not leave a stream and a
+  // watchdog running against an unmounted component.
+  useEffect(() => () => abortRef.current?.abort(), []);
 
   useEffect(() => {
     function handleEnhancementSaved(e: Event) {
@@ -682,13 +800,6 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
       window.removeEventListener("studybuddy:enhancement-saved", handleEnhancementSaved);
   }, []);
 
-  // Persona buttons are the generation trigger — there is no separate submit.
-  const generateWithPersona = (p: Persona) => {
-    setPersona(p);
-    setDeckSaved(false);
-    setConfigDrawerOpen(false);
-    generate(undefined, p);
-  };
 
   const startTopic = (label: string) => {
     setNotes(label);
@@ -759,174 +870,205 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
     }, 80);
   };
 
+  /**
+   * The generator's controls.
+   *
+   * This was three numbered cards asking nine questions — exam mode,
+   * difficulty, focus, length, grounding on/off, top-K, threshold, memory,
+   * persona — before a student could get one sheet. Worse, the three persona
+   * buttons WERE the submit action while a separate "Generate Study Sheet"
+   * button also existed: two competing primary actions with no hierarchy.
+   *
+   * Now: one input, one button, and everything else folded into a single
+   * disclosure whose summary states the current settings, so the defaults stay
+   * visible without occupying the screen.
+   */
   const configurator = (
-      <div className="animate-fade-in space-y-6">
+      <div className="animate-fade-in ds-stack">
         {!isLoggedIn && (
-          <CitationCTABanner onSignInClick={() => setAuthModalOpen(true)} />
+          <CitationCTABanner
+            onSignInClick={() => setAuthModalOpen(true)}
+            remaining={citationsRemaining}
+          />
         )}
 
-        {/* ── Step 1: Topic Selection ── */}
-        <div className="rounded-2xl border border-border bg-card p-6 shadow-sm">
-          <div className="space-y-4">
-            <div className="flex items-center gap-2">
-              <div className="flex items-center justify-center w-7 h-7 rounded-full bg-primary text-primary-foreground text-xs font-bold">1</div>
-              <h2 className="text-lg font-serif font-semibold text-foreground">Medical Topic</h2>
-            </div>
-            
-            <div className="space-y-3">
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                <Textarea
-                  placeholder="Search or type a medical topic (e.g., Heart Failure, Pneumonia, Diabetes...)"
-                  value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
-                  className="min-h-[80px] pl-10 pr-10 text-sm leading-relaxed rounded-xl border-border focus:border-primary focus:ring-2 focus:ring-primary"
-                />
-                {notes && (
-                  <button
-                    type="button"
-                    onClick={() => setNotes("")}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-muted-foreground hover:text-foreground transition-colors"
-                    aria-label="Clear"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
-                )}
-              </div>
-              
-              <div className="pt-2">
-                <p className="font-mono text-[11px] font-medium tracking-widest uppercase text-muted-foreground mb-3">Popular Topics</p>
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                  {QUICKSTART_TOPICS.slice(0, 6).map(({ label, icon, category }) => (
-                    <button
-                      key={label}
-                      type="button"
-                      onClick={() => setNotes(label)}
-                      className="group flex flex-col items-center gap-1.5 p-3 rounded-xl border border-border bg-card hover:border-primary hover:shadow-sm transition-all duration-200"
-                    >
-                      <span className="text-xl">{icon}</span>
-                      <div className="text-center">
-                        <p className="text-xs font-medium text-foreground group-hover:text-primary leading-tight">{label}</p>
-                        <p className="text-[10px] text-muted-foreground">{category}</p>
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
+        {/* ── The ask ── */}
+        <div>
+          <label htmlFor="sheet-topic" className="ds-label ds-label-accent">
+            What are you studying?
+          </label>
+          <div className="relative mt-2.5">
+            <Textarea
+              id="sheet-topic"
+              placeholder="Heart failure, DKA, cranial nerves…"
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              onKeyDown={(e) => {
+                // Enter submits; Shift+Enter is a newline. The textarea exists
+                // so longer notes can be pasted, but the common case is a
+                // two-word topic and should not need a mouse.
+                if (e.key === "Enter" && !e.shiftKey && notes.trim() && !loading) {
+                  e.preventDefault();
+                  generate();
+                }
+              }}
+              className="min-h-[76px] resize-none rounded-[var(--r-md)] border-border pe-10 text-[15px] leading-relaxed focus:border-primary focus:ring-1 focus:ring-primary"
+            />
+            {notes && (
+              <button
+                type="button"
+                onClick={() => setNotes("")}
+                className="absolute end-2.5 top-2.5 rounded-[var(--r-sm)] p-1 text-muted-foreground transition-colors hover:text-foreground"
+                aria-label="Clear topic"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            )}
           </div>
+
+          <Button
+            onClick={() => generate()}
+            disabled={loading || !notes.trim()}
+            className="mt-3 h-11 w-full rounded-[var(--r-md)] text-[15px] font-medium"
+          >
+            {loading ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Generating…
+              </>
+            ) : (
+              <>
+                <Sparkles className="h-4 w-4" />
+                Generate sheet
+              </>
+            )}
+          </Button>
+
+          <UsageLine
+            pro={pro}
+            isSheetLimited={isSheetLimited}
+            sheetCount={sheetCount}
+            isPremiumHookActive={isPremiumHookActive}
+            premiumRemaining={premiumRemaining}
+            onGoPro={() => setGoProOpen(true)}
+          />
         </div>
 
-        {/* ── Step 2: Customize ── */}
-        <div className="rounded-2xl border border-border bg-card p-6 shadow-sm">
-          <div className="space-y-4">
-            <div className="flex items-center gap-2">
-              <div className="flex items-center justify-center w-7 h-7 rounded-full bg-border text-muted-foreground text-xs font-bold">2</div>
-              <h2 className="text-lg font-serif font-semibold text-foreground">Customize</h2>
+        {/* ── Starting points ── */}
+        {(recentTopics.length > 0 || !notes) && (
+          <div>
+            <p className="ds-label mb-2.5">
+              {recentTopics.length > 0 ? "Recent" : "Popular"}
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {(recentTopics.length > 0
+                ? recentTopics
+                : QUICKSTART_TOPICS.map((q) => q.label)
+              ).map((topic) => (
+                <button
+                  key={topic}
+                  type="button"
+                  disabled={loading}
+                  onClick={() => setNotes(topic)}
+                  className="max-w-full truncate rounded-[var(--r-pill)] border border-border px-3 py-1.5 text-[13px] text-muted-foreground transition-colors hover:border-primary hover:text-primary disabled:opacity-50"
+                >
+                  {topic}
+                </button>
+              ))}
             </div>
-            
-            <div className="space-y-4">
-              <PillGroup
-                label="Exam Mode"
-                value={examMode}
-                onChange={setExamMode}
-                options={[
-                  { value: "General", label: "General" },
-                  { value: "USMLE Step 1", label: "Step 1" },
-                  { value: "USMLE Step 2", label: "Step 2" },
-                ]}
-              />
-              <PillGroup
-                label="Difficulty"
-                value={difficulty}
-                onChange={setDifficulty}
-                options={[
-                  { value: "Basic", label: "Basic" },
-                  { value: "Medium", label: "Intermediate" },
-                  { value: "Advanced", label: "Advanced" },
-                ]}
-              />
-              <PillGroup
-                label="Focus"
-                value={focus}
-                onChange={setFocus}
-                options={[
-                  { value: "Quick Revision", label: "Quick Revision" },
-                  { value: "Deep Understanding", label: "Deep Understanding" },
-                  { value: "Clinical Reasoning", label: "Clinical Reasoning" },
-                ]}
-              />
-              <PillGroup
-                label="Length"
-                value={length}
-                onChange={setLength}
-                options={[
-                  { value: "Concise", label: "Concise" },
-                  { value: "Moderate", label: "Moderate" },
-                  { value: "Detailed", label: "Detailed" },
-                ]}
-              />
-              {/* ── Guideline grounding ──
-                  Off skips retrieval entirely: no sources, no grounding badge,
-                  and the sheet reads exactly as it did before this feature.
-                  The tuning sliders live behind a disclosure because the
-                  defaults are right for almost everyone. */}
-              <div className="mb-4">
-                <div className="flex items-center justify-between mb-2">
-                  <label className="font-mono text-[11px] font-medium tracking-widest uppercase text-muted-foreground">
-                    Guideline Grounding
-                  </label>
-                  <button
-                    type="button"
-                    onClick={() => setGroundingSettingsOpen((v) => !v)}
-                    aria-expanded={groundingSettingsOpen}
-                    className="inline-flex items-center gap-1 text-[11px] font-medium text-muted-foreground hover:text-primary transition-colors"
-                  >
-                    {groundingSettingsOpen ? (
-                      <ChevronUp className="w-3.5 h-3.5" />
-                    ) : (
-                      <ChevronDown className="w-3.5 h-3.5" />
-                    )}
-                    Adjust
-                  </button>
-                </div>
+          </div>
+        )}
 
-                <div className="flex flex-wrap gap-2">
-                  {[
-                    { value: "on", label: "On" },
-                    { value: "off", label: "Off" },
-                  ].map((opt) => {
-                    const active = (useGrounding ? "on" : "off") === opt.value;
-                    return (
-                      <button
-                        key={opt.value}
-                        type="button"
-                        onClick={() => setUseGrounding(opt.value === "on")}
-                        aria-pressed={active}
-                        className={`inline-flex items-center gap-2 h-9 px-4 rounded-lg text-sm font-medium transition-all duration-200 border ${
-                          active
-                            ? "bg-primary border-primary text-primary-foreground shadow-md"
-                            : "bg-card border-border text-muted-foreground hover:border-primary hover:text-primary"
-                        }`}
-                      >
-                        {active && <Check className="w-4 h-4" />}
-                        {opt.label}
-                      </button>
-                    );
-                  })}
-                </div>
+        {/* ── Everything else ──
+            One disclosure. Its summary reports the current settings, so the
+            defaults are legible without being nine controls on screen. */}
+        <details className="group border-t border-border pt-4">
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-start">
+            <span className="min-w-0">
+              <span className="ds-small block font-medium text-foreground">
+                Options
+              </span>
+              <span className="ds-meta mt-0.5 block truncate">
+                {[examMode, difficulty, length, useGrounding ? "grounded" : "ungrounded"].join(" · ")}
+              </span>
+            </span>
+            <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-180" />
+          </summary>
 
-                {groundingSettingsOpen && (
-                  <div
-                    className={`animate-fade-in mt-3 rounded-lg border border-border bg-card p-4 space-y-5 transition-opacity duration-200 ${
-                      useGrounding ? "" : "opacity-50 pointer-events-none"
-                    }`}
-                    aria-hidden={!useGrounding}
-                  >
+          <div className="ds-stack-sm mt-5">
+            <PillGroup
+              label="Exam"
+              value={examMode}
+              onChange={setExamMode}
+              options={[
+                { value: "General", label: "General" },
+                { value: "USMLE Step 1", label: "Step 1" },
+                { value: "USMLE Step 2", label: "Step 2" },
+              ]}
+            />
+            <PillGroup
+              label="Depth"
+              value={difficulty}
+              onChange={setDifficulty}
+              options={[
+                { value: "Basic", label: "Basic" },
+                { value: "Medium", label: "Intermediate" },
+                { value: "Advanced", label: "Advanced" },
+              ]}
+            />
+            <PillGroup
+              label="Length"
+              value={length}
+              onChange={setLength}
+              options={[
+                { value: "Concise", label: "Concise" },
+                { value: "Moderate", label: "Moderate" },
+                { value: "Detailed", label: "Detailed" },
+              ]}
+            />
+            <PillGroup
+              label="Angle"
+              value={focus}
+              onChange={setFocus}
+              options={[
+                { value: "Quick Revision", label: "Revision" },
+                { value: "Deep Understanding", label: "Understanding" },
+                { value: "Clinical Reasoning", label: "Reasoning" },
+              ]}
+            />
+            <PillGroup
+              label="Written for"
+              value={persona}
+              onChange={(v) => setPersona(v as Persona)}
+              options={[
+                { value: "student", label: "Student" },
+                { value: "clinician", label: "Clinician" },
+                { value: "expert", label: "Expert" },
+              ]}
+            />
+
+            {/* Grounding: the toggle is the control most people need; the two
+                numbers behind it are for the few who tune retrieval. */}
+            <div>
+              <PillGroup
+                label="Guideline grounding"
+                value={useGrounding ? "on" : "off"}
+                onChange={(v) => setUseGrounding(v === "on")}
+                options={[
+                  { value: "on", label: "On" },
+                  { value: "off", label: "Off" },
+                ]}
+              />
+              {useGrounding && (
+                <details className="mt-1">
+                  <summary className="ds-meta cursor-pointer list-none hover:text-foreground">
+                    Tune retrieval ▾
+                  </summary>
+                  <div className="mt-3 space-y-4 rounded-[var(--r-md)] border border-border p-3.5">
                     <div>
-                      <div className="flex items-center justify-between mb-2">
-                        <span className="text-sm text-muted-foreground">Sources to use</span>
-                        <span className="font-mono text-xs font-semibold text-primary">
+                      <div className="mb-2 flex items-center justify-between">
+                        <span className="ds-small">Sources</span>
+                        <span className="ds-num ds-meta font-medium text-primary">
                           {groundingTopK}
                         </span>
                       </div>
@@ -936,18 +1078,13 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
                         min={1}
                         max={10}
                         step={1}
-                        disabled={!useGrounding}
                         aria-label="Number of guideline sources to retrieve"
                       />
-                      <p className="mt-1.5 text-[11px] leading-relaxed text-muted-foreground">
-                        How many guideline passages to pull in. More context, but weaker matches.
-                      </p>
                     </div>
-
                     <div>
-                      <div className="flex items-center justify-between mb-2">
-                        <span className="text-sm text-muted-foreground">Match strictness</span>
-                        <span className="font-mono text-xs font-semibold text-primary">
+                      <div className="mb-2 flex items-center justify-between">
+                        <span className="ds-small">Match strictness</span>
+                        <span className="ds-num ds-meta font-medium text-primary">
                           {Math.round(groundingThreshold * 100)}%
                         </span>
                       </div>
@@ -957,241 +1094,56 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
                         min={0.4}
                         max={0.9}
                         step={0.05}
-                        disabled={!useGrounding}
                         aria-label="Minimum similarity for a guideline passage to count"
                       />
-                      <p className="mt-1.5 text-[11px] leading-relaxed text-muted-foreground">
-                        How close a passage must be to count. Higher means fewer, better matches —
-                        and more sheets landing ungrounded.
-                      </p>
-                    </div>
-
-                    {/* Memory is independent of grounding — it stays fully
-                        interactive even while the sliders above are dimmed
-                        for useGrounding=false. */}
-                    <div className="opacity-100 pointer-events-auto border-t border-border pt-4">
-                      <label className="inline-flex items-center gap-2 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={useMemory}
-                          onChange={(e) => setUseMemory(e.target.checked)}
-                          className="h-3.5 w-3.5 accent-primary cursor-pointer"
-                        />
-                        <span className="text-sm text-muted-foreground">
-                          Remember my recent questions
-                        </span>
-                      </label>
-                      <p className="mt-1 ml-[22px] text-[11px] leading-relaxed text-muted-foreground">
-                        Lets follow-ups refer back to what you just asked. Resets automatically
-                        every 10 questions.
-                      </p>
                     </div>
                   </div>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* ── Step 3: AI Perspective ── */}
-        <div className="rounded-2xl border border-border bg-card p-6 shadow-sm">
-          <div className="space-y-4">
-            <div className="flex items-center gap-2">
-              <div className="flex items-center justify-center w-7 h-7 rounded-full bg-info text-primary-foreground text-xs font-bold">3</div>
-              <h2 className="text-lg font-serif font-semibold text-foreground">AI Perspective</h2>
-            </div>
-            
-            <div className="grid grid-cols-1 gap-3">
-              {[
-                {
-                  id: "student" as Persona,
-                  label: "Student",
-                  sub: "Build intuition and memory hooks for exam prep",
-                  Icon: BookOpen,
-                  color: "blue",
-                },
-                {
-                  id: "clinician" as Persona,
-                  label: "Clinician",
-                  sub: "Apply to patient care decisions and clinical practice",
-                  Icon: Stethoscope,
-                  color: "teal",
-                },
-                {
-                  id: "expert" as Persona,
-                  label: "Expert",
-                  sub: "Deep mechanisms, nuance, and edge cases",
-                  Icon: Brain,
-                  color: "violet",
-                },
-              ].map(({ id, label, sub, Icon, color }) => {
-                const active = persona === id;
-                return (
-                  <button
-                    key={id}
-                    type="button"
-                    onClick={() => !loading && generateWithPersona(id)}
-                    disabled={loading}
-                    aria-pressed={active}
-                    className={`relative group w-full flex items-start gap-4 p-4 rounded-xl text-left transition-all duration-200 ${
-                      active
-                        ? "border-2 shadow-md " + (color === "blue" ? "border-success bg-success-soft" : color === "teal" ? "border-primary bg-primary/10" : "border-info bg-info-soft")
-                        : "border border-border bg-card hover:border-input hover:shadow-sm"
-                    } ${loading ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
-                  >
-                    {active && (
-                      <div className={`absolute -top-2 -right-2 w-6 h-6 rounded-full flex items-center justify-center ${
-                        color === "blue" ? "bg-success" : color === "teal" ? "bg-primary" : "bg-info"
-                      }`}>
-                        <Check className="w-4 h-4 text-primary-foreground" />
-                      </div>
-                    )}
-                    <span className={`flex items-center justify-center w-10 h-10 rounded-lg flex-shrink-0 transition-colors ${
-                      active
-                        ? (color === "blue" ? "bg-success" : color === "teal" ? "bg-primary" : "bg-info")
-                        : "bg-secondary"
-                    }`}>
-                      {loading && active ? (
-                        <Loader2 className="w-5 h-5 text-primary-foreground animate-spin" />
-                      ) : (
-                        <Icon className={`w-5 h-5 ${
-                          active ? "text-primary-foreground" : "text-muted-foreground"
-                        }`} />
-                      )}
-                    </span>
-                    <div className="flex-1 min-w-0">
-                      <p className={`text-sm font-semibold leading-tight mb-1 ${
-                        active
-                          ? (color === "blue" ? "text-success" : color === "teal" ? "text-primary" : "text-info")
-                          : "text-foreground"
-                      }`}>
-                        {loading && active ? "Generating…" : label}
-                      </p>
-                      <p className="text-xs text-muted-foreground leading-relaxed">
-                        {sub}
-                      </p>
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-
-        {/* ── Generate CTA ── */}
-        <Button
-          onClick={() => generate()}
-          disabled={loading || !notes.trim()}
-          className="w-full h-12 rounded-xl bg-primary text-primary-foreground font-semibold text-base shadow-lg hover:shadow-xl transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-        >
-          <Sparkles className="w-5 h-5" />
-          Generate Study Sheet
-          <ArrowRight className="w-5 h-5" />
-        </Button>
-
-        {pro && (
-          <div className="flex items-center justify-center gap-2 rounded-xl border border-primary/30 bg-primary/10 px-4 py-2.5">
-            <span className="h-1.5 w-1.5 rounded-full bg-primary" />
-            <p className="text-sm font-medium text-primary">
-              Unlimited access active
-            </p>
-          </div>
-        )}
-
-        {!pro && (
-          <div className="text-center text-xs text-muted-foreground space-y-1">
-            {isSheetLimited ? (
-              <span className="text-warning font-medium block">
-                Daily limit reached ·{" "}
-                <button
-                  type="button"
-                  className="underline hover:text-warning transition-colors"
-                  onClick={() => setGoProOpen(true)}
-                >
-                  Go Pro for Claude + unlimited
-                </button>
-              </span>
-            ) : (
-              <span>{sheetCount} / {MAX_DAILY_SHEETS} uses today · Resets at midnight</span>
-            )}
-            {isPremiumHookActive ? (
-              <span className="text-info font-medium block">
-                ✦ {premiumRemaining} Claude generation{premiumRemaining !== 1 ? "s" : ""} left ·{" "}
-                <button
-                  type="button"
-                  className="underline hover:text-info transition-colors"
-                  onClick={() => setGoProOpen(true)}
-                >
-                  Go Pro for unlimited Claude
-                </button>
-              </span>
-            ) : !isSheetLimited ? (
-              <span className="text-muted-foreground block">
-                Powered by GPT-OSS 20B
-              </span>
-            ) : null}
-          </div>
-        )}
-        {pro && (
-          <div className="rounded-xl border border-border bg-secondary px-4 py-3 space-y-2">
-            <p className="text-xs font-medium text-muted-foreground text-center">
-              AI Model
-            </p>
-            <div className="flex items-center justify-center">
-              <div className="inline-flex items-center rounded-lg bg-card p-0.5 shadow-sm">
-                <button
-                  type="button"
-                  onClick={() => setPreferredModel("gpt-oss")}
-                  disabled={modelSaving || modelLoading}
-                  className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
-                    !modelLoading && preferredModel === "gpt-oss"
-                      ? "bg-card text-foreground shadow-sm"
-                      : "text-muted-foreground hover:text-foreground"
-                    }`}
-                  >
-                    GPT-OSS 20B
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setPreferredModel("claude")}
-                    disabled={modelSaving || modelLoading}
-                    className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
-                      !modelLoading && preferredModel === "claude"
-                        ? "bg-card text-foreground shadow-sm"
-                        : "text-muted-foreground hover:text-foreground"
-                    }`}
-                  >
-                    Claude Haiku 4.5
-                  </button>
-                </div>
-              </div>
-              {modelSaving && (
-                <p className="text-[11px] text-muted-foreground text-center">Saving preference…</p>
+                </details>
               )}
             </div>
-          )}
 
-        {recentTopics.length > 0 && (
-          <div className="pt-4 border-t border-border mt-4">
-            <p className="flex items-center gap-1.5 font-mono text-[11px] font-medium tracking-widest uppercase text-muted-foreground mb-2 pt-2">
-              <History className="w-3 h-3" />
-              Recent Topics
-            </p>
-            <div className="flex flex-wrap gap-2 max-h-16 overflow-y-auto">
-              {recentTopics.map((topic) => (
-                <button
-                  key={topic}
-                  type="button"
-                  disabled={loading}
-                  onClick={() => setNotes(topic)}
-                  className="truncate max-w-full px-2.5 py-1 rounded-lg border border-border bg-secondary text-muted-foreground text-xs font-medium hover:border-primary hover:text-primary transition-all duration-200 disabled:opacity-50 disabled:cursor-default"
-                >
-                  {topic}
-                </button>
-              ))}
-            </div>
+            <label className="flex cursor-pointer items-start gap-2.5 border-t border-border pt-4">
+              <input
+                type="checkbox"
+                checked={useMemory}
+                onChange={(e) => setUseMemory(e.target.checked)}
+                className="mt-0.5 h-3.5 w-3.5 accent-primary"
+              />
+              <span>
+                <span className="ds-small block text-foreground">
+                  Remember my recent questions
+                </span>
+                <span className="ds-meta mt-0.5 block">
+                  Lets follow-ups refer back. Resets every 10 questions.
+                </span>
+              </span>
+            </label>
+
+            {pro && (
+              <div className="border-t border-border pt-4">
+                <p className="ds-label mb-2">Model</p>
+                <div className="flex gap-2">
+                  {(["gpt-oss", "claude"] as const).map((m) => (
+                    <button
+                      key={m}
+                      type="button"
+                      onClick={() => setPreferredModel(m)}
+                      disabled={modelSaving || modelLoading}
+                      aria-pressed={!modelLoading && preferredModel === m}
+                      className={`rounded-[var(--r-sm)] border px-3 py-1.5 text-[13px] transition-colors ${
+                        !modelLoading && preferredModel === m
+                          ? "border-primary bg-primary/10 text-primary"
+                          : "border-border text-muted-foreground hover:text-foreground"
+                      }`}
+                    >
+                      {m === "claude" ? "Claude Haiku 4.5" : "GPT-OSS 20B"}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
-        )}
+        </details>
       </div>
   );
 
@@ -1411,40 +1363,28 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
       Configure
     </button>
 
-    {/* ── Tablet-only: slide-out configurator drawer ── */}
-    <div
-      className={`hidden md:max-lg:block fixed inset-0 z-50 ${
-        configDrawerOpen ? "" : "pointer-events-none"
-      }`}
-      aria-hidden={!configDrawerOpen}
+    {/* ── Tablet-only: slide-out configurator drawer ──
+        Radix Sheet, not a hand-rolled panel. The old version stayed mounted and
+        merely translated off-screen, marked `aria-hidden` while every control
+        inside it was still focusable — a keyboard user could tab into a subtree
+        the screen reader was told did not exist. Radix unmounts on close, traps
+        focus while open, restores it after, and handles Escape. ── */}
+    <Sheet
+      open={configDrawerOpen && inTabletBand}
+      onOpenChange={setConfigDrawerOpen}
     >
-      <div
-        className={`absolute inset-0 bg-black/50 motion-safe:transition-opacity motion-safe:duration-200 ${
-          configDrawerOpen ? "opacity-100" : "opacity-0"
-        }`}
-        onClick={() => setConfigDrawerOpen(false)}
-      />
-      <div
-        className={`absolute inset-y-0 left-0 w-[320px] overflow-y-auto bg-card border-r border-border p-4 motion-safe:transition-transform motion-safe:duration-[250ms] motion-safe:ease-out ${
-          configDrawerOpen ? "translate-x-0" : "-translate-x-full"
-        }`}
-      >
-        <div className="flex items-center justify-between pb-3">
-          <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+      <SheetContent side="left" className="w-[320px] overflow-y-auto p-4">
+        <SheetHeader className="text-left">
+          <SheetTitle className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
             Configure
-          </span>
-          <button
-            type="button"
-            onClick={() => setConfigDrawerOpen(false)}
-            className="p-1 rounded-md text-muted-foreground hover:text-foreground transition-colors"
-            aria-label="Close configurator"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
+          </SheetTitle>
+          <SheetDescription className="sr-only">
+            Choose a topic and generation settings.
+          </SheetDescription>
+        </SheetHeader>
         {configurator}
-      </div>
-    </div>
+      </SheetContent>
+    </Sheet>
 
     <AuthModal open={authModalOpen} onOpenChange={setAuthModalOpen} />
     <GoProModal open={goProOpen} onOpenChange={setGoProOpen} />
