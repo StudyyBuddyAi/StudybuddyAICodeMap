@@ -522,12 +522,7 @@ function App() {
         <section id="features" className="section tinted-section">
           <div className="container">
             <SectionHeading eyebrow="Core features" title={<>Clinical AI for medical education, built for <em>MENA.</em></>} children="Every feature exists because a student lost hours to the problem it solves." />
-            <Reveal className="features-grid">
-              {FEATURES.map((feature, index) => {
-                const Icon = feature.icon;
-                return <article className="feature-card" key={feature.title} data-testid={`card-feature-${index + 1}`}><span className="feature-icon"><Icon size={19} /></span><h3>{feature.title}</h3><p>{feature.desc}</p><div className="tag-row">{feature.tags.map((tag) => <span key={tag}>{tag}</span>)}</div></article>;
-              })}
-            </Reveal>
+
             <Reveal>
               <ResponsiveCarousel
                 className="features-carousel-wrapper"
