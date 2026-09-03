@@ -17,6 +17,10 @@ import {
   HeartPulse,
   History,
   Loader2,
+  PanelLeftClose,
+  PanelLeftOpen,
+  PanelRightClose,
+  PanelRightOpen,
   Play,
   Search,
   Settings2,
@@ -421,6 +425,13 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
   const [goProOpen, setGoProOpen] = useState(false);
   // Tablet (768–1023px) slide-out configurator drawer
   const [configDrawerOpen, setConfigDrawerOpen] = useState(false);
+  // Desktop (lg+) side panes. Both start open; the reader collapses them once
+  // a sheet is on screen and the document takes the reclaimed width.
+  const [configOpen, setConfigOpen] = useState(true);
+  const [navOpen, setNavOpen] = useState(true);
+  // Step 2 is a disclosure like "Adjust" beneath it: closed by default, since
+  // the defaults suit most sheets and the topic box is what a first visit needs.
+  const [customizeOpen, setCustomizeOpen] = useState(false);
   const [recentTopics, setRecentTopics] = useState<string[]>(() => {
     try {
       const stored = JSON.parse(localStorage.getItem(RECENT_TOPICS_KEY) ?? "[]");
@@ -860,12 +871,32 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
         {/* ── Step 2: Customize ── */}
         <div className="rounded-[26px] border border-[color:var(--color-border)] bg-[color:var(--color-card)] p-5 shadow-[0_18px_40px_rgba(15,23,42,0.04)]">
           <div className="space-y-4">
-            <div className="flex items-center gap-2.5">
+            <button
+              type="button"
+              onClick={() => setCustomizeOpen((v) => !v)}
+              aria-expanded={customizeOpen}
+              aria-controls="sheet-customize"
+              className="flex w-full items-center gap-2.5 text-left"
+            >
               <div className="flex h-7 w-7 items-center justify-center rounded-full border border-[color:var(--color-border)] bg-[color:var(--color-panel)] text-[10px] font-bold text-[color:var(--color-muted-foreground)]">2</div>
               <h2 className="[font-family:var(--app-font-serif)] text-lg font-medium tracking-[-0.02em] text-[color:var(--color-foreground)]">Customize</h2>
-            </div>
-            
-            <div className="space-y-4">
+              <span className="ml-auto flex min-w-0 items-center gap-2">
+                {/* Current picks, so a closed panel still says what it will do. */}
+                {!customizeOpen && (
+                  <span className="hidden truncate text-[11px] text-muted-foreground sm:block">
+                    {examMode} · {difficulty} · {length}
+                  </span>
+                )}
+                {customizeOpen ? (
+                  <ChevronUp className="h-4 w-4 shrink-0 text-muted-foreground" />
+                ) : (
+                  <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+                )}
+              </span>
+            </button>
+
+            {customizeOpen && (
+            <div id="sheet-customize" className="animate-fade-in space-y-4">
               <PillGroup
                 label="Exam Mode"
                 value={examMode}
@@ -1030,6 +1061,7 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
                 )}
               </div>
             </div>
+            )}
           </div>
         </div>
 
@@ -1238,16 +1270,41 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
   return (
     <>
     <div className="flex flex-col gap-6 lg:flex-row lg:gap-0 lg:items-start">
-      {/* ── Left pane: configurator (35% on desktop, drawer on tablet) ── */}
-      <div className="min-w-0 md:max-lg:hidden lg:sticky lg:top-6 lg:self-start lg:w-[35%] lg:min-w-[320px] lg:max-w-[480px] lg:shrink-0 lg:pr-5">
+      {/* ── Left pane: configurator (35% on desktop, drawer on tablet).
+          On desktop it collapses to zero width so the document, which is
+          `lg:flex-1`, grows into the space — width animates, nothing is merely
+          display:none'd while the column keeps its size. Below lg the pane
+          always stacks above the document and the toggle is hidden. ── */}
+      <div
+        id="sheet-configurator"
+        className={`min-w-0 md:max-lg:hidden lg:sticky lg:top-6 lg:self-start lg:shrink-0 lg:overflow-hidden motion-safe:lg:transition-[width,opacity] motion-safe:lg:duration-300 motion-safe:lg:ease-out ${
+          configOpen
+            ? "lg:w-[35%] lg:min-w-[320px] lg:max-w-[480px] lg:pr-5 lg:opacity-100"
+            : "lg:invisible lg:w-0 lg:min-w-0 lg:max-w-0 lg:pr-0 lg:opacity-0"
+        }`}
+      >
         {configurator}
       </div>
 
-      {/* ── 1px divider between config and document ── */}
-      <div
-        aria-hidden
-        className="hidden lg:block lg:w-px lg:shrink-0 lg:self-stretch bg-border"
-      />
+      {/* ── Toggle rail between config and document. Carries the 1px divider
+          the old spacer drew, plus the collapse control. ── */}
+      <div className="hidden lg:flex lg:w-9 lg:shrink-0 lg:flex-col lg:items-center lg:self-stretch lg:border-l lg:border-border">
+        <button
+          type="button"
+          onClick={() => setConfigOpen((v) => !v)}
+          aria-expanded={configOpen}
+          aria-controls="sheet-configurator"
+          aria-label={configOpen ? "Hide configuration" : "Show configuration"}
+          title={configOpen ? "Hide configuration" : "Show configuration"}
+          className="sticky top-6 mt-1 flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+        >
+          {configOpen ? (
+            <PanelLeftClose className="h-4 w-4" />
+          ) : (
+            <PanelLeftOpen className="h-4 w-4" />
+          )}
+        </button>
+      </div>
 
       {/* ── Middle pane: living document (fluid, fills its lane) ── */}
       <div ref={outputRef} className="min-w-0 lg:flex-1 lg:px-8">
@@ -1424,18 +1481,46 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
           back from the document just as the reader settles into it. */}
       {(loading || sheet) && (
         <>
+          {/* Toggle rail sits between the document and the navigator, so the
+              navigator is the outermost column and slides off the right edge. */}
+          <div className="hidden 2xl:flex 2xl:w-9 2xl:shrink-0 2xl:flex-col 2xl:items-center 2xl:self-stretch 2xl:border-l 2xl:border-border">
+            <button
+              type="button"
+              onClick={() => setNavOpen((v) => !v)}
+              aria-expanded={navOpen}
+              aria-controls="sheet-section-nav"
+              aria-label={navOpen ? "Hide section list" : "Show section list"}
+              title={navOpen ? "Hide section list" : "Show section list"}
+              className="sticky top-6 mt-1 flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+            >
+              {navOpen ? (
+                <PanelRightClose className="h-4 w-4" />
+              ) : (
+                <PanelRightOpen className="h-4 w-4" />
+              )}
+            </button>
+          </div>
+
+          {/* Width goes to zero and the box nudges rightward as it fades, so
+              it reads as leaving through the right edge. The inner wrapper
+              keeps a fixed width so the list doesn't reflow mid-animation. */}
           <div
-            aria-hidden
-            className="hidden 2xl:block 2xl:w-px 2xl:shrink-0 2xl:self-stretch bg-border"
-          />
-          <div className="hidden 2xl:block 2xl:w-[240px] 2xl:shrink-0 2xl:sticky 2xl:top-6 2xl:self-start 2xl:pl-6">
-            {/* A stable object, not a fresh literal — the observer effect keys
-                off `sheet`, so a new identity each render would rebind it. */}
-            <SheetSectionNav
-              key={generationId}
-              sheet={sheet ?? EMPTY_SHEET}
-              readyKeys={loading ? streamedKeys : undefined}
-            />
+            id="sheet-section-nav"
+            className={`hidden 2xl:block 2xl:shrink-0 2xl:sticky 2xl:top-6 2xl:self-start 2xl:overflow-hidden motion-safe:2xl:transition-[width,opacity,transform] motion-safe:2xl:duration-300 motion-safe:2xl:ease-out ${
+              navOpen
+                ? "2xl:w-[240px] 2xl:translate-x-0 2xl:opacity-100"
+                : "2xl:invisible 2xl:w-0 2xl:translate-x-6 2xl:opacity-0"
+            }`}
+          >
+            <div className="w-[240px] pl-6">
+              {/* A stable object, not a fresh literal — the observer effect keys
+                  off `sheet`, so a new identity each render would rebind it. */}
+              <SheetSectionNav
+                key={generationId}
+                sheet={sheet ?? EMPTY_SHEET}
+                readyKeys={loading ? streamedKeys : undefined}
+              />
+            </div>
           </div>
         </>
       )}
