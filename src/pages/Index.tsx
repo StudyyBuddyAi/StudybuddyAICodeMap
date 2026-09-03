@@ -389,7 +389,7 @@ function App() {
           {NAV_LINKS.map((link) => (
             <a href={link.href} key={link.href} onClick={closeMenu} data-testid={`link-mobile-${link.label.toLowerCase().split(" ").join("-")}`}>{link.label}<ArrowUpRight size={14} /></a>
           ))}
-          <ButtonLink href="/dashboard?start=sheet" onClick={() => { closeMenu(); startStudying(); }} testId="button-mobile-early-access">Start studying <ArrowRight size={15} /></ButtonLink>
+          <ButtonLink  href="/dashboard?start=sheet" onClick={() => { closeMenu(); startStudying(); }}  testId="button-mobile-early-access">Start studying <ArrowRight size={15} /></ButtonLink>
         </nav>
       </header>
 
@@ -462,7 +462,7 @@ function App() {
           </div>
         </section>
 
-        <section className="dark-band">
+        {/* <section className="dark-band">
           <div className="dark-grid" aria-hidden="true" />
           <Reveal className="container dark-band-inner">
             <Eyebrow dark>One workflow, every subject</Eyebrow>
@@ -470,9 +470,9 @@ function App() {
             <p>Growing across MENA — medical students using StudyBuddy AI to study smarter, practice better, and walk into exams with confidence.</p>
             <div className="discipline-list">{["Medicine", "Surgery", "Pharmacology", "Pathology", "Microbiology", "Anatomy"].map((discipline) => <span key={discipline}>{discipline}</span>)}</div>
           </Reveal>
-        </section>
+        </section> */}
 
-        <section className="section stories-section">
+        {/* <section className="section stories-section">
           <div className="container">
             <SectionHeading eyebrow="Student-backed stories" title={<>Trusted by medical students across <em>MENA.</em></>} center />
             <Reveal>
@@ -493,7 +493,7 @@ function App() {
               </ResponsiveCarousel>
             </Reveal>
           </div>
-        </section>
+        </section> */}
 
         <section className="section platform-section">
           <div className="container">
@@ -521,7 +521,7 @@ function App() {
         {/* ------- features start--------- */}
         <section id="features" className="section tinted-section">
           <div className="container">
-            <SectionHeading eyebrow="Core features" title={<>Clinical AI for medical education, built for <em>MENA.</em></>} children="Every feature exists because a student lost hours to the problem it solves." />
+            <SectionHeading eyebrow="Core features" title={<>Clinical AI for medical education, built for <em>MENA.</em></>} children="Every feature exists because a student lost hours to the problem it solves." center/>
 
             <Reveal>
               <ResponsiveCarousel
@@ -541,7 +541,7 @@ function App() {
         {/* ------- qbank start--------- */}
         <section id="qbank" className="section qbank-section">
           <div className="container">
-            <SectionHeading eyebrow="QBank" title={<>High-yield questions, by <em>subject.</em></>} children="USMLE-style vignettes with domain filters, session resume, and an explanation for every distractor." />
+            <SectionHeading eyebrow="QBank" title={<>High-yield questions, by <em>subject.</em></>} children="USMLE-style vignettes with domain filters, session resume, and an explanation for every distractor." center/>
             <div className="filter-row" role="tablist" aria-label="Filter QBank subjects">
               {SUBJECT_FILTERS.map((subject) => <button type="button" role="tab" aria-selected={filter === subject} className={`filter-button ${filter === subject ? "active" : ""}`} onClick={() => setFilter(subject)} key={subject} data-testid={`button-filter-${subject.toLowerCase()}`}>{subject}</button>)}
             </div>

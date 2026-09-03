@@ -1,6 +1,14 @@
 import { useState } from "react";
 import { useLocation } from "react-router-dom";
-import { PenLine, Sparkles, BookOpenCheck, Clock3, Target } from "lucide-react";
+import {
+  ArrowRight,
+  BookOpenCheck,
+  BrainCircuit,
+  Clock3,
+  PenLine,
+  Sparkles,
+  Target,
+} from "lucide-react";
 import DashboardLayout from "@/components/dashboard/DashboardLayout";
 import SheetGenerator from "@/components/SheetGenerator";
 import "@/index.css";
@@ -10,19 +18,19 @@ const HOW_IT_WORKS = [
   {
     label: "Step 1",
     title: "Enter a topic",
-    description: "Type any medical topic, or paste your own notes / a PDF.",
+    description: "Type any medical topic, paste notes, or drop a PDF and let the system map it instantly.",
     icon: PenLine,
   },
   {
     label: "Step 2",
     title: "AI builds the sheet",
-    description: "Structured sections generate live — pathophys to management.",
-    icon: Sparkles,
+    description: "Your clinical summary is generated live with structure, mechanisms, diagnosis, and management.",
+    icon: BrainCircuit,
   },
   {
     label: "Step 3",
     title: "Study & review",
-    description: "Read, enhance, or send straight into a QBank session.",
+    description: "Read, refine, and move directly into a focused QBank session without losing momentum.",
     icon: BookOpenCheck,
   },
 ] as const;
@@ -74,48 +82,42 @@ const Sheets = () => {
         </div>
  
         {/* How it works — makes the page self-explanatory at a glance */}
-        <div
-          className="grid grid-cols-1 gap-3 rounded-2xl border p-4 sm:grid-cols-3"
-          style={{
-            borderColor: "var(--color-border)",
-            background: "var(--color-panel)",
-          }}
-        >
-          {HOW_IT_WORKS.map(({ label, title, description, icon: Icon }) => (
-            <div key={title} className="flex items-start gap-3 rounded-xl p-2">
-              <div
-                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg"
-                style={{
-                  background: "var(--color-foreground)",
-                  color: "var(--color-accent)",
-                }}
-              >
-                <Icon size={18} strokeWidth={2} />
+        {/* steps */}
+        <div className="relative">
+          <div className="absolute inset-x-10 top-7 hidden h-px bg-gradient-to-r from-transparent via-[color:var(--color-accent)]/60 to-transparent sm:block" />
+
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+            {HOW_IT_WORKS.map(({ label, title, description, icon: Icon }, index) => (
+              <div key={title} className="relative z-10">
+                <div className="group flex items-center gap-4 rounded-[28px] border border-[color:var(--color-border)] bg-[color:var(--color-card)] p-4 shadow-[0_12px_30px_rgba(15,23,42,0.06)] transition-all duration-200 hover:-translate-y-1 hover:border-[color:var(--color-accent)]/70 hover:shadow-[0_18px_38px_rgba(19,128,134,0.12)] sm:flex-col sm:items-center sm:text-center sm:p-5">
+                  <div className="relative flex h-14 w-14 shrink-0 items-center justify-center rounded-full border-4 border-[color:var(--color-card)] bg-[color:var(--color-foreground)] text-[color:var(--color-accent)] shadow-[0_10px_18px_rgba(15,23,42,0.12)]">
+                    <span className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-[color:var(--color-accent)] text-[9px] font-bold text-[color:var(--color-background)] shadow-sm">
+                      {index + 1}
+                    </span>
+                    <Icon size={20} strokeWidth={2.2} />
+                  </div>
+
+                  <div className="min-w-0 flex-1 sm:flex-none">
+                    <div className="mb-2 inline-flex items-center gap-1.5">
+                      <span className="[font-family:var(--app-font-mono)] text-[10px] font-medium uppercase tracking-[0.14em] text-[color:var(--color-accent)]">
+                        {label}
+                      </span>
+                      <ArrowRight size={12} className="text-[color:var(--color-muted-foreground)] transition-transform duration-200 group-hover:translate-x-0.5" />
+                    </div>
+
+                    <h3 className="[font-family:var(--app-font-serif)] text-lg font-medium leading-snug tracking-[-0.02em] text-[color:var(--color-foreground)]">
+                      {title}
+                    </h3>
+                    <p className="mt-2 text-xs leading-relaxed text-[color:var(--color-muted-foreground)]">
+                      {description}
+                    </p>
+                  </div>
+                </div>
               </div>
-              <div>
-                <p
-                  className="[font-family:var(--app-font-mono)] text-[10px] font-medium uppercase tracking-[0.08em]"
-                  style={{ color: "var(--color-accent)" }}
-                >
-                  {label}
-                </p>
-                <h3
-                  className="mt-0.5 text-sm font-bold"
-                  style={{ color: "var(--color-foreground)" }}
-                >
-                  {title}
-                </h3>
-                <p
-                  className="mt-1 text-xs leading-relaxed"
-                  style={{ color: "var(--color-muted-foreground)" }}
-                >
-                  {description}
-                </p>
-              </div>
-            </div>
-          ))}
+            ))}
+          </div>
         </div>
- 
+        {/* steps */}
         {/* Quick start — removes blank-page hesitation */}
         <div className="flex flex-wrap items-center gap-2">
           <span

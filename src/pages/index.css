@@ -189,11 +189,28 @@ h1, h2, h3 { letter-spacing: -0.035em; }
 .ticker-track span:nth-of-type(3n + 1) { color: var(--color-accent); }
 .ticker-track i { color: color-mix(in srgb, var(--color-primary-foreground) 24%, transparent); font-style: normal; }
 .section { padding: 110px 0; }
-.section-heading { max-width: 650px; margin-bottom: 53px; }
-.section-heading-center { margin-inline: auto; text-align: center; }
-.section-heading h2 { margin-top: 19px; font: 500 clamp(32px, 4vw, 51px)/1.08 var(--app-font-serif); }
-.section-heading p { max-width: 590px; margin-top: 16px; color: var(--color-muted-foreground); font-size: 15px; line-height: 1.7; }
+
+.section-heading { 
+  max-width: 650px; 
+  margin-bottom: 53px; 
+}
+.section-heading-center { 
+  margin-inline: auto; 
+  text-align: center; 
+}
+.section-heading h2 { 
+  margin-top: 19px; 
+  font: 500 clamp(32px, 4vw, 51px)/1.08 var(--app-font-serif); 
+}
+.section-heading p { 
+  max-width: 590px; 
+  margin-top: 16px; 
+  color: var(--color-muted-foreground); 
+  font-size: 15px; 
+  line-height: 1.7; 
+}
 .section-heading-center p { margin-inline: auto; }
+
 .reveal { transition: opacity .75s ease, transform .75s cubic-bezier(.22, .7, .25, 1); }
 .steps-grid { display: grid; grid-template-columns: repeat(4, 1fr); overflow: hidden; border: 1px solid var(--color-border); border-radius: 11px; }
 .step-card { min-height: 270px; padding: 27px 23px; border-right: 1px solid var(--color-border); background: color-mix(in srgb, var(--color-background) 78%, var(--color-card)); position: relative; transition: background .25s ease; }
