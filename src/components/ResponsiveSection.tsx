@@ -29,7 +29,10 @@ const features = [
 ];
 
 const Icon = ({ name }: { name: string }) => {
-  const common = { width: 24, height: 24, fill: "none", stroke: "currentColor", strokeWidth: 1.75, strokeLinecap: "round", strokeLinejoin: "round" } as any;
+  // Annotated rather than cast: a bare object literal widens strokeLinecap /
+  // strokeLinejoin to `string`, which the SVG prop unions reject — that is what
+  // the `as any` here was hiding.
+  const common: React.SVGProps<SVGSVGElement> = { width: 24, height: 24, fill: "none", stroke: "currentColor", strokeWidth: 1.75, strokeLinecap: "round", strokeLinejoin: "round" };
   switch (name) {
     case "beaker":
       return (
