@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll } from "vitest";
-import { act, render, screen, type RenderResult } from "@testing-library/react";
+import { act, fireEvent, render, screen, type RenderResult } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import OutputSection from "./OutputSection";
@@ -138,6 +138,104 @@ describe("OutputSection streaming", () => {
     expect(screen.queryByLabelText("Writing section")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Waiting")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /save/i })).toBeEnabled();
+  });
+
+  it("resets Save for a new generation without resetting during updates", async () => {
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    let result!: RenderResult;
+    await act(async () => {
+      result = render(
+        <QueryClientProvider client={client}>
+          <MemoryRouter>
+            <OutputSection
+              output={JSON.stringify(SHEET)}
+              inputText="Heart failure"
+              generationId={1}
+            />
+          </MemoryRouter>
+        </QueryClientProvider>
+      );
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /^save$/i }));
+    });
+    expect(screen.getByRole("button", { name: /saved/i })).toBeDisabled();
+
+    await act(async () => {
+      result.rerender(
+        <QueryClientProvider client={client}>
+          <MemoryRouter>
+            <OutputSection
+              output={JSON.stringify({ ...SHEET, overview: "Updated overview" })}
+              inputText="Heart failure"
+              generationId={1}
+            />
+          </MemoryRouter>
+        </QueryClientProvider>
+      );
+    });
+    expect(screen.getByRole("button", { name: /saved/i })).toBeDisabled();
+
+    await act(async () => {
+      result.rerender(
+        <QueryClientProvider client={client}>
+          <MemoryRouter>
+            <OutputSection
+              output={JSON.stringify({ ...SHEET, topic: "Asthma" })}
+              inputText="Asthma"
+              generationId={2}
+            />
+          </MemoryRouter>
+        </QueryClientProvider>
+      );
+    });
+    expect(screen.getByRole("button", { name: /^save$/i })).toBeEnabled();
+  });
+
+  it("clears enhancements from the previous sheet on a new generation", async () => {
+    const previousSheet: GeneratedSheet = {
+      ...SHEET,
+      enhancements: {
+        "expand:reduced output": {
+          mode: "expand",
+          sourceText: "reduced output",
+          result: "Previous topic expansion",
+          createdAt: new Date().toISOString(),
+        },
+      },
+    };
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    let result!: RenderResult;
+    await act(async () => {
+      result = render(
+        <QueryClientProvider client={client}>
+          <MemoryRouter>
+            <OutputSection
+              output={JSON.stringify(previousSheet)}
+              generationId={1}
+            />
+          </MemoryRouter>
+        </QueryClientProvider>
+      );
+    });
+    expect(document.querySelector('[title="Re-open enhancement"]')).toBeInTheDocument();
+
+    await act(async () => {
+      result.rerender(
+        <QueryClientProvider client={client}>
+          <MemoryRouter>
+            <OutputSection output={JSON.stringify(SHEET)} generationId={2} />
+          </MemoryRouter>
+        </QueryClientProvider>
+      );
+    });
+    expect(document.querySelector('[title="Re-open enhancement"]')).not.toBeInTheDocument();
+    expect(screen.queryByText("Previous topic expansion")).not.toBeInTheDocument();
   });
 
   it("survives a partial sheet whose later fields are still empty", async () => {

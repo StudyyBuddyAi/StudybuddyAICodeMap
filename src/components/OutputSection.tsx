@@ -176,6 +176,7 @@ interface OutputSectionProps {
   userId?: string | null;
   isAnonymous?: boolean;
   sheetId?: string;
+  generationId?: number;
   /** True while the sheet is still arriving over the stream. */
   isStreaming?: boolean;
   /** Sections safe to render mid-stream. Ignored unless `isStreaming`. */
@@ -996,6 +997,7 @@ const OutputSection = ({
   userId,
   isAnonymous,
   sheetId,
+  generationId,
   isStreaming = false,
   streamedKeys,
 }: OutputSectionProps) => {
@@ -1033,6 +1035,38 @@ const OutputSection = ({
       })
     );
   });
+
+  useEffect(() => {
+    if (generationId === undefined) return;
+    if (!isJsonSheet(output)) {
+      setActiveEnhancements({});
+      return;
+    }
+
+    const parsed = parseStoredSheet(output);
+    if (!parsed?.enhancements) {
+      setActiveEnhancements({});
+      return;
+    }
+
+    setActiveEnhancements(
+      Object.fromEntries(
+        Object.entries(parsed.enhancements).map(([key, enhancement]) => {
+          const resolved = resolveSavedAnchor(parsed, enhancement.sourceText);
+          return [
+            key,
+            {
+              sourceText: enhancement.sourceText,
+              kind: enhancement.mode,
+              anchor: resolved ?? "referenceNote:end",
+              isCollapsed: resolved !== null,
+              savedResult: enhancement.result,
+            } as ActiveEnhancement,
+          ];
+        })
+      )
+    );
+  }, [generationId]);
 
   const sheet: GeneratedSheet | null = isJsonSheet(output) ? parseStoredSheet(output) : null;
   if (sheet && sheet.overview === undefined && (sheet as { summary?: string }).summary !== undefined) {
@@ -1251,7 +1285,12 @@ const OutputSection = ({
       <div ref={ref} className="print-document space-y-4">
         <div className="animate-fade-in flex items-center justify-between">
           {modeInfo && <ModeInfoBar modeInfo={modeInfo} />}
-          <SaveButton input={inputText || ""} output={output} modeInfo={modeInfo} />
+          <SaveButton
+            key={generationId}
+            input={inputText || ""}
+            output={output}
+            modeInfo={modeInfo}
+          />
         </div>
 
         {sections.map(({ title, content }, idx) => {
@@ -1434,6 +1473,7 @@ const OutputSection = ({
       <div className="animate-fade-in flex items-center justify-between">
         {modeInfo && <ModeInfoBar modeInfo={modeInfo} />}
         <SaveButton
+          key={generationId}
           input={inputText || ""}
           output={output}
           modeInfo={modeInfo}

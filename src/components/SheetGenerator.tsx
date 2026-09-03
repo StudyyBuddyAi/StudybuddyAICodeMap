@@ -156,9 +156,13 @@ function sectionHasContent(sheet: GeneratedSheet, key: string): boolean {
 const SheetSectionNav = ({
   sheet,
   readyKeys,
+  isOpen,
+  onToggle,
 }: {
   sheet: GeneratedSheet;
   readyKeys?: string[];
+  isOpen: boolean;
+  onToggle: () => void;
 }) => {
   const streaming = readyKeys !== undefined;
   const items = streaming
@@ -200,10 +204,26 @@ const SheetSectionNav = ({
 
   return (
     <div className="pt-1">
-      <p className="font-mono text-[11px] font-medium tracking-widest uppercase text-muted-foreground mb-3 pl-3">
-        On this sheet
-      </p>
-      <nav className="flex flex-col">
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={isOpen}
+        aria-label={isOpen ? "Close sheet navigation" : "Open sheet navigation"}
+        title={isOpen ? "Close sheet navigation" : "Open sheet navigation"}
+        className={`group flex items-center gap-2 rounded-lg border border-border bg-card text-left text-muted-foreground shadow-sm transition-all duration-200 hover:border-primary/50 hover:bg-primary/5 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${
+          isOpen ? "mb-3 px-2.5 py-1.5" : "mx-auto h-9 w-9 justify-center"
+        }`}
+      >
+        <ChevronRight
+          className={`h-4 w-4 shrink-0 transition-transform duration-200 group-hover:scale-110 ${isOpen ? "rotate-180" : ""}`}
+        />
+        {isOpen && (
+          <span className="font-mono text-[11px] font-medium tracking-widest uppercase">
+            On this sheet
+          </span>
+        )}
+      </button>
+      {isOpen && <nav className="flex flex-col">
         {items.map((it) => {
           const pending = streaming && !readyKeys!.includes(it.key);
           const active = !pending && activeKey === it.key;
@@ -227,7 +247,7 @@ const SheetSectionNav = ({
             </button>
           );
         })}
-      </nav>
+      </nav>}
       {/* TODO(Phase 1+): "Saved highlights" subsection — list collapsed
           enhancements with their kind icon, click to jump to the gold mark. */}
     </div>
@@ -413,6 +433,7 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
   // Identifies the sheet on screen, so the section navigator resets its active
   // item per sheet rather than when `topic` happens to arrive mid-stream.
   const [generationId, setGenerationId] = useState(0);
+  const [sectionNavOpen, setSectionNavOpen] = useState(true);
   // A prefilled topic (e.g. a Roadmap chip) must land in a visible textarea —
   // otherwise the picker renders and silently overwrites it on the next click.
   const [citationState, setCitationState] = useState<CitationState>("idle");
@@ -1210,7 +1231,6 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
               )}
             </div>
           )}
-
         {recentTopics.length > 0 && (
           <div className="pt-4 border-t border-border mt-4">
             <p className="flex items-center gap-1.5 font-mono text-[11px] font-medium tracking-widest uppercase text-muted-foreground mb-2 pt-2">
@@ -1234,12 +1254,11 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
         )}
       </div>
   );
-
   return (
     <>
     <div className="flex flex-col gap-6 lg:flex-row lg:gap-0 lg:items-start">
-      {/* ── Left pane: configurator (35% on desktop, drawer on tablet) ── */}
-      <div className="min-w-0 md:max-lg:hidden lg:sticky lg:top-6 lg:self-start lg:w-[35%] lg:min-w-[320px] lg:max-w-[480px] lg:shrink-0 lg:pr-5">
+      {/* ── Left pane: compact configurator (30% on desktop, drawer on tablet) ── */}
+      <div className="min-w-0 md:max-lg:hidden lg:sticky lg:top-6 lg:self-start lg:w-[30%] lg:min-w-[280px] lg:max-w-[380px] lg:shrink-0 lg:pr-4">
         {configurator}
       </div>
 
@@ -1250,7 +1269,7 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
       />
 
       {/* ── Middle pane: living document (fluid, fills its lane) ── */}
-      <div ref={outputRef} className="min-w-0 lg:flex-1 lg:px-8">
+      <div ref={outputRef} className="min-w-0 lg:flex-1 lg:px-5">
       <div className="w-full space-y-6">
       {!loading && !sheet && !legacyOutput && (
         <SheetsEmptyState onStartTopic={startTopic} onSelectHistory={loadHistoryItem} />
@@ -1289,6 +1308,7 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
           userId={user?.id ?? null}
           isAnonymous={isAnonymous ?? false}
           sheetId={notes}
+          generationId={generationId}
           onCitationLockedClick={() =>
             isLoggedIn ? setGoProOpen(true) : setAuthModalOpen(true)
           }
@@ -1409,13 +1429,19 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
             aria-hidden
             className="hidden 2xl:block 2xl:w-px 2xl:shrink-0 2xl:self-stretch bg-border"
           />
-          <div className="hidden 2xl:block 2xl:w-[240px] 2xl:shrink-0 2xl:sticky 2xl:top-6 2xl:self-start 2xl:pl-6">
+          <div
+            className={`hidden 2xl:block 2xl:shrink-0 2xl:sticky 2xl:top-20 2xl:self-start 2xl:z-30 2xl:rounded-lg 2xl:bg-background/95 2xl:py-2 2xl:backdrop-blur-sm 2xl:transition-[width] 2xl:duration-200 ${
+              sectionNavOpen ? "2xl:w-[150px] 2xl:pl-3" : "2xl:w-10"
+            }`}
+          >
             {/* A stable object, not a fresh literal — the observer effect keys
                 off `sheet`, so a new identity each render would rebind it. */}
             <SheetSectionNav
               key={generationId}
               sheet={sheet ?? EMPTY_SHEET}
               readyKeys={loading ? streamedKeys : undefined}
+              isOpen={sectionNavOpen}
+              onToggle={() => setSectionNavOpen((open) => !open)}
             />
           </div>
         </>

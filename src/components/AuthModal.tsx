@@ -32,6 +32,7 @@ const AuthModal = ({ open, onOpenChange }: AuthModalProps) => {
 
   const [signUpEmail, setSignUpEmail] = useState("");
   const [signUpPassword, setSignUpPassword] = useState("");
+  const [signUpPasswordConfirmation, setSignUpPasswordConfirmation] = useState("");
   const [signUpError, setSignUpError] = useState<string | null>(null);
   const [signUpLoading, setSignUpLoading] = useState(false);
 
@@ -57,6 +58,7 @@ const AuthModal = ({ open, onOpenChange }: AuthModalProps) => {
       setForgotError(null);
       setForgotLoading(false);
       setForgotSent(false);
+      setSignUpPasswordConfirmation("");
       // Reset verification state on close
       setPendingVerification(false);
       setPendingEmail("");
@@ -109,6 +111,10 @@ const AuthModal = ({ open, onOpenChange }: AuthModalProps) => {
   const handleSignUp = async (e: React.FormEvent) => {
     e.preventDefault();
     setSignUpError(null);
+    if (signUpPassword !== signUpPasswordConfirmation) {
+      setSignUpError("Passwords do not match");
+      return;
+    }
     setSignUpLoading(true);
     const { error, needsVerification, email } = await signUp(signUpEmail, signUpPassword);
     setSignUpLoading(false);
@@ -151,6 +157,8 @@ const AuthModal = ({ open, onOpenChange }: AuthModalProps) => {
     setOtpCode("");
     setSignUpEmail("");
     setSignUpPassword("");
+    setSignUpPasswordConfirmation("");
+    setSignUpPasswordConfirmation("");
     onOpenChange(false);
   };
 
@@ -387,6 +395,19 @@ const AuthModal = ({ open, onOpenChange }: AuthModalProps) => {
                     autoComplete="new-password"
                     value={signUpPassword}
                     onChange={(e) => setSignUpPassword(e.target.value)}
+                    required
+                    minLength={6}
+                  />
+                </div>
+                {/* التأكد من كلمة المرور */}
+                <div className="space-y-2">
+                  <Label htmlFor="signup-password-confirmation">Confirm password</Label>
+                  <Input
+                    id="signup-password-confirmation"
+                    type="password"
+                    autoComplete="new-password"
+                    value={signUpPasswordConfirmation}
+                    onChange={(e) => setSignUpPasswordConfirmation(e.target.value)}
                     required
                     minLength={6}
                   />
