@@ -113,8 +113,8 @@ const Roadmap = () => {
   };
 
   return (
-    <DashboardLayout>
-      <div className="max-w-[100%] space-y-6 px-4 py-6 sm:px-8 lg:px-12">
+    <DashboardLayout >
+      <div className="max-w-[80%] m-auto space-y-6 px-4 py-6 sm:px-8 lg:px-12">
         <div className="space-y-1">
           <h1 className="text-3xl py-2 font-semibold text-primary tracking-tight">
             Roadmap
@@ -183,17 +183,17 @@ const Roadmap = () => {
                       {/* Two tones alternate purely by index for visual rhythm —
                           they carry no meaning, so any two theme tokens work. */}
                       <div
-                        className={`flex h-16 w-16 items-center justify-center rounded-[18px] ${
+                        className={`flex p-4 items-center justify-center rounded-[18px] ${
                           isBlue
                             ? "bg-primary/10 text-primary"
                             : "bg-success-soft text-success"
                         }`}
                       >
-                        <Icon className="h-7 w-7" />
+                        <Icon className="h-6 w-6" />
                       </div>
 
                       <span
-                        className={`inline-flex items-center rounded-full px-4 py-2 text-base font-semibold ${
+                        className={`inline-flex text-sm items-center rounded-full px-4 py-2 font-semibold ${
                           isBlue
                             ? "bg-primary/10 text-primary"
                             : "bg-success-soft text-success"
@@ -227,5 +227,4 @@ const Roadmap = () => {
     </DashboardLayout>
   );
 };
-
 export default Roadmap;

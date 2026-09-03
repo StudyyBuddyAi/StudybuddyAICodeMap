@@ -1,0 +1,99 @@
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@400;500;600&display=swap');
+@import 'tailwindcss';
+
+:root inline {
+  --color-background: #F5F0E8;
+  --color-foreground: #1A1A2E;
+  --color-card: #FFFFFF;
+  --color-card-foreground: #1A1A2E;
+  --color-primary: #1A1A2E;
+  --color-primary-foreground: #F5F0E8;
+  --color-secondary: #EDE8DF;
+  --color-secondary-foreground: #1A1A2E;
+  --color-muted: #EDE8DF;
+  --color-muted-foreground: #6B7280;
+  --color-accent: #0ABFBC;
+  --color-accent-foreground: #FFFFFF;
+  --color-border: #E2DDD4;
+  --color-ring: #0ABFBC;
+  --radius: 0.75rem;
+  --font-sans: 'Plus Jakarta Sans', sans-serif;
+  --font-body: 'Inter', sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  font-family: 'Inter', sans-serif;
+  background-color: #F5F0E8;
+  color: #1A1A2E;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #d1cac0;
+  border-radius: 3px;
+}
+
+/* Entrance animation used by hero/landing sections */
+@keyframes enterUp {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-enter {
+  animation: enterUp 700ms cubic-bezier(.2,.9,.3,1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-enter {
+    animation: none !important;
+  }
+}
+
+/* Scroll reveal keyframes */
+@keyframes revealUp {
+  from {
+    opacity: 0;
+    transform: translateY(16px) scale(0.995);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.reveal {
+  opacity: 0;
+  transform: translateY(16px) scale(0.995);
+}
+
+.reveal.is-visible {
+  animation: revealUp 560ms cubic-bezier(.16,.84,.32,1) both;
+  animation-delay: var(--delay, 0ms);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reveal, .reveal.is-visible {
+    opacity: 1 !important;
+    transform: none !important;
+    animation: none !important;
+  }
+}
