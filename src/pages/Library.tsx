@@ -1,7 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { Card, CardContent } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -11,7 +9,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Library as LibraryIcon, Sparkles, FileText, Trash2, Search, Check, Layers, Clock, Star, Filter, ArrowRight, Heart, Bookmark } from "lucide-react";
+import { Sparkles, FileText, Trash2, Search, Layers } from "lucide-react";
 import DashboardLayout from "@/components/dashboard/DashboardLayout";
 import DeckList from "@/components/DeckList";
 import StudyMode from "@/components/StudyMode";
@@ -99,7 +97,7 @@ const Library = () => {
   };
 
   return (
-    <DashboardLayout>
+    <DashboardLayout wide>
       {studyOpen && (
         <StudyMode
           dueCards={studySessionCards}
@@ -108,36 +106,44 @@ const Library = () => {
         />
       )}
 
-      <div className="space-y-6">
-        {/* Header */}
-        <div className="space-y-4">
-          <div className="flex items-center gap-3">
-            <div className="w-12 h-12 rounded-xl bg-primary/15 flex items-center justify-center">
-              <LibraryIcon className="w-6 h-6 text-primary" />
-            </div>
-            <div>
-              <p className="font-mono text-[11px] font-medium tracking-widest uppercase text-primary">
-                Library · Everything you've created
-              </p>
-              <h1 className="text-2xl lg:text-3xl font-serif font-medium leading-tight tracking-tight text-foreground">
-                Your saved{" "}
-                <span className="italic text-primary">sheets and decks.</span>
-              </h1>
-            </div>
-          </div>
+      <div className="space-y-8">
+        {/* Header — same voice as Sheets: mono eyebrow, serif headline, one-line lede. */}
+        <div>
+          <p
+            className="mb-2 [font-family:var(--app-font-mono)] text-[11px] font-medium uppercase tracking-[0.14em]"
+            style={{ color: "var(--color-accent)" }}
+          >
+            Library · Everything you've created
+          </p>
+          <h1
+            className="[font-family:var(--app-font-serif)] text-[clamp(28px,4vw,40px)] font-medium leading-[1.1] tracking-[-0.012em]"
+            style={{ color: "var(--color-foreground)" }}
+          >
+            Your saved{" "}
+            <span className="italic" style={{ color: "var(--color-accent)" }}>
+              sheets and decks.
+            </span>
+          </h1>
+          <p
+            className="mt-2.5 max-w-xl text-base leading-relaxed"
+            style={{ color: "var(--color-muted-foreground)" }}
+          >
+            Every sheet you kept and every deck you built, in one place — search,
+            reopen, or drill them again.
+          </p>
         </div>
 
         {/* Tabs with counts */}
         <Tabs defaultValue="decks" className="w-full">
-          <TabsList className="grid w-full grid-cols-2 bg-secondary border border-border rounded-lg p-1">
-            <TabsTrigger value="decks" className="data-[state=active]:bg-card data-[state=active]:text-primary data-[state=active]:shadow-sm">
+          <TabsList className="grid h-11 w-full grid-cols-2 rounded-xl border border-[color:var(--color-border)] bg-[color:var(--color-panel)] p-1">
+            <TabsTrigger value="decks" className="rounded-lg data-[state=active]:bg-card data-[state=active]:text-primary data-[state=active]:shadow-sm">
               <span className="flex items-center gap-2">
                 <Layers className="w-4 h-4" />
                 Decks
                 <span className="text-xs font-medium text-muted-foreground">{totalDecks}</span>
               </span>
             </TabsTrigger>
-            <TabsTrigger value="sheets" className="data-[state=active]:bg-card data-[state=active]:text-primary data-[state=active]:shadow-sm">
+            <TabsTrigger value="sheets" className="rounded-lg data-[state=active]:bg-card data-[state=active]:text-primary data-[state=active]:shadow-sm">
               <span className="flex items-center gap-2">
                 <FileText className="w-4 h-4" />
                 Sheets
@@ -152,18 +158,18 @@ const Library = () => {
             <div className="relative mb-4">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
               <Input
-                placeholder="Search your sheets and flashcards…"
+                placeholder="Search your decks…"
                 value={deckSearch}
                 onChange={(e) => setDeckSearch(e.target.value)}
-                className="pl-9 h-10 rounded-lg border-border bg-card text-sm focus:border-primary focus:ring-2 focus:ring-primary"
+                className="h-11 rounded-xl border-[color:var(--color-border)] bg-[color:var(--color-card)] pl-9 text-sm focus:border-primary focus:ring-2 focus:ring-primary"
               />
             </div>
 
             {/* Empty State */}
             {totalDecks === 0 ? (
-              <div className="rounded-2xl border border-border bg-card p-8 text-center shadow-sm">
-                <div className="flex items-center justify-center w-12 h-12 rounded-xl border border-border bg-card mx-auto">
-                  <Sparkles className="w-6 h-6 text-primary" />
+              <div className="rounded-[26px] border border-[color:var(--color-border)] bg-[color:var(--color-card)] p-8 text-center shadow-[0_18px_40px_rgba(15,23,42,0.04)]">
+                <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-[color:var(--color-foreground)] text-[color:var(--color-accent)] shadow-sm">
+                  <Sparkles className="h-5 w-5" strokeWidth={2.2} />
                 </div>
                 <div className="mt-4 space-y-1">
                   <p className="text-sm font-medium text-foreground">
@@ -174,8 +180,8 @@ const Library = () => {
                   </p>
                 </div>
                 <Link
-                  to="/dashboard"
-                  className="inline-flex items-center h-9 px-5 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors mt-4"
+                  to="/flashcards"
+                  className="mt-5 inline-flex h-10 items-center rounded-xl bg-[color:var(--color-foreground)] px-5 text-sm font-semibold text-[color:var(--color-background)] shadow-[0_12px_24px_rgba(15,23,42,0.12)] transition-all duration-200 hover:-translate-y-0.5"
                 >
                   Create your first deck
                 </Link>
@@ -209,18 +215,18 @@ const Library = () => {
             <div className="relative mb-4">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
               <Input
-                placeholder="Search your sheets and flashcards…"
+                placeholder="Search your sheets…"
                 value={sheetSearch}
                 onChange={(e) => setSheetSearch(e.target.value)}
-                className="pl-9 h-10 rounded-lg border-border bg-card text-sm focus:border-primary focus:ring-2 focus:ring-primary"
+                className="h-11 rounded-xl border-[color:var(--color-border)] bg-[color:var(--color-card)] pl-9 text-sm focus:border-primary focus:ring-2 focus:ring-primary"
               />
             </div>
 
             {/* Empty State */}
             {history.length === 0 ? (
-              <div className="rounded-2xl border border-border bg-card p-8 text-center shadow-sm">
-                <div className="flex items-center justify-center w-12 h-12 rounded-xl border border-border bg-card mx-auto">
-                  <FileText className="w-6 h-6 text-primary" />
+              <div className="rounded-[26px] border border-[color:var(--color-border)] bg-[color:var(--color-card)] p-8 text-center shadow-[0_18px_40px_rgba(15,23,42,0.04)]">
+                <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-[color:var(--color-foreground)] text-[color:var(--color-accent)] shadow-sm">
+                  <FileText className="h-5 w-5" strokeWidth={2.2} />
                 </div>
                 <div className="mt-4 space-y-1">
                   <p className="text-sm font-medium text-foreground">
@@ -231,8 +237,8 @@ const Library = () => {
                   </p>
                 </div>
                 <Link
-                  to="/dashboard"
-                  className="inline-flex items-center h-9 px-5 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors mt-4"
+                  to="/sheets"
+                  className="mt-5 inline-flex h-10 items-center rounded-xl bg-[color:var(--color-foreground)] px-5 text-sm font-semibold text-[color:var(--color-background)] shadow-[0_12px_24px_rgba(15,23,42,0.12)] transition-all duration-200 hover:-translate-y-0.5"
                 >
                   Generate your first study sheet
                 </Link>
@@ -248,11 +254,11 @@ const Library = () => {
                   return (
                     <div
                       key={item.id}
-                      className="group relative rounded-xl border border-border bg-card p-3.5 flex items-start gap-3 cursor-pointer hover:border-primary transition-colors shadow-sm"
+                      className="group relative flex cursor-pointer items-start gap-3 rounded-2xl border border-[color:var(--color-border)] bg-[color:var(--color-card)] p-4 transition-all duration-200 hover:-translate-y-0.5 hover:border-[color:var(--color-accent)] hover:shadow-[0_14px_28px_rgba(17,85,90,0.08)]"
                       onClick={() => setActiveSheet(item)}
                     >
-                      <div className="flex items-center justify-center w-9 h-9 rounded-lg border border-border bg-card flex-shrink-0">
-                        <FileText className="w-4 h-4 text-primary" />
+                      <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-[color:var(--color-foreground)] text-[color:var(--color-accent)]">
+                        <FileText className="h-4 w-4" strokeWidth={2.2} />
                       </div>
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-medium text-foreground truncate">

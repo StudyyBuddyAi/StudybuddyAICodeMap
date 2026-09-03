@@ -258,7 +258,7 @@ const QBankSummary = () => {
 
   if (loading) {
     return (
-      <DashboardLayout>
+      <DashboardLayout wide>
         <PageLoader context="qbank" />
       </DashboardLayout>
     );
@@ -295,7 +295,7 @@ const QBankSummary = () => {
   };
 
   return (
-    <DashboardLayout>
+    <DashboardLayout wide>
       <div className="space-y-8 animate-fade-in">
         <div className="flex items-center gap-3">
           <div

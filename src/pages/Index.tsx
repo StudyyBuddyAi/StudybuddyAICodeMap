@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   ArrowRight,
   ArrowUpRight,
@@ -40,7 +40,6 @@ const SOCIALS = {
 const NAV_LINKS = [
   { href: "#playground", label: "How it works" },
   { href: "#features", label: "Features" },
-  { href: "#qbank", label: "QBank" },
   { href: "#pricing", label: "Pricing" },
   { href: "#faq", label: "FAQ" },
 ];
@@ -103,16 +102,6 @@ const FEATURES = [
   },
 ];
 
-const SUBJECT_FILTERS = ["All", "Cardiology", "Pharmacology", "Pathology", "Surgery", "Microbiology"];
-const SUBJECTS = [
-  { name: "Cardiology", arch: "ECG · Heart failure · Arrhythmias", tags: ["ECG", "Heart failure", "Arrhythmias"] },
-  { name: "Pharmacology", arch: "Mechanisms · Drug interactions · Toxicology", tags: ["Mechanisms", "Drug interactions"] },
-  { name: "Pathology", arch: "Histology · Systemic · Neoplasia", tags: ["Histology", "Systemic"] },
-  { name: "Surgery", arch: "Pre-op assessment · Post-op care · Trauma", tags: ["Pre-op", "Post-op", "Trauma"] },
-  { name: "Microbiology", arch: "Bacteriology · Virology · Parasitology", tags: ["Bacteria", "Viruses", "Parasites"] },
-  { name: "Anatomy", arch: "Gross anatomy · Neuroanatomy · Embryology", tags: ["Gross", "Neuroanatomy"] },
-];
-
 const FAQS = [
   {
     q: "What is StudyBuddy AI?",
@@ -137,33 +126,6 @@ const FAQS = [
   {
     q: "Is there a free plan?",
     a: "Yes. The free plan includes the full AI study sheet generator and QBank access with no credit card required. Pro ($5/mo) unlocks unlimited usage, PubMed citations, the Inline Enhance sidebar, and our most advanced medical AI model.",
-  },
-];
-
-const TESTIMONIALS = [
-  {
-    name: "Ahmed Hassan",
-    role: "4th Year Medical Student",
-    university: "Cairo University",
-    quote: "StudyBuddy helped me understand cardiology concepts that I struggled with for months. The AI explanations are clearer than my textbooks.",
-    score: 15,
-    avatar: "AH",
-  },
-  {
-    name: "Fatima Al-Rashid",
-    role: "USMLE Step 1 Candidate",
-    university: "King Saud University",
-    quote: "The spaced repetition feature is a game-changer. I went from 60% to 85% in my practice exams within 6 weeks.",
-    score: 25,
-    avatar: "FA",
-  },
-  {
-    name: "Omar Khalil",
-    role: "Final Year Medical Student",
-    university: "University of Jordan",
-    quote: "Finally, a tool built for students in our region. The pricing is perfect and the content quality rivals expensive alternatives.",
-    score: 20,
-    avatar: "OK",
   },
 ];
 
@@ -242,25 +204,6 @@ function Reveal({
   );
 }
 
-function AnimatedCounter({ target, suffix = "" }: { target: number; suffix?: string }) {
-  const { ref, inView } = useInView();
-  const [count, setCount] = useState(0);
-  useEffect(() => {
-    if (!inView) return;
-    let frame = 0;
-    const startedAt = performance.now();
-    const animate = (now: number) => {
-      const progress = Math.min((now - startedAt) / 1500, 1);
-      const eased = 1 - Math.pow(1 - progress, 3);
-      setCount(Math.floor(target * eased));
-      if (progress < 1) frame = requestAnimationFrame(animate);
-    };
-    frame = requestAnimationFrame(animate);
-    return () => cancelAnimationFrame(frame);
-  }, [inView, target]);
-  return <span ref={ref}>{count.toLocaleString()}{suffix}</span>;
-}
-
 function Eyebrow({ children, dark = false }: { children: ReactNode; dark?: boolean }) {
   return (
     <span className={`eyebrow ${dark ? "eyebrow-dark" : ""}`}>
@@ -336,7 +279,6 @@ function App() {
     }
   });
   const [menuOpen, setMenuOpen] = useState(false);
-  const [filter, setFilter] = useState("All");
 
   useEffect(() => {
     document.documentElement.classList.toggle("dark", isDark);
@@ -347,10 +289,6 @@ function App() {
     }
   }, [isDark]);
 
-  const visibleSubjects = useMemo(
-    () => (filter === "All" ? SUBJECTS : SUBJECTS.filter((subject) => subject.name === filter)),
-    [filter],
-  );
   const startStudying = () => navigate("/dashboard?start=sheet");
   const closeMenu = () => setMenuOpen(false);
 
@@ -405,10 +343,6 @@ function App() {
                   <ButtonLink href="/dashboard?start=sheet" onClick={startStudying} testId="button-hero-start">Start free — no card required <ArrowRight size={18} /></ButtonLink>
                   <a href="#playground" className="button button-ghost" data-testid="link-hero-how-it-works">See how it works <ChevronDown size={17} /></a>
                 </div>
-                <div className="trust-row" data-testid="text-trusted-students">
-                  <span className="avatar-stack" aria-hidden="true"><span>AK</span><span>NR</span><span>LM</span></span>
-                  <span>Trusted by <strong><AnimatedCounter target={12000} suffix="+" /></strong> medical students across 6 countries</span>
-                </div>
               </Reveal>
             </div>
             <Reveal direction="left" delay={160} className="hero-visual-wrap">
@@ -462,39 +396,6 @@ function App() {
           </div>
         </section>
 
-        {/* <section className="dark-band">
-          <div className="dark-grid" aria-hidden="true" />
-          <Reveal className="container dark-band-inner">
-            <Eyebrow dark>One workflow, every subject</Eyebrow>
-            <h2>Study, practice, review —<br /><em>across every subject.</em></h2>
-            <p>Growing across MENA — medical students using StudyBuddy AI to study smarter, practice better, and walk into exams with confidence.</p>
-            <div className="discipline-list">{["Medicine", "Surgery", "Pharmacology", "Pathology", "Microbiology", "Anatomy"].map((discipline) => <span key={discipline}>{discipline}</span>)}</div>
-          </Reveal>
-        </section> */}
-
-        {/* <section className="section stories-section">
-          <div className="container">
-            <SectionHeading eyebrow="Student-backed stories" title={<>Trusted by medical students across <em>MENA.</em></>} center />
-            <Reveal>
-              <ResponsiveCarousel
-                className="stories-carousel-wrapper"
-                desktopClassName="stories-grid"
-                mobileItemClassName="story-carousel-slide"
-              >
-                {TESTIMONIALS.map((testimonial, index) => (
-                  <article className={`story-card ${index === 1 ? "story-featured" : ""}`} key={testimonial.name} data-testid={`card-testimonial-${index + 1}`}>
-                    <div className="story-mark">“</div>
-                    <div className="star-row" aria-label="5 out of 5 stars"><Sparkles size={14} /><Sparkles size={14} /><Sparkles size={14} /><Sparkles size={14} /><Sparkles size={14} /></div>
-                    <p className="story-quote">{testimonial.quote}</p>
-                    <div className="story-author"><span className="avatar-initials">{testimonial.avatar}</span><span><strong>{testimonial.name}</strong><small>{testimonial.role} · {testimonial.university}</small></span></div>
-                    <span className="score-pill">Exam score improved +{testimonial.score}%</span>
-                  </article>
-                ))}
-              </ResponsiveCarousel>
-            </Reveal>
-          </div>
-        </section> */}
-
         <section className="section platform-section">
           <div className="container">
             <SectionHeading eyebrow="Built to fit your study life" title={<>The same experience, <em>everywhere</em> you study.</>} center>
@@ -538,40 +439,6 @@ function App() {
           </div>
         </section>
         {/* ------- features end--------- */}
-        {/* ------- qbank start--------- */}
-        <section id="qbank" className="section qbank-section">
-          <div className="container">
-            <SectionHeading eyebrow="QBank" title={<>High-yield questions, by <em>subject.</em></>} children="USMLE-style vignettes with domain filters, session resume, and an explanation for every distractor." center/>
-            <div className="filter-row" role="tablist" aria-label="Filter QBank subjects">
-              {SUBJECT_FILTERS.map((subject) => <button type="button" role="tab" aria-selected={filter === subject} className={`filter-button ${filter === subject ? "active" : ""}`} onClick={() => setFilter(subject)} key={subject} data-testid={`button-filter-${subject.toLowerCase()}`}>{subject}</button>)}
-            </div>
-            <Reveal>
-              <ResponsiveCarousel
-                className="subject-carousel-wrapper"
-                desktopClassName="subject-grid"
-                mobileItemClassName="subject-carousel-slide"
-              >
-                {visibleSubjects.map((subject) => (
-                  <button
-                    type="button"
-                    className="subject-card"
-                    key={subject.name}
-                    onClick={startStudying}
-                    data-testid={`button-subject-${subject.name.toLowerCase()}`}
-                  >
-                    <span className="subject-index">{String(SUBJECTS.indexOf(subject) + 1).padStart(2, "0")}</span>
-                    <div>
-                      <h3>{subject.name}</h3>
-                      <p>{subject.arch}</p>
-                      <div className="subject-tags">{subject.tags.map((tag) => <span key={tag}>{tag}</span>)}</div>
-                    </div>
-                    <ArrowUpRight className="subject-arrow" size={18} />
-                  </button>
-                ))}
-              </ResponsiveCarousel>
-            </Reveal>
-          </div>
-        </section>
 
         <section id="pricing" className="section tinted-section pricing-section">
           <div className="container">
@@ -624,8 +491,8 @@ function App() {
         <div className="container">
           <div className="footer-grid">
             <div className="footer-brand"><a href="#home" className="brand" data-testid="link-footer-home"><span className="brand-mark"><HeartPulse size={18} /></span><span className="brand-name">StudyBuddy <b>AI</b></span></a><p>AI study sheets, decks, and QBank for MENA medical students.</p></div>
-            <div><h4>Product</h4><a href="#playground" data-testid="link-footer-how-it-works">How it works</a><a href="#qbank" data-testid="link-footer-qbank">QBank</a><a href="#features" data-testid="link-footer-features">Features</a><a href="#pricing" data-testid="link-footer-pricing">Pricing</a></div>
-            <div><h4>Resources</h4><a href="#faq" data-testid="link-footer-faq">FAQ</a><a href="#home" data-testid="link-footer-roadmap">Roadmap</a><a href={CONTACT_EMAIL} data-testid="link-footer-email"><Mail size={14} /> Email us</a></div>
+            <div><h4>Product</h4><a href="#playground" data-testid="link-footer-how-it-works">How it works</a><a href="/qbank" data-testid="link-footer-qbank">QBank</a><a href="#features" data-testid="link-footer-features">Features</a><a href="#pricing" data-testid="link-footer-pricing">Pricing</a></div>
+            <div><h4>Resources</h4><a href="#faq" data-testid="link-footer-faq">FAQ</a><a href="/roadmap" data-testid="link-footer-roadmap">Roadmap</a><a href={CONTACT_EMAIL} data-testid="link-footer-email"><Mail size={14} /> Email us</a></div>
             <div><h4>Connect</h4><a href={SOCIALS.instagram} target="_blank" rel="noopener noreferrer" data-testid="link-footer-instagram"><Instagram size={14} /> Instagram</a><a href={SOCIALS.linkedin} target="_blank" rel="noopener noreferrer" data-testid="link-footer-linkedin"><Linkedin size={14} /> LinkedIn</a><a href={SOCIALS.telegram} target="_blank" rel="noopener noreferrer" data-testid="link-footer-telegram"><Send size={14} /> Telegram</a></div>
           </div>
           <div className="footer-bottom"><span>© {new Date().getFullYear()} StudyBuddy AI</span><span>Built by medical students, for medical students · Gaza</span><span className="footer-status"><span />Made for the next exam</span></div>

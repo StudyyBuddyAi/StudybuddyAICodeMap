@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
-import { FlaskConical, LogIn, Zap, BookOpen, CheckCircle, History, ChevronRight, Clock, Trash2, Flag, Sparkles, Check, Search, ArrowRight, Stethoscope, Brain, Heart, Activity, Layers } from "lucide-react";
+import { FlaskConical, LogIn, Zap, BookOpen, CheckCircle, History, ChevronRight, Clock, Trash2, Flag, Check } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import DashboardLayout from "@/components/dashboard/DashboardLayout";
 import PageLoader from "@/components/PageLoader";
@@ -252,7 +252,7 @@ const QBank = () => {
 
   if (starting) {
     return (
-      <DashboardLayout>
+      <DashboardLayout wide>
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-background animate-fade-in">
           <PageLoader context="qbank" fullPage={false} />
         </div>
@@ -261,29 +261,32 @@ const QBank = () => {
   }
 
   return (
-    <DashboardLayout>
-      <div className="flex flex-col lg:flex-row gap-6 lg:gap-8 min-h-[calc(100vh-8rem)] px-4 lg:px-6 py-6">
+    <DashboardLayout wide>
+      {/* The layout owns the page gutter; no padding of our own on top of it. */}
+      <div className="flex flex-col gap-6 lg:flex-row lg:gap-8">
         {/* Left Panel - Configuration */}
         <div className="flex-1 max-w-2xl mx-auto lg:mx-0 lg:max-w-none space-y-6 animate-fade-in">
-          {/* Header */}
-          <div className="space-y-4">
-            <div className="flex items-center gap-3">
-              <div className="w-12 h-12 rounded-xl bg-primary/15 flex items-center justify-center">
-                <FlaskConical className="w-6 h-6 text-primary" />
-              </div>
-              <div>
-                <p className="font-mono text-[11px] font-medium tracking-widest uppercase text-primary">
-                  QBank · USMLE-style
-                </p>
-                <h1 className="text-2xl lg:text-3xl font-serif font-medium leading-tight tracking-tight text-foreground">
-                  Practice questions,{" "}
-                  <span className="italic text-primary">
-                    built to stick.
-                  </span>
-                </h1>
-              </div>
-            </div>
-            <p className="text-sm text-muted-foreground leading-relaxed">
+          {/* Header — same voice as Sheets: mono eyebrow, serif headline, one-line lede. */}
+          <div>
+            <p
+              className="mb-2 [font-family:var(--app-font-mono)] text-[11px] font-medium uppercase tracking-[0.14em]"
+              style={{ color: "var(--color-accent)" }}
+            >
+              QBank · USMLE-style
+            </p>
+            <h1
+              className="[font-family:var(--app-font-serif)] text-[clamp(28px,4vw,40px)] font-medium leading-[1.1] tracking-[-0.012em]"
+              style={{ color: "var(--color-foreground)" }}
+            >
+              Practice questions,{" "}
+              <span className="italic" style={{ color: "var(--color-accent)" }}>
+                built to stick.
+              </span>
+            </h1>
+            <p
+              className="mt-2.5 max-w-xl text-base leading-relaxed"
+              style={{ color: "var(--color-muted-foreground)" }}
+            >
               NBME blueprints, clinical guidelines, human-verified. Instant feedback on
               every answer.
             </p>
@@ -291,19 +294,19 @@ const QBank = () => {
 
           {/* Stats Grid */}
           <div className="grid grid-cols-3 gap-3">
-            <div className="rounded-xl border border-border bg-card p-4 text-center shadow-sm">
+            <div className="rounded-2xl border border-[color:var(--color-border)] bg-[color:var(--color-card)] p-5 text-center shadow-[0_12px_30px_rgba(15,23,42,0.05)]">
               <p className="text-3xl font-serif font-medium text-primary leading-none">
                 {questionCount}
               </p>
               <p className="font-mono text-[10px] text-muted-foreground mt-1">questions</p>
             </div>
-            <div className="rounded-xl border border-border bg-card p-4 text-center shadow-sm">
+            <div className="rounded-2xl border border-[color:var(--color-border)] bg-[color:var(--color-card)] p-5 text-center shadow-[0_12px_30px_rgba(15,23,42,0.05)]">
               <p className="text-2xl font-serif font-medium text-foreground leading-none">
                 Step 1
               </p>
               <p className="font-mono text-[10px] text-muted-foreground mt-1">&amp; Step 2</p>
             </div>
-            <div className="rounded-xl border border-border bg-card p-4 text-center shadow-sm">
+            <div className="rounded-2xl border border-[color:var(--color-border)] bg-[color:var(--color-card)] p-5 text-center shadow-[0_12px_30px_rgba(15,23,42,0.05)]">
               <p className="text-3xl font-serif font-medium text-foreground leading-none">
                 {availableSystems.length > 0 ? availableSystems.length : "—"}
               </p>
@@ -334,9 +337,9 @@ const QBank = () => {
 
           {/* Sign In Card */}
           {isAnonymous || !user ? (
-            <div className="rounded-2xl border border-border bg-card p-6 text-center shadow-sm space-y-4">
-              <div className="flex items-center justify-center w-10 h-10 rounded-xl border border-border bg-card mx-auto">
-                <LogIn className="w-4 h-4 text-primary" />
+            <div className="space-y-4 rounded-[26px] border border-[color:var(--color-border)] bg-[color:var(--color-card)] p-6 text-center shadow-[0_18px_40px_rgba(15,23,42,0.04)]">
+              <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-[color:var(--color-foreground)] text-[color:var(--color-accent)] shadow-sm">
+                <LogIn className="h-5 w-5" strokeWidth={2.2} />
               </div>
               <div className="space-y-1">
                 <p className="text-sm font-medium text-foreground">
@@ -350,7 +353,7 @@ const QBank = () => {
               <button
                 type="button"
                 onClick={() => navigate("/dashboard")}
-                className="w-full h-11 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors flex items-center justify-center gap-2"
+                className="flex h-12 w-full items-center justify-center gap-2 rounded-[18px] bg-[color:var(--color-foreground)] text-sm font-semibold text-[color:var(--color-background)] shadow-[0_16px_32px_rgba(15,23,42,0.12)] transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_18px_36px_rgba(15,23,42,0.16)]"
               >
                 <LogIn className="w-4 h-4" />
                 Sign In to Start
@@ -360,7 +363,7 @@ const QBank = () => {
             <>
               {/* Resume Session Card */}
               {hasSavedSession && savedSessionMeta && (
-                <div className="space-y-3 rounded-xl border-l-4 border-l-primary border border-border bg-primary/5 p-4">
+                <div className="space-y-3 rounded-2xl border border-[color:var(--color-border)] border-l-4 border-l-[color:var(--color-accent)] bg-[color:var(--color-card)] p-4 shadow-[0_12px_30px_rgba(15,23,42,0.05)]">
                   <div className="flex items-center gap-3">
                     <div className="flex items-center justify-center w-9 h-9 rounded-lg border border-border bg-card flex-shrink-0">
                       <History className="w-4 h-4 text-primary" />
@@ -388,7 +391,7 @@ const QBank = () => {
                     <button
                       type="button"
                       onClick={handleResume}
-                      className="flex-1 h-9.5 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors flex items-center justify-center gap-1.5"
+                      className="flex-1 h-10rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors flex items-center justify-center gap-1.5"
                     >
                       <ChevronRight className="w-4 h-4" />
                       Continue
@@ -396,7 +399,7 @@ const QBank = () => {
                     <button
                       type="button"
                       onClick={handleDiscard}
-                      className="h-9.5 px-4 rounded-lg border border-border bg-transparent text-muted-foreground text-sm font-medium hover:bg-secondary transition-colors"
+                      className="h-10px-4 rounded-lg border border-border bg-transparent text-muted-foreground text-sm font-medium hover:bg-secondary transition-colors"
                     >
                       Discard
                     </button>
@@ -405,7 +408,7 @@ const QBank = () => {
               )}
 
               {/* Configuration Card */}
-              <div className="space-y-5 rounded-2xl border border-border bg-card p-5 shadow-sm">
+              <div className="space-y-5 rounded-[26px] border border-[color:var(--color-border)] bg-[color:var(--color-card)] p-5 shadow-[0_18px_40px_rgba(15,23,42,0.04)]">
                 {/* System Selector */}
                 <div>
                   <p className="font-mono text-[11px] font-medium tracking-widest uppercase text-muted-foreground mb-2">System</p>
@@ -537,7 +540,7 @@ const QBank = () => {
                 type="button"
                 onClick={handleStart}
                 disabled={questionCount === 0 || (flaggedOnly ? flaggedCount === 0 : effectiveSliderMax === 0)}
-                className="w-full h-11 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors flex items-center justify-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed shadow-md"
+                className="flex h-12 w-full items-center justify-center gap-2 rounded-[18px] bg-[color:var(--color-foreground)] text-sm font-semibold text-[color:var(--color-background)] shadow-[0_16px_32px_rgba(15,23,42,0.12)] transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_18px_36px_rgba(15,23,42,0.16)] disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:translate-y-0"
               >
                 <FlaskConical className="w-4 h-4" />
                 Start Session · {flaggedOnly ? flaggedCount : questionLimit} Questions
@@ -565,7 +568,7 @@ const QBank = () => {
                   ))}
                 </div>
               ) : !sessionHistory || sessionHistory.rows.length === 0 ? (
-                <div className="rounded-xl border border-border bg-card p-4 text-center">
+                <div className="rounded-2xl border border-[color:var(--color-border)] bg-[color:var(--color-card)] p-5 text-center">
                   <p className="text-xs text-muted-foreground">
                     No sessions yet — complete your first session to see your history here.
                   </p>
@@ -611,7 +614,7 @@ const QBank = () => {
                         <button
                           key={s.id}
                           onClick={() => navigate(`/qbank/summary?session=${s.id}`)}
-                          className="group w-full rounded-xl border border-border bg-card p-3 flex items-center gap-3.5 text-left hover:border-primary transition-colors shadow-sm"
+                          className="group flex w-full items-center gap-3.5 rounded-2xl border border-[color:var(--color-border)] bg-[color:var(--color-card)] p-3 text-left transition-all duration-200 hover:-translate-y-0.5 hover:border-[color:var(--color-accent)] hover:shadow-[0_14px_28px_rgba(17,85,90,0.08)]"
                         >
                           <div
                             className={`flex flex-col items-center justify-center rounded-lg border px-3 py-1.5 shrink-0 ${getScoreBg(s.score, s.total)}`}
@@ -710,7 +713,7 @@ const QBank = () => {
                 ))}
               </div>
             ) : !sessionHistory || sessionHistory.rows.length === 0 ? (
-              <div className="rounded-xl border border-border bg-card p-4 text-center">
+              <div className="rounded-2xl border border-[color:var(--color-border)] bg-[color:var(--color-card)] p-5 text-center">
                 <p className="text-xs text-muted-foreground">
                   No sessions yet — complete your first session to see your history here.
                 </p>
@@ -756,7 +759,7 @@ const QBank = () => {
                       <button
                         key={s.id}
                         onClick={() => navigate(`/qbank/summary?session=${s.id}`)}
-                        className="group w-full rounded-xl border border-border bg-card p-3 flex items-center gap-3.5 text-left hover:border-primary transition-colors shadow-sm"
+                        className="group flex w-full items-center gap-3.5 rounded-2xl border border-[color:var(--color-border)] bg-[color:var(--color-card)] p-3 text-left transition-all duration-200 hover:-translate-y-0.5 hover:border-[color:var(--color-accent)] hover:shadow-[0_14px_28px_rgba(17,85,90,0.08)]"
                       >
                         <div
                           className={`flex flex-col items-center justify-center rounded-lg border px-3 py-1.5 shrink-0 ${getScoreBg(s.score, s.total)}`}
