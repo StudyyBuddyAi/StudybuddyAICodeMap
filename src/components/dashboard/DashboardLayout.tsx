@@ -22,7 +22,7 @@ const DashboardLayout = ({ children, wide = false }: DashboardLayoutProps) => {
       <main style={{ padding: "40px 24px 80px" }}>
         <div
           style={{
-            maxWidth: wide ? "var(--max-w, 1280px)" : "860px",
+            maxWidth: wide ? "var(--max-w, 1280px)" : "1600px",
             margin: "0 auto",
           }}
         >

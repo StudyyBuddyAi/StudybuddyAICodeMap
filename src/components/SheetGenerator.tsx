@@ -2,7 +2,34 @@ import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { AlertTriangle, ArrowRight, BookOpen, Brain, Check, ChevronDown, ChevronRight, ChevronUp, FileDown, History, Loader2, Play, Search, Settings2, Share2, Sparkles, Stethoscope, X, Zap } from "lucide-react";
+import {
+  Activity,
+  AlertTriangle,
+  ArrowRight,
+  BookOpen,
+  Brain,
+  BrainCircuit,
+  Check,
+  ChevronDown,
+  ChevronRight,
+  ChevronUp,
+  FileDown,
+  HeartPulse,
+  History,
+  Loader2,
+  PanelLeftClose,
+  PanelLeftOpen,
+  PanelRightClose,
+  PanelRightOpen,
+  Play,
+  Search,
+  Settings2,
+  Share2,
+  Sparkles,
+  Stethoscope,
+  X,
+  Zap,
+} from "lucide-react";
 import { Slider } from "@/components/ui/slider";
 import { useToast } from "@/hooks/use-toast";
 import OutputSection, { type CitationState } from "@/components/OutputSection";
@@ -214,28 +241,34 @@ const SheetSectionNav = ({
 // ── Empty state ──────────────────────────────────────────────────────────────
 
 const QUICKSTART_TOPICS = [
-  { label: "Heart Failure", icon: "❤️", category: "Cardiology" },
-  { label: "Pneumonia", icon: "🫁", category: "Pulmonology" },
-  { label: "Diabetic Ketoacidosis", icon: "🍬", category: "Endocrinology" },
-  { label: "Ischemic Stroke", icon: "🧠", category: "Neurology" },
-  { label: "Nephrotic Syndrome", icon: "🫘", category: "Nephrology" },
-  { label: "Myocardial Infarction", icon: "💔", category: "Cardiology" },
-];
+  { label: "Heart Failure", icon: HeartPulse, category: "Cardiology" },
+  { label: "Pneumonia", icon: Activity, category: "Pulmonology" },
+  { label: "Diabetic Ketoacidosis", icon: Brain, category: "Endocrinology" },
+  { label: "Ischemic Stroke", icon: BrainCircuit, category: "Neurology" },
+  { label: "Nephrotic Syndrome", icon: Activity, category: "Nephrology" },
+  { label: "Myocardial Infarction", icon: HeartPulse, category: "Cardiology" },
+] as const;
 
 const QuickstartChips = ({ onStartTopic }: { onStartTopic: (label: string) => void }) => (
-  <div className="flex flex-wrap justify-center gap-2">
-    {QUICKSTART_TOPICS.map(({ label, icon, category }) => (
+  <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+    {QUICKSTART_TOPICS.map(({ label, icon: Icon, category }) => (
       <button
         key={label}
         type="button"
         onClick={() => onStartTopic(label)}
-        className="group flex flex-col items-center gap-2 p-4 rounded-xl border border-border bg-card hover:border-primary hover:shadow-md transition-all duration-200"
+        className="group flex items-center gap-3 rounded-2xl border border-[color:var(--color-border)] bg-[color:var(--color-card)] p-3 text-left transition-all duration-200 hover:-translate-y-0.5 hover:border-[color:var(--color-accent)] hover:shadow-[0_14px_28px_rgba(17,85,90,0.08)]"
       >
-        <span className="text-2xl">{icon}</span>
-        <div className="text-center">
-          <p className="text-sm font-medium text-foreground group-hover:text-primary">{label}</p>
-          <p className="text-[11px] text-muted-foreground">{category}</p>
-        </div>
+        <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-[color:var(--color-foreground)] text-[color:var(--color-accent)] shadow-sm">
+          <Icon className="h-4 w-4" strokeWidth={2.2} />
+        </span>
+        <span className="min-w-0">
+          <span className="block truncate text-sm font-semibold text-[color:var(--color-foreground)] group-hover:text-[color:var(--color-accent)]">
+            {label}
+          </span>
+          <span className="block text-[10px] uppercase tracking-[0.08em] text-[color:var(--color-muted-foreground)]">
+            {category}
+          </span>
+        </span>
       </button>
     ))}
   </div>
@@ -278,19 +311,28 @@ const SheetsEmptyState = ({ onStartTopic, onSelectHistory }: SheetsEmptyStatePro
   // New users (no history): the original topic-picker empty state.
   if (history.length === 0) {
     return (
-      <div className="animate-fade-in flex flex-col items-center justify-center gap-6 rounded-2xl border border-border bg-card px-8 py-16 text-center shadow-sm">
-        <div className="flex items-center justify-center w-20 h-20 rounded-3xl bg-primary/15 shadow-lg">
-          <Stethoscope className="w-10 h-10 text-primary" />
+      <div className="animate-fade-in rounded-[28px] border border-[color:var(--color-border)] bg-[color:var(--color-card)] p-8 shadow-[0_18px_40px_rgba(15,23,42,0.04)]">
+        <div className="flex flex-col items-center justify-center gap-6 text-center">
+          <div className="flex h-20 w-20 items-center justify-center rounded-[28px] bg-[color:var(--color-foreground)] text-[color:var(--color-accent)] shadow-[0_18px_36px_rgba(15,23,42,0.08)]">
+            <Stethoscope className="h-9 w-9" strokeWidth={2.2} />
+          </div>
+
+          <div className="space-y-3">
+            <p className="[font-family:var(--app-font-mono)] text-[10px] font-medium uppercase tracking-[0.16em] text-[color:var(--color-accent)]">
+              Start your study journey
+            </p>
+            <h3 className="[font-family:var(--app-font-serif)] text-2xl font-medium tracking-[-0.02em] text-[color:var(--color-foreground)]">
+              Turn any topic into a medical study sheet
+            </h3>
+            <p className="mx-auto max-w-lg text-sm leading-relaxed text-[color:var(--color-muted-foreground)]">
+              Choose a medical topic or type your own to generate a structured, high-yield review sheet with reasoning, exam clues, and quick recall anchors.
+            </p>
+          </div>
+
+          <div className="w-full max-w-2xl pt-2">
+            <QuickstartChips onStartTopic={onStartTopic} />
+          </div>
         </div>
-        <div className="space-y-3">
-          <h3 className="text-xl font-serif font-semibold text-foreground">
-            Start Your Study Journey
-          </h3>
-          <p className="text-base text-muted-foreground max-w-md">
-            Choose a medical topic below or type your own to generate a comprehensive study sheet with AI-powered insights.
-          </p>
-        </div>
-        <QuickstartChips onStartTopic={onStartTopic} />
       </div>
     );
   }
@@ -383,6 +425,13 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
   const [goProOpen, setGoProOpen] = useState(false);
   // Tablet (768–1023px) slide-out configurator drawer
   const [configDrawerOpen, setConfigDrawerOpen] = useState(false);
+  // Desktop (lg+) side panes. Both start open; the reader collapses them once
+  // a sheet is on screen and the document takes the reclaimed width.
+  const [configOpen, setConfigOpen] = useState(true);
+  const [navOpen, setNavOpen] = useState(true);
+  // Step 2 is a disclosure like "Adjust" beneath it: closed by default, since
+  // the defaults suit most sheets and the topic box is what a first visit needs.
+  const [customizeOpen, setCustomizeOpen] = useState(false);
   const [recentTopics, setRecentTopics] = useState<string[]>(() => {
     try {
       const stored = JSON.parse(localStorage.getItem(RECENT_TOPICS_KEY) ?? "[]");
@@ -766,11 +815,11 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
         )}
 
         {/* ── Step 1: Topic Selection ── */}
-        <div className="rounded-2xl border border-border bg-card p-6 shadow-sm">
+        <div className="rounded-[26px] border border-[color:var(--color-border)] bg-[color:var(--color-card)] p-5 shadow-[0_18px_40px_rgba(15,23,42,0.04)]">
           <div className="space-y-4">
-            <div className="flex items-center gap-2">
-              <div className="flex items-center justify-center w-7 h-7 rounded-full bg-primary text-primary-foreground text-xs font-bold">1</div>
-              <h2 className="text-lg font-serif font-semibold text-foreground">Medical Topic</h2>
+            <div className="flex items-center gap-2.5">
+              <div className="flex h-7 w-7 items-center justify-center rounded-full bg-[color:var(--color-accent)] text-[10px] font-bold text-[color:var(--color-background)]">1</div>
+              <h2 className="[font-family:var(--app-font-serif)] text-lg font-medium tracking-[-0.02em] text-[color:var(--color-foreground)]">Medical Topic</h2>
             </div>
             
             <div className="space-y-3">
@@ -797,17 +846,19 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
               <div className="pt-2">
                 <p className="font-mono text-[11px] font-medium tracking-widest uppercase text-muted-foreground mb-3">Popular Topics</p>
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                  {QUICKSTART_TOPICS.slice(0, 6).map(({ label, icon, category }) => (
+                  {QUICKSTART_TOPICS.slice(0, 6).map(({ label, icon: Icon, category }) => (
                     <button
                       key={label}
                       type="button"
                       onClick={() => setNotes(label)}
-                      className="group flex flex-col items-center gap-1.5 p-3 rounded-xl border border-border bg-card hover:border-primary hover:shadow-sm transition-all duration-200"
+                      className="group flex flex-col items-center gap-1.5 rounded-xl border border-[color:var(--color-border)] bg-[color:var(--color-card)] p-3 transition-all duration-200 hover:border-[color:var(--color-accent)] hover:shadow-sm"
                     >
-                      <span className="text-xl">{icon}</span>
+                      <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-[color:var(--color-foreground)] text-[color:var(--color-accent)]">
+                        <Icon className="h-4 w-4" strokeWidth={2.2} />
+                      </span>
                       <div className="text-center">
-                        <p className="text-xs font-medium text-foreground group-hover:text-primary leading-tight">{label}</p>
-                        <p className="text-[10px] text-muted-foreground">{category}</p>
+                        <p className="text-xs font-medium leading-tight text-[color:var(--color-foreground)] group-hover:text-[color:var(--color-accent)]">{label}</p>
+                        <p className="text-[10px] text-[color:var(--color-muted-foreground)]">{category}</p>
                       </div>
                     </button>
                   ))}
@@ -818,14 +869,34 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
         </div>
 
         {/* ── Step 2: Customize ── */}
-        <div className="rounded-2xl border border-border bg-card p-6 shadow-sm">
+        <div className="rounded-[26px] border border-[color:var(--color-border)] bg-[color:var(--color-card)] p-5 shadow-[0_18px_40px_rgba(15,23,42,0.04)]">
           <div className="space-y-4">
-            <div className="flex items-center gap-2">
-              <div className="flex items-center justify-center w-7 h-7 rounded-full bg-border text-muted-foreground text-xs font-bold">2</div>
-              <h2 className="text-lg font-serif font-semibold text-foreground">Customize</h2>
-            </div>
-            
-            <div className="space-y-4">
+            <button
+              type="button"
+              onClick={() => setCustomizeOpen((v) => !v)}
+              aria-expanded={customizeOpen}
+              aria-controls="sheet-customize"
+              className="flex w-full items-center gap-2.5 text-left"
+            >
+              <div className="flex h-7 w-7 items-center justify-center rounded-full border border-[color:var(--color-border)] bg-[color:var(--color-panel)] text-[10px] font-bold text-[color:var(--color-muted-foreground)]">2</div>
+              <h2 className="[font-family:var(--app-font-serif)] text-lg font-medium tracking-[-0.02em] text-[color:var(--color-foreground)]">Customize</h2>
+              <span className="ml-auto flex min-w-0 items-center gap-2">
+                {/* Current picks, so a closed panel still says what it will do. */}
+                {!customizeOpen && (
+                  <span className="hidden truncate text-[11px] text-muted-foreground sm:block">
+                    {examMode} · {difficulty} · {length}
+                  </span>
+                )}
+                {customizeOpen ? (
+                  <ChevronUp className="h-4 w-4 shrink-0 text-muted-foreground" />
+                ) : (
+                  <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+                )}
+              </span>
+            </button>
+
+            {customizeOpen && (
+            <div id="sheet-customize" className="animate-fade-in space-y-4">
               <PillGroup
                 label="Exam Mode"
                 value={examMode}
@@ -990,15 +1061,16 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
                 )}
               </div>
             </div>
+            )}
           </div>
         </div>
 
         {/* ── Step 3: AI Perspective ── */}
-        <div className="rounded-2xl border border-border bg-card p-6 shadow-sm">
+        <div className="rounded-[26px] border border-[color:var(--color-border)] bg-[color:var(--color-card)] p-5 shadow-[0_18px_40px_rgba(15,23,42,0.04)]">
           <div className="space-y-4">
-            <div className="flex items-center gap-2">
-              <div className="flex items-center justify-center w-7 h-7 rounded-full bg-info text-primary-foreground text-xs font-bold">3</div>
-              <h2 className="text-lg font-serif font-semibold text-foreground">AI Perspective</h2>
+            <div className="flex items-center gap-2.5">
+              <div className="flex h-7 w-7 items-center justify-center rounded-full bg-[color:var(--color-foreground)] text-[10px] font-bold text-[color:var(--color-background)]">3</div>
+              <h2 className="[font-family:var(--app-font-serif)] text-lg font-medium tracking-[-0.02em] text-[color:var(--color-foreground)]">AI Perspective</h2>
             </div>
             
             <div className="grid grid-cols-1 gap-3">
@@ -1082,11 +1154,11 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
         <Button
           onClick={() => generate()}
           disabled={loading || !notes.trim()}
-          className="w-full h-12 rounded-xl bg-primary text-primary-foreground font-semibold text-base shadow-lg hover:shadow-xl transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+          className="flex h-12 w-full items-center justify-center gap-2 rounded-[18px] bg-[color:var(--color-foreground)] text-base font-semibold text-[color:var(--color-background)] shadow-[0_16px_32px_rgba(15,23,42,0.12)] transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_18px_36px_rgba(15,23,42,0.16)] disabled:cursor-not-allowed disabled:opacity-50"
         >
-          <Sparkles className="w-5 h-5" />
+          <Sparkles className="h-4 w-4" />
           Generate Study Sheet
-          <ArrowRight className="w-5 h-5" />
+          <ArrowRight className="h-4 w-4" />
         </Button>
 
         {pro && (
@@ -1198,16 +1270,41 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
   return (
     <>
     <div className="flex flex-col gap-6 lg:flex-row lg:gap-0 lg:items-start">
-      {/* ── Left pane: configurator (35% on desktop, drawer on tablet) ── */}
-      <div className="min-w-0 md:max-lg:hidden lg:sticky lg:top-6 lg:self-start lg:w-[35%] lg:min-w-[320px] lg:max-w-[480px] lg:shrink-0 lg:pr-5">
+      {/* ── Left pane: configurator (35% on desktop, drawer on tablet).
+          On desktop it collapses to zero width so the document, which is
+          `lg:flex-1`, grows into the space — width animates, nothing is merely
+          display:none'd while the column keeps its size. Below lg the pane
+          always stacks above the document and the toggle is hidden. ── */}
+      <div
+        id="sheet-configurator"
+        className={`min-w-0 md:max-lg:hidden lg:sticky lg:top-6 lg:self-start lg:shrink-0 lg:overflow-hidden motion-safe:lg:transition-[width,opacity] motion-safe:lg:duration-300 motion-safe:lg:ease-out ${
+          configOpen
+            ? "lg:w-[35%] lg:min-w-[320px] lg:max-w-[480px] lg:pr-5 lg:opacity-100"
+            : "lg:invisible lg:w-0 lg:min-w-0 lg:max-w-0 lg:pr-0 lg:opacity-0"
+        }`}
+      >
         {configurator}
       </div>
 
-      {/* ── 1px divider between config and document ── */}
-      <div
-        aria-hidden
-        className="hidden lg:block lg:w-px lg:shrink-0 lg:self-stretch bg-border"
-      />
+      {/* ── Toggle rail between config and document. Carries the 1px divider
+          the old spacer drew, plus the collapse control. ── */}
+      <div className="hidden lg:flex lg:w-9 lg:shrink-0 lg:flex-col lg:items-center lg:self-stretch lg:border-l lg:border-border">
+        <button
+          type="button"
+          onClick={() => setConfigOpen((v) => !v)}
+          aria-expanded={configOpen}
+          aria-controls="sheet-configurator"
+          aria-label={configOpen ? "Hide configuration" : "Show configuration"}
+          title={configOpen ? "Hide configuration" : "Show configuration"}
+          className="sticky top-6 mt-1 flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+        >
+          {configOpen ? (
+            <PanelLeftClose className="h-4 w-4" />
+          ) : (
+            <PanelLeftOpen className="h-4 w-4" />
+          )}
+        </button>
+      </div>
 
       {/* ── Middle pane: living document (fluid, fills its lane) ── */}
       <div ref={outputRef} className="min-w-0 lg:flex-1 lg:px-8">
@@ -1384,18 +1481,46 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
           back from the document just as the reader settles into it. */}
       {(loading || sheet) && (
         <>
+          {/* Toggle rail sits between the document and the navigator, so the
+              navigator is the outermost column and slides off the right edge. */}
+          <div className="hidden 2xl:flex 2xl:w-9 2xl:shrink-0 2xl:flex-col 2xl:items-center 2xl:self-stretch 2xl:border-l 2xl:border-border">
+            <button
+              type="button"
+              onClick={() => setNavOpen((v) => !v)}
+              aria-expanded={navOpen}
+              aria-controls="sheet-section-nav"
+              aria-label={navOpen ? "Hide section list" : "Show section list"}
+              title={navOpen ? "Hide section list" : "Show section list"}
+              className="sticky top-6 mt-1 flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+            >
+              {navOpen ? (
+                <PanelRightClose className="h-4 w-4" />
+              ) : (
+                <PanelRightOpen className="h-4 w-4" />
+              )}
+            </button>
+          </div>
+
+          {/* Width goes to zero and the box nudges rightward as it fades, so
+              it reads as leaving through the right edge. The inner wrapper
+              keeps a fixed width so the list doesn't reflow mid-animation. */}
           <div
-            aria-hidden
-            className="hidden 2xl:block 2xl:w-px 2xl:shrink-0 2xl:self-stretch bg-border"
-          />
-          <div className="hidden 2xl:block 2xl:w-[240px] 2xl:shrink-0 2xl:sticky 2xl:top-6 2xl:self-start 2xl:pl-6">
-            {/* A stable object, not a fresh literal — the observer effect keys
-                off `sheet`, so a new identity each render would rebind it. */}
-            <SheetSectionNav
-              key={generationId}
-              sheet={sheet ?? EMPTY_SHEET}
-              readyKeys={loading ? streamedKeys : undefined}
-            />
+            id="sheet-section-nav"
+            className={`hidden 2xl:block 2xl:shrink-0 2xl:sticky 2xl:top-6 2xl:self-start 2xl:overflow-hidden motion-safe:2xl:transition-[width,opacity,transform] motion-safe:2xl:duration-300 motion-safe:2xl:ease-out ${
+              navOpen
+                ? "2xl:w-[240px] 2xl:translate-x-0 2xl:opacity-100"
+                : "2xl:invisible 2xl:w-0 2xl:translate-x-6 2xl:opacity-0"
+            }`}
+          >
+            <div className="w-[240px] pl-6">
+              {/* A stable object, not a fresh literal — the observer effect keys
+                  off `sheet`, so a new identity each render would rebind it. */}
+              <SheetSectionNav
+                key={generationId}
+                sheet={sheet ?? EMPTY_SHEET}
+                readyKeys={loading ? streamedKeys : undefined}
+              />
+            </div>
           </div>
         </>
       )}
