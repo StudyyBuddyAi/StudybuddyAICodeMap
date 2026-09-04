@@ -22,6 +22,9 @@ function buildCorsHeaders(req: Request): Record<string, string> {
   return { ...BASE_CORS_HEADERS, "Access-Control-Allow-Origin": origin };
 }
 
+const MAX_BODY_BYTES = 102_400; // 100 KB — consistent with rag-generate
+const MAX_NOTES_LENGTH = 20_000; // chars; generous for real notes, blocks abuse
+
 // Structured, machine-parseable logs (visible in Supabase edge-fn logs).
 // Metadata only — never log notes/topic content, tokens, or keys.
 const log = (event: string, fields: Record<string, unknown> = {}) => {
@@ -167,6 +170,42 @@ serve(async (req) => {
       );
     }
 
+    // ── Request body size guard ────────────────────────────────────────────
+    // Reject oversized requests before any expensive work. Prefer the declared
+    // Content-Length header when present; always enforce on the actual bytes read.
+    const declaredLength = Number(req.headers.get("Content-Length"));
+    if (Number.isFinite(declaredLength) && declaredLength > MAX_BODY_BYTES) {
+      log("body_too_large", { declaredLength, userId: user.id });
+      return new Response(
+        JSON.stringify({ error: { code: "INVALID_INPUT", message: "Request body too large" } }),
+        { status: 400, headers: { ...buildCorsHeaders(req), "Content-Type": "application/json" } }
+      );
+    }
+
+    const rawBytes = await req.arrayBuffer();
+    if (rawBytes.byteLength > MAX_BODY_BYTES) {
+      log("body_too_large", { actualBytes: rawBytes.byteLength, userId: user.id });
+      return new Response(
+        JSON.stringify({ error: { code: "INVALID_INPUT", message: "Request body too large" } }),
+        { status: 400, headers: { ...buildCorsHeaders(req), "Content-Type": "application/json" } }
+      );
+    }
+
+    // Safe JSON parse — never expose parse errors to the caller.
+    let body: Record<string, unknown>;
+    try {
+      body = JSON.parse(new TextDecoder().decode(rawBytes));
+      if (typeof body !== "object" || body === null || Array.isArray(body)) {
+        throw new TypeError("body must be a JSON object");
+      }
+    } catch {
+      log("invalid_json", { userId: user.id });
+      return new Response(
+        JSON.stringify({ error: { code: "INVALID_INPUT", message: "Request body must be valid JSON" } }),
+        { status: 400, headers: { ...buildCorsHeaders(req), "Content-Type": "application/json" } }
+      );
+    }
+
     // Entitlement fields (userId / isAnonymous / isPro / preferredModel) may
     // still be present in the body — the client sends them for backwards
     // compatibility — but they are deliberately NOT read here. Identity and
@@ -174,11 +213,26 @@ serve(async (req) => {
     const { notes, difficulty, focus, length, examMode, cardsOnly, cardCount, focusCard,
             explainMode,
             enhanceMode, itemText, sectionKey, sectionItems, enhanceTopic,
-            persona } = await req.json();
+            persona } = body as {
+      notes?: unknown; difficulty?: unknown; focus?: unknown; length?: unknown;
+      examMode?: unknown; cardsOnly?: unknown; cardCount?: unknown; focusCard?: unknown;
+      explainMode?: unknown; enhanceMode?: unknown; itemText?: unknown;
+      sectionKey?: unknown; sectionItems?: unknown; enhanceTopic?: unknown;
+      persona?: unknown;
+    };
 
+    // ── Input validation ───────────────────────────────────────────────────
     if (!notes || typeof notes !== "string" || !notes.trim()) {
       return new Response(
-        JSON.stringify({ error: "Notes are required" }),
+        JSON.stringify({ error: { code: "INVALID_INPUT", message: "Notes are required" } }),
+        { status: 400, headers: { ...buildCorsHeaders(req), "Content-Type": "application/json" } }
+      );
+    }
+
+    if (notes.length > MAX_NOTES_LENGTH) {
+      log("notes_too_long", { notesLength: notes.length, userId: user.id });
+      return new Response(
+        JSON.stringify({ error: { code: "INVALID_INPUT", message: "Notes too long" } }),
         { status: 400, headers: { ...buildCorsHeaders(req), "Content-Type": "application/json" } }
       );
     }
@@ -756,8 +810,9 @@ ${sheetSchemaBlock}`;
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
     log("error", { error: message, elapsedMs: Date.now() - startedAt });
+    // Do NOT expose internal error details to the caller.
     return new Response(
-      JSON.stringify({ error: message }),
+      JSON.stringify({ error: { code: "INTERNAL_ERROR", message: "Internal server error" } }),
       { status: 500, headers: { ...buildCorsHeaders(req), "Content-Type": "application/json" } }
     );
   }
