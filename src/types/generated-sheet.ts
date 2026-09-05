@@ -18,6 +18,16 @@ export interface SheetSource {
   sourceUrl: string | null;
   similarity: number;
   content: string;
+  // ── Locator fields, all optional: absent on every sheet saved before the
+  // 20260905000000 migration taught match_guideline_chunks to return them, and
+  // absent per-chunk for documents whose ingestion run recorded no metadata.
+  // src/lib/source-display.ts degrades to showing no location at all rather
+  // than guessing. `pageStart`/`pageEnd` are PDF page indices, not printed page
+  // numbers — read the note on RagChunk in supabase/functions/_shared/rag.ts.
+  chunkIndex?: number | null;
+  totalChunks?: number | null;
+  pageStart?: number | null;
+  pageEnd?: number | null;
 }
 
 /**

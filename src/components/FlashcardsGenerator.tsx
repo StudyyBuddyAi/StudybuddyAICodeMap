@@ -660,7 +660,10 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated }: FlashcardsGene
               }
             />
             {pendingGrounding.sources.length > 0 && (
-              <SheetSources sheet={{ sources: pendingGrounding.sources } as GeneratedSheet} />
+              <SheetSources
+                sheet={{ sources: pendingGrounding.sources } as GeneratedSheet}
+                query={topic}
+              />
             )}
           </div>
         )}
