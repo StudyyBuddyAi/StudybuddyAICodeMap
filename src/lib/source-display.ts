@@ -62,8 +62,15 @@ const TITLE_STOPWORDS = new Set([
   "from", "or", "at", "as", "its", "into", "over", "under", "via",
 ]);
 
-/** "Chris A. Liacouras" — a contributor byline, not a section heading. */
-const BYLINE_RE = /^[A-Z][a-z]+(?:\s+[A-Z]\.)?\s+[A-Z][a-z']+$/;
+/**
+ * "Chris A. Liacouras" — a contributor byline, not a section heading.
+ *
+ * The middle initial is required. Without it this also matches any two-word
+ * title ("Gastrointestinal Bleeding", "Acute Pancreatitis"), and rejecting
+ * real chapter headings to catch the occasional byline is much the worse
+ * trade: a byline slipping through is cosmetic, a missing chapter is not.
+ */
+const BYLINE_RE = /^[A-Z][a-z]+\s+[A-Z]\.\s+[A-Z][a-z']+$/;
 
 /** Ingestion noise that disqualifies a segment outright. */
 const NOISE_RE = /\bwww\.|\.com\b|\.org\b|Downloaded for /i;
@@ -439,6 +446,84 @@ export function highlightQuery(text: string, query: string): ExcerptSegment[] {
   }
   if (last < text.length) segments.push({ text: text.slice(last), hit: false });
   return segments.length > 0 ? segments : [{ text, hit: false }];
+}
+
+// ── Index rows ───────────────────────────────────────────────────────────────
+
+/** Trailing fragments that make a truncated lead read as cut off mid-thought. */
+const TRAILING_PARTIAL_RE = /[\s,;:(]+\S*$/;
+
+/**
+ * A short descriptor of what a passage opens with, for the contents row when
+ * nothing better is available.
+ *
+ * This is the passage's own first words, trimmed at a word boundary — not a
+ * summary. Deliberately so: a generated one-line gloss of a medical passage
+ * that drifts from the text underneath it would be worse than a blunt quote.
+ */
+export function passageLead(text: string, maxChars = 72): string {
+  const flat = text.replace(/\s+/g, " ").trim();
+  if (flat.length <= maxChars) return flat;
+
+  const cut = flat.slice(0, maxChars);
+  const trimmed = cut.replace(TRAILING_PARTIAL_RE, "");
+  return (trimmed.length >= maxChars * 0.5 ? trimmed : cut).trimEnd() + "…";
+}
+
+export interface SourceChapter {
+  /** Chapter or section heading shared by these passages; null when unknown. */
+  heading: string | null;
+  passages: SheetSource[];
+}
+
+export interface SourceBook {
+  /** Display title of the work. */
+  title: string;
+  /** Raw guideline_name, kept so callers can still key off the true document. */
+  rawName: string;
+  chapters: SourceChapter[];
+  passageCount: number;
+}
+
+/**
+ * Reshapes a flat passage list into the book -> chapter -> passage tree the
+ * source list renders as a contents page.
+ *
+ * Retrieval routinely returns eight passages from one chapter of one book. Flat,
+ * that renders as eight near-identical headers; grouped, it reads as a single
+ * citation with eight page references under it. Books are ordered by their best
+ * match, chapters and passages in book order where positions are known.
+ */
+export function groupSources(sources: readonly SheetSource[]): SourceBook[] {
+  const books = new Map<string, SourceBook>();
+
+  for (const source of orderSources(sources)) {
+    const rawName = source.guidelineName;
+    let book = books.get(rawName);
+    if (!book) {
+      book = {
+        title: source.book ?? cleanDocumentName(rawName),
+        rawName,
+        chapters: [],
+        passageCount: 0,
+      };
+      books.set(rawName, book);
+    }
+    // A label on any one passage names the whole book — retrieval can return
+    // the same document with the label resolved on only some of its chunks.
+    if (source.book && book.title !== source.book) book.title = source.book;
+    book.passageCount++;
+
+    const heading = source.chapter ?? resolveLocation(source).heading;
+    const last = book.chapters[book.chapters.length - 1];
+    if (last && last.heading === heading) {
+      last.passages.push(source);
+    } else {
+      book.chapters.push({ heading, passages: [source] });
+    }
+  }
+
+  return [...books.values()];
 }
 
 // ── Ordering ─────────────────────────────────────────────────────────────────

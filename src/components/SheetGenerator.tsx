@@ -51,6 +51,7 @@ import {
 import GroundingNotice from "@/components/GroundingNotice";
 import SheetSources from "@/components/SheetSources";
 import { reconcileGroundingLevel, resolveGroundingLevel } from "@/lib/grounding";
+import { applySourceLabels } from "@/lib/source-labels";
 import { fetchBestCitation, type CitationResult } from "@/lib/citation";
 import { getCitationsForTopic } from "@/lib/citation-store";
 import CitationCTABanner from "@/components/CitationCTABanner";
@@ -601,13 +602,29 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
             // model bytes. It must be intercepted before the delta read below
             // so it never reaches fullText / parsePartialSheet.
             if (parsed.__meta) {
-              groundingResultRef.current = {
-                retrievedChunks:
-                  typeof parsed.__meta.retrievedChunks === "number"
-                    ? parsed.__meta.retrievedChunks
-                    : 0,
-                sources: Array.isArray(parsed.__meta.sources) ? parsed.__meta.sources : [],
-              };
+              // Two frame kinds share this envelope: the retrieval result
+              // ahead of any model bytes, and the book/chapter labels that
+              // arrive at the end of the stream. The second only ever refines
+              // the sources the first delivered, so it merges rather than
+              // replaces — and every label is validated against its own chunk
+              // before it can reach the UI or a saved sheet.
+              if (Array.isArray(parsed.__meta.sourceLabels)) {
+                const current = groundingResultRef.current;
+                if (current) {
+                  groundingResultRef.current = {
+                    ...current,
+                    sources: applySourceLabels(current.sources, parsed.__meta.sourceLabels),
+                  };
+                }
+              } else {
+                groundingResultRef.current = {
+                  retrievedChunks:
+                    typeof parsed.__meta.retrievedChunks === "number"
+                      ? parsed.__meta.retrievedChunks
+                      : 0,
+                  sources: Array.isArray(parsed.__meta.sources) ? parsed.__meta.sources : [],
+                };
+              }
               continue;
             }
             const content = parsed.choices?.[0]?.delta?.content;

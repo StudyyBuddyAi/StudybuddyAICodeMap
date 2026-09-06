@@ -28,6 +28,16 @@ export interface SheetSource {
   totalChunks?: number | null;
   pageStart?: number | null;
   pageEnd?: number | null;
+  // ── Model-proposed labels, validated against the raw chunk before they are
+  // ever set (src/lib/source-labels.ts). Present only when the label survived
+  // that check, so display code can trust them and fall back to the mechanical
+  // repair in src/lib/source-display.ts whenever they are absent.
+  /** Human-readable title of the work, e.g. "Nelson Textbook of Pediatrics, 22nd Edition". */
+  book?: string;
+  /** Where in the book the passage sits, e.g. "Chapter 415 — Portal Hypertension". */
+  chapter?: string;
+  /** Contents-page entry for this one passage, e.g. "Transfusion thresholds in acute bleeding". */
+  section?: string;
 }
 
 /**

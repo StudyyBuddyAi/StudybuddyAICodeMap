@@ -1,7 +1,9 @@
 import { describe, it, expect } from "vitest";
 import {
   cleanDocumentName,
+  groupSources,
   looksLikeHeading,
+  passageLead,
   resolveLocation,
   formatLocation,
   cleanExcerpt,
@@ -77,6 +79,12 @@ describe("looksLikeHeading", () => {
 
   it("rejects contributor bylines", () => {
     expect(looksLikeHeading("Chris A. Liacouras")).toBe(false);
+  });
+
+  it("accepts two-word chapter titles, which a loose byline rule would eat", () => {
+    expect(looksLikeHeading("Gastrointestinal Bleeding")).toBe(true);
+    expect(looksLikeHeading("Acute Pancreatitis")).toBe(true);
+    expect(looksLikeHeading("Portal Hypertension")).toBe(true);
   });
 
   it("rejects ingestion noise", () => {
@@ -299,6 +307,113 @@ describe("highlightQuery", () => {
     const text = "Hypertension and hypertensive crisis in hypertension.";
     const joined = highlightQuery(text, "hypertension").map((s) => s.text).join("");
     expect(joined).toBe(text);
+  });
+});
+
+describe("passageLead", () => {
+  it("returns a short passage unchanged", () => {
+    expect(passageLead("Benign HTN damages vessels slowly.")).toBe("Benign HTN damages vessels slowly.");
+  });
+
+  it("truncates at a word boundary", () => {
+    const lead = passageLead(
+      "Endoscopic therapy is indicated for actively bleeding Mallory-Weiss tears and visible vessels",
+      40
+    );
+    expect(lead.endsWith("…")).toBe(true);
+    expect(lead.length).toBeLessThanOrEqual(41);
+    expect(lead).not.toMatch(/\s…$/);
+    // Never cuts inside a word.
+    expect("Endoscopic therapy is indicated for actively bleeding").toContain(lead.slice(0, -1));
+  });
+
+  it("collapses newlines so the row stays on one line", () => {
+    expect(passageLead("D. Pathogenesis\n1. Damage to endothelium")).toBe(
+      "D. Pathogenesis 1. Damage to endothelium"
+    );
+  });
+});
+
+describe("groupSources", () => {
+  const harrison = (id: string, chunkIndex: number, section?: string) =>
+    src({
+      id,
+      guidelineName: "Harrison's_Principles_of_Internal_Medicine,_Twenty_First_Edition",
+      sectionTitle: "46 Gastrointestinal Bleeding › some trailing fragment that is not a heading",
+      similarity: 0.7,
+      chunkIndex,
+      content: "Endoscopic therapy is indicated for actively bleeding lesions.",
+      ...(section ? { section } : {}),
+    });
+
+  it("collapses many passages from one chapter into a single group", () => {
+    const books = groupSources([harrison("a", 10), harrison("b", 11), harrison("c", 12)]);
+    expect(books).toHaveLength(1);
+    expect(books[0].title).toBe("Harrison's Principles of Internal Medicine, Twenty First Edition");
+    expect(books[0].passageCount).toBe(3);
+    expect(books[0].chapters).toHaveLength(1);
+    expect(books[0].chapters[0].heading).toBe("Chapter 46 — Gastrointestinal Bleeding");
+    expect(books[0].chapters[0].passages.map((p) => p.id)).toEqual(["a", "b", "c"]);
+  });
+
+  it("separates chapters within one book and keeps book order", () => {
+    const other = src({
+      id: "d",
+      guidelineName: "Harrison's_Principles_of_Internal_Medicine,_Twenty_First_Edition",
+      sectionTitle: "40 Hypoxia and Cyanosis",
+      chunkIndex: 3,
+      similarity: 0.72,
+    });
+    const books = groupSources([harrison("a", 10), other]);
+    expect(books).toHaveLength(1);
+    expect(books[0].chapters.map((c) => c.heading)).toEqual([
+      "Chapter 40 — Hypoxia and Cyanosis",
+      "Chapter 46 — Gastrointestinal Bleeding",
+    ]);
+  });
+
+  it("orders books by their best match", () => {
+    const pathoma = src({
+      id: "p",
+      guidelineName: "[Medicalstudyzone.com] Pathoma 2023 PDF",
+      similarity: 0.9,
+      content: "III. CIRRHOSIS\nEnd-stage liver damage.",
+    });
+    const books = groupSources([harrison("a", 10), pathoma]);
+    expect(books.map((b) => b.title)).toEqual([
+      "Pathoma 2023",
+      "Harrison's Principles of Internal Medicine, Twenty First Edition",
+    ]);
+  });
+
+  it("prefers a validated model label over the parsed heading and name", () => {
+    const labelled = src({
+      id: "a",
+      guidelineName: "OceanofPDF.comNelson_textbook_of_pediatrics_22nd_edition",
+      sectionTitle: "Chapter 415 u Portal Hypertension 2103",
+      book: "Nelson Textbook of Pediatrics, 22nd Edition",
+      chapter: "Chapter 415 — Portal Hypertension",
+    });
+    const [book] = groupSources([labelled]);
+    expect(book.title).toBe("Nelson Textbook of Pediatrics, 22nd Edition");
+    expect(book.chapters[0].heading).toBe("Chapter 415 — Portal Hypertension");
+  });
+
+  it("reports a null heading rather than inventing one", () => {
+    const unplaceable = src({
+      id: "x",
+      guidelineName: "PsychReproRenalRes",
+      sectionTitle: null,
+      content: "in older children or young adults, MPGN can be classified into primary forms",
+    });
+    const [book] = groupSources([unplaceable]);
+    expect(book.chapters[0].heading).toBeNull();
+  });
+
+  it("does not mutate its input", () => {
+    const sources = [harrison("a", 10), harrison("b", 11)];
+    groupSources(sources);
+    expect(sources.map((s) => s.id)).toEqual(["a", "b"]);
   });
 });
 

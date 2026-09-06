@@ -28,6 +28,7 @@ import AuthModal from "@/components/AuthModal";
 import { startTopProgress, finishTopProgress } from "@/components/TopProgressBar";
 import { useMemoryPreference } from "@/hooks/use-memory-preference";
 import { groundingLevelFromCards } from "@/lib/grounding";
+import { applySourceLabels } from "@/lib/source-labels";
 import GroundingNotice from "@/components/GroundingNotice";
 import SheetSources from "@/components/SheetSources";
 import type { GeneratedSheet, SheetSource } from "@/types/generated-sheet";
@@ -233,13 +234,26 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated }: FlashcardsGene
             // bytes. Intercept it before the delta read so it never lands in
             // fullText and get parsed as a flashcard.
             if (parsed.__meta) {
-              groundingResultRef.current = {
-                retrievedChunks:
-                  typeof parsed.__meta.retrievedChunks === "number"
-                    ? parsed.__meta.retrievedChunks
-                    : 0,
-                sources: Array.isArray(parsed.__meta.sources) ? parsed.__meta.sources : [],
-              };
+              // The book/chapter labels arrive as a second __meta frame at the
+              // end of the stream and only refine the sources the first frame
+              // delivered, so merge rather than replace.
+              if (Array.isArray(parsed.__meta.sourceLabels)) {
+                const current = groundingResultRef.current;
+                if (current) {
+                  groundingResultRef.current = {
+                    ...current,
+                    sources: applySourceLabels(current.sources, parsed.__meta.sourceLabels),
+                  };
+                }
+              } else {
+                groundingResultRef.current = {
+                  retrievedChunks:
+                    typeof parsed.__meta.retrievedChunks === "number"
+                      ? parsed.__meta.retrievedChunks
+                      : 0,
+                  sources: Array.isArray(parsed.__meta.sources) ? parsed.__meta.sources : [],
+                };
+              }
               continue;
             }
             const content = parsed.choices?.[0]?.delta?.content;

@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.8";
 import { makeEmbeddings, embedQuery, retrieveChunks, type RagChunk } from "../_shared/rag.ts";
+import { requestSourceLabels, type RawSourceLabel } from "../_shared/source-labels.ts";
 import {
   openMemoryWindow,
   readMemoryTurns,
@@ -230,6 +231,20 @@ serve(async (req) => {
     // declared level applies, defaulting to "partial" if missing/malformed.
     const retrievedChunks = ragChunks.length;
     const grounded = retrievedChunks > 0;
+
+    // ── SOURCE LABELS ──────────────────────────────────────────────────────
+    // Started here and deliberately NOT awaited: the sheet's own generation is
+    // kicked off below and streams for seconds, so by the time flush() needs
+    // these the cheap call has long since resolved. Awaiting it here instead
+    // would delay the first visible byte of every grounded sheet.
+    //
+    // Always routed to the cheap tier regardless of the user's model — this is
+    // a formatting job over text we already hold, not a medical judgement, and
+    // it must never consume premium routing.
+    const SOURCE_LABEL_MODEL = "openai/gpt-oss-20b";
+    const sourceLabelsPromise: Promise<RawSourceLabel[]> = grounded
+      ? requestSourceLabels(OPENROUTER_API_KEY, SOURCE_LABEL_MODEL, ragChunks)
+      : Promise.resolve([]);
 
     const groundingContextBlock = !groundingAttempted
       ? ""
@@ -933,6 +948,31 @@ ${sheetSchemaBlock}`;
         }
       },
       async flush(controller) {
+        // Second and final __meta frame, carrying the model's proposed book and
+        // chapter labels. It must go out before [DONE] — the client breaks out
+        // of its read loop on that sentinel. Raced against a timeout so a slow
+        // or hung label call can never hold the sheet's stream open; losing the
+        // labels only costs polish, since the source list already renders from
+        // the mechanical repair alone. The client validates every label against
+        // the raw chunk before showing or persisting it.
+        if (groundingAttempted) {
+          try {
+            const labels = await Promise.race([
+              sourceLabelsPromise,
+              new Promise<RawSourceLabel[]>((resolve) => setTimeout(() => resolve([]), 2500)),
+            ]);
+            if (labels.length > 0) {
+              controller.enqueue(
+                encoder.encode(`data: ${JSON.stringify({ __meta: { sourceLabels: labels } })}\n\n`)
+              );
+            }
+          } catch (labelErr: unknown) {
+            log("source_labels_failed", {
+              err: labelErr instanceof Error ? labelErr.message : String(labelErr),
+            });
+          }
+        }
+
         controller.enqueue(encoder.encode("data: [DONE]\n\n"));
         log("generation_stream_end", {
           userId: user.id,
