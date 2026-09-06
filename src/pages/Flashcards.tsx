@@ -10,7 +10,6 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { useFlashcardDeck, makeCardId, useDeckGrounding, type Card as DeckCard } from "@/hooks/use-flashcard-deck";
 import { useToast } from "@/hooks/use-toast";
-import type { GeneratedSheet } from "@/types/generated-sheet";
 
 const RECENT_DECK_LIMIT = 5;
 
@@ -80,10 +79,16 @@ const Flashcards = () => {
   const [done, setDone] = useState(false);
   const [slidePhase, setSlidePhase] = useState<"idle" | "exit">("idle");
 
-  // Deck-level retrieval metadata (sources) for the active session's topic —
-  // the per-card grounded/ungrounded counts below come straight from
-  // session.cards and don't need this fetch, only the guideline source list does.
-  const { data: sessionGroundingMeta } = useDeckGrounding(session?.topic ?? null);
+  // Deck-level retrieval metadata (sources) for the card currently on screen,
+  // not for the session as a whole: `session.topic` is "Today's review" or
+  // "All cards" for the two mixed-deck entry points, which matches no deck row
+  // and left those sessions showing no sources at all. Scoping per card is
+  // what StudyMode does, and react-query caches by topic so moving between
+  // cards of one deck doesn't refetch. The per-card grounded/ungrounded counts
+  // below come straight from session.cards and don't need this fetch.
+  const { data: sessionGroundingMeta } = useDeckGrounding(
+    session?.cards[index]?.topic ?? null
+  );
   const sessionGroundedCount = session ? session.cards.filter((c) => c.grounded).length : 0;
   const sessionUngroundedCount = session ? session.cards.length - sessionGroundedCount : 0;
 
@@ -614,12 +619,14 @@ const Flashcards = () => {
               Tap the card to flip · AI-generated content · Not a substitute for clinical judgment
             </p>
 
-            {/* Guideline sources behind this deck — same component and
+            {/* Guideline sources behind this card's deck — same component and
                 placement SheetGenerator uses below its document. Self-hides
                 when the deck has no retrieval metadata (ungrounded decks,
-                grounding turned off, or an anonymous user's local-only deck). */}
+                grounding turned off, or an anonymous user's local-only deck).
+                The deck's topic is what was retrieved on, so it is also what
+                the excerpts highlight against. */}
             {sessionGroundingMeta && sessionGroundingMeta.sources.length > 0 && (
-              <SheetSources sheet={{ sources: sessionGroundingMeta.sources } as GeneratedSheet} />
+              <SheetSources sources={sessionGroundingMeta.sources} query={current.topic} />
             )}
           </>
         ) : null}

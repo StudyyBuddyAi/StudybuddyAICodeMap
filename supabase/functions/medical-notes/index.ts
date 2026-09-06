@@ -233,10 +233,11 @@ serve(async (req) => {
     const grounded = retrievedChunks > 0;
 
     // ── SOURCE LABELS ──────────────────────────────────────────────────────
-    // Started here and deliberately NOT awaited: the sheet's own generation is
-    // kicked off below and streams for seconds, so by the time flush() needs
-    // these the cheap call has long since resolved. Awaiting it here instead
-    // would delay the first visible byte of every grounded sheet.
+    // Started here and deliberately NOT awaited: the generation itself is
+    // kicked off below and streams for seconds — a sheet or a card deck alike,
+    // both of which show this source list — so by the time flush() needs these
+    // the cheap call has long since resolved. Awaiting it here instead would
+    // delay the first visible byte of every grounded generation.
     //
     // Always routed to the cheap tier regardless of the user's model — this is
     // a formatting job over text we already hold, not a medical judgement, and

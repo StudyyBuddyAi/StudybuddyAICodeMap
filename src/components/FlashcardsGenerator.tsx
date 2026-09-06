@@ -31,7 +31,7 @@ import { groundingLevelFromCards } from "@/lib/grounding";
 import { applySourceLabels } from "@/lib/source-labels";
 import GroundingNotice from "@/components/GroundingNotice";
 import SheetSources from "@/components/SheetSources";
-import type { GeneratedSheet, SheetSource } from "@/types/generated-sheet";
+import type { SheetSource } from "@/types/generated-sheet";
 
 type CitationState = "idle" | "loading" | "found" | "locked" | "hidden";
 
@@ -95,6 +95,10 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated }: FlashcardsGene
   // separates "we looked and found nothing" from "you turned it off", which
   // GroundingNotice words very differently.
   const [pendingGroundingRequested, setPendingGroundingRequested] = useState(true);
+  // The topic this deck was actually retrieved for, held separately because
+  // saving the deck clears the topic input — and the source list renders after
+  // that, so reading `topic` there would highlight the excerpts against "".
+  const [pendingGroundingQuery, setPendingGroundingQuery] = useState("");
   const [goProOpen, setGoProOpen] = useState(false);
   const [recentTopics, setRecentTopics] = useState<string[]>(() => {
     try {
@@ -282,6 +286,7 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated }: FlashcardsGene
 
       setPendingCards(parsed);
       setPendingGrounding(groundingMeta);
+      setPendingGroundingQuery(activeTopic);
       pendingGroundingRef.current = groundingMeta;
 
       // Citation lookup — runs after cards are saved. Serves from the local
@@ -675,8 +680,8 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated }: FlashcardsGene
             />
             {pendingGrounding.sources.length > 0 && (
               <SheetSources
-                sheet={{ sources: pendingGrounding.sources } as GeneratedSheet}
-                query={topic}
+                sources={pendingGrounding.sources}
+                query={pendingGroundingQuery}
               />
             )}
           </div>

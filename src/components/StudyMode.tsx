@@ -13,7 +13,6 @@ import SheetSources from "@/components/SheetSources";
 import { startTopProgress, finishTopProgress } from "@/components/TopProgressBar";
 import { callMedicalNotes } from "@/lib/callMedicalNotes";
 import { useMemoryPreference } from "@/hooks/use-memory-preference";
-import type { GeneratedSheet } from "@/types/generated-sheet";
 
 interface StudyModeProps {
   dueCards: Card[];
@@ -245,9 +244,11 @@ const StudyMode = ({ dueCards, onReview, onClose }: StudyModeProps) => {
 
             {/* Guideline sources behind the current card's deck — same
                 component SheetGenerator renders below the document; self-hides
-                when the current card's deck has no retrieval metadata. */}
+                when the current card's deck has no retrieval metadata. The
+                deck's topic is what was retrieved on, so it is also what the
+                excerpts highlight against. */}
             {currentCardGrounding && currentCardGrounding.sources.length > 0 && (
-              <SheetSources sheet={{ sources: currentCardGrounding.sources } as GeneratedSheet} />
+              <SheetSources sources={currentCardGrounding.sources} query={current.topic} />
             )}
           </div>
         ) : null}

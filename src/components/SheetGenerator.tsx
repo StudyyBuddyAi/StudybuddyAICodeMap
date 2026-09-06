@@ -1375,7 +1375,7 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
       {/* The library passages this sheet was built on. Self-hides when the
           sheet has no sources, so ungrounded sheets are unaffected. `notes` is
           passed so each excerpt can highlight the terms it matched on. */}
-      {!loading && sheet && <SheetSources sheet={sheet} query={notes} />}
+      {!loading && sheet && <SheetSources sources={sheet.sources ?? []} query={notes} />}
 
       {/* The response was damaged mid-flight. Say so rather than let a short
           sheet pass for a complete one — this is medical content. */}
