@@ -8,6 +8,20 @@ export type RagChunk = {
   sourceUrl: string | null;
   content: string;
   similarity: number;
+  /** Position of this chunk in its source document, 0-based. */
+  chunkIndex: number | null;
+  /** Total chunks the ingestion run produced for that document. */
+  totalChunks: number | null;
+  /**
+   * Page span from the ingestion metadata. This is the page index within the
+   * ingested PDF, NOT the page number printed on the page — the offset between
+   * the two differs per document, and for a split volume it is thousands of
+   * pages. Never render it directly: `resolveLocation` in
+   * src/lib/source-display.ts prefers the printed page parsed out of the
+   * document's running header and falls back to this only when it is plausible.
+   */
+  pageStart: number | null;
+  pageEnd: number | null;
 };
 
 type MatchGuidelineChunksRow = {
@@ -17,8 +31,16 @@ type MatchGuidelineChunksRow = {
   section_title: string | null;
   content: string;
   source_url: string | null;
+  chunk_index: number | null;
+  metadata: Record<string, unknown> | null;
   similarity: number;
 };
+
+/** Reads a positive integer out of the ingestion metadata blob, else null. */
+function metaInt(metadata: Record<string, unknown> | null, key: string): number | null {
+  const v = metadata?.[key];
+  return typeof v === "number" && Number.isFinite(v) && v > 0 ? Math.round(v) : null;
+}
 
 /** Same OpenRouter-backed embeddings config rag-generate has always used. */
 export function makeEmbeddings(openRouterApiKey: string): OpenAIEmbeddings {
@@ -59,6 +81,10 @@ export async function retrieveChunks(
   }
 
   const rows: MatchGuidelineChunksRow[] = Array.isArray(data) ? data : [];
+  // Only the four locator fields are lifted out of `metadata` — the rest of
+  // the blob is ingestion bookkeeping (checksums, the original PDF filename,
+  // timestamps) with no business being streamed to the client and persisted
+  // inside every saved sheet.
   const chunks: RagChunk[] = rows.map((row) => ({
     id: row.id,
     guidelineName: row.guideline_name,
@@ -66,6 +92,10 @@ export async function retrieveChunks(
     sourceUrl: row.source_url ?? null,
     content: row.content,
     similarity: row.similarity,
+    chunkIndex: typeof row.chunk_index === "number" ? row.chunk_index : null,
+    totalChunks: metaInt(row.metadata ?? null, "total_chunks"),
+    pageStart: metaInt(row.metadata ?? null, "page_start"),
+    pageEnd: metaInt(row.metadata ?? null, "page_end"),
   }));
 
   return { chunks, grounded: chunks.length > 0 };

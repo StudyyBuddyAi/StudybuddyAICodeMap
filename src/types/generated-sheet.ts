@@ -18,6 +18,26 @@ export interface SheetSource {
   sourceUrl: string | null;
   similarity: number;
   content: string;
+  // ── Locator fields, all optional: absent on every sheet saved before the
+  // 20260905000000 migration taught match_guideline_chunks to return them, and
+  // absent per-chunk for documents whose ingestion run recorded no metadata.
+  // src/lib/source-display.ts degrades to showing no location at all rather
+  // than guessing. `pageStart`/`pageEnd` are PDF page indices, not printed page
+  // numbers — read the note on RagChunk in supabase/functions/_shared/rag.ts.
+  chunkIndex?: number | null;
+  totalChunks?: number | null;
+  pageStart?: number | null;
+  pageEnd?: number | null;
+  // ── Model-proposed labels, validated against the raw chunk before they are
+  // ever set (src/lib/source-labels.ts). Present only when the label survived
+  // that check, so display code can trust them and fall back to the mechanical
+  // repair in src/lib/source-display.ts whenever they are absent.
+  /** Human-readable title of the work, e.g. "Nelson Textbook of Pediatrics, 22nd Edition". */
+  book?: string;
+  /** Where in the book the passage sits, e.g. "Chapter 415 — Portal Hypertension". */
+  chapter?: string;
+  /** Contents-page entry for this one passage, e.g. "Transfusion thresholds in acute bleeding". */
+  section?: string;
 }
 
 /**

@@ -51,6 +51,7 @@ import {
 import GroundingNotice from "@/components/GroundingNotice";
 import SheetSources from "@/components/SheetSources";
 import { reconcileGroundingLevel, resolveGroundingLevel } from "@/lib/grounding";
+import { applySourceLabels } from "@/lib/source-labels";
 import { fetchBestCitation, type CitationResult } from "@/lib/citation";
 import { getCitationsForTopic } from "@/lib/citation-store";
 import CitationCTABanner from "@/components/CitationCTABanner";
@@ -601,13 +602,29 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
             // model bytes. It must be intercepted before the delta read below
             // so it never reaches fullText / parsePartialSheet.
             if (parsed.__meta) {
-              groundingResultRef.current = {
-                retrievedChunks:
-                  typeof parsed.__meta.retrievedChunks === "number"
-                    ? parsed.__meta.retrievedChunks
-                    : 0,
-                sources: Array.isArray(parsed.__meta.sources) ? parsed.__meta.sources : [],
-              };
+              // Two frame kinds share this envelope: the retrieval result
+              // ahead of any model bytes, and the book/chapter labels that
+              // arrive at the end of the stream. The second only ever refines
+              // the sources the first delivered, so it merges rather than
+              // replaces — and every label is validated against its own chunk
+              // before it can reach the UI or a saved sheet.
+              if (Array.isArray(parsed.__meta.sourceLabels)) {
+                const current = groundingResultRef.current;
+                if (current) {
+                  groundingResultRef.current = {
+                    ...current,
+                    sources: applySourceLabels(current.sources, parsed.__meta.sourceLabels),
+                  };
+                }
+              } else {
+                groundingResultRef.current = {
+                  retrievedChunks:
+                    typeof parsed.__meta.retrievedChunks === "number"
+                      ? parsed.__meta.retrievedChunks
+                      : 0,
+                  sources: Array.isArray(parsed.__meta.sources) ? parsed.__meta.sources : [],
+                };
+              }
               continue;
             }
             const content = parsed.choices?.[0]?.delta?.content;
@@ -1355,9 +1372,10 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
         />
       )}
 
-      {/* Retrieved guideline chunks behind this sheet. Self-hides when the
-          sheet has no sources, so ungrounded sheets are unaffected. */}
-      {!loading && sheet && <SheetSources sheet={sheet} />}
+      {/* The library passages this sheet was built on. Self-hides when the
+          sheet has no sources, so ungrounded sheets are unaffected. `notes` is
+          passed so each excerpt can highlight the terms it matched on. */}
+      {!loading && sheet && <SheetSources sheet={sheet} query={notes} />}
 
       {/* The response was damaged mid-flight. Say so rather than let a short
           sheet pass for a complete one — this is medical content. */}
