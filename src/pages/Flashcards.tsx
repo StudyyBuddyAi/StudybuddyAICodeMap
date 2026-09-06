@@ -832,7 +832,7 @@ const Flashcards = () => {
             id="flashcards-configurator"
             className={`min-w-0 md:max-lg:hidden lg:sticky lg:top-6 lg:self-start lg:shrink-0 lg:overflow-hidden motion-safe:lg:transition-[width,opacity] motion-safe:lg:duration-300 motion-safe:lg:ease-out ${
               configOpen
-                ? "lg:w-[320px] lg:min-w-[320px] lg:max-w-[400px] lg:pr-5 lg:opacity-100"
+                ? "lg:w-[380px] lg:min-w-[380px] lg:max-w-[440px] lg:pr-5 lg:opacity-100"
                 : "lg:invisible lg:w-0 lg:min-w-0 lg:max-w-0 lg:pr-0 lg:opacity-0"
             }`}
           >
