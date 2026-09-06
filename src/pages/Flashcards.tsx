@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { ArrowRight, BookOpen, Layers, Play, Repeat, Settings2, Shuffle, X, Sparkles, Check, ChevronRight, ArrowLeft, RotateCcw, Bookmark, AlertTriangle, CheckCircle2 } from "lucide-react";
+import { ArrowRight, BookOpen, BrainCircuit, Layers, PanelLeftClose, PanelLeftOpen, PenLine, Play, Repeat, Settings2, Shuffle, X, Sparkles, Check, ChevronRight, ArrowLeft, RotateCcw, Bookmark, AlertTriangle, CheckCircle2 } from "lucide-react";
 import DashboardLayout from "@/components/dashboard/DashboardLayout";
 import FlashcardsGenerator, { type GeneratedCard } from "@/components/FlashcardsGenerator";
 import DeckList from "@/components/DeckList";
@@ -12,6 +12,78 @@ import { useFlashcardDeck, makeCardId, useDeckGrounding, type Card as DeckCard }
 import { useToast } from "@/hooks/use-toast";
 
 const RECENT_DECK_LIMIT = 5;
+
+// Steps shown above the generator so a first visit understands the flow before
+// touching anything: pick a topic -> the deck is written -> review on schedule.
+// Same three-card row the sheets page uses, worded for spaced repetition.
+const HOW_IT_WORKS = [
+  {
+    label: "Step 1",
+    title: "Pick a topic",
+    description: "Type any medical topic or reach for one you studied recently — the deck is built around it.",
+    icon: PenLine,
+  },
+  {
+    label: "Step 2",
+    title: "AI writes the cards",
+    description: "Vignette-style questions with one unambiguous answer, grounded in the guideline library wherever it covers your topic.",
+    icon: BrainCircuit,
+  },
+  {
+    label: "Step 3",
+    title: "Review on schedule",
+    description: "Rate each card as you go and spaced repetition brings it back exactly when you are about to forget it.",
+    icon: Repeat,
+  },
+] as const;
+
+/**
+ * The three-step explainer above the generator. Rendered only while no review
+ * session is running: mid-session the right pane is the card being studied, and
+ * a tutorial telling the reader how to start one is noise at that point.
+ */
+const HowItWorks = () => (
+  // Carries the sheets page's token spelling rather than this page's Tailwind
+  // classes, so the two rows are the same object rather than an approximation
+  // of it: `--color-accent` is the bright teal the chips need, where Tailwind's
+  // `primary` is a dark teal that disappears against the ink-coloured circle.
+  <div className="relative">
+    <div className="absolute inset-x-10 top-7 hidden h-px bg-gradient-to-r from-transparent via-[color:var(--color-accent)]/60 to-transparent sm:block" />
+
+    <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+      {HOW_IT_WORKS.map(({ label, title, description, icon: Icon }, index) => (
+        <div key={title} className="relative z-10">
+          <div className="group flex items-center gap-4 rounded-[28px] border border-[color:var(--color-border)] bg-[color:var(--color-card)] p-4 shadow-[0_12px_30px_rgba(15,23,42,0.06)] transition-all duration-200 hover:-translate-y-1 hover:border-[color:var(--color-accent)]/70 hover:shadow-[0_18px_38px_rgba(19,128,134,0.12)] sm:flex-col sm:items-center sm:p-5 sm:text-center">
+            {/* Dark mode inverts the pair — the circle turns cream — so the
+                glyph takes the ink colour there rather than the accent. */}
+            <div className="relative flex h-14 w-14 shrink-0 items-center justify-center rounded-full border-4 border-[color:var(--color-card)] bg-[color:var(--color-foreground)] text-[color:var(--color-accent)] shadow-[0_10px_18px_rgba(15,23,42,0.12)] dark:text-[color:var(--color-accent-foreground)]">
+              <span className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-[color:var(--color-accent)] text-[9px] font-bold text-[color:var(--color-background)] shadow-sm">
+                {index + 1}
+              </span>
+              <Icon size={20} strokeWidth={2.2} />
+            </div>
+
+            <div className="min-w-0 flex-1 sm:flex-none">
+              <div className="mb-2 inline-flex items-center gap-1.5">
+                <span className="[font-family:var(--app-font-mono)] text-[10px] font-medium uppercase tracking-[0.14em] text-[color:var(--color-accent)]">
+                  {label}
+                </span>
+                <ArrowRight size={12} className="text-[color:var(--color-muted-foreground)] transition-transform duration-200 group-hover:translate-x-0.5" />
+              </div>
+
+              <h3 className="[font-family:var(--app-font-serif)] text-lg font-medium leading-snug tracking-[-0.02em] text-[color:var(--color-foreground)]">
+                {title}
+              </h3>
+              <p className="mt-2 text-xs leading-relaxed text-[color:var(--color-muted-foreground)]">
+                {description}
+              </p>
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
+  </div>
+);
 
 type RightPhase = "idle" | "generating" | "reviewing";
 type Rating = "again" | "good" | "easy";
@@ -65,6 +137,9 @@ const Flashcards = () => {
   const [rightPhase, setRightPhase] = useState<RightPhase>("idle");
   const [genTopic, setGenTopic] = useState("");
   const [configDrawerOpen, setConfigDrawerOpen] = useState(false);
+  // Desktop (lg+) left pane. Starts open; the reader collapses it once a deck
+  // is on screen and the review pane takes the reclaimed width.
+  const [configOpen, setConfigOpen] = useState(true);
 
   // ── "Explain this" panel state ────────────────────────────────────────
   const [explainOpen, setExplainOpen] = useState(false);
@@ -737,16 +812,52 @@ const Flashcards = () => {
             Study any topic,{" "}
             <span className="italic text-primary">lock it in.</span>
           </h1>
+          <p className="mt-2.5 max-w-xl text-base leading-relaxed text-muted-foreground">
+            Enter any medical topic — a deck of vignette cards is written for it,
+            then scheduled so you see each one just before it slips.
+          </p>
         </div>
 
+        {/* How it works — makes the page self-explanatory at a glance. Hidden
+            once a review is running; see HowItWorks. */}
+        {!session && <HowItWorks />}
+
         <div className="flex flex-col gap-6 lg:flex-row lg:gap-0 lg:items-start">
-          {/* ── Left pane: configurator / session status (drawer on tablet) ── */}
-          <div className="min-w-0 md:max-lg:hidden lg:sticky lg:top-6 lg:self-start lg:w-[320px] lg:min-w-[320px] lg:max-w-[400px] lg:shrink-0 lg:pr-5">
+          {/* ── Left pane: configurator / session status (drawer on tablet).
+              On desktop it collapses to zero width so the right pane, which is
+              `lg:flex-1`, grows into the space — the width animates rather than
+              the pane being display:none'd inside a column that keeps its size.
+              Below lg it always stacks above and the toggle is hidden. ── */}
+          <div
+            id="flashcards-configurator"
+            className={`min-w-0 md:max-lg:hidden lg:sticky lg:top-6 lg:self-start lg:shrink-0 lg:overflow-hidden motion-safe:lg:transition-[width,opacity] motion-safe:lg:duration-300 motion-safe:lg:ease-out ${
+              configOpen
+                ? "lg:w-[320px] lg:min-w-[320px] lg:max-w-[400px] lg:pr-5 lg:opacity-100"
+                : "lg:invisible lg:w-0 lg:min-w-0 lg:max-w-0 lg:pr-0 lg:opacity-0"
+            }`}
+          >
             {leftPaneContent}
           </div>
 
-          {/* ── 1px divider between panes ── */}
-          <div aria-hidden className="hidden lg:block lg:w-px lg:shrink-0 lg:self-stretch bg-border" />
+          {/* ── Toggle rail between the panes. Carries the 1px divider the old
+              spacer drew, plus the collapse control. ── */}
+          <div className="hidden lg:flex lg:w-9 lg:shrink-0 lg:flex-col lg:items-center lg:self-stretch lg:border-l lg:border-border">
+            <button
+              type="button"
+              onClick={() => setConfigOpen((v) => !v)}
+              aria-expanded={configOpen}
+              aria-controls="flashcards-configurator"
+              aria-label={configOpen ? "Hide configuration" : "Show configuration"}
+              title={configOpen ? "Hide configuration" : "Show configuration"}
+              className="sticky top-6 mt-1 flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+            >
+              {configOpen ? (
+                <PanelLeftClose className="h-4 w-4" />
+              ) : (
+                <PanelLeftOpen className="h-4 w-4" />
+              )}
+            </button>
+          </div>
 
           {/* ── Right pane ── */}
           <div className="min-w-0 lg:flex-1 lg:pl-8">
