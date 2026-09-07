@@ -11,6 +11,7 @@ import PageLoader from "@/components/PageLoader";
 import Index from "./pages/Index.tsx";
 import NotFound from "./pages/NotFound.tsx";
 import ResetPassword from "./pages/ResetPassword.tsx";
+import AuthCallback from "./pages/AuthCallback.tsx";
 
 // Route pages are lazy-loaded so the heavy page chunks (Sheets, Flashcards,
 // QBank family) are only fetched on navigation instead of in the initial bundle.
@@ -71,6 +72,7 @@ const AppRoutes = () => {
           </Route>
           <Route path="/library" element={<Library />} />
           <Route path="/reset-password" element={<ResetPassword />} />
+          <Route path="/auth/callback" element={<AuthCallback />} />
           {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
           <Route path="*" element={<NotFound />} />
         </Routes>
