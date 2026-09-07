@@ -269,3 +269,25 @@ export function parseSheetOutput(raw: string): SheetParseResult | null {
 
   return null;
 }
+
+/**
+ * Sentinel the model returns instead of a sheet when the input passed
+ * structural validation but isn't a medical/clinical topic (see the decline
+ * contract built into the system prompt in medical-notes/index.ts). A plain
+ * text line rather than a JSON field, because cardsOnly output is a text
+ * format, not JSON — one sentinel works identically for both modes.
+ */
+export const DECLINE_SENTINEL = "NOT_A_MEDICAL_TOPIC";
+
+/**
+ * Detects a decline and returns the model's one-sentence reason, or null if
+ * this isn't one. Only matches when the sentinel leads the response (after
+ * fence-stripping and trimming) — a sheet whose content merely mentions the
+ * string somewhere inside a field must not be treated as a decline.
+ */
+export function parseDecline(raw: string): string | null {
+  const text = stripFences(raw).trim();
+  if (!text.startsWith(DECLINE_SENTINEL)) return null;
+  const rest = text.slice(DECLINE_SENTINEL.length).replace(/^:\s*/, "").trim();
+  return rest || "That doesn't look like a medical topic.";
+}

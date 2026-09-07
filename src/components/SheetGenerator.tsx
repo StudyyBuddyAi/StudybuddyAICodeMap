@@ -41,7 +41,8 @@ import { useAuth } from "@/hooks/use-auth";
 import { callMedicalNotes } from "@/lib/callMedicalNotes";
 import { useFlashcardDeck } from "@/hooks/use-flashcard-deck";
 import { parseFlashcardsFromOutput } from "@/lib/parse-flashcards";
-import { parsePartialSheet, parseSheetOutput } from "@/lib/parse-partial-sheet";
+import { parsePartialSheet, parseSheetOutput, parseDecline } from "@/lib/parse-partial-sheet";
+import { validateTopic, topicRejectionMessage, TOPIC_MAX_LENGTH } from "@/lib/validate-topic";
 import {
   type GeneratedSheet,
   type SheetSource,
@@ -415,6 +416,11 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
   // The response was damaged and only part of it could be salvaged — the reader
   // is told rather than being handed a silently short sheet.
   const [sheetIncomplete, setSheetIncomplete] = useState(false);
+  // Structural validation error shown inline under the textarea, or the
+  // model's one-sentence reason for declining a well-formed but non-medical
+  // topic — the two never overlap (a structural rejection never reaches the
+  // model). Cleared on the next edit.
+  const [topicError, setTopicError] = useState<string | null>(null);
   // Identifies the sheet on screen, so the section navigator resets its active
   // item per sheet rather than when `topic` happens to arrive mid-stream.
   const [generationId, setGenerationId] = useState(0);
@@ -503,15 +509,16 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
   const generate = async (overrideNotes?: string, overridePersona?: Persona) => {
     const activeNotes = overrideNotes ?? notes;
     const activePersona = overridePersona ?? persona;
-    if (!activeNotes.trim()) {
-      toast({ title: "Please enter medical notes", variant: "destructive" });
+    const rejection = validateTopic(activeNotes);
+    if (rejection) {
+      setTopicError(topicRejectionMessage(rejection));
       return;
     }
     if (isSheetLimited) {
       setGoProOpen(true);
       return;
     }
-    recordRecentTopic(activeNotes);
+    setTopicError(null);
     setLoading(true);
     setSheet(null);
     setLegacyOutput("");
@@ -650,42 +657,57 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
       // single unescaped quote from the model used to discard the whole sheet
       // and dump raw JSON at the reader.
       const rawText = fullText || "";
-      const result = parseSheetOutput(rawText);
-      if (result) {
-        // Reconcile the model's self-reported coverage against retrieval truth.
-        // Retrieval can only ever weaken the claim, never strengthen it.
-        const grounding = groundingResultRef.current;
-        const groundedSheet: GeneratedSheet = grounding
-          ? {
-              ...result.sheet,
-              retrievedChunks: grounding.retrievedChunks,
-              sources: grounding.sources,
-              groundingLevel: reconcileGroundingLevel(
-                grounding.retrievedChunks,
-                result.sheet.sourceCoverage ?? null
-              ),
-            }
-          : groundingRequested === false
-          ? // Deliberately turned off. Mark it "none" but leave retrievedChunks
-            // unset — that absence is what tells the notice to say "turned off"
-            // rather than "we don't have this topic".
-            { ...result.sheet, groundingLevel: "none" as const }
-          : // Grounding was on but no __meta arrived (an edge function that
-            // predates this feature). Leave the sheet unmarked so it renders
-            // exactly as it did before, rather than claiming a false verdict.
-            result.sheet;
-        setSheet(groundedSheet);
-        setLegacyOutput("");
-        setSheetIncomplete(result.status === "partial");
-      } else if (revealedCount === 0) {
-        // Not a JSON sheet at all — hand it to the legacy text renderer.
+      const declineReason = parseDecline(rawText);
+      if (declineReason) {
+        // Structurally valid input, but the model judged it not a medical
+        // topic — refunded server-side. Show the reason, not a hallucinated
+        // sheet, and never learn this topic as a "recent" one.
         setSheet(null);
-        setLegacyOutput(rawText);
+        setLegacyOutput("");
+        setSheetIncomplete(false);
+        setTopicError(declineReason);
       } else {
-        // Unparseable tail, but sections did stream. Keep them.
-        setSheetIncomplete(true);
+        const result = parseSheetOutput(rawText);
+        if (result) {
+          // Reconcile the model's self-reported coverage against retrieval truth.
+          // Retrieval can only ever weaken the claim, never strengthen it.
+          const grounding = groundingResultRef.current;
+          const groundedSheet: GeneratedSheet = grounding
+            ? {
+                ...result.sheet,
+                retrievedChunks: grounding.retrievedChunks,
+                sources: grounding.sources,
+                groundingLevel: reconcileGroundingLevel(
+                  grounding.retrievedChunks,
+                  result.sheet.sourceCoverage ?? null
+                ),
+              }
+            : groundingRequested === false
+            ? // Deliberately turned off. Mark it "none" but leave retrievedChunks
+              // unset — that absence is what tells the notice to say "turned off"
+              // rather than "we don't have this topic".
+              { ...result.sheet, groundingLevel: "none" as const }
+            : // Grounding was on but no __meta arrived (an edge function that
+              // predates this feature). Leave the sheet unmarked so it renders
+              // exactly as it did before, rather than claiming a false verdict.
+              result.sheet;
+          setSheet(groundedSheet);
+          setLegacyOutput("");
+          setSheetIncomplete(result.status === "partial");
+          recordRecentTopic(activeNotes);
+        } else if (revealedCount === 0) {
+          // Not a JSON sheet at all — hand it to the legacy text renderer.
+          setSheet(null);
+          setLegacyOutput(rawText);
+          recordRecentTopic(activeNotes);
+        } else {
+          // Unparseable tail, but sections did stream. Keep them.
+          setSheetIncomplete(true);
+          recordRecentTopic(activeNotes);
+        }
       }
       setLoading(false);
+      if (declineReason) return;
 
       // Citation lookup — runs after stream completes. Serves from the local
       // topic cache when available (no quota consumed); otherwise the edge
@@ -845,13 +867,20 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
                 <Textarea
                   placeholder="Search or type a medical topic (e.g., Heart Failure, Pneumonia, Diabetes...)"
                   value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
+                  onChange={(e) => {
+                    setNotes(e.target.value);
+                    if (topicError) setTopicError(null);
+                  }}
+                  maxLength={TOPIC_MAX_LENGTH}
                   className="min-h-[80px] pl-10 pr-10 text-sm leading-relaxed rounded-xl border-border focus:border-primary focus:ring-2 focus:ring-primary"
                 />
                 {notes && (
                   <button
                     type="button"
-                    onClick={() => setNotes("")}
+                    onClick={() => {
+                      setNotes("");
+                      setTopicError(null);
+                    }}
                     className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-muted-foreground hover:text-foreground transition-colors"
                     aria-label="Clear"
                   >
@@ -859,7 +888,10 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
                   </button>
                 )}
               </div>
-              
+              {topicError && (
+                <p className="text-sm text-destructive">{topicError}</p>
+              )}
+
               <div className="pt-2">
                 <p className="font-mono text-[11px] font-medium tracking-widest uppercase text-muted-foreground mb-3">Popular Topics</p>
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
@@ -1119,14 +1151,14 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
                   <button
                     key={id}
                     type="button"
-                    onClick={() => !loading && generateWithPersona(id)}
-                    disabled={loading}
+                    onClick={() => !loading && notes.trim() && generateWithPersona(id)}
+                    disabled={loading || !notes.trim()}
                     aria-pressed={active}
                     className={`relative group w-full flex items-start gap-4 p-4 rounded-xl text-left transition-all duration-200 ${
                       active
                         ? "border-2 shadow-md " + (color === "blue" ? "border-success bg-success-soft" : color === "teal" ? "border-primary bg-primary/10" : "border-info bg-info-soft")
                         : "border border-border bg-card hover:border-input hover:shadow-sm"
-                    } ${loading ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
+                    } ${loading || !notes.trim() ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
                   >
                     {active && (
                       <div className={`absolute -top-2 -right-2 w-6 h-6 rounded-full flex items-center justify-center ${

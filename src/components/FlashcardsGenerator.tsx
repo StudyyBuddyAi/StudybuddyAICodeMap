@@ -27,6 +27,8 @@ import { useModelPreference } from "@/hooks/use-model-preference";
 import { useAuth } from "@/hooks/use-auth";
 import { callMedicalNotes } from "@/lib/callMedicalNotes";
 import { parseFlashcardsFromOutput } from "@/lib/parse-flashcards";
+import { parseDecline } from "@/lib/parse-partial-sheet";
+import { validateTopic, topicRejectionMessage, TOPIC_MAX_LENGTH } from "@/lib/validate-topic";
 import { fetchBestCitation, type CitationResult } from "@/lib/citation";
 import { saveCitationsForTopic, getCitationsForTopic } from "@/lib/citation-store";
 import CitationCTABanner from "@/components/CitationCTABanner";
@@ -92,6 +94,10 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated }: FlashcardsGene
   const [loadingMsg, setLoadingMsg] = useState("");
   const [pendingCards, setPendingCards] = useState<ReturnType<typeof parseFlashcardsFromOutput> | null>(null);
   const [showTextarea, setShowTextarea] = useState(false);
+  // Structural validation error shown inline under the textarea, or the
+  // model's one-sentence reason for declining a well-formed but non-medical
+  // topic. Cleared on the next edit.
+  const [topicError, setTopicError] = useState<string | null>(null);
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [citationState, setCitationState] = useState<CitationState>("idle");
   const [citations, setCitations] = useState<CitationResult[]>([]);
@@ -182,15 +188,16 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated }: FlashcardsGene
   const handleGenerate = async (overrideTopic?: string, overrideCardCount?: number) => {
     const activeTopic = overrideTopic ?? topic;
     const activeCardCount = overrideCardCount ?? parseInt(cardCount, 10);
-    if (!activeTopic.trim()) {
-      toast({ title: "Please enter a topic", variant: "destructive" });
+    const rejection = validateTopic(activeTopic);
+    if (rejection) {
+      setTopicError(topicRejectionMessage(rejection));
       return;
     }
     if (isCardsLimited) {
       setGoProOpen(true);
       return;
     }
-    recordRecentTopic(activeTopic);
+    setTopicError(null);
     activeTopicRef.current = activeTopic;
     setGenerating(true, activeTopic);
     setCitationState("idle");
@@ -285,7 +292,19 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated }: FlashcardsGene
         }
       }
 
+      const declineReason = parseDecline(fullText);
+      if (declineReason) {
+        // Structurally valid input, but the model judged it not a medical
+        // topic — refunded server-side. Show the reason instead of saving an
+        // empty deck, and never learn this topic as a "recent" one.
+        setGenerating(false, "");
+        setLoadingMsg("");
+        setTopicError(declineReason);
+        return;
+      }
+
       const parsed = parseFlashcardsFromOutput(fullText, activeTopic);
+      recordRecentTopic(activeTopic);
 
       // Retrieval is the ceiling; the per-card [Grounded]/[General] tags decide
       // whether that ceiling was actually reached. No __meta at all means the
@@ -443,13 +462,20 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated }: FlashcardsGene
               <Textarea
                 placeholder="Search or type a medical topic (e.g., Heart Failure, Pneumonia, Diabetes...)"
                 value={topic}
-                onChange={(e) => setTopic(e.target.value)}
+                onChange={(e) => {
+                  setTopic(e.target.value);
+                  if (topicError) setTopicError(null);
+                }}
+                maxLength={TOPIC_MAX_LENGTH}
                 className="min-h-[80px] pl-10 pr-10 text-sm leading-relaxed rounded-xl border-border focus:border-primary focus:ring-2 focus:ring-primary"
               />
               {topic && (
                 <button
                   type="button"
-                  onClick={() => setTopic("")}
+                  onClick={() => {
+                    setTopic("");
+                    setTopicError(null);
+                  }}
                   className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-muted-foreground hover:text-foreground transition-colors"
                   aria-label="Clear"
                 >
@@ -457,6 +483,9 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated }: FlashcardsGene
                 </button>
               )}
             </div>
+            {topicError && (
+              <p className="text-sm text-destructive">{topicError}</p>
+            )}
             
             <div className="pt-2">
               <p className="font-mono text-[11px] font-medium tracking-widest uppercase text-muted-foreground mb-3">Popular Topics</p>

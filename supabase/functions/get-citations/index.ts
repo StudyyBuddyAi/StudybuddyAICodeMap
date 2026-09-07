@@ -1,4 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { validateTopic } from "../_shared/validate-topic.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -343,6 +344,15 @@ serve(async (req) => {
 
     const { topic } = await req.json();
     if (!topic || typeof topic !== "string" || !topic.trim()) {
+      return json({ citations: [] });
+    }
+    // Same structural gate as medical-notes: reject before any quota unit is
+    // consumed, rather than spending one on a PubMed lookup that was always
+    // going to return nothing (buildSearchQuery would strip markup down to
+    // "script alert 1 script" and query that verbatim). Same response shape
+    // as the missing-topic case above — the client already treats an empty
+    // list as "no citations found", not an error.
+    if (validateTopic(topic)) {
       return json({ citations: [] });
     }
 
