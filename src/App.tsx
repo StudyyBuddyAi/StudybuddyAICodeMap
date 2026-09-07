@@ -22,6 +22,7 @@ const Sheets = lazy(() => import("./pages/Sheets.tsx"));
 const Flashcards = lazy(() => import("./pages/Flashcards.tsx"));
 const QBank = lazy(() => import("./pages/QBank.tsx"));
 const QBankSession = lazy(() => import("./pages/QBankSession.tsx"));
+const QBankGenerate = lazy(() => import("./pages/QBankGenerate.tsx"));
 const QBankSummary = lazy(() => import("./pages/QBankSummary.tsx"));
 
 const queryClient = new QueryClient();
@@ -66,6 +67,7 @@ const AppRoutes = () => {
           <Route path="/flashcards" element={<Flashcards />} />
           <Route element={<QBankProvider><Outlet /></QBankProvider>}>
             <Route path="/qbank" element={<QBank />} />
+            <Route path="/qbank/generate" element={<QBankGenerate />} />
             <Route path="/qbank/session" element={<QBankSession />} />
             <Route path="/qbank/summary" element={<QBankSummary />} />
           </Route>

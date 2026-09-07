@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
-import { FlaskConical, LogIn, Zap, BookOpen, CheckCircle, History, ChevronRight, Clock, Trash2, Flag, Check } from "lucide-react";
+import { FlaskConical, LogIn, Zap, BookOpen, CheckCircle, History, ChevronRight, Clock, Trash2, Flag, Check, Sparkles } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import DashboardLayout from "@/components/dashboard/DashboardLayout";
 import PageLoader from "@/components/PageLoader";
@@ -544,6 +544,17 @@ const QBank = () => {
               >
                 <FlaskConical className="w-4 h-4" />
                 Start Session · {flaggedOnly ? flaggedCount : questionLimit} Questions
+              </button>
+
+              {/* The curated bank covers three systems; this is the way to
+                  practise anything it does not carry yet. */}
+              <button
+                type="button"
+                onClick={() => navigate("/qbank/generate")}
+                className="flex h-11 w-full items-center justify-center gap-2 rounded-[18px] border border-[color:var(--color-border)] text-sm font-medium text-[color:var(--color-muted-foreground)] transition-colors duration-200 hover:text-[color:var(--color-foreground)]"
+              >
+                <Sparkles className="w-4 h-4" />
+                Generate questions on any topic
               </button>
             </>
           )}
