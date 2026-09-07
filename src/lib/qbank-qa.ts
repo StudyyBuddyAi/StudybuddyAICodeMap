@@ -111,24 +111,32 @@ function distractorKeys(correct: OptionKey): OptionKey[] {
 }
 
 /**
- * v13 Rule 7 / NBME "correct answer standing out".
+ * The key has to clear the longest distractor by this much before length is a
+ * tell rather than a coincidence — 40% longer, and at least 20 characters.
  *
- * Writers pad the key with caveats and instructional detail, so length alone
- * becomes a tell. Being longest is not itself damning — sometimes the true
- * answer is a longer phrase — so this only fires when the key is both the
- * longest and meaningfully longer than the average distractor.
+ * Both bounds are needed, and measuring against the longest distractor rather
+ * than the mean is the point. An earlier version compared to the mean at a 25%
+ * margin and blocked three items in five: real keys that happened to be the
+ * longest option ran 2, 4 and 14 characters clear of the next longest, which no
+ * student could read anything into, but sat well above a mean dragged down by
+ * two short options. What NBME actually warns about is a key padded with
+ * caveats and instructional material until it visibly outweighs the field, and
+ * that looks like the 80-character gap this now requires.
  */
+const LENGTH_TELL_RATIO = 1.4;
+const LENGTH_TELL_CHARS = 20;
+
+/** v13 Rule 7 / NBME "correct answer standing out". */
 function checkKeyLength(draft: GeneratedQuestionDraft, findings: QaFinding[]): void {
   const key = draft.options[draft.correctOption].length;
   const others = distractorKeys(draft.correctOption).map((k) => draft.options[k].length);
   const longest = Math.max(...others);
-  const mean = others.reduce((a, b) => a + b, 0) / others.length;
 
-  if (key > longest && key > mean * 1.25) {
+  if (key > longest * LENGTH_TELL_RATIO && key - longest >= LENGTH_TELL_CHARS) {
     findings.push({
       rule: "key-longest",
       severity: "block",
-      detail: `Correct option ${draft.correctOption} is ${key} chars against a ${Math.round(mean)}-char distractor average — length gives the answer away.`,
+      detail: `Correct option ${draft.correctOption} is ${key} chars against a longest distractor of ${longest} — length gives the answer away.`,
     });
   }
 }

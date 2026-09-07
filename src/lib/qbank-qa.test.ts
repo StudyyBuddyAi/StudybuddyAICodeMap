@@ -63,6 +63,26 @@ describe("checkQuestion", () => {
     expect(checkQuestion(d).blocked).toBe(true);
   });
 
+  // Real option lengths from generated batches, for keys that happened to be
+  // the longest option. Comparing against the mean at a 25% margin blocked all
+  // three; none is a length a student could read anything into.
+  it.each([
+    ["a 2-char gap", 48, 46],
+    ["a 14-char gap", 95, 81],
+    ["a 4-char gap", 76, 72],
+  ])("does not block a key that clears the field by only %s", (_label, keyLen, longestLen) => {
+    const d = draft({
+      options: {
+        a: "x".repeat(longestLen),
+        b: "x".repeat(keyLen),
+        c: "x".repeat(Math.round(longestLen * 0.6)),
+        d: "x".repeat(Math.round(longestLen * 0.5)),
+        e: "x".repeat(Math.round(longestLen * 0.6)),
+      },
+    });
+    expect(rules(d)).not.toContain("key-longest");
+  });
+
   it("allows a merely-longest key that is not an outlier", () => {
     const d = draft({
       options: {
