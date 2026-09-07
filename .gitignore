@@ -36,3 +36,6 @@ CLAUDE.md
 .agents/
 .vercel
 .env*
+
+# TypeScript incremental build artifacts (tsc -b)
+*.tsbuildinfo
