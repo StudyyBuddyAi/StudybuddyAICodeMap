@@ -39,8 +39,7 @@ function draft(over: Partial<GeneratedQuestionDraft> = {}): GeneratedQuestionDra
   };
 }
 
-const rules = (d: GeneratedQuestionDraft, expected?: "a" | "b" | "c" | "d" | "e") =>
-  checkQuestion(d, expected).findings.map((f) => f.rule);
+const rules = (d: GeneratedQuestionDraft) => checkQuestion(d).findings.map((f) => f.rule);
 
 describe("checkQuestion", () => {
   it("passes a clean item", () => {
@@ -180,11 +179,12 @@ describe("checkQuestion", () => {
     expect(rules(d)).toContain("missing-distractor-explanation");
   });
 
-  it("warns when the key is given a why-it-is-wrong entry", () => {
+  it("blocks an item that argues against its own key", () => {
     const d = draft({
       distractorExplanations: { ...draft().distractorExplanations, b: "Wrong because…" },
     });
     expect(rules(d)).toContain("distractor-explains-key");
+    expect(checkQuestion(d).blocked).toBe(true);
   });
 
   it("warns on over-bolding and on no bolding", () => {
@@ -201,17 +201,80 @@ describe("checkQuestion", () => {
     expect(rules(d)).toContain("bolded-distractor");
   });
 
-  it("surfaces a self-check the model reported as failing", () => {
-    const d = draft({ selfCheck: { rule1: true, rule10: false } });
-    const finding = checkQuestion(d).findings.find((f) => f.rule === "self-check-failed");
-    expect(finding?.detail).toContain("rule10");
+  it("does not read ordinary prose as reasoning scaffolding", () => {
+    // Both of these blocked a good item under the old substring match.
+    expect(rules(draft({ explanation: "**ALAS2** catalyses the first step of heme synthesis." })))
+      .not.toContain("explanation-meta-language");
+    expect(rules(draft({ explanation: "A classic **USMLE Step 1** association." })))
+      .not.toContain("explanation-meta-language");
   });
 
-  it("warns when the answer lands on a different letter than the plan assigned", () => {
-    expect(rules(draft(), "d")).toContain("answer-position-drift");
-    expect(rules(draft(), "b")).not.toContain("answer-position-drift");
-    // The item is still usable — only its position in the batch spread suffers.
-    expect(checkQuestion(draft(), "d").blocked).toBe(false);
+  it("flags options that are not all the category the lead-in asked for", () => {
+    const d = draft({
+      leadIn: "Which cord of the brachial plexus carries the disrupted fibres?",
+      options: {
+        a: "Medial cord",
+        b: "Lateral cord",
+        c: "Inferior trunk",
+        d: "Middle trunk",
+        e: "Posterior cord",
+      },
+      distractorExplanations: { a: "No.", c: "No.", d: "No.", e: "No." },
+    });
+    expect(rules(d)).toContain("mixed-option-categories");
+    // A warn: the word test is too crude to withhold a question on.
+    expect(checkQuestion(d).blocked).toBe(false);
+  });
+
+  it("does not flag a set whose options name instances rather than the category", () => {
+    // Measured false positive: every option here is a cell type, but only two
+    // of them spell the word out. An earlier version blocked this question.
+    const d = draft({
+      leadIn: "Which cells are the primary site of action for this peptide?",
+      options: {
+        a: "Macrophages of the reticuloendothelial system",
+        b: "Parietal cells of the gastric mucosa",
+        c: "Erythroid precursors in the bone marrow",
+        d: "Hepatocytes of the liver parenchyma",
+        e: "Vascular endothelial cells of the hepatic sinusoids",
+      },
+      correctOption: "a",
+      distractorExplanations: { b: "No.", c: "No.", d: "No.", e: "No." },
+    });
+    expect(rules(d)).not.toContain("mixed-option-categories");
+  });
+
+  it("leaves a homogeneous set alone even when it names the category", () => {
+    const d = draft({
+      leadIn: "Which cord of the brachial plexus carries the disrupted fibres?",
+      options: {
+        a: "Medial cord",
+        b: "Lateral cord",
+        c: "Posterior cord",
+        d: "Medial cord contribution to the ulnar nerve",
+        e: "Lateral cord contribution to the median nerve",
+      },
+      distractorExplanations: { a: "No.", c: "No.", d: "No.", e: "No." },
+    });
+    expect(rules(d)).not.toContain("mixed-option-categories");
+  });
+
+  it("does not fire when the category word is simply not the options' vocabulary", () => {
+    // "Which enzyme…" against five enzyme names: none contain the word.
+    expect(rules(draft({ leadIn: "Which enzyme is directly inhibited?" })))
+      .not.toContain("mixed-option-categories");
+    // A generic head noun names no category at all.
+    expect(rules(draft({ leadIn: "Which mechanism best explains the finding?" })))
+      .not.toContain("mixed-option-categories");
+  });
+
+  it("surfaces a concern the writer raised about its own item", () => {
+    const flagged = draft({ reviewerFlag: "Buzzword from memory, unconfirmed." });
+    const finding = checkQuestion(flagged).findings.find((f) => f.rule === "writer-flagged");
+    expect(finding?.detail).toContain("unconfirmed");
+    // A flag is a reviewer's problem, not a reason to withhold the item.
+    expect(checkQuestion(flagged).blocked).toBe(false);
+    expect(rules(draft({ reviewerFlag: "None." }))).not.toContain("writer-flagged");
   });
 });
 
@@ -232,14 +295,76 @@ describe("checkBatch", () => {
       vignette:
         "A 71-year-old develops tinnitus and reduced hearing shortly after rapid intravenous therapy for pulmonary congestion.",
       leadIn: "Which structure accounts for the auditory effect?",
+      options: {
+        a: "Organ of Corti hair cells",
+        b: "Stria vascularis",
+        c: "Spiral ganglion",
+        d: "Tympanic membrane",
+        e: "Auditory cortex",
+      },
+      correctOption: "b",
+      distractorExplanations: { a: "No.", c: "No.", d: "No.", e: "No." },
     });
-    const results = checkBatch([a, b]);
-    expect(results[0].findings.map((f) => f.rule)).not.toContain("duplicate-question");
+    const found = checkBatch([a, b])[0].findings.map((f) => f.rule);
+    expect(found).not.toContain("duplicate-question");
+    expect(found).not.toContain("repeated-lead-in");
+    expect(found).not.toContain("shared-option-pool");
   });
 
-  it("applies the batch plan's answer letters positionally", () => {
-    const results = checkBatch([draft({ index: 1 }), draft({ index: 2 })], ["b", "e"]);
-    expect(results[0].findings.map((f) => f.rule)).not.toContain("answer-position-drift");
-    expect(results[1].findings.map((f) => f.rule)).toContain("answer-position-drift");
+  it("flags two questions that ask the same thing about different content", () => {
+    // The vocabulary check cannot see this: the stems and subtopics genuinely
+    // differ, and only the task is repeated.
+    const a = draft({
+      index: 1,
+      subtopic: "Erb palsy",
+      leadIn: "Which cord of the brachial plexus is injured in this infant?",
+      vignette: "A newborn has the arm adducted and internally rotated after a difficult delivery.",
+    });
+    const b = draft({
+      index: 2,
+      subtopic: "Klumpke palsy",
+      leadIn: "Which cord of the brachial plexus is injured in this climber?",
+      vignette: "An adult has clawing of the fourth and fifth digits after a fall arrested overhead.",
+    });
+    const results = checkBatch([a, b]);
+    expect(results[0].findings.map((f) => f.rule)).toContain("repeated-lead-in");
+    expect(results[1].findings.map((f) => f.rule)).toContain("repeated-lead-in");
+  });
+
+  it("does not call a shared interrogative opener a repeated question", () => {
+    // Measured false positive: four items in one batch matched on "which of the
+    // following best", which is simply how a lead-in opens.
+    const a = draft({
+      index: 1,
+      subtopic: "Multiple sclerosis",
+      leadIn: "Which of the following best explains the periventricular lesions?",
+    });
+    const b = draft({
+      index: 2,
+      subtopic: "Guillain-Barré syndrome",
+      leadIn: "Which of the following best accounts for the ascending weakness?",
+      options: {
+        a: "Schwann cell injury",
+        b: "Oligodendrocyte loss",
+        c: "Axonal transection",
+        d: "Anterior horn cell death",
+        e: "Neuromuscular junction blockade",
+      },
+      correctOption: "a",
+      distractorExplanations: { b: "No.", c: "No.", d: "No.", e: "No." },
+    });
+    expect(checkBatch([a, b])[0].findings.map((f) => f.rule)).not.toContain("repeated-lead-in");
+  });
+
+  it("flags two questions drawing their options from one pool", () => {
+    const a = draft({ index: 1, leadIn: "Which structure is injured here?" });
+    const b = draft({
+      index: 2,
+      subtopic: "Loop diuretic ototoxicity",
+      vignette: "A 71-year-old develops tinnitus after rapid intravenous therapy for congestion.",
+      leadIn: "Which target accounts for the auditory effect?",
+    });
+    // Same five options in both, which lets each be answered against the other.
+    expect(checkBatch([a, b])[0].findings.map((f) => f.rule)).toContain("shared-option-pool");
   });
 });
