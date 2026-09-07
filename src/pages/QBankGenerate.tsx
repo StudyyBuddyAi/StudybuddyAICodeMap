@@ -272,8 +272,7 @@ const QBankGenerate = () => {
 
         {error && (
           <div
-            className="mt-4 flex items-start gap-2 rounded-lg border px-3.5 py-3 text-sm"
-            style={{ borderColor: "var(--color-danger)", color: "var(--color-danger)" }}
+            className="mt-4 flex items-start gap-2 rounded-lg border border-danger/40 bg-danger/5 px-3.5 py-3 text-sm text-danger"
           >
             <AlertTriangle size={15} className="mt-0.5 shrink-0" />
             <span>{error}</span>
@@ -298,7 +297,7 @@ const QBankGenerate = () => {
               {blockedCount > 0 && (
                 <>
                   {" · "}
-                  <span style={{ color: "var(--color-warning)" }}>
+                  <span className="text-warning">
                     {blockedCount} held back by the quality gate
                   </span>
                 </>
@@ -341,11 +340,10 @@ const QuestionPreview = ({
 
   return (
     <article
-      className="rounded-xl border p-4"
+      className={`rounded-xl border p-4 ${blocked ? "border-danger/50 opacity-75" : ""}`}
       style={{
-        borderColor: blocked ? "var(--color-danger)" : "var(--color-border)",
+        borderColor: blocked ? undefined : "var(--color-border)",
         background: "var(--color-card)",
-        opacity: blocked ? 0.75 : 1,
       }}
     >
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px]" style={{ ...MONO_EYEBROW, fontSize: 10 }}>
@@ -375,11 +373,9 @@ const QuestionPreview = ({
           return (
             <li
               key={letter}
-              className="flex gap-2 rounded-md px-2 py-1.5 text-sm"
+              className={`flex gap-2 rounded-md px-2 py-1.5 text-sm ${isKey ? "bg-success/10 font-medium" : ""}`}
               style={{
-                background: isKey ? "var(--color-success-muted, transparent)" : "transparent",
                 color: isKey ? "var(--color-foreground)" : "var(--color-muted-foreground)",
-                fontWeight: isKey ? 500 : 400,
               }}
             >
               <span className="shrink-0 uppercase opacity-60">{letter}.</span>
@@ -398,7 +394,7 @@ const QuestionPreview = ({
       )}
 
       {draft.reviewerFlag && draft.reviewerFlag !== "None." && (
-        <p className="mt-2.5 text-xs" style={{ color: "var(--color-warning)" }}>
+        <p className="mt-2.5 text-xs text-warning">
           Model flagged: {draft.reviewerFlag}
         </p>
       )}
@@ -406,7 +402,7 @@ const QuestionPreview = ({
       {(blocks.length > 0 || warnings.length > 0) && (
         <ul className="mt-2.5 flex flex-col gap-1 text-xs">
           {blocks.map((f, i) => (
-            <li key={`b${i}`} style={{ color: "var(--color-danger)" }}>
+            <li key={`b${i}`} className="text-danger">
               Held back — {f.detail}
             </li>
           ))}
