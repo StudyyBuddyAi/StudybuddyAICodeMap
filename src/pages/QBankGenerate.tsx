@@ -18,8 +18,21 @@ import { useQBankContext } from "@/contexts/QBankContext";
 import { useToast } from "@/hooks/use-toast";
 import { callQbankGenerate } from "@/lib/callQbankGenerate";
 import { parsePartialQuestions } from "@/lib/parse-partial-questions";
-import { checkBatch, type QaResult } from "@/lib/qbank-qa";
+import type { QaResult } from "@/lib/qbank-qa";
 import type { GeneratedQuestionDraft } from "@/lib/qbank-types";
+
+/**
+ * The cold-answering pass's verdict on one item, as the edge function sends it.
+ * Mirrors VerificationResult in supabase/functions/_shared/qbank-verify.ts.
+ */
+interface Verification {
+  index: number;
+  agreed: boolean;
+  answer: string | null;
+  solvable: boolean;
+  issue: string;
+  error: string | null;
+}
 
 const MONO_EYEBROW: React.CSSProperties = {
   fontFamily: "var(--font-mono)",
@@ -64,19 +77,21 @@ const RULE_LABELS: Record<string, string> = {
   "banned-option-language": "Vague qualifier in an option",
   "all-or-none-option": "All/none-of-the-above option",
   "duplicate-option": "Two options said the same thing",
+  "mixed-option-categories": "Options were not all the same kind of thing",
   "open-lead-in": "Open-ended lead-in",
   "explanation-meta-language": "Explanation exposed the reasoning scaffold",
   "stem-key-cueing": "Stem wording hinted at the answer",
   "question-in-vignette": "Vignette repeated the question",
   "lead-in-not-question": "Lead-in was not a question",
   "duplicate-question": "Overlaps another question in the set",
+  "repeated-lead-in": "Asks the same thing as another question",
+  "shared-option-pool": "Shares its options with another question",
   "over-bolding": "Too much emphasis in the explanation",
   "no-bolding": "No key phrase emphasised",
   "bolded-distractor": "Emphasis in a distractor explanation",
   "missing-distractor-explanation": "A distractor went unexplained",
-  "distractor-explains-key": "The key was labelled as wrong",
-  "self-check-failed": "The writer flagged its own item",
-  "answer-position-drift": "Answer landed on a different letter",
+  "distractor-explains-key": "The item contradicted its own answer",
+  "writer-flagged": "The writer raised a concern",
 };
 
 const ruleLabel = (rule: string) => RULE_LABELS[rule] ?? "Quality check failed";
@@ -109,6 +124,8 @@ const QBankGenerate = () => {
   const [isStarting, setIsStarting] = useState(false);
   const [drafts, setDrafts] = useState<GeneratedQuestionDraft[]>([]);
   const [questionIds, setQuestionIds] = useState<string[]>([]);
+  const [qa, setQa] = useState<QaResult[]>([]);
+  const [verification, setVerification] = useState<Verification[]>([]);
   const [meta, setMeta] = useState<BatchMeta>({});
   const [error, setError] = useState<string | null>(null);
   const [elapsed, setElapsed] = useState(0);
@@ -126,24 +143,30 @@ const QBankGenerate = () => {
 
   useEffect(() => () => abortRef.current?.abort(), []);
 
-  const qa = useMemo<QaResult[]>(
-    () => (finished && drafts.length ? checkBatch(drafts) : []),
-    [finished, drafts]
-  );
-
   /**
-   * Ids for the items that passed the gate, positionally matched to the drafts.
+   * Ids for the items that are fit to sit, positionally matched to the rows.
    *
-   * The edge function inserts in the model's own question order and returns the
-   * ids in that order, so index alignment is what connects a draft to its row.
-   * A blocked item keeps its row; it is simply never requested.
+   * The gate and the cold-answering pass both run in the edge function now, so
+   * `qa`, `verification` and `questionIds` are all computed from one parse of
+   * one batch and line up by construction. They used to be computed in two
+   * places — the ids server-side, the findings from the browser's own parse of
+   * the stream — and index i in one array was only the same question as index i
+   * in the other for as long as the two parsers agreed.
+   *
+   * A held-back item keeps its row; it is simply never requested.
    */
   const playableIds = useMemo(
-    () => questionIds.filter((_, i) => !qa[i]?.blocked),
-    [questionIds, qa]
+    () =>
+      questionIds.filter(
+        (_, i) => !qa[i]?.blocked && verification[i]?.agreed !== false
+      ),
+    [questionIds, qa, verification]
   );
 
   const blocked = qa.filter((r) => r.blocked);
+  const disputed = verification.filter((v) => !v.agreed);
+  /** Warnings worth a reviewer's eye, on items that are still playable. */
+  const flagged = qa.filter((r) => !r.blocked && r.findings.length > 0);
   const written = drafts.length;
   const expected = meta.plan?.length ?? QUESTION_COUNT;
 
@@ -159,6 +182,8 @@ const QBankGenerate = () => {
     setFinished(false);
     setDrafts([]);
     setQuestionIds([]);
+    setQa([]);
+    setVerification([]);
     setMeta({});
     setError(null);
 
@@ -218,8 +243,22 @@ const QBankGenerate = () => {
                   : undefined,
               });
             }
+            // The generation died mid-stream and was re-run. Everything
+            // received so far is half of a JSON document that no longer has a
+            // second half, so it goes in the bin before the replacement lands.
+            if (frame.restart === true) {
+              content = "";
+              setDrafts([]);
+              continue;
+            }
             if (Array.isArray(frame.questionIds)) {
               setQuestionIds(frame.questionIds as string[]);
+            }
+            if (Array.isArray(frame.qa)) {
+              setQa(frame.qa as QaResult[]);
+            }
+            if (Array.isArray(frame.verification)) {
+              setVerification(frame.verification as Verification[]);
             }
             if (typeof frame.persistError === "string" && frame.persistError) {
               setError("The questions were written but could not be saved.");
@@ -400,12 +439,12 @@ const QBankGenerate = () => {
               <Step
                 state={finished ? "done" : "pending"}
                 icon={ShieldCheck}
-                label="Quality gate"
+                label="Checked and answered"
                 detail={
                   finished
-                    ? blocked.length === 0
+                    ? blocked.length + disputed.length === 0
                       ? "all items passed"
-                      : `${blocked.length} held back`
+                      : `${blocked.length + disputed.length} held back`
                     : "waiting for the full set"
                 }
               />
@@ -416,7 +455,8 @@ const QBankGenerate = () => {
               <ul className="mt-4 flex flex-wrap gap-1.5">
                 {Array.from({ length: expected }, (_, i) => {
                   const draft = drafts[i];
-                  const isBlocked = qa[i]?.blocked ?? false;
+                  const isBlocked =
+                    (qa[i]?.blocked ?? false) || verification[i]?.agreed === false;
                   return (
                     <li
                       key={i}
@@ -455,15 +495,47 @@ const QBankGenerate = () => {
             )}
 
             {/* ── Held back ─────────────────────────────────────────────── */}
-            {finished && blocked.length > 0 && (
+            {finished && blocked.length + disputed.length > 0 && (
               <div className="mt-4 rounded-lg border border-danger/30 bg-danger/5 p-3">
                 <p className="text-xs font-medium text-danger">
-                  {blocked.length} question{blocked.length === 1 ? "" : "s"} held back
+                  {blocked.length + disputed.length} question
+                  {blocked.length + disputed.length === 1 ? "" : "s"} held back
                 </p>
                 <ul className="mt-1.5 flex flex-col gap-1">
                   {blocked.map((r) => (
-                    <li key={r.index} className="text-xs" style={{ color: "var(--fg-muted)" }}>
+                    <li key={`b${r.index}`} className="text-xs" style={{ color: "var(--fg-muted)" }}>
                       Q{r.index} — {ruleLabel(r.findings.find((f) => f.severity === "block")!.rule)}
+                    </li>
+                  ))}
+                  {/* The blind second read landed somewhere else. Naming the
+                      letter would print the disputed answer, so it does not. */}
+                  {disputed.map((v) => (
+                    <li key={`v${v.index}`} className="text-xs" style={{ color: "var(--fg-muted)" }}>
+                      Q{v.index} — a second read disagreed with the answer
+                      {v.issue ? ` (${v.issue})` : ""}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {/* ── Flagged, but still playable ───────────────────────────── */}
+            {/* These used to be computed and thrown away. They are stored on
+                the row now, and shown here because a set that is technically
+                playable can still be worth knowing something about. */}
+            {finished && flagged.length > 0 && (
+              <div
+                className="mt-4 rounded-lg border p-3"
+                style={{ borderColor: "var(--border)", background: "var(--bg-subtle)" }}
+              >
+                <p className="text-xs font-medium" style={{ color: "var(--fg)" }}>
+                  {flagged.length} question{flagged.length === 1 ? "" : "s"} flagged for review
+                </p>
+                <ul className="mt-1.5 flex flex-col gap-1">
+                  {flagged.map((r) => (
+                    <li key={r.index} className="text-xs" style={{ color: "var(--fg-muted)" }}>
+                      Q{r.index} —{" "}
+                      {[...new Set(r.findings.map((f) => ruleLabel(f.rule)))].join("; ")}
                     </li>
                   ))}
                 </ul>

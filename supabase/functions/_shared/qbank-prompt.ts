@@ -152,11 +152,15 @@ Target: a well-prepared student sitting this item should answer correctly roughl
 
 ## Vignette Length — domain-calibrated
 
+These are requirements, not suggestions. Count the sentences in your stem before you emit it.
+
 - Short, 3-5 sentences plus lead-in: histopathology, anatomy, 1st-order pharmacology, pattern recognition from labs or imaging.
 - Medium, 5-8 sentences plus lead-in: physiology, embryology, 2nd-order pharmacology, quantitative or physiologic-calculation problems.
 - Long, 8-12 sentences plus lead-in: 3rd-order only, and multi-system integration questions.
 
-If a sentence can be removed without making the question unanswerable or ambiguous, remove it.
+A 2nd-order item with a three-sentence stem has not been made concise, it has been made 1st-order: there was no room in it for the intermediate conclusion the reader is supposed to reach. If you find yourself under the floor, the fix is not to pad with filler — it is that the item is not carrying the reasoning its label claims, so build more clinical context into the presentation until the reader has to work through it.
+
+If a sentence can be removed without making the question unanswerable or ambiguous, remove it — then check the count again and rebuild the item if it now falls short.
 
 ## Mandatory Item-Writing Rules
 
@@ -165,7 +169,7 @@ Every question must pass all ten before you output it.
 1. Foundational science only. No clinical protocols. The answer is derivable from mechanism, not memorized management.
 2. Student-generatable answer. Reachable by a prepared student through explicit reasoning. Write the reasoning chain first.
 3. Closed, focused lead-in. A single specific answerable question. Never "which of the following is true about X".
-4. Homogeneous options. All five belong to the same category. Never mix categories.
+4. Homogeneous options. All five belong to the same category. Never mix categories. Read your own lead-in back: if it asks "which cord", every option is a cord — not a trunk, not a root, not a nerve. An option that is not a member of the category asked for can be eliminated without any medical knowledge, which turns a five-option item into a three-option one.
 5. All distractors genuinely plausible. Every wrong answer represents a specific reasoning failure a real student could make. No throwaway options.
 6. No absolute or vague language. Banned in options: always, never, usually, frequently, may, could be, is associated with, is useful for.
 7. Parallel format, equal length. Options grammatically parallel. The correct answer must not be the longest option.
@@ -218,13 +222,17 @@ Tone, right: "**Thiazide diuretics** inhibit the **NCC cotransporter** in the ea
 
 Distractor, right: "Loop diuretics also cause hypokalemia and metabolic alkalosis, but they block paracellular calcium reabsorption in the thick ascending limb, producing hypercalciuria rather than hypocalciuria."
 
-## Answer Position Distribution
+## Answer Position
 
-The batch plan assigns each question its correct answer letter. These assignments are LOCKED. Write the item so the correct answer genuinely belongs in its assigned position — do not reorder options afterwards to move the answer. Never let the correct answer drift toward b or c.
+Put the correct answer wherever it naturally belongs and say which letter that is in correctOption. Do not try to spread your answers across the letters, and do not move an option to reach a particular letter — the options are shuffled after you hand the batch over, so answer position is not your problem and any effort you spend on it is wasted.
+
+The one thing that matters here: never change which option is medically correct in order to satisfy anything about position. If the correct answer is option c, the answer is c.
 
 ## Verbosity
 
-All output is 10% more concise than your default. Remove any sentence restating what was already said. Remove transitional filler. Distractor explanations are 1-2 sentences, no exceptions.
+This applies to the explanations, the teaching point and the reasoning chain, and NOT to the vignette. In those fields, be 10% more concise than your default: remove any sentence restating what was already said, remove transitional filler, and keep distractor explanations to 1-2 sentences, no exceptions.
+
+The vignette is governed by the length rules above instead, and those are floors. A stem that runs short is the more common failure and the more damaging one: it is what makes a question that is labelled 3rd-order answerable in one step. Concision in a vignette means removing sentences that carry no finding, never compressing the presentation into fewer findings than the reasoning requires.
 
 ## Known Pitfalls — avoid all
 
@@ -237,7 +245,7 @@ All output is 10% more concise than your default. Remove any sentence restating 
 7. Explanation meta-language. Any explanation containing "Step 1", "Step 2", "Step 3", "reasoning chain" or "fails at step" is a failed explanation.
 8. Vignette padding. Any removable sentence must be removed.
 9. Missing buzzwords. If the answer turns on a First Aid high-yield phrase, that phrase appears bolded in the explanation.
-10. Answer position bias. Honour the assigned letter for every question.
+10. Bending the medicine to fit a letter. correctOption names the option that is actually correct, always. Never move the key onto a different letter for any reason.
 11. Answer telegraphing. If a prepared student could identify the answer from phrasing alone, rewrite.
 12. Over-bolding. More than five bolded items dilutes the signal.
 13. Bolding the wrong things. Never bold transitions, demographics or context.
@@ -288,7 +296,8 @@ Return ONE JSON object and nothing else. No prose before or after it, and no mar
 Field notes:
 - vignette holds the clinical stem only and contains no question mark. leadIn holds the question sentence, ending in a question mark. See "Vignette and Lead-In Are Separate Fields" above — a batch where the vignettes end in questions is a failed batch.
 - reasoningChain is internal scaffolding. It is stored for review and never shown to a student, so write it plainly.
-- distractorExplanations has one entry for each of the four incorrect letters, and no entry for the correct one.
+- correctOption is the option that is medically correct. Nothing else determines it.
+- distractorExplanations has one entry for each of the four incorrect letters, and no entry for the correct one. If you find yourself writing an entry that argues an option is right, that option is your key and correctOption is wrong — fix correctOption, do not write the entry.
 - Every selfCheck field must be true before you emit the question. If one would be false, fix the question instead. Never emit an item you know fails a rule.
 - reviewerFlag is "None." only when you are fully confident. Otherwise state the specific concern: factual uncertainty, depth, distractor risk, unconfirmed buzzword, or system overlap.
 - suggestedImage describes an image that would help. No image is fetched or rendered, so never write a vignette that depends on seeing one.
@@ -424,20 +433,32 @@ export interface BatchPlan {
 
 const LETTERS: OptionLetter[] = ["a", "b", "c", "d", "e"];
 
-/**
- * v13's answer position rule: shuffle a-e, then cycle through the shuffle for
- * the batch length, so no letter repeats until all five have appeared. Computed
- * here rather than asked of the model — a model asked to randomise its own
- * answer key drifts toward b and c, which is exactly the bias the rule exists
- * to prevent.
- */
-function shuffledLetters(random: () => number): OptionLetter[] {
-  const pool = [...LETTERS];
+/** Fisher-Yates, in place, on a copy. */
+function shuffle<T>(values: T[], random: () => number): T[] {
+  const pool = [...values];
   for (let i = pool.length - 1; i > 0; i--) {
     const j = Math.floor(random() * (i + 1));
     [pool[i], pool[j]] = [pool[j], pool[i]];
   }
   return pool;
+}
+
+/**
+ * v13's answer position rule: shuffle a-e, then cycle through the shuffle for
+ * the batch length, so no letter repeats until all five have appeared.
+ *
+ * These letters are a target for permuteToPlannedLetter, not an instruction to
+ * the model. Asking the model to write its answer onto an assigned letter was
+ * measured to be actively harmful: in a 50-item run it hit the assigned letter
+ * 50 times out of 50, and the one item where obeying the letter conflicted with
+ * the medicine shipped with a factually wrong answer key — a correct question
+ * about the canalicular stage of lung development, keyed to "alveolar stage"
+ * because the plan had assigned that position. The model now picks whichever
+ * letter is correct and the options are shuffled afterwards, which buys the same
+ * flat distribution with none of that risk.
+ */
+function shuffledLetters(random: () => number): OptionLetter[] {
+  return shuffle(LETTERS, random);
 }
 
 /**
@@ -447,16 +468,25 @@ function shuffledLetters(random: () => number): OptionLetter[] {
  * imposed rather than left to the model: a majority of 2nd-order with one item
  * at each end. For five questions that is 1 / 3 / 1. The shape generalises so a
  * later batch size does not need a second code path.
+ *
+ * Shuffled across positions, because emitting it in order made every set
+ * identical in shape. A measured run put the single 1st-order item at index 1
+ * and the 3rd-order item at index 5 in all ten batches, and the model labelled
+ * difficulty to match: every Easy item in fifty was its batch's first question
+ * and every Hard one was its fourth or fifth. A student who generates two sets
+ * learns the ramp and stops reading the early items carefully.
  */
-function reasoningOrderMix(count: number): ReasoningOrder[] {
+function reasoningOrderMix(count: number, random: () => number): ReasoningOrder[] {
   const firsts = Math.max(1, Math.round(count * 0.2));
   const thirds = Math.max(1, Math.round(count * 0.2));
   const seconds = Math.max(0, count - firsts - thirds);
-  return [
+  const mix = [
     ...Array<ReasoningOrder>(firsts).fill("1st"),
     ...Array<ReasoningOrder>(seconds).fill("2nd"),
     ...Array<ReasoningOrder>(thirds).fill("3rd"),
   ].slice(0, count);
+
+  return shuffle(mix, random);
 }
 
 /**
@@ -468,18 +498,61 @@ export function buildBatchPlan(
   count: number,
   random: () => number = Math.random
 ): BatchPlan {
-  const shuffle = shuffledLetters(random);
-  const orders = reasoningOrderMix(count);
+  const letters = shuffledLetters(random);
+  const orders = reasoningOrderMix(count, random);
 
   return {
     system,
     systemName: SYSTEM_NAMES[system],
     questions: Array.from({ length: count }, (_, i) => ({
       index: i + 1,
-      answerLetter: shuffle[i % shuffle.length],
+      answerLetter: letters[i % letters.length],
       reasoningOrder: orders[i],
     })),
   };
+}
+
+/** The shape permuteToPlannedLetter rewrites. Both parsers produce it. */
+export interface PermutableQuestion {
+  options: Record<OptionLetter, string>;
+  correctOption: OptionLetter;
+  distractorExplanations: Partial<Record<OptionLetter, string>>;
+}
+
+/**
+ * Moves a question's correct answer onto the letter the batch plan wanted.
+ *
+ * A single swap: whatever sits on the target letter trades places with the key.
+ * Everything else keeps its position, so the option order stays as close to what
+ * the writer chose as moving one answer allows.
+ *
+ * `distractorExplanations` is keyed by letter and has to travel with the swap,
+ * or the entry explaining why option c is wrong ends up attached to the text
+ * that is now option e.
+ *
+ * This is what replaced telling the model its letters were locked. The batch
+ * still gets an even spread of answer positions, and the model never has to
+ * choose between the plan and the medicine.
+ */
+export function permuteToPlannedLetter<T extends PermutableQuestion>(
+  question: T,
+  target: OptionLetter
+): T {
+  const from = question.correctOption;
+  if (from === target) return question;
+
+  const options = { ...question.options };
+  [options[from], options[target]] = [options[target], options[from]];
+
+  const explanations = { ...question.distractorExplanations };
+  const fromText = explanations[from];
+  const targetText = explanations[target];
+  if (targetText === undefined) delete explanations[from];
+  else explanations[from] = targetText;
+  if (fromText === undefined) delete explanations[target];
+  else explanations[target] = fromText;
+
+  return { ...question, options, correctOption: target, distractorExplanations: explanations };
 }
 
 export interface UserMessageInput {
@@ -495,11 +568,11 @@ export interface UserMessageInput {
  * topic. Everything static lives in QBANK_SYSTEM_PROMPT so it stays cacheable.
  */
 export function buildUserMessage({ topic, plan, avoidSubtopics = [] }: UserMessageInput): string {
+  // Answer letters are deliberately NOT sent. They are applied after the fact
+  // by permuteToPlannedLetter; telling the model about them only gives it a
+  // reason to move a key off the option that is actually correct.
   const planRows = plan.questions
-    .map(
-      (q) =>
-        `- Question ${q.index}: correct answer MUST be option ${q.answerLetter}, reasoning order ${q.reasoningOrder}`
-    )
+    .map((q) => `- Question ${q.index}: reasoning order ${q.reasoningOrder}`)
     .join("\n");
 
   const avoidBlock = avoidSubtopics.length
@@ -517,7 +590,7 @@ ${SYSTEM_BRIEFS[plan.system]}
 
 ${planRows}
 
-These answer letters are locked. Write each item so its correct answer genuinely belongs in the assigned position.
+Write each item at the reasoning order assigned to it, and put its correct answer on whichever option is correct.
 ${avoidBlock}
 ## Requested topic
 

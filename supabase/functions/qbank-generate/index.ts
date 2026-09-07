@@ -12,9 +12,11 @@ import {
   SYSTEM_KEYS,
   buildBatchPlan,
   buildUserMessage,
+  type BatchPlan,
   type SystemKey,
 } from "../_shared/qbank-prompt.ts";
-import { persistBatch } from "../_shared/qbank-persist.ts";
+import { prepareBatch, parseBatchContent, persistBatch } from "../_shared/qbank-persist.ts";
+import { verifyBatch, type VerificationResult } from "../_shared/qbank-verify.ts";
 
 /**
  * On-demand QBank generation.
@@ -22,18 +24,25 @@ import { persistBatch } from "../_shared/qbank-persist.ts";
  * Takes a free-text topic, resolves it to one of the thirteen USMLE systems,
  * generates a batch of items with Corti, and persists them so the existing
  * session engine can play them. The client gets the generation as an SSE
- * stream so it can reveal questions as they finish rather than showing a
+ * stream so it can show progress as questions finish rather than showing a
  * spinner for the ninety seconds a batch takes.
  *
- * Shaped on medical-notes: same JWT verification, same TransformStream relay,
- * same out-of-band `__meta` frames carrying what the model itself never sends.
+ * Shaped on medical-notes: same JWT verification, same SSE relay, same
+ * out-of-band `__meta` frames carrying what the model itself never sends.
  * The differences are all downstream of Corti not being OpenRouter — OAuth
  * instead of a static key (see _shared/corti.ts), and no provider fallback.
  *
  * The rows are written is_active = false with origin = 'generated', which the
  * random-sampling branch of start_qbank_session already excludes, so nothing
  * here can leak into the curated bank. The final __meta frame carries the ids
- * the client then hands to start_qbank_session.
+ * the client then hands to start_qbank_session, along with the quality gate's
+ * findings and the cold-answering pass's verdict for each item.
+ *
+ * Three things happen after the model stops talking, and all three are new:
+ * the answers are moved onto their planned letters, the gate runs here rather
+ * than in the browser so its findings can be stored, and a second model answers
+ * every item blind to catch a wrong key. See _shared/qbank-persist.ts and
+ * _shared/qbank-verify.ts.
  */
 
 const corsHeaders = {
@@ -47,9 +56,24 @@ const log = (event: string, fields: Record<string, unknown> = {}) => {
   console.log(JSON.stringify({ fn: "qbank-generate", event, ...fields }));
 };
 
-/** Matches MAX_SESSION_CAP on the client and the cap inside start_qbank_session. */
-const MAX_COUNT = 40;
+/**
+ * Ceiling on one request.
+ *
+ * Was 40, which described a batch that could not physically complete. Measured
+ * against a real run: an item costs ~990 completion tokens and ~17.6 seconds, so
+ * forty of them need ~39,500 tokens against the 32,768 ceiling below, and about
+ * twelve minutes of wall clock. Fifteen fits inside both with room to spare.
+ * Anything larger has to be chunked into separate calls, not asked for at once.
+ */
+const MAX_COUNT = 15;
 const DEFAULT_COUNT = 5;
+
+/**
+ * Output ceiling for one batch. Well clear of the ~5k a five-item batch uses
+ * and of the ~15k the new MAX_COUNT could, so a long batch is not silently
+ * truncated mid-question.
+ */
+const MAX_OUTPUT_TOKENS = 32768;
 
 const json = (body: unknown, status: number) =>
   new Response(JSON.stringify(body), {
@@ -135,7 +159,7 @@ serve(async (req) => {
     }
 
     const { system, confidence } = await resolveSystem(config, cleanTopic);
-    const plan = buildBatchPlan(system, questionCount);
+    const plan: BatchPlan = buildBatchPlan(system, questionCount);
     log("generating", {
       system,
       confidence,
@@ -144,20 +168,21 @@ serve(async (req) => {
       topicLength: cleanTopic.length,
     });
 
-    let upstream: Response;
-    try {
-      upstream = await cortiChatCompletion(config, {
+    const startGeneration = () =>
+      cortiChatCompletion(config, {
         stream: true,
         temperature: 0.7,
-        // Well clear of the ~4.5k a five-item batch actually uses, so a longer
-        // batch is not silently truncated mid-question.
-        maxTokens: 32768,
+        maxTokens: MAX_OUTPUT_TOKENS,
         json: true,
         messages: [
           { role: "system", content: QBANK_SYSTEM_PROMPT },
           { role: "user", content: buildUserMessage({ topic: cleanTopic, plan }) },
         ],
       });
+
+    let upstream: Response;
+    try {
+      upstream = await startGeneration();
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       log("upstream_failed", { message });
@@ -181,44 +206,44 @@ serve(async (req) => {
 
     // ── Relay ────────────────────────────────────────────────────────────────
     // Corti's SSE frames pass through untouched so the client parses exactly
-    // what the model sent. Two things the model never sends are added
-    // out-of-band as `__meta` frames, the same convention medical-notes uses:
-    // the batch plan up front (so the preview can show what was asked for
-    // before any content arrives), and the persisted question ids at the end.
+    // what the model sent. Everything the model never sends is added out-of-band
+    // as `__meta` frames, the same convention medical-notes uses: the batch plan
+    // up front, a restart signal if the stream had to be re-run, and the ids,
+    // findings and verification at the end.
     const encoder = new TextEncoder();
     const decoder = new TextDecoder();
-    let buffer = "";
+
+    const frame = (payload: unknown) =>
+      encoder.encode(`data: ${JSON.stringify(payload)}\n\n`);
+
     let content = "";
 
-    const transform = new TransformStream<Uint8Array, Uint8Array>({
-      start(controller) {
-        controller.enqueue(
-          encoder.encode(
-            `data: ${JSON.stringify({
-              __meta: {
-                system,
-                systemName: SYSTEM_NAMES[system],
-                model: config.model,
-                plan: plan.questions,
-              },
-            })}\n\n`
-          )
-        );
-      },
+    /**
+     * Forwards one upstream body to the client while accumulating the model's
+     * content. Throws if the connection drops mid-stream, which is the case the
+     * retry below exists for.
+     */
+    const relay = async (
+      body: ReadableStream<Uint8Array>,
+      controller: ReadableStreamDefaultController<Uint8Array>
+    ) => {
+      const reader = body.getReader();
+      let buffer = "";
 
-      transform(chunk, controller) {
-        // Forward first, accumulate second: the client's reveal should never
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        // Forward first, accumulate second: the client's progress should never
         // wait on our bookkeeping.
-        controller.enqueue(chunk);
+        controller.enqueue(value);
 
-        buffer += decoder.decode(chunk, { stream: true });
+        buffer += decoder.decode(value, { stream: true });
         const events = buffer.split(/\r?\n\r?\n/);
         buffer = events.pop() ?? "";
 
         for (const event of events) {
-          const dataLine = event
-            .split("\n")
-            .find((line) => line.startsWith("data:"));
+          const dataLine = event.split("\n").find((line) => line.startsWith("data:"));
           if (!dataLine) continue;
           const data = dataLine.slice(5).trim();
           if (!data || data === "[DONE]") continue;
@@ -234,47 +259,131 @@ serve(async (req) => {
             // a reason to break the relay.
           }
         }
-      },
+      }
+    };
 
-      async flush(controller) {
-        // Persistence happens here rather than per-question: a question is only
-        // worth storing once it is whole, and the client cannot start a session
-        // until it has ids for all of them anyway.
+    const stream = new ReadableStream<Uint8Array>({
+      async start(controller) {
+        controller.enqueue(
+          frame({
+            __meta: {
+              system,
+              systemName: SYSTEM_NAMES[system],
+              model: config.model,
+              plan: plan.questions,
+            },
+          })
+        );
+
+        // ── Generation, with one retry on a mid-stream death ────────────────
+        // Measured: one batch in ten aborted with a bare `terminated` after the
+        // student had already waited, and the identical request succeeded on
+        // re-run. The retry is deliberately narrow — it only fires when nothing
+        // survived, because a stream that died after three complete questions
+        // has produced something worth keeping, and restarting would throw it
+        // away and charge for it twice.
+        let response = upstream;
+        let attempts = 1;
+        let streamError: string | null = null;
+
+        for (;;) {
+          try {
+            await relay(response.body!, controller);
+            streamError = null;
+            break;
+          } catch (err) {
+            streamError = err instanceof Error ? err.message : String(err);
+            const salvaged = parseBatchContent(content).length;
+            log("stream_aborted", { message: streamError, attempts, salvaged });
+
+            if (attempts > 1 || salvaged > 0) break;
+
+            let retried: Response | null = null;
+            try {
+              retried = await startGeneration();
+            } catch (retryErr) {
+              log("retry_failed", {
+                message: retryErr instanceof Error ? retryErr.message : String(retryErr),
+              });
+            }
+
+            if (!retried?.ok || !retried.body) break;
+
+            // The client has already been handed a partial JSON document, so it
+            // has to be told to throw it away before the replacement arrives.
+            attempts++;
+            content = "";
+            controller.enqueue(frame({ __meta: { restart: true } }));
+            response = retried;
+          }
+        }
+
+        // ── Gate, verify, persist ──────────────────────────────────────────
+        // A question is only worth storing once it is whole, and the client
+        // cannot start a session until it has ids anyway, so all of this
+        // happens after the stream rather than per question.
         let questionIds: string[] = [];
+        let verification: VerificationResult[] = [];
         let persistError: string | null = null;
 
-        try {
-          questionIds = await persistBatch(authClient, user.id, {
-            content,
-            system,
-            plan,
-            topic: cleanTopic,
-            model: config.model,
+        const prepared = prepareBatch(content, plan);
+
+        if (prepared.questions.length > 0) {
+          // Verification runs before the insert, not alongside it, so its
+          // verdict can be stored on the row it is about. The whole batch is
+          // answered in parallel and lands in about a second — see verifyBatch —
+          // against the ninety the generation itself took.
+          verification = await verifyBatch(config, prepared.questions);
+
+          questionIds = await persistBatch(
+            authClient,
+            user.id,
+            { content, system, plan, topic: cleanTopic, model: config.model },
+            prepared,
+            verification
+          ).catch((err: unknown) => {
+            persistError = err instanceof Error ? err.message : String(err);
+            log("persist_failed", { message: persistError });
+            return [] as string[];
           });
-        } catch (err) {
-          persistError = err instanceof Error ? err.message : String(err);
-          log("persist_failed", { message: persistError });
         }
+
+        const blocked = prepared.qa.filter((r) => r.blocked).length;
+        const disputed = verification.filter((v) => !v.agreed).length;
 
         log("complete", {
           ms: Date.now() - startedAt,
           persisted: questionIds.length,
           requested: questionCount,
           contentChars: content.length,
+          attempts,
+          streamError,
+          blocked,
+          disputed,
+          verifierErrors: verification.filter((v) => v.error).length,
           persistError,
         });
 
         controller.enqueue(
-          encoder.encode(
-            `data: ${JSON.stringify({
-              __meta: { questionIds, persistError },
-            })}\n\n`
-          )
+          frame({
+            __meta: {
+              questionIds,
+              persistError,
+              streamError,
+              // The gate's findings and the blind answer, so the client shows
+              // the same verdict the row was stored with rather than a second
+              // opinion computed from its own parse of the stream.
+              qa: prepared.qa,
+              verification,
+            },
+          })
         );
+
+        controller.close();
       },
     });
 
-    return new Response(upstream.body.pipeThrough(transform), {
+    return new Response(stream, {
       headers: {
         ...corsHeaders,
         "Content-Type": "text/event-stream",

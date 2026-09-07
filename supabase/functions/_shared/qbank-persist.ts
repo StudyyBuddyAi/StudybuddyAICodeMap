@@ -1,5 +1,13 @@
 import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.39.8";
-import { SYSTEM_NAMES, type BatchPlan, type OptionLetter, type SystemKey } from "./qbank-prompt.ts";
+import {
+  SYSTEM_NAMES,
+  permuteToPlannedLetter,
+  type BatchPlan,
+  type OptionLetter,
+  type SystemKey,
+} from "./qbank-prompt.ts";
+import { checkBatch, type QaResult } from "./qbank-qa.ts";
+import type { VerificationResult } from "./qbank-verify.ts";
 
 /**
  * Parsing and persisting a generated batch, server-side.
@@ -10,11 +18,17 @@ import { SYSTEM_NAMES, type BatchPlan, type OptionLetter, type SystemKey } from 
  * browser. This one sees the finished text and has a different obligation — it
  * decides what is safe to write into a table the grading RPC will later trust.
  *
- * The QA gate is deliberately NOT applied here. It lives in src/lib/qbank-qa.ts
- * where it is unit-tested, and the client already has it; duplicating 380 lines
- * of rule checks into Deno to run them twice would guarantee the two copies
- * drift. Everything that parses is persisted, and the client decides which ids
- * to hand to start_qbank_session — the RPC re-checks ownership regardless, so a
+ * The QA gate now runs here, before the insert. It used to run only in the
+ * browser, after the rows were already written, and its findings were discarded
+ * when the page unmounted — across a measured 50-item run it produced eighteen
+ * findings that reached nobody and were stored nowhere, so there was no way to
+ * see quality move. Running it here means the findings go onto the row and come
+ * back with the batch, and the ids and the findings are computed from one parse
+ * rather than from two parses in two runtimes that could disagree about how many
+ * questions there were.
+ *
+ * Everything that parses is still persisted. The client decides which ids to
+ * hand to start_qbank_session — the RPC re-checks ownership regardless, so a
  * blocked item that is never requested is simply an unused row.
  */
 
@@ -219,6 +233,41 @@ export interface PersistInput {
   model: string;
 }
 
+export interface PreparedBatch {
+  /** Parsed, option-permuted, in the model's own question order. */
+  questions: ParsedQuestion[];
+  /** One result per question, positionally aligned with `questions`. */
+  qa: QaResult[];
+}
+
+/**
+ * Everything between the raw response and the insert: parse, move each answer
+ * onto its planned letter, then gate.
+ *
+ * Order matters. The permutation has to happen before the gate, because the gate
+ * reads option positions and distractor-explanation letters, and the permuted
+ * order is what the student will actually see. It has to happen before
+ * composeExplanation for the same reason.
+ *
+ * Split out from the insert so the caller can run the cold-answering pass
+ * against the same questions concurrently — the two are independent and the
+ * batch should not pay for both in series.
+ */
+export function prepareBatch(content: string, plan: BatchPlan): PreparedBatch {
+  const parsed = parseBatchContent(content);
+
+  const questions = parsed.map((question, i) => {
+    // Fall back to position when the model's own index is missing or wrong;
+    // the plan is per-index and a batch that mislabels one is still playable.
+    const planned =
+      plan.questions.find((p) => p.index === question.index)?.answerLetter ??
+      plan.questions[i]?.answerLetter;
+    return planned ? permuteToPlannedLetter(question, planned) : question;
+  });
+
+  return { questions, qa: checkBatch(questions) };
+}
+
 /**
  * Writes the batch and returns the new ids in the model's own question order.
  *
@@ -236,12 +285,14 @@ export interface PersistInput {
 export async function persistBatch(
   client: SupabaseClient,
   userId: string,
-  input: PersistInput
+  input: PersistInput,
+  prepared: PreparedBatch,
+  verification: VerificationResult[] = []
 ): Promise<string[]> {
-  const questions = parseBatchContent(input.content);
+  const { questions, qa } = prepared;
   if (questions.length === 0) return [];
 
-  const rows = questions.map((question) => ({
+  const rows = questions.map((question, i) => ({
     subject: SYSTEM_NAMES[input.system],
     domain: question.domain,
     topic: question.subtopic,
@@ -273,6 +324,12 @@ export async function persistBatch(
       selfCheck: question.selfCheck,
       reviewerFlag: question.reviewerFlag,
       suggestedImage: question.suggestedImage,
+      // The two quality signals, stored rather than recomputed. Without these
+      // there is no way to ask later how a change to the prompt or the gate
+      // moved the numbers — the findings used to exist only in a React memo.
+      qa: qa[i]?.findings ?? [],
+      qaBlocked: qa[i]?.blocked ?? false,
+      verification: verification.find((v) => v.index === question.index) ?? null,
       generatedAt: new Date().toISOString(),
     },
   }));
