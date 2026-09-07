@@ -4,7 +4,7 @@ import type { RagChunk } from "./rag.ts";
  * A label the model proposed for one retrieved passage. Deliberately untrusted
  * and untyped beyond its shape: the client validates every field against the
  * raw chunk before anything reaches the UI or gets persisted into a saved
- * sheet (src/lib/source-labels.ts).
+ * sheet or a flashcard deck's grounding metadata (src/lib/source-labels.ts).
  */
 export type RawSourceLabel = {
   id: string;

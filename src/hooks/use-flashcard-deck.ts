@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import type { Json } from "@/integrations/supabase/types";
 import { useAuth } from "@/hooks/use-auth";
 import { getNextReview } from "@/lib/spaced-repetition";
+import type { GroundingLevel, SheetSource } from "@/types/generated-sheet";
 
 export type Card = {
   id: string;
@@ -27,18 +29,18 @@ export type Card = {
 /**
  * Deck-level retrieval result, persisted on `decks.grounding_metadata`. One
  * generation runs one retrieval, so every card it produced shares this.
+ *
+ * `sources` is the same `SheetSource` a sheet stores, deliberately: a deck and
+ * a sheet are two renderings of one retrieval, and both are read back by
+ * SheetSources. That includes the locator and validated book/chapter/section
+ * fields, which ride through this JSON column untouched. They are all optional
+ * on SheetSource, so a deck saved before they existed still parses — it simply
+ * renders from the mechanical repair in src/lib/source-display.ts.
  */
 export type GroundingMeta = {
   retrievedChunks: number;
-  groundingLevel: "full" | "partial" | "none";
-  sources: Array<{
-    id: string;
-    guidelineName: string;
-    sectionTitle: string | null;
-    sourceUrl: string | null;
-    content: string;
-    similarity: number;
-  }>;
+  groundingLevel: GroundingLevel;
+  sources: SheetSource[];
 };
 
 const STORAGE_KEY = "studybuddy_decks_v1";
@@ -191,7 +193,14 @@ export function useFlashcardDeck() {
           // metadata. Omitting the key leaves an existing deck's grounding
           // untouched rather than nulling it out on a regeneration that
           // arrived without __meta.
-          ...(groundingMeta ? { grounding_metadata: groundingMeta } : {}),
+          //
+          // `grounding_metadata` is a jsonb column typed as `Json`, and an
+          // interface with optional fields is not structurally assignable to
+          // it. GroundingMeta is plain JSON-safe data, so this is the ordinary
+          // serialization boundary, not a claim about an unrelated shape.
+          ...(groundingMeta
+            ? { grounding_metadata: groundingMeta as unknown as Json }
+            : {}),
         }));
         const { error: deckError } = await supabase
           .from("decks")
@@ -398,7 +407,11 @@ export function useDeckGrounding(topic: string | null) {
       // Fail soft: a missing deck or a transient error is not worth surfacing
       // as an error state for a badge. Null renders the legacy/unknown case.
       if (error || !data) return null;
-      return (data.grounding_metadata as GroundingMeta | null) ?? null;
+      // The mirror of the write above: back out of `Json` into the shape this
+      // hook wrote. Every field display code reads is optional on SheetSource,
+      // so a deck row written before the locator/label fields existed still
+      // renders — just from the mechanical repair rather than the model labels.
+      return (data.grounding_metadata as unknown as GroundingMeta | null) ?? null;
     },
   });
 }

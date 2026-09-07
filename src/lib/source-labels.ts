@@ -6,9 +6,9 @@ import type { SheetSource } from "@/types/generated-sheet";
  * The labels are a presentation nicety: they turn
  * "OceanofPDF.comNelson_textbook_of_pediatrics_22nd_edition_-_Robert_M_Kliegman"
  * into "Nelson Textbook of Pediatrics, 22nd Edition". But a model asked to
- * tidy a citation will happily invent one, and an invented citation on a
- * medical study sheet is worse than no citation at all — it manufactures
- * provenance a student may act on.
+ * tidy a citation will happily invent one, and an invented citation under a
+ * medical study sheet or flashcard deck is worse than no citation at all — it
+ * manufactures provenance a student may act on.
  *
  * So every label is checked back against the chunk it claims to describe, and
  * anything unverifiable is dropped rather than shown. A dropped label costs

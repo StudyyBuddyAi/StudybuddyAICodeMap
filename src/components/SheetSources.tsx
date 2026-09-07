@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { BookOpen, ChevronRight, ExternalLink } from "lucide-react";
-import type { GeneratedSheet, SheetSource } from "@/types/generated-sheet";
+import type { SheetSource } from "@/types/generated-sheet";
 import {
   cleanExcerpt,
   groupSources,
@@ -297,18 +297,25 @@ const BookGroup = ({ book, query }: { book: SourceBook; query: string }) => {
 };
 
 interface SheetSourcesProps {
-  sheet: GeneratedSheet;
   /**
-   * What the reader asked for. Used only to highlight the overlapping terms in
-   * an opened excerpt; omit it and passages render unhighlighted.
+   * The retrieved passages. A sheet reads these off its own `sources`; a deck
+   * reads them off the `grounding_metadata` written when it was generated. The
+   * payload is identical either way — one retrieval, one shape — so both
+   * render through this one component.
+   */
+  sources: readonly SheetSource[];
+  /**
+   * What the reader asked for: the sheet's notes, or the deck's topic. Used
+   * only to highlight the overlapping terms in an opened excerpt; omit it and
+   * passages render unhighlighted.
    */
   query?: string;
 }
 
 /**
- * The library passages this sheet was built on, presented as a contents page:
- * book, then chapter, then one line per passage, with the retrieved text folded
- * away until the reader asks for it.
+ * The library passages a sheet or a flashcard deck was built on, presented as a
+ * contents page: book, then chapter, then one line per passage, with the
+ * retrieved text folded away until the reader asks for it.
  *
  * Retrieval routinely returns eight passages from a single chapter of a single
  * book. Listed flat with their text showing, that reads as eight walls of
@@ -318,10 +325,10 @@ interface SheetSourcesProps {
  * All repair of the underlying chunks happens in src/lib/source-display.ts, and
  * the model-proposed book/chapter/section labels are validated in
  * src/lib/source-labels.ts before they ever reach this component. Self-hides
- * when the sheet has no sources.
+ * when there is nothing to show.
  */
-const SheetSources = ({ sheet, query }: SheetSourcesProps) => {
-  const books = groupSources(sheet.sources ?? []);
+const SheetSources = ({ sources, query }: SheetSourcesProps) => {
+  const books = groupSources(sources);
   if (books.length === 0) return null;
 
   const passageCount = books.reduce((n, b) => n + b.passageCount, 0);
@@ -351,7 +358,7 @@ const SheetSources = ({ sheet, query }: SheetSourcesProps) => {
       </div>
       <div style={{ ...BODY_STYLE, display: "flex", flexDirection: "column", gap: 18 }}>
         {books.map((book) => (
-          <BookGroup key={book.rawName} book={book} query={query ?? sheet.topic ?? ""} />
+          <BookGroup key={book.rawName} book={book} query={query ?? ""} />
         ))}
       </div>
     </div>
