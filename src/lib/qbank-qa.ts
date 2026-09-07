@@ -78,6 +78,15 @@ const CLINICAL_STOPWORDS = new Set([
   "there", "with", "this", "that", "from", "have", "been", "were", "their",
   "increased", "decreased", "normal", "abnormal", "years", "year", "week",
   "weeks", "month", "months", "days", "male", "female", "woman", "man",
+  // Physiology vocabulary common enough to appear in any stem and any option
+  // on the same topic. Without these the cueing check fires on "pressure" and
+  // "diastolic", which tell a student nothing they did not already know from
+  // the subject of the question.
+  "blood", "pressure", "systolic", "diastolic", "arterial", "venous",
+  "cardiac", "vascular", "volume", "flow", "rate", "wall", "cell", "cells",
+  "tissue", "level", "levels", "acute", "chronic", "effect", "effects",
+  "mechanism", "response", "function", "during", "after", "before", "into",
+  "within", "artery", "arteries", "vein", "veins", "muscle", "smooth",
 ]);
 
 /** Lowercased 4+ character words, crudely stemmed, clinical filler removed. */
@@ -178,14 +187,27 @@ function checkDistinctOptions(draft: GeneratedQuestionDraft, findings: QaFinding
  * with the reviewer, so this is a warn rather than a block.
  */
 function checkCueing(draft: GeneratedQuestionDraft, findings: QaFinding[]): void {
-  const stemTokens = tokens(`${draft.vignette} ${draft.leadIn}`);
+  // Vignette only, deliberately. NBME's cueing flaw is stem language echoed in
+  // the key; the lead-in is a different thing — Rule 3 requires it to name the
+  // category being asked about, and Rule 4 requires every option to belong to
+  // that category, so a lead-in asking "which transporter" will always share
+  // vocabulary with a correct answer that is a transporter. Counting that as
+  // cueing flags the rules working.
+  const stemTokens = tokens(draft.vignette);
   const keyTokens = tokens(draft.options[draft.correctOption]);
   const distractorTokens = new Set<string>();
   for (const letter of distractorKeys(draft.correctOption)) {
     for (const t of tokens(draft.options[letter])) distractorTokens.add(t);
   }
 
-  const cues = [...keyTokens].filter((t) => stemTokens.has(t) && !distractorTokens.has(t));
+  // A word drawn from the question's own subject is not a cue. Every item on
+  // aortic dissection will say "dissection" in the stem, and if it is also the
+  // right answer's vocabulary that is the topic showing through, not a tell.
+  const topicTokens = tokens(draft.subtopic);
+
+  const cues = [...keyTokens].filter(
+    (t) => stemTokens.has(t) && !distractorTokens.has(t) && !topicTokens.has(t)
+  );
   if (cues.length > 0) {
     findings.push({
       rule: "stem-key-cueing",
@@ -263,6 +285,25 @@ function checkBolding(draft: GeneratedQuestionDraft, findings: QaFinding[]): voi
   }
 }
 
+/**
+ * The vignette must not ask the question — that is the lead-in's job.
+ *
+ * Measured, not theoretical: the first real batch had this in five items out of
+ * five, each ending its stem with a question and then repeating a reworded
+ * version in leadIn. The reader sees the question twice, in two different
+ * phrasings, which is both sloppy and a genuine source of ambiguity when the
+ * two wordings do not ask quite the same thing.
+ */
+function checkVignetteQuestion(draft: GeneratedQuestionDraft, findings: QaFinding[]): void {
+  if (draft.vignette.includes("?")) {
+    findings.push({
+      rule: "question-in-vignette",
+      severity: "warn",
+      detail: "Vignette contains a question; the stem must end on a finding and ask nothing.",
+    });
+  }
+}
+
 function checkLeadIn(draft: GeneratedQuestionDraft, findings: QaFinding[]): void {
   if (!draft.leadIn.trim().endsWith("?")) {
     findings.push({
@@ -318,6 +359,7 @@ export function checkQuestion(
   checkMetaLanguage(draft, findings);
   checkDistractorCoverage(draft, findings);
   checkBolding(draft, findings);
+  checkVignetteQuestion(draft, findings);
   checkLeadIn(draft, findings);
   checkSelfReport(draft, findings);
 

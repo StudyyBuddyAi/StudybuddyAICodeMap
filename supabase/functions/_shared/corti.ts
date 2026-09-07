@@ -35,11 +35,15 @@
 export type CortiRegion = "eu" | "us";
 
 /**
- * Writer model. `corti-s1` emits a chain-of-thought trace before the answer;
- * the `-instant` variants skip it. The QBank item-writing prompt is rule-dense
- * enough that the deliberation is worth paying for — but the model id is a
- * parameter precisely so dropping to `corti-s1-instant` for latency is a config
- * change, not a code change.
+ * Writer model.
+ *
+ * The default is deliberately an `-instant` variant. `corti-s1` reasons before
+ * answering and, against a prompt this rule-dense, it does not stop: a measured
+ * five-question run spent its entire 32,768-token output budget on 138,000
+ * characters of reasoning and emitted zero content — 404 seconds and $0.27 for
+ * nothing. Its only offered effort levels are "high" and "max", so there is no
+ * dial to turn it down. `corti-s1-instant` is the same model at the same price
+ * without the reasoning pass, and writes five items in ~76s for ~$0.04.
  *
  * Context is 262,144 input tokens on every s1 variant, so the prompt has room.
  */
@@ -50,7 +54,7 @@ export type CortiModel =
   | "corti-s1-mini-instant";
 
 const DEFAULT_REGION: CortiRegion = "eu";
-const DEFAULT_MODEL: CortiModel = "corti-s1";
+const DEFAULT_MODEL: CortiModel = "corti-s1-instant";
 const DEFAULT_TENANT = "base";
 
 export interface CortiConfig {

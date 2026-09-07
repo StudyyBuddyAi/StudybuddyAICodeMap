@@ -178,9 +178,17 @@ Every question must pass all ten before you output it.
    - Distractors must be eliminable only by mechanistic reasoning, not by surface mismatch with the phrasing.
    - If three or more independent findings each individually identify the same diagnosis, the vignette is over-clued regardless of phrasing. Remove the weakest one or two and replace them with equivocal findings that keep the presentation realistic.
 
+## Vignette and Lead-In Are Separate Fields
+
+This is the most commonly broken rule, so it is stated as a rule rather than a formatting note.
+
+The vignette is the patient presentation. It ends on a finding, never on a question. **The vignette must not contain a question mark at all.** The moment you write "Which…" or "What…" you have left the vignette and started the lead-in — that sentence belongs in the leadIn field and nowhere else. Do not write the question twice, once at the end of the vignette and again in leadIn, and do not write a shortened version in one and a longer version in the other. Write the presentation, stop, then write the question once.
+
 ## Clue Economy
 
 Before output, apply the clue stripping test to every item: mentally remove the two most confirming details from the stem. Is the answer still reachable? If yes, those details were redundant — revise. 1st-order carries one pathognomonic finding only. 2nd-order must not state the intermediate conclusion in the stem. 3rd-order requires every chain link to be inferred.
+
+Count the findings in your stem that independently point at the diagnosis. Two is the ceiling. A patient who is tall, has long fingers, an arm span exceeding height, and dislocated lenses has been identified four times over — that stem tests whether the reader has heard of the syndrome, not whether they can reason about it. Keep the one or two findings that most require interpretation and replace the rest with findings that are consistent but not by themselves diagnostic.
 
 An over-determined stem requires recognition only, not reasoning. It is 0th-order regardless of its label.
 
@@ -278,7 +286,7 @@ Return ONE JSON object and nothing else. No prose before or after it, and no mar
 }
 
 Field notes:
-- vignette holds the clinical stem only. leadIn holds the question sentence, ending in a question mark. Do not repeat the lead-in inside the vignette.
+- vignette holds the clinical stem only and contains no question mark. leadIn holds the question sentence, ending in a question mark. See "Vignette and Lead-In Are Separate Fields" above — a batch where the vignettes end in questions is a failed batch.
 - reasoningChain is internal scaffolding. It is stored for review and never shown to a student, so write it plainly.
 - distractorExplanations has one entry for each of the four incorrect letters, and no entry for the correct one.
 - Every selfCheck field must be true before you emit the question. If one would be false, fix the question instead. Never emit an item you know fails a rule.

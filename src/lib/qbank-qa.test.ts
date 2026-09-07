@@ -96,6 +96,30 @@ describe("checkQuestion", () => {
     expect(rules(d)).toContain("open-lead-in");
   });
 
+  it("warns when the vignette asks the question itself", () => {
+    const d = draft({
+      vignette: "A 54-year-old presents with stones. Which transporter is inhibited?",
+    });
+    expect(rules(d)).toContain("question-in-vignette");
+  });
+
+  it("does not flag cueing on a word from the question's own subject", () => {
+    const d = draft({
+      subtopic: "Thiazide handling of calcium",
+      vignette: "A patient taking a thiazide develops recurrent stones and low potassium.",
+      options: { ...draft().options, b: "Thiazide-sensitive transporter" },
+    });
+    expect(rules(d)).not.toContain("stem-key-cueing");
+  });
+
+  it("does not flag cueing on common physiology vocabulary", () => {
+    const d = draft({
+      vignette: "Blood pressure is elevated and diastolic pressure is low on examination.",
+      options: { ...draft().options, b: "Diastolic runoff into the ventricle" },
+    });
+    expect(rules(d)).not.toContain("stem-key-cueing");
+  });
+
   it("warns when the lead-in is not a question", () => {
     const d = draft({ leadIn: "Identify the inhibited transporter." });
     expect(rules(d)).toContain("lead-in-not-question");
