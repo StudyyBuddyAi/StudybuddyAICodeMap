@@ -45,6 +45,7 @@ export function createSupabaseStub() {
       }),
       signUp: async () => empty,
       signInWithPassword: async () => empty,
+      signInWithOAuth: async () => ({ data: { provider: "google", url: null }, error: null }),
       signOut: async () => ({ error: null }),
       updateUser: async () => empty,
       verifyOtp: async () => empty,

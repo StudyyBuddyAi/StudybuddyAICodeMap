@@ -15,10 +15,20 @@ site_url = "env(SUPABASE_AUTH_SITE_URL)"
 additional_redirect_urls = [
   "https://www.studyybuddyai.com/reset-password",
   "http://localhost:8080/reset-password",
+  "https://www.studyybuddyai.com/auth/callback",
+  "http://localhost:8080/auth/callback",
 ]
 # Every visitor is signed in anonymously on load (src/hooks/use-auth.ts).
 # Turning this off breaks the entire app, not just signup.
 enable_anonymous_sign_ins = true
+
+[auth.external.google]
+enabled = true
+client_id = "env(SUPABASE_AUTH_EXTERNAL_GOOGLE_CLIENT_ID)"
+secret = "env(SUPABASE_AUTH_EXTERNAL_GOOGLE_SECRET)"
+# Blank = Supabase's own /auth/v1/callback, which is what Google is registered with.
+redirect_uri = ""
+skip_nonce_check = false
 
 [auth.email]
 enable_signup = true

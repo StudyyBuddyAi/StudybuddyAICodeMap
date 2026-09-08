@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect, useState } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Outlet, Route, Routes, useLocation } from "react-router-dom";
 import { Analytics } from "@vercel/analytics/react";
+import { AuthProvider } from "./contexts/AuthContext";
 import { QBankProvider } from "./contexts/QBankContext";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
@@ -11,6 +12,7 @@ import PageLoader from "@/components/PageLoader";
 import Index from "./pages/Index.tsx";
 import NotFound from "./pages/NotFound.tsx";
 import ResetPassword from "./pages/ResetPassword.tsx";
+import AuthCallback from "./pages/AuthCallback.tsx";
 
 // Route pages are lazy-loaded so the heavy page chunks (Sheets, Flashcards,
 // QBank family) are only fetched on navigation instead of in the initial bundle.
@@ -73,6 +75,7 @@ const AppRoutes = () => {
           </Route>
           <Route path="/library" element={<Library />} />
           <Route path="/reset-password" element={<ResetPassword />} />
+          <Route path="/auth/callback" element={<AuthCallback />} />
           {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
           <Route path="*" element={<NotFound />} />
         </Routes>
@@ -88,7 +91,9 @@ const App = () => (
       {/* <Sonner /> */}
       <TopProgressBar />
       <BrowserRouter>
-        <AppRoutes />
+        <AuthProvider>
+          <AppRoutes />
+        </AuthProvider>
       </BrowserRouter>
       <Analytics />
     </TooltipProvider>

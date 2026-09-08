@@ -10,7 +10,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
+import { Separator } from "@/components/ui/separator";
 import { ArrowLeft, Loader2, Mail } from "lucide-react";
+import GoogleIcon from "@/components/icons/GoogleIcon";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
 
@@ -20,10 +22,14 @@ interface AuthModalProps {
 }
 
 const AuthModal = ({ open, onOpenChange }: AuthModalProps) => {
-  const { signIn, signUp, resetPasswordForEmail, verifyOtp, resendSignUpOtp, isAnonymous } = useAuth();
+  const { signIn, signUp, signInWithGoogle, resetPasswordForEmail, verifyOtp, resendSignUpOtp, isAnonymous } =
+    useAuth();
   const { toast } = useToast();
 
   const [tab, setTab] = useState<"signin" | "signup">("signin");
+
+  const [googleLoading, setGoogleLoading] = useState(false);
+  const [googleError, setGoogleError] = useState<string | null>(null);
 
   const [signInEmail, setSignInEmail] = useState("");
   const [signInPassword, setSignInPassword] = useState("");
@@ -64,6 +70,8 @@ const AuthModal = ({ open, onOpenChange }: AuthModalProps) => {
       setOtpError(null);
       setOtpLoading(false);
       setResendCooldown(0);
+      setGoogleLoading(false);
+      setGoogleError(null);
     }
   }, [open]);
 
@@ -76,6 +84,19 @@ const AuthModal = ({ open, onOpenChange }: AuthModalProps) => {
       return () => clearInterval(timer);
     }
   }, [resendCooldown]);
+
+  const handleGoogle = async () => {
+    setGoogleError(null);
+    setGoogleLoading(true);
+    const { error } = await signInWithGoogle();
+    if (error) {
+      setGoogleLoading(false);
+      setGoogleError(error);
+      return;
+    }
+    // On success the browser is navigating to Google; leave the spinner up
+    // so the button can't be double-clicked before the page unloads.
+  };
 
   const handleSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -253,160 +274,184 @@ const AuthModal = ({ open, onOpenChange }: AuthModalProps) => {
             </div>
           </div>
         ) : (
-          <Tabs value={tab} onValueChange={(v) => setTab(v as "signin" | "signup")} className="w-full">
-            <TabsList className="grid w-full grid-cols-2">
-              <TabsTrigger value="signin">Sign In</TabsTrigger>
-              <TabsTrigger value="signup">Sign Up</TabsTrigger>
-            </TabsList>
+          <div className="space-y-4 pt-2">
+            <Button
+              type="button"
+              variant="outline"
+              className="w-full h-10 rounded-lg font-medium"
+              onClick={handleGoogle}
+              disabled={googleLoading}
+            >
+              {googleLoading ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <GoogleIcon className="mr-2 h-4 w-4" />
+              )}
+              Continue with Google
+            </Button>
+            {googleError && <p className="text-sm text-destructive">{googleError}</p>}
 
-            <TabsContent value="signin">
-              {!showForgotPassword ? (
-                <form onSubmit={handleSignIn} className="space-y-4 pt-2">
+            <div className="flex items-center gap-3">
+              <Separator className="flex-1" />
+              <span className="text-xs text-muted-foreground">or</span>
+              <Separator className="flex-1" />
+            </div>
+
+            <Tabs value={tab} onValueChange={(v) => setTab(v as "signin" | "signup")} className="w-full">
+              <TabsList className="grid w-full grid-cols-2">
+                <TabsTrigger value="signin">Sign In</TabsTrigger>
+                <TabsTrigger value="signup">Sign Up</TabsTrigger>
+              </TabsList>
+
+              <TabsContent value="signin">
+                {!showForgotPassword ? (
+                  <form onSubmit={handleSignIn} className="space-y-4 pt-2">
+                    <div className="space-y-2">
+                      <Label htmlFor="signin-email">Email</Label>
+                      <Input
+                        id="signin-email"
+                        type="email"
+                        autoComplete="email"
+                        value={signInEmail}
+                        onChange={(e) => setSignInEmail(e.target.value)}
+                        required
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="signin-password">Password</Label>
+                      <Input
+                        id="signin-password"
+                        type="password"
+                        autoComplete="current-password"
+                        value={signInPassword}
+                        onChange={(e) => setSignInPassword(e.target.value)}
+                        required
+                      />
+                    </div>
+                    <div className="flex justify-end -mt-2">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-auto p-0 text-xs text-muted-foreground hover:text-foreground hover:bg-transparent"
+                        onClick={() => setShowForgotPassword(true)}
+                      >
+                        Forgot password?
+                      </Button>
+                    </div>
+                    {signInError && (
+                      <p className="text-sm text-destructive">{signInError}</p>
+                    )}
+                    <Button type="submit" className="w-full h-10 rounded-lg font-medium" disabled={signInLoading}>
+                      {signInLoading ? (
+                        <>
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          Signing in…
+                        </>
+                      ) : (
+                        "Sign In"
+                      )}
+                    </Button>
+                  </form>
+                ) : (
+                  <div className="space-y-4 pt-2">
+                    <div className="flex items-center gap-2">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7"
+                        onClick={() => {
+                          setShowForgotPassword(false);
+                          setForgotEmail("");
+                          setForgotError(null);
+                          setForgotSent(false);
+                        }}
+                        aria-label="Back to sign in"
+                      >
+                        <ArrowLeft className="h-4 w-4" />
+                      </Button>
+                      <h3 className="text-base font-semibold tracking-tight">Reset your password</h3>
+                    </div>
+
+                    {forgotSent ? (
+                      <p className="text-sm text-muted-foreground">
+                        Check your email for a reset link.
+                      </p>
+                    ) : (
+                      <form onSubmit={handleForgotPassword} className="space-y-4">
+                        <div className="space-y-2">
+                          <Label htmlFor="forgot-email">Email</Label>
+                          <Input
+                            id="forgot-email"
+                            type="email"
+                            autoComplete="email"
+                            value={forgotEmail}
+                            onChange={(e) => setForgotEmail(e.target.value)}
+                            required
+                          />
+                        </div>
+                        {forgotError && (
+                          <p className="text-sm text-destructive">{forgotError}</p>
+                        )}
+                        <Button type="submit" className="w-full h-10 rounded-lg font-medium" disabled={forgotLoading}>
+                          {forgotLoading ? (
+                            <>
+                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                              Sending…
+                            </>
+                          ) : (
+                            "Send reset link"
+                          )}
+                        </Button>
+                      </form>
+                    )}
+                  </div>
+                )}
+              </TabsContent>
+
+              <TabsContent value="signup">
+                <form onSubmit={handleSignUp} className="space-y-4 pt-2">
                   <div className="space-y-2">
-                    <Label htmlFor="signin-email">Email</Label>
+                    <Label htmlFor="signup-email">Email</Label>
                     <Input
-                      id="signin-email"
+                      id="signup-email"
                       type="email"
                       autoComplete="email"
-                      value={signInEmail}
-                      onChange={(e) => setSignInEmail(e.target.value)}
+                      value={signUpEmail}
+                      onChange={(e) => setSignUpEmail(e.target.value)}
                       required
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="signin-password">Password</Label>
+                    <Label htmlFor="signup-password">Password</Label>
                     <Input
-                      id="signin-password"
+                      id="signup-password"
                       type="password"
-                      autoComplete="current-password"
-                      value={signInPassword}
-                      onChange={(e) => setSignInPassword(e.target.value)}
+                      autoComplete="new-password"
+                      value={signUpPassword}
+                      onChange={(e) => setSignUpPassword(e.target.value)}
                       required
+                      minLength={6}
                     />
                   </div>
-                  <div className="flex justify-end -mt-2">
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      className="h-auto p-0 text-xs text-muted-foreground hover:text-foreground hover:bg-transparent"
-                      onClick={() => setShowForgotPassword(true)}
-                    >
-                      Forgot password?
-                    </Button>
-                  </div>
-                  {signInError && (
-                    <p className="text-sm text-destructive">{signInError}</p>
+                  {signUpError && (
+                    <p className="text-sm text-destructive">{signUpError}</p>
                   )}
-                  <Button type="submit" className="w-full h-10 rounded-lg font-medium" disabled={signInLoading}>
-                    {signInLoading ? (
+                  <Button type="submit" className="w-full h-10 rounded-lg font-medium" disabled={signUpLoading}>
+                    {signUpLoading ? (
                       <>
                         <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        Signing in…
+                        Creating account…
                       </>
                     ) : (
-                      "Sign In"
+                      "Sign Up"
                     )}
                   </Button>
                 </form>
-              ) : (
-                <div className="space-y-4 pt-2">
-                  <div className="flex items-center gap-2">
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      className="h-7 w-7"
-                      onClick={() => {
-                        setShowForgotPassword(false);
-                        setForgotEmail("");
-                        setForgotError(null);
-                        setForgotSent(false);
-                      }}
-                      aria-label="Back to sign in"
-                    >
-                      <ArrowLeft className="h-4 w-4" />
-                    </Button>
-                    <h3 className="text-base font-semibold tracking-tight">Reset your password</h3>
-                  </div>
-
-                  {forgotSent ? (
-                    <p className="text-sm text-muted-foreground">
-                      Check your email for a reset link.
-                    </p>
-                  ) : (
-                    <form onSubmit={handleForgotPassword} className="space-y-4">
-                      <div className="space-y-2">
-                        <Label htmlFor="forgot-email">Email</Label>
-                        <Input
-                          id="forgot-email"
-                          type="email"
-                          autoComplete="email"
-                          value={forgotEmail}
-                          onChange={(e) => setForgotEmail(e.target.value)}
-                          required
-                        />
-                      </div>
-                      {forgotError && (
-                        <p className="text-sm text-destructive">{forgotError}</p>
-                      )}
-                      <Button type="submit" className="w-full h-10 rounded-lg font-medium" disabled={forgotLoading}>
-                        {forgotLoading ? (
-                          <>
-                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                            Sending…
-                          </>
-                        ) : (
-                          "Send reset link"
-                        )}
-                      </Button>
-                    </form>
-                  )}
-                </div>
-              )}
-            </TabsContent>
-
-            <TabsContent value="signup">
-              <form onSubmit={handleSignUp} className="space-y-4 pt-2">
-                <div className="space-y-2">
-                  <Label htmlFor="signup-email">Email</Label>
-                  <Input
-                    id="signup-email"
-                    type="email"
-                    autoComplete="email"
-                    value={signUpEmail}
-                    onChange={(e) => setSignUpEmail(e.target.value)}
-                    required
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="signup-password">Password</Label>
-                  <Input
-                    id="signup-password"
-                    type="password"
-                    autoComplete="new-password"
-                    value={signUpPassword}
-                    onChange={(e) => setSignUpPassword(e.target.value)}
-                    required
-                    minLength={6}
-                  />
-                </div>
-                {signUpError && (
-                  <p className="text-sm text-destructive">{signUpError}</p>
-                )}
-                <Button type="submit" className="w-full h-10 rounded-lg font-medium" disabled={signUpLoading}>
-                  {signUpLoading ? (
-                    <>
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      Creating account…
-                    </>
-                  ) : (
-                    "Sign Up"
-                  )}
-                </Button>
-              </form>
-            </TabsContent>
-          </Tabs>
+              </TabsContent>
+            </Tabs>
+          </div>
         )}
       </DialogContent>
     </Dialog>
