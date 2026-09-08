@@ -41,7 +41,7 @@ vi.mock("@/integrations/supabase/client", () => ({
 }));
 
 import AuthCallback from "@/pages/AuthCallback";
-import { stashPendingUpgrade } from "@/lib/auth-upgrade";
+import { readPendingUpgrade, stashPendingUpgrade } from "@/lib/auth-upgrade";
 
 async function renderCallback() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -93,5 +93,25 @@ describe("AuthCallback", () => {
     });
 
     expect(navigateMock).not.toHaveBeenCalled();
+  });
+
+  // A stash left behind by an abandoned sign-in is not inert: the returnTo
+  // redirect is not date-gated, so it would still steer the next successful
+  // sign-in in this tab.
+  it("clears the stash when the sign-in never completes", async () => {
+    vi.useFakeTimers();
+    try {
+      await stashPendingUpgrade(null, "/sheets?start=1");
+      await renderCallback();
+
+      await act(async () => {
+        vi.advanceTimersByTime(8000);
+      });
+
+      expect(readPendingUpgrade()).toBeNull();
+      expect(navigateMock).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect, useState } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Outlet, Route, Routes, useLocation } from "react-router-dom";
 import { Analytics } from "@vercel/analytics/react";
+import { AuthProvider } from "./contexts/AuthContext";
 import { QBankProvider } from "./contexts/QBankContext";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
@@ -88,7 +89,9 @@ const App = () => (
       {/* <Sonner /> */}
       <TopProgressBar />
       <BrowserRouter>
-        <AppRoutes />
+        <AuthProvider>
+          <AppRoutes />
+        </AuthProvider>
       </BrowserRouter>
       <Analytics />
     </TooltipProvider>

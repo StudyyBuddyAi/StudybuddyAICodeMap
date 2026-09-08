@@ -4,7 +4,12 @@ import PageLoader from "@/components/PageLoader";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
-import { applyAnonUsage, readPendingUpgrade, runPostUpgradeMigrations } from "@/lib/auth-upgrade";
+import {
+  applyAnonUsage,
+  clearPendingUpgrade,
+  readPendingUpgrade,
+  runPostUpgradeMigrations,
+} from "@/lib/auth-upgrade";
 
 type Status = "working" | "failed";
 
@@ -47,6 +52,10 @@ const AuthCallback = () => {
     const fail = () => {
       if (settled) return;
       settled = true;
+      // Only finish() consumes the stash, so without this a cancelled or
+      // timed-out sign-in leaves it in sessionStorage for the rest of the
+      // tab, where it would still steer where a later sign-in lands.
+      clearPendingUpgrade();
       setStatus("failed");
     };
 
