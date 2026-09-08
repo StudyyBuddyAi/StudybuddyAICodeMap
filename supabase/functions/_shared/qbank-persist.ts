@@ -231,6 +231,13 @@ export interface PersistInput {
   plan: BatchPlan;
   topic: string;
   model: string;
+  /**
+   * Ties every row of one generation together, across the several waves a large
+   * set takes. It is what claim_generated_questions looks rows up by, which is
+   * how a question that was written but never acknowledged by the client still
+   * finds its way into the session. Minted by the client, never by the model.
+   */
+  generationId: string;
 }
 
 export interface PreparedBatch {
@@ -269,6 +276,66 @@ export function prepareBatch(content: string, plan: BatchPlan): PreparedBatch {
 }
 
 /**
+ * One question as a `questions` row.
+ *
+ * Lifted out of persistBatch so the incremental writer can insert a single
+ * question the moment it closes mid-stream and the batch writer can still do
+ * one multi-row insert, without the two drifting into different column sets —
+ * a generated row the grading RPC trusts must look identical whichever path
+ * wrote it.
+ */
+function buildRow(
+  question: ParsedQuestion,
+  userId: string,
+  input: PersistInput,
+  qaResult: QaResult | undefined,
+  verification: VerificationResult[]
+) {
+  return {
+    subject: SYSTEM_NAMES[input.system],
+    domain: question.domain,
+    topic: question.subtopic,
+    difficulty: question.difficulty,
+    reasoning_order: question.reasoningOrder,
+    competency: question.competency,
+    question_text: `${question.vignette}\n\n${question.leadIn}`,
+    option_a: question.options.a,
+    option_b: question.options.b,
+    option_c: question.options.c,
+    option_d: question.options.d,
+    option_e: question.options.e,
+    correct_option: question.correctOption,
+    explanation: composeExplanation(question),
+    teaching_point: question.teachingPoint,
+    is_active: false,
+    origin: "generated",
+    created_by: userId,
+    generation_meta: {
+      generationId: input.generationId,
+      model: input.model,
+      promptVersion: "v13.1-api",
+      requestedTopic: input.topic,
+      system: input.system,
+      index: question.index,
+      plannedAnswer: input.plan.questions.find((p) => p.index === question.index)?.answerLetter ?? null,
+      plannedReasoningOrder:
+        input.plan.questions.find((p) => p.index === question.index)?.reasoningOrder ?? null,
+      reasoningChain: question.reasoningChain,
+      selfCheck: question.selfCheck,
+      reviewerFlag: question.reviewerFlag,
+      suggestedImage: question.suggestedImage,
+      // The two quality signals, stored rather than recomputed. Without these
+      // there is no way to ask later how a change to the prompt or the gate
+      // moved the numbers — the findings used to exist only in a React memo.
+      qa: qaResult?.findings ?? [],
+      qaBlocked: qaResult?.blocked ?? false,
+      verification: verification.find((v) => v.index === question.index) ?? null,
+      generatedAt: new Date().toISOString(),
+    },
+  };
+}
+
+/**
  * Writes the batch and returns the new ids in the model's own question order.
  *
  * Rows are inactive by design. `is_active = false` is what keeps a generated
@@ -292,47 +359,9 @@ export async function persistBatch(
   const { questions, qa } = prepared;
   if (questions.length === 0) return [];
 
-  const rows = questions.map((question, i) => ({
-    subject: SYSTEM_NAMES[input.system],
-    domain: question.domain,
-    topic: question.subtopic,
-    difficulty: question.difficulty,
-    reasoning_order: question.reasoningOrder,
-    competency: question.competency,
-    question_text: `${question.vignette}\n\n${question.leadIn}`,
-    option_a: question.options.a,
-    option_b: question.options.b,
-    option_c: question.options.c,
-    option_d: question.options.d,
-    option_e: question.options.e,
-    correct_option: question.correctOption,
-    explanation: composeExplanation(question),
-    teaching_point: question.teachingPoint,
-    is_active: false,
-    origin: "generated",
-    created_by: userId,
-    generation_meta: {
-      model: input.model,
-      promptVersion: "v13.1-api",
-      requestedTopic: input.topic,
-      system: input.system,
-      index: question.index,
-      plannedAnswer: input.plan.questions.find((p) => p.index === question.index)?.answerLetter ?? null,
-      plannedReasoningOrder:
-        input.plan.questions.find((p) => p.index === question.index)?.reasoningOrder ?? null,
-      reasoningChain: question.reasoningChain,
-      selfCheck: question.selfCheck,
-      reviewerFlag: question.reviewerFlag,
-      suggestedImage: question.suggestedImage,
-      // The two quality signals, stored rather than recomputed. Without these
-      // there is no way to ask later how a change to the prompt or the gate
-      // moved the numbers — the findings used to exist only in a React memo.
-      qa: qa[i]?.findings ?? [],
-      qaBlocked: qa[i]?.blocked ?? false,
-      verification: verification.find((v) => v.index === question.index) ?? null,
-      generatedAt: new Date().toISOString(),
-    },
-  }));
+  const rows = questions.map((question, i) =>
+    buildRow(question, userId, input, qa[i], verification)
+  );
 
   // Insert order is preserved by Postgres for a multi-row INSERT … RETURNING,
   // so the returned ids line up with `questions` — which is what lets the
@@ -341,4 +370,35 @@ export async function persistBatch(
   if (error) throw new Error(`insert_failed: ${error.message}`);
 
   return (data ?? []).map((row: { id: string }) => row.id);
+}
+
+/**
+ * Writes one question and returns its id, or null if the insert failed.
+ *
+ * The incremental counterpart to persistBatch: a question is written the moment
+ * it closes mid-stream rather than at the end of the batch, which is what lets
+ * the student start on question one while the rest are still being written.
+ *
+ * It returns null rather than throwing because a single failed insert is a
+ * shortfall, not a dead batch. The wave loop above it is driven by how many
+ * questions have actually landed, so a lost row is simply regenerated by a
+ * later wave — whereas throwing here would abort a stream that still had
+ * perfectly good questions coming.
+ */
+export async function persistOne(
+  client: SupabaseClient,
+  userId: string,
+  input: PersistInput,
+  question: ParsedQuestion,
+  qaResult: QaResult | undefined,
+  verification: VerificationResult[] = []
+): Promise<string | null> {
+  const { data, error } = await client
+    .from("questions")
+    .insert(buildRow(question, userId, input, qaResult, verification))
+    .select("id")
+    .single();
+
+  if (error) return null;
+  return (data as { id: string } | null)?.id ?? null;
 }

@@ -492,11 +492,20 @@ function reasoningOrderMix(count: number, random: () => number): ReasoningOrder[
 /**
  * Builds the per-batch plan the model is required to honour. `random` is
  * injectable so the plan is deterministic under test.
+ *
+ * `startIndex` exists because a large set is generated as several sequential
+ * waves rather than one call, and the index has to stay unique across the whole
+ * set: it is what the reconciliation RPC sorts by to put the questions back in
+ * the order the plan intended, so a third wave numbering itself 1-5 again would
+ * shuffle the student's set. Each wave still shuffles its own letters and
+ * reasoning orders, which composes to an even spread across the whole set
+ * without the plan needing to know how many waves there are.
  */
 export function buildBatchPlan(
   system: SystemKey,
   count: number,
-  random: () => number = Math.random
+  random: () => number = Math.random,
+  startIndex = 1
 ): BatchPlan {
   const letters = shuffledLetters(random);
   const orders = reasoningOrderMix(count, random);
@@ -505,7 +514,7 @@ export function buildBatchPlan(
     system,
     systemName: SYSTEM_NAMES[system],
     questions: Array.from({ length: count }, (_, i) => ({
-      index: i + 1,
+      index: startIndex + i,
       answerLetter: letters[i % letters.length],
       reasoningOrder: orders[i],
     })),

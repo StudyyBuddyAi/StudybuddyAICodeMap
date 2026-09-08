@@ -10,6 +10,7 @@ import {
   Clock,
   Flag,
   SkipForward,
+  Loader2,
 } from "lucide-react";
 import DashboardLayout from "@/components/dashboard/DashboardLayout";
 import PageLoader from "@/components/PageLoader";
@@ -138,10 +139,21 @@ const QuestionCounter = ({
                 border: "1px solid rgba(217,119,6,0.35)",
                 cursor: "pointer",
               }
-            : {
+            : q
+            ? {
                 background: "var(--bg-elevated)",
                 color: "var(--fg-subtle)",
                 border: "1px solid var(--border)",
+              }
+            : {
+                // Not written yet. A generated set shows its full length from the
+                // start, so these slots exist before their questions do — dashed
+                // and dimmed so the student can see the set filling in rather
+                // than wondering why a numbered question will not open.
+                background: "transparent",
+                color: "var(--fg-subtle)",
+                border: "1px dashed var(--border)",
+                opacity: 0.5,
               };
 
           const canClick = isAnswered || (isSkipped && !isCurrent);
@@ -172,6 +184,8 @@ const QuestionCounter = ({
                   ? `Q${i + 1} — click to review`
                   : isSkipped && !isCurrent
                   ? `Q${i + 1} — skipped, click to answer`
+                  : !q
+                  ? `Q${i + 1} — not written yet`
                   : `Q${i + 1}`
               }
             >
@@ -698,6 +712,9 @@ const QBankSession = () => {
     currentIndex,
     totalQuestions,
     isLastQuestion,
+    isAwaitingMore,
+    generation,
+    resumeGeneration,
     submitAnswer,
     nextQuestion,
     endSession,
@@ -780,6 +797,26 @@ const QBankSession = () => {
     }
   }, [session, sessionIdParam, lastSummary, navigate, restoreSession]);
 
+  /**
+   * Picks an interrupted set back up.
+   *
+   * A generated session can be re-entered with its set unfinished: the tab was
+   * closed, the browser was refreshed, or the student walked to /dashboard and
+   * back, any of which drops the in-memory wave loop. This reconciles against
+   * the table first — questions written while we were gone are already paid for
+   * and simply need collecting — and only then starts writing again for whatever
+   * is genuinely still missing. Safe to call repeatedly; it no-ops for a curated
+   * session, a finished one, or a run that is already going.
+   */
+  // Keyed on the generation's identity rather than the object it hangs off:
+  // session.generation is rewritten after every wave to persist the resume
+  // point, so depending on it would re-fire this on each one.
+  useEffect(() => {
+    if (!session?.generation) return;
+    resumeGeneration();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session?.sessionId, session?.generation?.generationId, resumeGeneration]);
+
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     const q = session?.questions[currentIndex];
@@ -847,12 +884,21 @@ const QBankSession = () => {
 
   const handleNext = useCallback(async () => {
     setDrawerOpen(false);
-    if (unansweredCount === 0) {
+    // "Everything loaded is answered" is not the same as "the set is done" while
+    // questions are still being written, so ending on it would cut a set of
+    // twenty short at whatever had landed.
+    if (unansweredCount === 0 && !isAwaitingMore) {
       await endSession();
     } else {
       nextQuestion();
     }
-  }, [unansweredCount, endSession, nextQuestion]);
+  }, [unansweredCount, isAwaitingMore, endSession, nextQuestion]);
+
+  /** The deliberate way out of a set that is still being written. */
+  const handleFinishNow = useCallback(async () => {
+    setDrawerOpen(false);
+    await endSession();
+  }, [endSession]);
 
   useEffect(() => {
     if (isReviewing) return;
@@ -881,6 +927,25 @@ const QBankSession = () => {
   const sessionQuestions = session?.questions ?? lastSummary?.questions ?? [];
   const sessionAnswers = session?.answers ?? lastSummary?.answers ?? [];
   const effectiveTotalQuestions = session ? totalQuestions : lastSummary?.total ?? 0;
+
+  /**
+   * Standing at the end of what has been written, with more still expected.
+   *
+   * This is the one state the player did not previously have. Without it the
+   * student answers question one of twenty, the engine sees nothing unanswered,
+   * and offers to finish the session.
+   */
+  const waitingForNext =
+    !!session && isAwaitingMore && currentIndex >= session.questions.length - 1;
+
+  /** A run that stopped early. Said plainly rather than left as a silent gap. */
+  const generationFellShort =
+    !!session &&
+    !isAwaitingMore &&
+    !!session.generation &&
+    !!generation &&
+    generation.status !== "running" &&
+    session.questions.length < generation.target;
 
   if (!displayQuestion) {
     return (
@@ -1135,7 +1200,32 @@ const QBankSession = () => {
             )}
 
             {isAnsweredEffective && !isReviewing && (
-              unansweredCount > 0 && isLastQuestion ? (
+              waitingForNext ? (
+                <div className="flex flex-col gap-2 pt-1 animate-fade-in">
+                  <div
+                    className="flex items-center gap-2.5 rounded-xl px-4 py-3"
+                    style={{ border: "1px solid var(--border)", background: "var(--bg-subtle)" }}
+                  >
+                    <Loader2 className="h-4 w-4 shrink-0 animate-spin" style={{ color: "var(--fg-muted)" }} />
+                    <p className="text-xs font-medium" style={{ color: "var(--fg-muted)" }}>
+                      Writing question {sessionQuestions.length + 1} of {effectiveTotalQuestions}…
+                      it appears here in a moment.
+                    </p>
+                  </div>
+                  {/* Always available. A student who does not want to wait for the
+                      rest of the set must never be trapped by it — the score is
+                      computed from the questions they actually answered. */}
+                  <button
+                    type="button"
+                    onClick={handleFinishNow}
+                    className="self-end text-xs underline underline-offset-4 transition-opacity hover:opacity-70"
+                    style={{ color: "var(--fg-muted)" }}
+                  >
+                    Finish now with {sessionAnswers.length} question
+                    {sessionAnswers.length === 1 ? "" : "s"}
+                  </button>
+                </div>
+              ) : unansweredCount > 0 && isLastQuestion ? (
                 <div className="flex flex-col gap-2 pt-1 animate-fade-in">
                   <div className="flex items-center gap-2 rounded-xl border border-amber-500/20 bg-amber-500/5 px-4 py-3">
                     <SkipForward className="h-4 w-4 text-amber-400 shrink-0" />
@@ -1146,11 +1236,23 @@ const QBankSession = () => {
                     </p>
                   </div>
                 </div>
-              ) : unansweredCount === 0 ? (
-                <div className="flex justify-end pt-1 animate-fade-in">
-                  <button type="button" onClick={handleNext} style={darkButtonStyle()}>
-                    Finish Session <ChevronRight style={{ width: 16, height: 16 }} />
-                  </button>
+              ) : unansweredCount === 0 && !isAwaitingMore ? (
+                <div className="flex flex-col gap-2 pt-1 animate-fade-in">
+                  {generationFellShort && (
+                    <p className="text-xs" style={{ color: "var(--fg-muted)" }}>
+                      This set ended at {session!.questions.length} of {generation!.target}{" "}
+                      question{generation!.target === 1 ? "" : "s"}
+                      {generation!.heldBack > 0
+                        ? ` — ${generation!.heldBack} ${generation!.heldBack === 1 ? "was" : "were"} held back by the quality checks`
+                        : ""}
+                      .
+                    </p>
+                  )}
+                  <div className="flex justify-end">
+                    <button type="button" onClick={handleNext} style={darkButtonStyle()}>
+                      Finish Session <ChevronRight style={{ width: 16, height: 16 }} />
+                    </button>
+                  </div>
                 </div>
               ) : (
                 <div className="flex justify-end pt-1 animate-fade-in">
@@ -1235,7 +1337,32 @@ const QBankSession = () => {
               />
 
               <div className="pt-4">
-                {unansweredCount > 0 && isLastQuestion ? (
+                {waitingForNext ? (
+                  <div className="flex flex-col gap-2">
+                    <div
+                      className="flex items-center gap-2.5 rounded-xl px-4 py-3"
+                      style={{ border: "1px solid var(--border)", background: "var(--bg-subtle)" }}
+                    >
+                      <Loader2
+                        className="h-4 w-4 shrink-0 animate-spin"
+                        style={{ color: "var(--fg-muted)" }}
+                      />
+                      <p className="text-xs font-medium" style={{ color: "var(--fg-muted)" }}>
+                        Writing question {sessionQuestions.length + 1} of{" "}
+                        {effectiveTotalQuestions}…
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleFinishNow}
+                      className="self-end text-xs underline underline-offset-4 transition-opacity hover:opacity-70"
+                      style={{ color: "var(--fg-muted)" }}
+                    >
+                      Finish now with {sessionAnswers.length} question
+                      {sessionAnswers.length === 1 ? "" : "s"}
+                    </button>
+                  </div>
+                ) : unansweredCount > 0 && isLastQuestion ? (
                   <div className="flex items-center gap-2 rounded-xl border border-amber-500/20 bg-amber-500/5 px-4 py-3">
                     <SkipForward className="h-4 w-4 text-amber-400 shrink-0" />
                     <p className="text-xs text-amber-400 font-medium">
@@ -1244,7 +1371,7 @@ const QBankSession = () => {
                         : `You have ${unansweredCount} unanswered questions — go back and answer them to finish.`}
                     </p>
                   </div>
-                ) : unansweredCount === 0 ? (
+                ) : unansweredCount === 0 && !isAwaitingMore ? (
                   <button
                     type="button"
                     onClick={handleNext}

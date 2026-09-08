@@ -44,6 +44,29 @@ export interface SessionAnswer {
   time_taken_ms: number;
 }
 
+/**
+ * What a generated session needs to keep generating after the player has taken
+ * over — and, more to the point, what it needs to RESUME after a refresh.
+ *
+ * Everything here is persisted alongside the session. `generationId` is the
+ * thread back to the rows in the table, so a reload can reconcile the session
+ * against questions that were written while the tab was closed. `nextIndex` and
+ * `covered` are what a resumed run needs to avoid renumbering questions over
+ * the top of each other or re-covering ground the set already covered.
+ */
+export interface SessionGeneration {
+  generationId: string;
+  /** The student's topic, verbatim — a resumed run needs it to keep writing. */
+  topic: string;
+  /** The system the first wave routed to. Every later wave reuses it. */
+  system: string | null;
+  systemName: string | null;
+  /** How many questions the set is meant to end with. */
+  target: number;
+  nextIndex: number;
+  covered: string[];
+}
+
 export interface SessionState {
   // Server session id, created up front by start_qbank_session.
   sessionId: string | null;
@@ -56,6 +79,19 @@ export interface SessionState {
   resumedAt: number;
   skippedIds: string[];
   flaggedIds: string[];
+  /**
+   * How many questions this session will end up with.
+   *
+   * Distinct from `questions.length` only while a generated set is still being
+   * written: the player shows "Q2 of 20" from the moment the session starts,
+   * and it is what tells the difference between "this is the last question" and
+   * "the next one has not been written yet". Reconciled down to the real count
+   * when generation finishes, so a set that ended short says so rather than
+   * waiting forever for questions that are not coming.
+   */
+  expectedTotal: number;
+  /** Null for a curated session — those are complete the moment they start. */
+  generation: SessionGeneration | null;
 }
 
 // ─── On-demand generation ───────────────────────────────────────────────────

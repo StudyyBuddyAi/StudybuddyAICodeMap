@@ -79,7 +79,7 @@ function renderItem(question: VerifiableQuestion): string {
   return `${question.vignette}\n\n${question.leadIn}\n\n${options}`;
 }
 
-async function verifyOne(
+export async function verifyOne(
   config: CortiConfig,
   question: VerifiableQuestion
 ): Promise<VerificationResult> {

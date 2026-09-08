@@ -1,38 +1,20 @@
-import { useState, useRef, useCallback, useMemo, useEffect } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Sparkles,
   AlertTriangle,
   Loader2,
   ArrowLeft,
-  FlaskConical,
   Check,
-  ShieldCheck,
   Compass,
-  ListChecks,
   PenLine,
+  PlayCircle,
 } from "lucide-react";
 import DashboardLayout from "@/components/dashboard/DashboardLayout";
 import { useAuth } from "@/hooks/use-auth";
 import { useQBankContext } from "@/contexts/QBankContext";
 import { useToast } from "@/hooks/use-toast";
-import { callQbankGenerate } from "@/lib/callQbankGenerate";
-import { parsePartialQuestions } from "@/lib/parse-partial-questions";
-import type { QaResult } from "@/lib/qbank-qa";
-import type { GeneratedQuestionDraft } from "@/lib/qbank-types";
-
-/**
- * The cold-answering pass's verdict on one item, as the edge function sends it.
- * Mirrors VerificationResult in supabase/functions/_shared/qbank-verify.ts.
- */
-interface Verification {
-  index: number;
-  agreed: boolean;
-  answer: string | null;
-  solvable: boolean;
-  issue: string;
-  error: string | null;
-}
+import { MIN_SET_SIZE, MAX_SET_SIZE, SET_SIZE_STEP } from "@/lib/qbank-wave-runner";
 
 const MONO_EYEBROW: React.CSSProperties = {
   fontFamily: "var(--font-mono)",
@@ -50,265 +32,85 @@ const PANEL_STYLE: React.CSSProperties = {
   background: "var(--bg-elevated)",
 };
 
-const QUESTION_COUNT = 5;
-
-interface PlanEntry {
-  index: number;
-  reasoningOrder: string;
-}
-
-interface BatchMeta {
-  systemName?: string;
-  model?: string;
-  plan?: PlanEntry[];
-}
-
-/**
- * Human labels for the QA gate's rule slugs.
- *
- * The findings' own `detail` strings quote the offending text — an option that
- * ran long, a word shared between stem and key. That is the right thing for a
- * reviewer and the wrong thing here, where the whole point is that the student
- * has not sat the questions yet. These say what went wrong without saying what
- * it went wrong *with*.
- */
-const RULE_LABELS: Record<string, string> = {
-  "key-longest": "Correct answer stood out by length",
-  "banned-option-language": "Vague qualifier in an option",
-  "all-or-none-option": "All/none-of-the-above option",
-  "duplicate-option": "Two options said the same thing",
-  "mixed-option-categories": "Options were not all the same kind of thing",
-  "open-lead-in": "Open-ended lead-in",
-  "explanation-meta-language": "Explanation exposed the reasoning scaffold",
-  "stem-key-cueing": "Stem wording hinted at the answer",
-  "question-in-vignette": "Vignette repeated the question",
-  "lead-in-not-question": "Lead-in was not a question",
-  "duplicate-question": "Overlaps another question in the set",
-  "repeated-lead-in": "Asks the same thing as another question",
-  "shared-option-pool": "Shares its options with another question",
-  "over-bolding": "Too much emphasis in the explanation",
-  "no-bolding": "No key phrase emphasised",
-  "bolded-distractor": "Emphasis in a distractor explanation",
-  "missing-distractor-explanation": "A distractor went unexplained",
-  "distractor-explains-key": "The item contradicted its own answer",
-  "writer-flagged": "The writer raised a concern",
-};
-
-const ruleLabel = (rule: string) => RULE_LABELS[rule] ?? "Quality check failed";
+const SET_SIZES = Array.from(
+  { length: Math.floor((MAX_SET_SIZE - MIN_SET_SIZE) / SET_SIZE_STEP) + 1 },
+  (_, i) => MIN_SET_SIZE + i * SET_SIZE_STEP
+);
 
 type StepState = "pending" | "active" | "done";
 
 /**
  * On-demand question generation.
  *
- * A student names a topic and a set is written for it. That takes about ninety
- * seconds, so the stream is parsed at question grain and the console below
- * reports each item the moment it is whole.
+ * A student names a topic and a size, and the set is written for it. This page's
+ * job is now only to get them into the session — it waits for the FIRST question
+ * and then hands over to the player, where the rest of the set arrives while they
+ * work. That is about twenty seconds rather than the ninety a whole set takes,
+ * and for a set of twenty it is the difference between a usable feature and a
+ * six-minute stare.
  *
- * What it deliberately does not report is the items themselves. Showing a
- * vignette, its options, the key and the explanation before the student sits
- * the set would hand them the answers — the questions are the thing they came
- * for, and reading them first destroys it. So generation surfaces only its own
- * progress and the blueprint being filled: which system, how many written, the
- * difficulty and reasoning-order mix, and what the quality gate rejected. The
- * questions appear in the player, and the answers after they are graded.
+ * The generation itself does not live here. It runs in QBankProvider, which wraps
+ * every /qbank route, so navigating to the session does not cancel it — this page
+ * unmounting used to abort the request, and a page that hands over mid-generation
+ * cannot do that. See src/lib/qbank-wave-runner.ts for the loop.
+ *
+ * What it deliberately does not report is the questions themselves. Showing a
+ * vignette, its options and the key before the student sits the set would hand
+ * them the answers. So this surfaces only its own progress: which system the
+ * topic routed to, and how far along the first question is.
  */
 const QBankGenerate = () => {
   const navigate = useNavigate();
   const { user, isAnonymous } = useAuth();
-  const { startSession } = useQBankContext();
+  const { startGeneratedSession, generation, session } = useQBankContext();
   const { toast } = useToast();
 
   const [topic, setTopic] = useState("");
-  const [isGenerating, setIsGenerating] = useState(false);
+  const [setSize, setSetSize] = useState(MIN_SET_SIZE);
   const [isStarting, setIsStarting] = useState(false);
-  const [drafts, setDrafts] = useState<GeneratedQuestionDraft[]>([]);
-  const [questionIds, setQuestionIds] = useState<string[]>([]);
-  const [qa, setQa] = useState<QaResult[]>([]);
-  const [verification, setVerification] = useState<Verification[]>([]);
-  const [meta, setMeta] = useState<BatchMeta>({});
   const [error, setError] = useState<string | null>(null);
   const [elapsed, setElapsed] = useState(0);
-  const [finished, setFinished] = useState(false);
-  const abortRef = useRef<AbortController | null>(null);
 
-  // Elapsed counter, so a long generation never looks stalled.
+  // Elapsed counter, so the wait never looks stalled.
   useEffect(() => {
-    if (!isGenerating) return;
+    if (!isStarting) return;
     const started = Date.now();
     setElapsed(0);
-    const id = window.setInterval(() => setElapsed(Math.round((Date.now() - started) / 1000)), 1000);
+    const id = window.setInterval(
+      () => setElapsed(Math.round((Date.now() - started) / 1000)),
+      1000
+    );
     return () => window.clearInterval(id);
-  }, [isGenerating]);
+  }, [isStarting]);
 
-  useEffect(() => () => abortRef.current?.abort(), []);
-
-  /**
-   * Ids for the items that are fit to sit, positionally matched to the rows.
-   *
-   * The gate and the cold-answering pass both run in the edge function now, so
-   * `qa`, `verification` and `questionIds` are all computed from one parse of
-   * one batch and line up by construction. They used to be computed in two
-   * places — the ids server-side, the findings from the browser's own parse of
-   * the stream — and index i in one array was only the same question as index i
-   * in the other for as long as the two parsers agreed.
-   *
-   * A held-back item keeps its row; it is simply never requested.
-   */
-  const playableIds = useMemo(
-    () =>
-      questionIds.filter(
-        (_, i) => !qa[i]?.blocked && verification[i]?.agreed !== false
-      ),
-    [questionIds, qa, verification]
-  );
-
-  const blocked = qa.filter((r) => r.blocked);
-  const disputed = verification.filter((v) => !v.agreed);
-  /** Warnings worth a reviewer's eye, on items that are still playable. */
-  const flagged = qa.filter((r) => !r.blocked && r.findings.length > 0);
-  const written = drafts.length;
-  const expected = meta.plan?.length ?? QUESTION_COUNT;
+  // A set that is still being written while the student is back on this page —
+  // they navigated away rather than finishing. Offer the way back rather than
+  // silently starting a second set on top of the first.
+  const runInProgress = !!session && generation?.status === "running";
 
   const generate = useCallback(async () => {
     const trimmed = topic.trim();
-    if (!trimmed || isGenerating) return;
+    if (!trimmed || isStarting) return;
 
-    abortRef.current?.abort();
-    const controller = new AbortController();
-    abortRef.current = controller;
-
-    setIsGenerating(true);
-    setFinished(false);
-    setDrafts([]);
-    setQuestionIds([]);
-    setQa([]);
-    setVerification([]);
-    setMeta({});
+    setIsStarting(true);
     setError(null);
 
     try {
-      const response = await callQbankGenerate(
-        { topic: trimmed, count: QUESTION_COUNT },
-        { signal: controller.signal }
-      );
-
-      if (!response.ok || !response.body) {
-        const body = await response.json().catch(() => null);
-        throw new Error(body?.error ?? "Generation failed");
-      }
-
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-      let content = "";
-
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const events = buffer.split(/\r?\n\r?\n/);
-        buffer = events.pop() ?? "";
-
-        for (const event of events) {
-          const line = event.split("\n").find((l) => l.startsWith("data:"));
-          if (!line) continue;
-          const data = line.slice(5).trim();
-          if (!data || data === "[DONE]") continue;
-
-          let parsed: Record<string, unknown>;
-          try {
-            parsed = JSON.parse(data);
-          } catch {
-            continue;
-          }
-
-          // Out-of-band frames the model never sends: the resolved system and
-          // batch plan up front, the persisted ids at the end.
-          const frame = parsed.__meta as Record<string, unknown> | undefined;
-          if (frame) {
-            if (typeof frame.systemName === "string") {
-              setMeta({
-                systemName: frame.systemName as string,
-                model: frame.model as string | undefined,
-                // The plan also carries each question's assigned answer letter.
-                // Only the reasoning order is lifted out — rendering the letters
-                // would print the answer key straight onto the page.
-                plan: Array.isArray(frame.plan)
-                  ? (frame.plan as Record<string, unknown>[]).map((p) => ({
-                      index: Number(p.index),
-                      reasoningOrder: String(p.reasoningOrder ?? ""),
-                    }))
-                  : undefined,
-              });
-            }
-            // The generation died mid-stream and was re-run. Everything
-            // received so far is half of a JSON document that no longer has a
-            // second half, so it goes in the bin before the replacement lands.
-            if (frame.restart === true) {
-              content = "";
-              setDrafts([]);
-              continue;
-            }
-            if (Array.isArray(frame.questionIds)) {
-              setQuestionIds(frame.questionIds as string[]);
-            }
-            if (Array.isArray(frame.qa)) {
-              setQa(frame.qa as QaResult[]);
-            }
-            if (Array.isArray(frame.verification)) {
-              setVerification(frame.verification as Verification[]);
-            }
-            if (typeof frame.persistError === "string" && frame.persistError) {
-              setError("The questions were written but could not be saved.");
-            }
-            continue;
-          }
-
-          const delta = (parsed as { choices?: { delta?: { content?: unknown } }[] })
-            .choices?.[0]?.delta?.content;
-          if (typeof delta === "string") {
-            content += delta;
-            // One linear scan per chunk, and a question that has appeared keeps
-            // appearing with identical content, so this is safe to call often.
-            setDrafts(parsePartialQuestions(content));
-          }
-        }
-      }
-      setFinished(true);
-    } catch (err) {
-      if ((err as Error)?.name === "AbortError") return;
-      const message = err instanceof Error ? err.message : "Generation failed";
-      setError(message);
-      toast({ title: "Could not generate questions", description: message, variant: "destructive" });
-    } finally {
-      setIsGenerating(false);
-    }
-  }, [topic, isGenerating, toast]);
-
-  const start = useCallback(async () => {
-    if (playableIds.length === 0 || isStarting) return;
-    setIsStarting(true);
-    try {
-      await startSession({
-        // Explicit ids only: domains and system drive the sampling branch, and
-        // this batch bypasses sampling entirely.
-        domains: [],
-        questionIds: playableIds,
-        limit: playableIds.length,
-        system: meta.systemName,
-      });
+      // Resolves the moment the first question exists and the session is live.
+      // The remaining waves keep running against the provider.
+      await startGeneratedSession(trimmed, setSize);
       navigate("/qbank/session");
     } catch (err) {
+      const message = err instanceof Error ? err.message : "Generation failed";
+      setError(message);
       toast({
-        title: "Could not start the session",
-        description: err instanceof Error ? err.message : "Please try again.",
+        title: "Could not generate questions",
+        description: message,
         variant: "destructive",
       });
       setIsStarting(false);
     }
-  }, [playableIds, isStarting, startSession, meta.systemName, navigate, toast]);
+  }, [topic, setSize, isStarting, startGeneratedSession, navigate, toast]);
 
   if (!user || isAnonymous) {
     return (
@@ -326,7 +128,7 @@ const QBankGenerate = () => {
     );
   }
 
-  const showConsole = isGenerating || finished || !!error;
+  const routed = !!generation?.systemName;
 
   return (
     <DashboardLayout>
@@ -346,10 +148,26 @@ const QBankGenerate = () => {
             anything you like.
           </span>
         </h1>
-        <p className="mt-2.5 max-w-xl text-base leading-relaxed" style={{ color: "var(--color-muted-foreground)" }}>
-          Name a topic and a {QUESTION_COUNT}-question set is written for it, to the same
-          NBME item-writing rules the curated bank follows.
+        <p
+          className="mt-2.5 max-w-xl text-base leading-relaxed"
+          style={{ color: "var(--color-muted-foreground)" }}
+        >
+          Name a topic and a set is written for it, to the same NBME item-writing rules
+          the curated bank follows. You start on the first question as soon as it is
+          ready — the rest is written while you work.
         </p>
+
+        {runInProgress && (
+          <button
+            type="button"
+            onClick={() => navigate("/qbank/session")}
+            className="mt-5 inline-flex items-center gap-2 rounded-lg border px-3.5 py-2.5 text-sm transition-opacity hover:opacity-80"
+            style={{ borderColor: "var(--color-border)", color: "var(--color-foreground)" }}
+          >
+            <PlayCircle size={15} />
+            A set is still being written — go back to it
+          </button>
+        )}
 
         {/* ── Topic ───────────────────────────────────────────────────── */}
         <div className="mt-7 flex flex-col gap-2.5 sm:flex-row">
@@ -359,7 +177,7 @@ const QBankGenerate = () => {
             onKeyDown={(e) => {
               if (e.key === "Enter") generate();
             }}
-            disabled={isGenerating}
+            disabled={isStarting}
             placeholder="aortic dissection, nephrotic syndrome, the brachial plexus…"
             className="flex-1 rounded-lg border px-3.5 py-2.5 text-sm outline-none transition-colors focus:border-[var(--color-accent)] disabled:opacity-60"
             style={{
@@ -370,13 +188,48 @@ const QBankGenerate = () => {
           />
           <button
             onClick={generate}
-            disabled={isGenerating || !topic.trim()}
+            disabled={isStarting || !topic.trim()}
             className="inline-flex items-center justify-center gap-2 rounded-lg px-5 py-2.5 text-sm font-medium transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
             style={{ background: "var(--color-accent)", color: "var(--color-accent-foreground)" }}
           >
-            {isGenerating ? <Loader2 size={15} className="animate-spin" /> : <Sparkles size={15} />}
-            {isGenerating ? "Writing…" : finished ? "Write another set" : "Generate"}
+            {isStarting ? <Loader2 size={15} className="animate-spin" /> : <Sparkles size={15} />}
+            {isStarting ? "Writing…" : "Generate"}
           </button>
+        </div>
+
+        {/* ── How many ────────────────────────────────────────────────── */}
+        <div className="mt-5">
+          <p style={MONO_EYEBROW}>Questions</p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {SET_SIZES.map((size) => {
+              const active = size === setSize;
+              return (
+                <button
+                  key={size}
+                  type="button"
+                  onClick={() => setSetSize(size)}
+                  disabled={isStarting}
+                  aria-pressed={active}
+                  className="rounded-lg border px-3.5 py-1.5 text-sm tabular-nums transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+                  style={{
+                    fontFamily: "var(--font-mono)",
+                    borderColor: active ? "var(--color-accent)" : "var(--color-border)",
+                    background: active ? "var(--accent-soft)" : "transparent",
+                    color: active ? "var(--color-accent)" : "var(--fg-muted)",
+                    fontWeight: active ? 600 : 400,
+                  }}
+                >
+                  {size}
+                </button>
+              );
+            })}
+          </div>
+          <p className="mt-2 text-xs" style={{ color: "var(--fg-muted)" }}>
+            A question takes about twenty seconds to write, so a set of {setSize} finishes
+            in roughly {Math.max(1, Math.round((setSize * 18) / 60))} minute
+            {Math.max(1, Math.round((setSize * 18) / 60)) === 1 ? "" : "s"} — but you will be
+            answering it long before then.
+          </p>
         </div>
 
         {error && (
@@ -387,196 +240,43 @@ const QBankGenerate = () => {
         )}
 
         {/* ── Console ─────────────────────────────────────────────────── */}
-        {showConsole && !error && (
+        {/* Rendered whenever a run is under way, error or not. It used to be
+            hidden the moment anything went wrong, which took the progress and
+            the way forward down with it. */}
+        {isStarting && (
           <div className="mt-6" style={{ ...PANEL_STYLE, padding: 20 }}>
             <div className="flex items-center justify-between gap-3">
-              <p style={MONO_EYEBROW}>{finished ? "Set ready" : "Writing"}</p>
-              <span
-                className="tabular-nums"
-                style={{ ...MONO_EYEBROW, letterSpacing: "0.08em" }}
-              >
+              <p style={MONO_EYEBROW}>Writing</p>
+              <span className="tabular-nums" style={{ ...MONO_EYEBROW, letterSpacing: "0.08em" }}>
                 {elapsed}s
               </span>
             </div>
 
-            <div
-              className="mt-3 h-1 w-full overflow-hidden rounded-full"
-              style={{ background: "var(--border)" }}
-              aria-hidden
-            >
-              <div
-                className="h-full rounded-full transition-all duration-500 ease-out"
-                style={{
-                  width: `${Math.round((written / Math.max(1, expected)) * 100)}%`,
-                  background: "var(--accent)",
-                }}
-              />
-            </div>
-
             <ol className="mt-4 flex flex-col gap-2.5">
               <Step
-                state="done"
+                state={routed ? "done" : "active"}
                 icon={Compass}
                 label="Topic routed"
-                detail={meta.systemName ?? "…"}
+                detail={generation?.systemName ?? "choosing a system"}
               />
               <Step
-                state={meta.plan ? "done" : "active"}
-                icon={ListChecks}
-                label="Blueprint set"
-                detail={
-                  meta.plan
-                    ? `${meta.plan.length} questions · ${orderMix(meta.plan)}`
-                    : "planning the batch"
-                }
-              />
-              <Step
-                state={finished ? "done" : written > 0 ? "active" : "pending"}
+                state={routed ? "active" : "pending"}
                 icon={PenLine}
-                label="Questions written"
-                detail={`${written} of ${expected}`}
-              />
-              <Step
-                state={finished ? "done" : "pending"}
-                icon={ShieldCheck}
-                label="Checked and answered"
-                detail={
-                  finished
-                    ? blocked.length + disputed.length === 0
-                      ? "all items passed"
-                      : `${blocked.length + disputed.length} held back`
-                    : "waiting for the full set"
-                }
+                label="First question"
+                detail={routed ? "writing" : "waiting on the blueprint"}
               />
             </ol>
 
-            {/* Per-question ticks. Metadata only — no stem, no options, no key. */}
-            {written > 0 && (
-              <ul className="mt-4 flex flex-wrap gap-1.5">
-                {Array.from({ length: expected }, (_, i) => {
-                  const draft = drafts[i];
-                  const isBlocked =
-                    (qa[i]?.blocked ?? false) || verification[i]?.agreed === false;
-                  return (
-                    <li
-                      key={i}
-                      title={
-                        draft
-                          ? `${draft.domain} · ${draft.difficulty} · ${draft.reasoningOrder} order`
-                          : "not written yet"
-                      }
-                      className={`rounded-md border px-2 py-1 text-[11px] ${
-                        isBlocked ? "border-danger/40 text-danger" : ""
-                      }`}
-                      style={{
-                        fontFamily: "var(--font-mono)",
-                        borderColor: isBlocked ? undefined : "var(--border)",
-                        color: isBlocked ? undefined : draft ? "var(--fg-muted)" : "var(--fg-subtle)",
-                        background: draft && !isBlocked ? "var(--accent-soft)" : "transparent",
-                      }}
-                    >
-                      Q{i + 1}
-                      {draft && (
-                        <span className="ml-1.5 opacity-70">
-                          {draft.difficulty} · {draft.reasoningOrder}
-                        </span>
-                      )}
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-
-            {!finished && (
-              <p className="mt-4 text-xs" style={{ color: "var(--fg-muted)" }}>
-                Questions stay hidden until the set is finished — reading them now would
-                give away the answers.
-              </p>
-            )}
-
-            {/* ── Held back ─────────────────────────────────────────────── */}
-            {finished && blocked.length + disputed.length > 0 && (
-              <div className="mt-4 rounded-lg border border-danger/30 bg-danger/5 p-3">
-                <p className="text-xs font-medium text-danger">
-                  {blocked.length + disputed.length} question
-                  {blocked.length + disputed.length === 1 ? "" : "s"} held back
-                </p>
-                <ul className="mt-1.5 flex flex-col gap-1">
-                  {blocked.map((r) => (
-                    <li key={`b${r.index}`} className="text-xs" style={{ color: "var(--fg-muted)" }}>
-                      Q{r.index} — {ruleLabel(r.findings.find((f) => f.severity === "block")!.rule)}
-                    </li>
-                  ))}
-                  {/* The blind second read landed somewhere else. Naming the
-                      letter would print the disputed answer, so it does not. */}
-                  {disputed.map((v) => (
-                    <li key={`v${v.index}`} className="text-xs" style={{ color: "var(--fg-muted)" }}>
-                      Q{v.index} — a second read disagreed with the answer
-                      {v.issue ? ` (${v.issue})` : ""}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-
-            {/* ── Flagged, but still playable ───────────────────────────── */}
-            {/* These used to be computed and thrown away. They are stored on
-                the row now, and shown here because a set that is technically
-                playable can still be worth knowing something about. */}
-            {finished && flagged.length > 0 && (
-              <div
-                className="mt-4 rounded-lg border p-3"
-                style={{ borderColor: "var(--border)", background: "var(--bg-subtle)" }}
-              >
-                <p className="text-xs font-medium" style={{ color: "var(--fg)" }}>
-                  {flagged.length} question{flagged.length === 1 ? "" : "s"} flagged for review
-                </p>
-                <ul className="mt-1.5 flex flex-col gap-1">
-                  {flagged.map((r) => (
-                    <li key={r.index} className="text-xs" style={{ color: "var(--fg-muted)" }}>
-                      Q{r.index} —{" "}
-                      {[...new Set(r.findings.map((f) => ruleLabel(f.rule)))].join("; ")}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-
-            {/* ── Start ─────────────────────────────────────────────────── */}
-            {finished && questionIds.length > 0 && (
-              <button
-                type="button"
-                onClick={start}
-                disabled={playableIds.length === 0 || isStarting}
-                className="mt-5 flex h-12 w-full items-center justify-center gap-2 rounded-[18px] bg-[color:var(--color-foreground)] text-sm font-semibold text-[color:var(--color-background)] shadow-[0_16px_32px_rgba(15,23,42,0.12)] transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_18px_36px_rgba(15,23,42,0.16)] disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:translate-y-0"
-              >
-                {isStarting ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <FlaskConical className="h-4 w-4" />
-                )}
-                Start Session · {playableIds.length} Question
-                {playableIds.length === 1 ? "" : "s"}
-              </button>
-            )}
+            <p className="mt-4 text-xs" style={{ color: "var(--fg-muted)" }}>
+              The session opens as soon as the first question is ready. The other{" "}
+              {setSize - 1} are written while you answer it, and appear as they land.
+            </p>
           </div>
         )}
       </div>
     </DashboardLayout>
   );
 };
-
-/** "1 first-order, 3 second, 1 third" — the mix, without the answer letters. */
-function orderMix(plan: PlanEntry[]): string {
-  const counts = plan.reduce<Record<string, number>>((acc, p) => {
-    acc[p.reasoningOrder] = (acc[p.reasoningOrder] ?? 0) + 1;
-    return acc;
-  }, {});
-  return (["1st", "2nd", "3rd"] as const)
-    .filter((o) => counts[o])
-    .map((o) => `${counts[o]}× ${o}`)
-    .join(", ");
-}
 
 const Step = ({
   state,

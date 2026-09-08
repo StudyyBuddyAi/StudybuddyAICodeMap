@@ -696,6 +696,13 @@ export type Database = {
         }
         Returns: Json
       }
+      claim_generated_questions: {
+        Args: {
+          p_session: string
+          p_generation_id: string
+        }
+        Returns: Json
+      }
       submit_answer: {
         Args: {
           p_session: string
