@@ -1,5 +1,6 @@
 import { callQbankGenerate } from "./callQbankGenerate";
 import { parsePartialQuestions } from "./parse-partial-questions";
+import { DISPUTED_REASON } from "./qbank-rule-labels";
 import type { GeneratedQuestionDraft } from "./qbank-types";
 
 /**
@@ -79,15 +80,30 @@ export interface QuestionReadyEvent {
   id: string | null;
   index: number;
   blocked: boolean;
+  /** The gate rule that blocked it, when one did. */
+  blockRule?: string | null;
   difficulty: string;
   reasoningOrder: string;
   agreed: boolean;
+}
+
+/**
+ * A question that was written and paid for but never reached the session.
+ *
+ * Kept per question rather than as a count so the set can say what went wrong
+ * rather than only how often. The reason is a gate rule slug, or "disputed"
+ * when the blind second read landed somewhere other than the key.
+ */
+export interface HeldBackItem {
+  index: number;
+  reason: string;
 }
 
 export interface GenerationProgress {
   delivered: number;
   /** Written and paid for, but withheld by the gate or the second read. */
   heldBack: number;
+  heldBackItems: HeldBackItem[];
   target: number;
   wave: number;
   system: string | null;
@@ -108,6 +124,7 @@ export interface GenerationOutcome {
   delivered: number;
   /** Written and paid for, but withheld by the gate or the second read. */
   heldBack: number;
+  heldBackItems: HeldBackItem[];
   target: number;
   waves: number;
   systemName: string | null;
@@ -155,6 +172,7 @@ interface WaveResult {
   playable: number;
   /** Committed but withheld — gate-blocked, or the second read disagreed. */
   heldBack: number;
+  heldBackItems: HeldBackItem[];
   subtopics: string[];
   system: string | null;
   systemName: string | null;
@@ -195,6 +213,7 @@ async function runWave(
   const result: WaveResult = {
     playable: 0,
     heldBack: 0,
+    heldBackItems: [],
     subtopics: [],
     system: params.system,
     systemName: null,
@@ -291,7 +310,15 @@ async function runWave(
           const ready = meta.questionReady as QuestionReadyEvent | undefined;
           if (ready) {
             const withheld = ready.blocked || ready.agreed === false;
-            if (ready.id && withheld) result.heldBack++;
+            if (ready.id && withheld) {
+              result.heldBack++;
+              result.heldBackItems.push({
+                index: ready.index,
+                reason: ready.blocked
+                  ? ready.blockRule || "quality-gate"
+                  : DISPUTED_REASON,
+              });
+            }
             if (ready.id && !withheld) result.playable++;
             // Awaited: the first of these starts the session, and the second
             // must not race it into starting a second one.
@@ -362,6 +389,7 @@ export async function runQbankGeneration(
 
   let delivered = 0;
   let heldBack = 0;
+  const heldBackItems: HeldBackItem[] = [];
   let waves = 0;
   let emptyStreak = 0;
   let nextIndex = Math.max(1, Math.round(opts.startIndex ?? 1));
@@ -372,10 +400,10 @@ export async function runQbankGeneration(
 
   while (delivered < target) {
     if (opts.signal.aborted) {
-      return { status: "aborted", delivered, heldBack, target, waves, systemName, error: null };
+      return { status: "aborted", delivered, heldBack, heldBackItems, target, waves, systemName, error: null };
     }
     if (opts.shouldContinue && !opts.shouldContinue()) {
-      return { status: "short", delivered, heldBack, target, waves, systemName, error: null };
+      return { status: "short", delivered, heldBack, heldBackItems, target, waves, systemName, error: null };
     }
     if (waves >= maxWaves || emptyStreak >= MAX_CONSECUTIVE_EMPTY_WAVES) break;
 
@@ -398,14 +426,14 @@ export async function runQbankGeneration(
         );
       } catch (err) {
         if (isAbort(err)) {
-          return { status: "aborted", delivered, heldBack, target, waves, systemName, error: null };
+          return { status: "aborted", delivered, heldBack, heldBackItems, target, waves, systemName, error: null };
         }
         wave = null;
         lastError = err instanceof Error ? err.message : String(err);
       }
 
       if (wave?.fatal) {
-        return { status: "failed", delivered, heldBack, target, waves, systemName, error: wave.fatal };
+        return { status: "failed", delivered, heldBack, heldBackItems, target, waves, systemName, error: wave.fatal };
       }
       // Only a wave that produced nothing at all is worth re-attempting straight
       // away; one that produced something has already advanced the set, and the
@@ -415,7 +443,7 @@ export async function runQbankGeneration(
         const backoff = opts.retryBackoffMs ?? RETRY_BACKOFF_MS;
         await sleep(backoff[attempt] ?? backoff[backoff.length - 1] ?? 4_000, opts.signal);
         if (opts.signal.aborted) {
-          return { status: "aborted", delivered, heldBack, target, waves, systemName, error: null };
+          return { status: "aborted", delivered, heldBack, heldBackItems, target, waves, systemName, error: null };
         }
       }
     }
@@ -432,6 +460,7 @@ export async function runQbankGeneration(
 
     delivered += wave.playable;
     heldBack += wave.heldBack;
+    heldBackItems.push(...wave.heldBackItems);
     // Advanced by what was ASKED for, not by what landed, so two waves can never
     // be numbered over the top of each other. The set is then ordered by index
     // with no collisions even when a wave delivers nothing.
@@ -441,6 +470,7 @@ export async function runQbankGeneration(
     opts.onProgress?.({
       delivered,
       heldBack,
+      heldBackItems: [...heldBackItems],
       target,
       wave: waves,
       system,
@@ -451,18 +481,19 @@ export async function runQbankGeneration(
   }
 
   if (delivered >= target) {
-    return { status: "complete", delivered, heldBack, target, waves, systemName, error: null };
+    return { status: "complete", delivered, heldBack, heldBackItems, target, waves, systemName, error: null };
   }
   if (delivered === 0) {
     return {
       status: "failed",
       delivered,
       heldBack,
+      heldBackItems,
       target,
       waves,
       systemName,
       error: lastError ?? "No questions could be generated for that topic.",
     };
   }
-  return { status: "short", delivered, heldBack, target, waves, systemName, error: lastError };
+  return { status: "short", delivered, heldBack, heldBackItems, target, waves, systemName, error: lastError };
 }

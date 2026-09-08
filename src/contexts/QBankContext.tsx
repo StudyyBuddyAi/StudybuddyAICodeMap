@@ -16,6 +16,7 @@ import {
   MAX_SET_SIZE,
   type GenerationOutcome,
   type GenerationStatus,
+  type HeldBackItem,
 } from "@/lib/qbank-wave-runner";
 
 const STORAGE_KEY = "sb_qbank_session";
@@ -68,6 +69,12 @@ export interface GenerationState {
    * between "the model struggled" and "the model wrote nothing".
    */
   heldBack: number;
+  /**
+   * Which questions were withheld and why, so the set can report what went
+   * wrong rather than only how often. Named by gate rule, or "disputed" when the
+   * blind second read landed somewhere other than the key.
+   */
+  heldBackItems: HeldBackItem[];
   /** Set when the run failed outright, or ended short for a known reason. */
   error: string | null;
 }
@@ -94,6 +101,8 @@ interface QBankContextValue {
   /** More questions are still expected for this set than have arrived. */
   isAwaitingMore: boolean;
   generation: GenerationState | null;
+  /** The generation behind the most recently finished session, if it had one. */
+  lastGeneration: SessionGeneration | null;
   progress: number;
   startSession: (config?: SessionConfig) => Promise<void>;
   /**
@@ -141,6 +150,16 @@ export const QBankProvider = ({ children }: { children: ReactNode }) => {
   const [lastSummary, setLastSummary] = useState<SessionSummary | null>(null);
   const [reviewIndex, setReviewIndex] = useState<number | null>(null);
   const [generation, setGeneration] = useState<GenerationState | null>(null);
+  /**
+   * The generation behind the session that just finished.
+   *
+   * The session is torn down on finish, and with it the topic and size the set
+   * was written to — which is exactly what the summary needs to offer another
+   * set on the same topic. Without it "Try Again" silently falls back to a
+   * random curated session, which is not what a student who just generated
+   * twenty questions on the brachial plexus is asking for.
+   */
+  const [lastGeneration, setLastGeneration] = useState<SessionGeneration | null>(null);
 
   // The generation callbacks are long-lived and fire from a stream, long after
   // the render that created them. They read these rather than closed-over state,
@@ -155,6 +174,7 @@ export const QBankProvider = ({ children }: { children: ReactNode }) => {
   // its own running total, so a resumed run has to be added to what came before
   // it rather than replacing it.
   const heldBackRef = useRef(0);
+  const heldBackItemsRef = useRef<HeldBackItem[]>([]);
 
   const { data: questionCount = 0 } = useQuery({
     queryKey: ["qbank-count"],
@@ -534,6 +554,7 @@ export const QBankProvider = ({ children }: { children: ReactNode }) => {
       genAbortRef.current = controller;
       genRunningRef.current = true;
       const heldBackBase = heldBackRef.current;
+      const heldBackItemsBase = heldBackItemsRef.current;
 
       const meta: SessionGeneration = {
         generationId: cfg.generationId,
@@ -553,6 +574,7 @@ export const QBankProvider = ({ children }: { children: ReactNode }) => {
         // Carried across a resume: questions held back before a refresh were
         // still written, and forgetting them would misreport the run.
         heldBack: heldBackBase,
+        heldBackItems: heldBackItemsBase,
         error: null,
       });
 
@@ -594,6 +616,7 @@ export const QBankProvider = ({ children }: { children: ReactNode }) => {
                   ...prev,
                   systemName: progress.systemName ?? prev.systemName,
                   heldBack: heldBackBase + progress.heldBack,
+                  heldBackItems: [...heldBackItemsBase, ...progress.heldBackItems],
                 }
               : prev
           );
@@ -622,6 +645,7 @@ export const QBankProvider = ({ children }: { children: ReactNode }) => {
         }
 
         heldBackRef.current = heldBackBase + outcome.heldBack;
+        heldBackItemsRef.current = [...heldBackItemsBase, ...outcome.heldBackItems];
         setGeneration((prev) =>
           prev
             ? {
@@ -629,6 +653,7 @@ export const QBankProvider = ({ children }: { children: ReactNode }) => {
                 status: outcome.status,
                 error: outcome.error,
                 heldBack: heldBackRef.current,
+                heldBackItems: heldBackItemsRef.current,
                 systemName: outcome.systemName ?? prev.systemName,
               }
             : prev
@@ -657,6 +682,7 @@ export const QBankProvider = ({ children }: { children: ReactNode }) => {
       stopGeneration();
       sessionIdRef.current = null;
       heldBackRef.current = 0;
+      heldBackItemsRef.current = [];
       setReviewIndex(null);
 
       const setTarget = Math.min(
@@ -767,6 +793,7 @@ export const QBankProvider = ({ children }: { children: ReactNode }) => {
     // refuse a completed session anyway, but stopping here also stops us writing
     // questions nobody is going to sit.
     stopGeneration();
+    setLastGeneration(session.generation ?? null);
 
     const endedAt = Date.now();
     const score = session.answers.filter((a) => a.is_correct).length;
@@ -1019,6 +1046,7 @@ export const QBankProvider = ({ children }: { children: ReactNode }) => {
         isLastQuestion,
         isAwaitingMore,
         generation,
+        lastGeneration,
         progress,
         startSession,
         startGeneratedSession,

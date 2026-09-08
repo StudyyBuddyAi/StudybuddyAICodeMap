@@ -160,7 +160,16 @@ const QBankSummary = () => {
   const [searchParams] = useSearchParams();
   const sessionId = searchParams.get("session");
 
-  const { lastSummary, startSession, enterSummaryReview, setReviewIndex, loadSummary } = useQBankContext();
+  const {
+    lastSummary,
+    startSession,
+    startGeneratedSession,
+    lastGeneration,
+    enterSummaryReview,
+    setReviewIndex,
+    loadSummary,
+  } = useQBankContext();
+  const [retrying, setRetrying] = useState(false);
 
   const [summaryData, setSummaryData] = useState<SummaryData | null>(null);
   const [summaryFlaggedIds, setSummaryFlaggedIds] = useState<Set<string>>(new Set());
@@ -290,9 +299,28 @@ const QBankSummary = () => {
     return { diff, correct, total: qs.length };
   }).filter((d) => d.total > 0);
 
+  /**
+   * Another go at the same thing.
+   *
+   * For a generated set that means writing a NEW set on the same topic, at the
+   * same size. It used to call startSession() bare, which draws a random
+   * forty-question curated session — so a student who had just sat twenty
+   * generated questions on the brachial plexus and pressed Try Again silently
+   * got something else entirely.
+   */
   const handleTryAgain = async () => {
-    await startSession();
-    navigate("/qbank/session");
+    if (retrying) return;
+    setRetrying(true);
+    try {
+      if (lastGeneration) {
+        await startGeneratedSession(lastGeneration.topic, lastGeneration.target);
+      } else {
+        await startSession();
+      }
+      navigate("/qbank/session");
+    } catch {
+      setRetrying(false);
+    }
   };
 
   const handleReviewQuestion = (index: number) => {
@@ -499,9 +527,18 @@ const QBankSummary = () => {
         </div>
 
         <div className="flex flex-col sm:flex-row gap-3 pb-8">
-          <button type="button" onClick={handleTryAgain} style={DARK_BUTTON_STYLE}>
+          <button
+            type="button"
+            onClick={handleTryAgain}
+            disabled={retrying}
+            style={{ ...DARK_BUTTON_STYLE, opacity: retrying ? 0.5 : 1 }}
+          >
             <RotateCcw style={{ width: 16, height: 16 }} />
-            Try Again
+            {retrying
+              ? "Writing…"
+              : lastGeneration
+                ? `Another ${lastGeneration.target} on this topic`
+                : "Try Again"}
           </button>
           <button
             type="button"

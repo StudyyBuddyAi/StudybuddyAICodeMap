@@ -130,9 +130,21 @@ const QBank = () => {
       const raw = localStorage.getItem("sb_qbank_session");
       if (!raw) return null;
       const parsed = JSON.parse(raw);
+
+      const loaded = Array.isArray(parsed.questions) ? parsed.questions.length : 0;
+      // A generated set is saved while it is still being written, so the
+      // questions it currently holds are not the size of the session. Counting
+      // progress against them would show a set of twenty as "2/2 answered" with
+      // a full bar, which is exactly backwards.
+      const expected =
+        typeof parsed.expectedTotal === "number" ? Math.max(parsed.expectedTotal, loaded) : loaded;
+
       return {
         answered: Array.isArray(parsed.answers) ? parsed.answers.length : 0,
-        total: Array.isArray(parsed.questions) ? parsed.questions.length : 0,
+        loaded,
+        total: expected,
+        stillWriting: !!parsed.generation && loaded < expected,
+        topic: typeof parsed.generation?.topic === "string" ? parsed.generation.topic : null,
         system: parsed.questions?.[0]?.subject ?? "Cardiovascular",
       };
     } catch {
@@ -373,8 +385,15 @@ const QBank = () => {
                         Resume previous session
                       </p>
                       <p className="font-mono text-[11px] text-muted-foreground mt-0.5">
-                        {savedSessionMeta.system} · {savedSessionMeta.answered}/{savedSessionMeta.total} answered
+                        {savedSessionMeta.topic ?? savedSessionMeta.system} ·{" "}
+                        {savedSessionMeta.answered}/{savedSessionMeta.total} answered
                       </p>
+                      {savedSessionMeta.stillWriting && (
+                        <p className="font-mono text-[11px] text-muted-foreground mt-0.5">
+                          {savedSessionMeta.loaded} of {savedSessionMeta.total} written — continue to
+                          finish the set
+                        </p>
+                      )}
                     </div>
                   </div>
 
@@ -554,7 +573,7 @@ const QBank = () => {
                 className="flex h-11 w-full items-center justify-center gap-2 rounded-[18px] border border-[color:var(--color-border)] text-sm font-medium text-[color:var(--color-muted-foreground)] transition-colors duration-200 hover:text-[color:var(--color-foreground)]"
               >
                 <Sparkles className="w-4 h-4" />
-                Generate questions on any topic
+                Generate up to 20 questions on any topic
               </button>
             </>
           )}

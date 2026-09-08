@@ -362,6 +362,14 @@ serve(async (req) => {
                       id,
                       index: question.index,
                       blocked: qaResult?.blocked ?? false,
+                      // The rule that held it back, carried per question rather
+                      // than left to be dug out of the wave's qa array later.
+                      // That array is indexed by the model's own numbering,
+                      // which a wave starting at eleven does not share — so
+                      // matching them up after the fact would mislabel exactly
+                      // the questions the student is being told about.
+                      blockRule:
+                        qaResult?.findings?.find((f) => f.severity === "block")?.rule ?? null,
                       difficulty: question.difficulty,
                       reasoningOrder: question.reasoningOrder,
                       agreed: verdict.agreed,

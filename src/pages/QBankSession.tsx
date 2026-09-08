@@ -11,10 +11,12 @@ import {
   Flag,
   SkipForward,
   Loader2,
+  AlertTriangle,
 } from "lucide-react";
 import DashboardLayout from "@/components/dashboard/DashboardLayout";
 import PageLoader from "@/components/PageLoader";
-import { useQBankContext } from "@/contexts/QBankContext";
+import { useQBankContext, type GenerationState } from "@/contexts/QBankContext";
+import { ruleLabel } from "@/lib/qbank-rule-labels";
 import { renderMarkdown } from "@/lib/render-markdown";
 import type { OptionKey, QuestionMedia } from "@/lib/qbank-types";
 
@@ -705,6 +707,104 @@ const ReviewExplanationDrawer = ({
   );
 };
 
+/**
+ * Live state of the set being written underneath the session.
+ *
+ * The generation used to have a page of its own, where the student watched it
+ * finish before playing anything. Now it runs behind the player, which means
+ * the only honest way to report it is in the player — otherwise a run that
+ * stalls or dies is invisible until the student reaches the end and finds the
+ * set shorter than they asked for.
+ *
+ * Silent once a set has been delivered in full: at that point it is an ordinary
+ * session and a banner about how it was made is just noise.
+ */
+const GenerationStrip = ({
+  generation,
+  loaded,
+}: {
+  generation: GenerationState;
+  loaded: number;
+}) => {
+  const running = generation.status === "running";
+  const short = !running && loaded < generation.target;
+  if (!running && !short) return null;
+
+  const pct = generation.target > 0 ? Math.round((loaded / generation.target) * 100) : 0;
+
+  // Grouped by reason rather than listed per question. The held-back items are
+  // not in the session, so they have no question number the student could match
+  // them to — a list of "one question was rewritten" repeated four times says
+  // less than "4 rewritten" and reads worse.
+  const heldBackByReason = generation.heldBackItems.reduce<Record<string, number>>(
+    (acc, item) => {
+      acc[item.reason] = (acc[item.reason] ?? 0) + 1;
+      return acc;
+    },
+    {}
+  );
+
+  return (
+    <div
+      className="mb-4 rounded-xl px-4 py-3"
+      style={{
+        border: `1px solid ${short ? "rgba(217,119,6,0.35)" : "var(--border)"}`,
+        background: short ? "rgba(217,119,6,0.06)" : "var(--bg-subtle)",
+      }}
+    >
+      <div className="flex items-center gap-2.5">
+        {running ? (
+          <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" style={{ color: "var(--fg-muted)" }} />
+        ) : (
+          <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-amber-500" />
+        )}
+        <p className="text-xs font-medium" style={{ color: short ? "#d97706" : "var(--fg-muted)" }}>
+          {running
+            ? `Writing your set — ${loaded} of ${generation.target} ready`
+            : `This set ended at ${loaded} of ${generation.target} questions`}
+        </p>
+        <span
+          className="ml-auto tabular-nums text-[11px]"
+          style={{ fontFamily: "var(--font-mono)", color: "var(--fg-subtle)" }}
+        >
+          {loaded}/{generation.target}
+        </span>
+      </div>
+
+      {running && (
+        <div
+          className="mt-2 h-1 w-full overflow-hidden rounded-full"
+          style={{ background: "var(--border)" }}
+          aria-hidden
+        >
+          <div
+            className="h-full rounded-full transition-all duration-500 ease-out"
+            style={{ width: `${pct}%`, background: "var(--accent)" }}
+          />
+        </div>
+      )}
+
+      {/* Why the set is short. The rules name what went wrong without quoting
+          the text it went wrong in, which would describe the answer. */}
+      {generation.heldBackItems.length > 0 && (
+        <ul className="mt-2 flex flex-col gap-0.5">
+          {Object.entries(heldBackByReason).map(([reason, count]) => (
+            <li key={reason} className="text-[11px]" style={{ color: "var(--fg-muted)" }}>
+              {count} rewritten — {ruleLabel(reason).toLowerCase()}
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {!running && generation.error && (
+        <p className="mt-1.5 text-[11px]" style={{ color: "var(--fg-muted)" }}>
+          {generation.error}
+        </p>
+      )}
+    </div>
+  );
+};
+
 const QBankSession = () => {
   const navigate = useNavigate();
   const {
@@ -938,15 +1038,6 @@ const QBankSession = () => {
   const waitingForNext =
     !!session && isAwaitingMore && currentIndex >= session.questions.length - 1;
 
-  /** A run that stopped early. Said plainly rather than left as a silent gap. */
-  const generationFellShort =
-    !!session &&
-    !isAwaitingMore &&
-    !!session.generation &&
-    !!generation &&
-    generation.status !== "running" &&
-    session.questions.length < generation.target;
-
   if (!displayQuestion) {
     return (
       <DashboardLayout wide>
@@ -1018,6 +1109,10 @@ const QBankSession = () => {
           </div>
         );
       })()}
+
+      {session?.generation && generation && (
+        <GenerationStrip generation={generation} loaded={session.questions.length} />
+      )}
 
       <div className="flex gap-3 items-start">
         {effectiveTotalQuestions > 0 && (
@@ -1237,22 +1332,10 @@ const QBankSession = () => {
                   </div>
                 </div>
               ) : unansweredCount === 0 && !isAwaitingMore ? (
-                <div className="flex flex-col gap-2 pt-1 animate-fade-in">
-                  {generationFellShort && (
-                    <p className="text-xs" style={{ color: "var(--fg-muted)" }}>
-                      This set ended at {session!.questions.length} of {generation!.target}{" "}
-                      question{generation!.target === 1 ? "" : "s"}
-                      {generation!.heldBack > 0
-                        ? ` — ${generation!.heldBack} ${generation!.heldBack === 1 ? "was" : "were"} held back by the quality checks`
-                        : ""}
-                      .
-                    </p>
-                  )}
-                  <div className="flex justify-end">
-                    <button type="button" onClick={handleNext} style={darkButtonStyle()}>
-                      Finish Session <ChevronRight style={{ width: 16, height: 16 }} />
-                    </button>
-                  </div>
+                <div className="flex justify-end pt-1 animate-fade-in">
+                  <button type="button" onClick={handleNext} style={darkButtonStyle()}>
+                    Finish Session <ChevronRight style={{ width: 16, height: 16 }} />
+                  </button>
                 </div>
               ) : (
                 <div className="flex justify-end pt-1 animate-fade-in">

@@ -101,6 +101,7 @@ function waveFrames(spec: WaveSpec, startIndex: number): unknown[] {
           id: `q-${startIndex + i}`,
           index: startIndex + i,
           blocked: i < (spec.blocked ?? 0),
+          blockRule: i < (spec.blocked ?? 0) ? "key-longest" : null,
           difficulty: "Medium",
           reasoningOrder: "2nd",
           agreed: i >= (spec.blocked ?? 0) + (spec.disputed ?? 0),
@@ -207,6 +208,22 @@ describe("runQbankGeneration", () => {
     expect(outcome.heldBack).toBe(2);
     // Still owed two after a wave that committed four.
     expect(calls.map((c) => c.count)).toEqual([4, 2]);
+  });
+
+  it("records why each withheld question never reached the session", async () => {
+    const { call } = fakeCall([
+      { delivers: 4, blocked: 1, disputed: 1 },
+      { delivers: 2 },
+    ]);
+
+    const outcome = await runQbankGeneration({ ...baseOpts(), target: 4, call });
+
+    // The gate names the rule it blocked on; the second read has no rule, so it
+    // is recorded as a dispute rather than mislabelled as a gate failure.
+    expect(outcome.heldBackItems).toEqual([
+      { index: 1, reason: "key-longest" },
+      { index: 2, reason: "disputed" },
+    ]);
   });
 
   it("carries the system, the index and the covered subtopics into later waves", async () => {
