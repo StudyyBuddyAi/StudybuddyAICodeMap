@@ -234,6 +234,10 @@ async function runWave(
   };
 
   let drafts: GeneratedQuestionDraft[] = [];
+  // Whether the wave closed the way this client's protocol says it should. A
+  // stream that ends cleanly without ever sending one is not a failed wave, it
+  // is a server that does not speak this protocol — see the check below.
+  let sawWaveComplete = false;
 
   try {
     kick();
@@ -328,6 +332,7 @@ async function runWave(
 
           const summary = meta.waveComplete as Record<string, unknown> | undefined;
           if (summary) {
+            sawWaveComplete = true;
             if (Array.isArray(summary.subtopics)) {
               result.subtopics = summary.subtopics.filter(
                 (s): s is string => typeof s === "string" && !!s
@@ -359,6 +364,27 @@ async function runWave(
   } finally {
     if (timer) clearTimeout(timer);
     opts.signal.removeEventListener("abort", abortOuter);
+  }
+
+  /**
+   * A wave that ran to completion without ever sending a waveComplete frame is
+   * an out-of-date edge function, not a bad generation.
+   *
+   * The previous qbank-generate wrote its whole batch after the model stopped
+   * and announced it in one closing frame; it has no concept of a question being
+   * ready, and none of the frames this client counts. Retried against it, every
+   * wave looks empty, so the loop spends nine full generations — about thirteen
+   * minutes and the tokens to match — before reporting something misleading
+   * about the topic. Naming it as fatal turns that into an immediate, accurate
+   * error.
+   *
+   * Gated on the stream having ended cleanly: a dropped connection also loses
+   * this frame, and that genuinely is a wave worth retrying.
+   */
+  if (!result.streamError && !sawWaveComplete) {
+    result.fatal =
+      "The question generator on the server is out of date. Deploy the qbank-generate function and try again.";
+    return result;
   }
 
   // The closing summary is the frame most likely to be missing after a dropped

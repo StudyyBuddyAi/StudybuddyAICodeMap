@@ -79,6 +79,8 @@ interface WaveSpec {
   subtopics?: string[];
   /** Emit the frames and then break the connection. */
   broken?: boolean;
+  /** Speak the pre-incremental protocol: no questionReady, no waveComplete. */
+  legacy?: boolean;
 }
 
 function waveFrames(spec: WaveSpec, startIndex: number): unknown[] {
@@ -93,6 +95,13 @@ function waveFrames(spec: WaveSpec, startIndex: number): unknown[] {
       },
     },
   ];
+
+  // What the old edge function sent: the opening frame, then everything at the
+  // end in one closing frame, with nothing in between this client counts.
+  if (spec.legacy) {
+    frames.push({ __meta: { questionIds: ["a", "b", "c"], qa: [], verification: [] } });
+    return frames;
+  }
 
   for (let i = 0; i < spec.delivers; i++) {
     frames.push({
@@ -290,6 +299,19 @@ describe("runQbankGeneration", () => {
     // run must still continue rather than stall on the missing summary.
     expect(calls).toHaveLength(2);
     expect(calls[1].startIndex).toBe(6);
+  });
+
+  it("names an out-of-date server rather than retrying against it", async () => {
+    // The old function streams a whole batch and announces it in one closing
+    // frame. Every wave therefore looks empty, and retrying costs a full
+    // generation each time for a result that cannot change.
+    const { call, calls } = fakeCall([{ delivers: 0, legacy: true }]);
+
+    const outcome = await runQbankGeneration({ ...baseOpts(), target: 10, call });
+
+    expect(outcome.status).toBe("failed");
+    expect(outcome.error).toMatch(/out of date/i);
+    expect(calls).toHaveLength(1);
   });
 
   it("stops immediately on a refusal that retrying cannot fix", async () => {
