@@ -267,6 +267,17 @@ const QBankSummary = () => {
   if (!summaryData) return null;
 
   const { questions, answers, totalTime, score, total } = summaryData;
+
+  // The title was hardcoded to "Cardiovascular System", which was merely
+  // misleading while the bank held three systems and every session drew from
+  // one. Generated sets reach all thirteen, so it is read off the questions —
+  // and a set spanning more than one system says so rather than picking one.
+  const systemLabel = (() => {
+    const subjects = [...new Set(questions.map((q) => q.subject).filter(Boolean))];
+    if (subjects.length === 0) return "Session";
+    return subjects.length === 1 ? subjects[0] : "Mixed systems";
+  })();
+
   const pct = total > 0 ? Math.round((score / total) * 100) : 0;
   const perf = performanceLabel(pct);
   const avgTime = total > 0
@@ -327,7 +338,7 @@ const QBankSummary = () => {
                 lineHeight: 1.1,
               }}
             >
-              Cardiovascular System
+              {systemLabel}
               <span style={{ color: "var(--fg-muted)" }}> · {total} questions</span>
             </h1>
           </div>
