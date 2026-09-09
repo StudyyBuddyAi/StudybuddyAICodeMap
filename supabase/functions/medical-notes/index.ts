@@ -1,4 +1,16 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.8";
+import { makeEmbeddings, embedQuery, retrieveChunks, type RagChunk } from "../_shared/rag.ts";
+import { requestSourceLabels, type RawSourceLabel } from "../_shared/source-labels.ts";
+import {
+  openMemoryWindow,
+  readMemoryTurns,
+  writeUserTurn,
+  completeTurn,
+  trim500,
+  MEMORY_FOLLOWUP_INSTRUCTION,
+  type MemoryTurn,
+} from "../_shared/memory.ts";
 
 const ALLOWED_ORIGINS = new Set([
   "https://studyybuddyai.com",
@@ -9,7 +21,7 @@ const ALLOWED_ORIGINS = new Set([
 const BASE_CORS_HEADERS: Record<string, string> = {
   "Access-Control-Allow-Headers":
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
-  "Access-Control-Expose-Headers": "x-model-used, x-is-premium",
+  "Access-Control-Expose-Headers": "x-model-used, x-is-premium, x-retrieved-chunks",
 };
 
 // Origin-aware CORS. Only allowlisted origins get Access-Control-Allow-Origin;
@@ -136,8 +148,13 @@ serve(async (req) => {
     return new Response(null, { headers: buildCorsHeaders(req) });
   }
 
+  // Declared outside the try block so the catch handler below can still read
+  // it — a const declared inside `try { ... }` is out of scope in the
+  // sibling `catch` block and referencing it there throws its own
+  // ReferenceError, masking whatever the original error was.
+  const startedAt = Date.now();
+
   try {
-    const startedAt = Date.now();
     // ── JWT verification ───────────────────────────────────────────────────
     // Reject missing/invalid tokens before doing any work. The client sends the
     // user's Supabase access token as the Authorization bearer.
@@ -149,7 +166,6 @@ serve(async (req) => {
         { status: 401, headers: { ...buildCorsHeaders(req), "Content-Type": "application/json" } }
       );
     }
-    const { createClient } = await import("https://esm.sh/@supabase/supabase-js@2");
     const authClient = createClient(
       Deno.env.get("SUPABASE_URL")!,
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
@@ -213,12 +229,12 @@ serve(async (req) => {
     const { notes, difficulty, focus, length, examMode, cardsOnly, cardCount, focusCard,
             explainMode,
             enhanceMode, itemText, sectionKey, sectionItems, enhanceTopic,
-            persona } = body as {
+            persona, useGrounding, topK, threshold, useMemory } = body as {
       notes?: unknown; difficulty?: unknown; focus?: unknown; length?: unknown;
       examMode?: unknown; cardsOnly?: unknown; cardCount?: unknown; focusCard?: unknown;
       explainMode?: unknown; enhanceMode?: unknown; itemText?: unknown;
       sectionKey?: unknown; sectionItems?: unknown; enhanceTopic?: unknown;
-      persona?: unknown;
+      persona?: unknown; useGrounding?: unknown; topK?: unknown; threshold?: unknown; useMemory?: unknown;
     };
 
     // ── Input validation ───────────────────────────────────────────────────
@@ -242,9 +258,145 @@ serve(async (req) => {
     const foc = focus || "Quick Revision";
     const len = length || "Concise";
 
-    const referenceNote = mode.startsWith("USMLE")
-      ? "Exam-aligned with high-yield USMLE resources (e.g., First Aid, guidelines)."
-      : "Based on standard medical references and clinical guidelines.";
+    const OPENROUTER_API_KEY = Deno.env.get("OPENROUTER_API_KEY");
+    if (!OPENROUTER_API_KEY) {
+      throw new Error("OPENROUTER_API_KEY is not configured");
+    }
+
+    // ── GROUNDING: retrieve guideline_chunks context for sheet/cards modes ──
+    // Retrieval is fail-open: any embedding/RPC failure just falls back to an
+    // ungrounded generation. It must never error out or burn quota on its own.
+    // explain/enhance modes stay ungrounded — they're single-item follow-ups,
+    // not full generations.
+    const groundingEligible = !enhanceMode && !explainMode;
+    const useGroundingFlag = typeof useGrounding === "boolean" ? useGrounding : true;
+    const groundingAttempted = groundingEligible && useGroundingFlag;
+    const rawTopK = typeof topK === "number" ? topK : 8;
+    const rawThreshold = typeof threshold === "number" ? threshold : 0.60;
+    const groundingTopK = Math.min(Math.max(Math.round(rawTopK), 1), 10);
+    const groundingThreshold = Math.min(Math.max(rawThreshold, 0.40), 0.90);
+
+    // Search string is the user's notes/topic alone — examMode/focus/difficulty
+    // are style axes with no semantic counterpart in the guideline corpus and
+    // measurably lower cosine similarity, which matters near a 0.60 threshold.
+    // They still shape the prompt below, just not the embedding input.
+    const searchString = notes.trim();
+
+    let ragChunks: RagChunk[] = [];
+
+    if (groundingAttempted) {
+      try {
+        const embeddings = makeEmbeddings(OPENROUTER_API_KEY);
+        const queryEmbedding = await embedQuery(embeddings, searchString);
+        const result = await retrieveChunks(
+          authClient,
+          queryEmbedding,
+          groundingTopK,
+          groundingThreshold
+        );
+        ragChunks = result.chunks;
+      } catch (retrievalErr: unknown) {
+        const msg = retrievalErr instanceof Error ? retrievalErr.message : String(retrievalErr);
+        log("retrieval_failed", { err: msg });
+        ragChunks = [];
+      }
+
+      // Fire-and-forget audit row — never blocks or fails generation.
+      // rag_logs.grounded stays a boolean column — write "did retrieval return
+      // anything", which is all that column ever meant.
+      authClient
+        .from("rag_logs")
+        .insert({
+          user_id: user.id,
+          feature: cardsOnly ? "cards" : "sheet",
+          query: searchString,
+          grounded: ragChunks.length > 0,
+          source_ids: ragChunks.map((c) => c.id),
+        })
+        .then(({ error: logErr }: { error: unknown }) => {
+          if (logErr) log("rag_log_failed", { err: logErr });
+        });
+    }
+
+    // retrievedChunks is the retrieval *ceiling*, not the final grounding
+    // level — the model hasn't run yet, so it can't have declared
+    // sourceCoverage. The client reconciles this count against the model's
+    // self-reported coverage after the JSON parses (src/lib/grounding.ts):
+    // retrievedChunks === 0 always forces "none"; otherwise the model's
+    // declared level applies, defaulting to "partial" if missing/malformed.
+    const retrievedChunks = ragChunks.length;
+    const grounded = retrievedChunks > 0;
+
+    // ── SOURCE LABELS ──────────────────────────────────────────────────────
+    // Started here and deliberately NOT awaited: the generation itself is
+    // kicked off below and streams for seconds — a sheet or a card deck alike,
+    // both of which show this source list — so by the time flush() needs these
+    // the cheap call has long since resolved. Awaiting it here instead would
+    // delay the first visible byte of every grounded generation.
+    //
+    // Always routed to the cheap tier regardless of the user's model — this is
+    // a formatting job over text we already hold, not a medical judgement, and
+    // it must never consume premium routing.
+    const SOURCE_LABEL_MODEL = "openai/gpt-oss-20b";
+    const sourceLabelsPromise: Promise<RawSourceLabel[]> = grounded
+      ? requestSourceLabels(OPENROUTER_API_KEY, SOURCE_LABEL_MODEL, ragChunks)
+      : Promise.resolve([]);
+
+    const groundingContextBlock = !groundingAttempted
+      ? ""
+      : grounded
+      ? `Context from verified clinical guidelines (retrieved from our database):
+---
+${ragChunks
+        .map(
+          (c, i) =>
+            `[source ${i + 1}: ${c.guidelineName}${c.sectionTitle ? " — " + c.sectionTitle : ""}]\n${c.content}`
+        )
+        .join("\n\n")}
+---
+Rules:
+- Build your output primarily from this context. It outranks your own knowledge on any conflict.
+- You may add well-established general knowledge only to fill gaps the context does not cover.
+- Do not invent guideline names, numbers, or citations that are not in the context above.
+- Fill every field of the JSON output below from standard medical knowledge even where this Context
+  is silent. Never leave a field empty, never truncate the sheet, and never refuse to answer — report
+  any gap honestly in "sourceCoverage" instead (see the OUTPUT section below).`
+      : `No verified guideline context matched this topic. Answer from general medical knowledge, and
+still fill every field of the JSON output below completely — never leave a field empty, never truncate
+the sheet, and never refuse to answer.`;
+
+    // When grounding was never attempted (disabled, or explain/enhance mode),
+    // keep the original mode-based note — saying "not covered by our reference
+    // library" would be false when we simply never looked.
+    const referenceNote = !groundingAttempted
+      ? mode.startsWith("USMLE")
+        ? "Exam-aligned with high-yield USMLE resources (e.g., First Aid, guidelines)."
+        : "Based on standard medical references and clinical guidelines."
+      : grounded
+      ? `<Choose based on your own "sourceCoverage.level" below. If "full": "Based on: <guideline name(s) from the Context, verbatim>". If "partial": "Partly based on: <guideline name(s) from the Context, verbatim>. Sections not covered by our library were written from general medical knowledge." Never invent a guideline name not in the Context above.>`
+      : "Not covered by our reference library — written from general medical knowledge. Verify before exam or clinical use.";
+
+    // ── MEMORY: 10-turn sliding window, shared across sheet/cards/explain/enhance ──
+    // All four modes read the same per-user window so a follow-up ("explain
+    // that again more simply") resolves regardless of which mode asked it.
+    // enhance reads history but never writes a turn or advances the counter —
+    // it's quota-exempt and fires several times per sheet, so counting it
+    // would evict the actual sheet topic from the window before the user
+    // asks the follow-up this feature exists for.
+    // Fail-open, same as grounding: any read/write failure just proceeds
+    // without memory — it must never error out or burn quota on its own.
+    const useMemoryFlag = typeof useMemory === "boolean" ? useMemory : true;
+    const memoryWritable = useMemoryFlag && !enhanceMode;
+
+    let memoryTurns: MemoryTurn[] = [];
+    let memoryWindow: { windowId: string; turnCount: number } | null = null;
+
+    if (useMemoryFlag) {
+      memoryWindow = await openMemoryWindow(authClient, user.id);
+      if (memoryWindow) {
+        memoryTurns = await readMemoryTurns(authClient, user.id, memoryWindow.windowId);
+      }
+    }
 
     let systemPrompt: string;
 
@@ -272,6 +424,8 @@ RULES: Under 180 words total. No markdown. No flashcards or full sheets. Start w
 
 Mode: ${mode} | Difficulty: ${diff}
 
+${groundingContextBlock}
+
 Think through the highest-yield concepts for this topic, then output ONLY the flashcards in the exact format below. No preamble, no commentary, no explanations outside the cards.
 
 OUTPUT FORMAT — copy this structure exactly:
@@ -280,15 +434,21 @@ FLASHCARDS
 
 [one emoji representing the topic on its own line]
 
-Q: [Tag] Question ending with question mark?
+Q: [Mechanism][Grounded] Question text ending with question mark?
 A: Answer in 1-2 sentences maximum.
 
-Q: [Tag] Next question?
+Q: [Next Step][General] Question for a topic not in the context?
 A: Answer.
 
 [blank line between every card — this is mandatory]
 
 TAGS (pick one per card): [Diagnosis] [Mechanism] [Next Step] [Complication] [Association]
+
+SOURCING TAG (mandatory, second bracket on every Q: line):
+- [Grounded] — if this card's content comes directly from the Context above
+- [General]  — if no retrieved context covers this card's content
+
+If no Context was provided, every card must be tagged [General].
 
 EMOJI: Pick one that matches the topic — 🫀 cardiac, 🩸 hematology, 🧠 neuro, 🫁 pulmonary, 🦴 ortho, 🩺 general, 💊 pharmacology, 🧬 genetics, 👁️ ophthalmology, 🤰 OB/GYN, 👶 pediatrics, 🧫 micro, ⚗️ biochem, 🩹 trauma, 🛡️ immunology
 
@@ -296,6 +456,7 @@ HARD RULES:
 - Exactly ${count} cards. No more, no less.
 - Each card: Q: on one line, A: on next line, blank line after.
 - Tags in square brackets at start of every Q: line.
+- Every Q: line must have exactly two bracket tags: one clinical tag, one sourcing tag.
 - Questions end with ?
 - Answers: 1-2 sentences only — never more.
 - No "Q:" or "A:" anywhere inside question or answer text.
@@ -307,7 +468,12 @@ HARD RULES:
     // families. Defined once here; the only per-family difference is the
     // preamble (gptOss = terse; haiku = explicit input/mode/focus rules).
     // (Step 1 of feature 02 — Persona Tiers.)
-    const sheetSchemaBlock = `FORMATTING RULES (non-negotiable):
+    // groundingContextBlock leads the shared contract so retrieved guideline
+    // text is in front of the model before the output schema — and is an empty
+    // string when grounding was never attempted, leaving the prompt unchanged.
+    const sheetSchemaBlock = `${groundingContextBlock}
+
+FORMATTING RULES (non-negotiable):
 - Return ONLY a valid JSON object. No markdown fences, no preamble, no
   commentary, no text before or after the JSON.
 - Use **double asterisks** inside string values to bold key terms in the
@@ -343,8 +509,20 @@ OUTPUT — return exactly this JSON shape:
       "answer": "<1-2 sentence answer>"
     }
   ],
-  "referenceNote": "${referenceNote}"
+  "referenceNote": "${referenceNote}",
+  "sourceCoverage": {
+    "level": "full | partial | none",
+    "uncovered": ["<zero or more of: overview, clinicalApproach, keyPoints, examTraps, memoryHooks, flashcards>"]
+  }
 }
+
+SOURCE COVERAGE — report honestly, after writing the rest of the sheet:
+- "full": every section above rests on the provided Context. "uncovered" is empty.
+- "partial": one or more sections were written mainly from your own medical knowledge because the
+  Context did not cover them. List those section names in "uncovered".
+- "none": the Context was empty or irrelevant to this topic. List every section in "uncovered".
+- When in doubt, choose the weaker level. Over-claiming source backing is the worst possible error here —
+  worse than under-claiming it.
 
 LENGTH GATE — apply strictly based on the Length setting "${len}":
 
@@ -461,6 +639,8 @@ Write EXACTLY 2 sentences: patient presentation + clinical decision it drives. M
 
 Mode: ${mode} | Difficulty: ${diff}
 
+${groundingContextBlock}
+
 INPUT HANDLING:
 The user input may be one of three types:
 1. Raw medical notes — extract the core topic(s) and generate flashcards based on them.
@@ -475,15 +655,21 @@ FLASHCARDS
 
 [one emoji representing the topic on its own line]
 
-Q: [Tag] Question ending with question mark?
+Q: [Mechanism][Grounded] Question text ending with question mark?
 A: Answer in 1-2 sentences maximum.
 
-Q: [Tag] Next question?
+Q: [Next Step][General] Question for a topic not in the context?
 A: Answer.
 
 [blank line between every card — this is mandatory]
 
 TAGS (pick one per card): [Diagnosis] [Mechanism] [Next Step] [Complication] [Association]
+
+SOURCING TAG (mandatory, second bracket on every Q: line):
+- [Grounded] — if this card's content comes directly from the Context above
+- [General]  — if no retrieved context covers this card's content
+
+If no Context was provided, every card must be tagged [General].
 
 EMOJI: Pick one that matches the topic — 🫀 cardiac, 🩸 hematology, 🧠 neuro, 🫁 pulmonary, 🦴 ortho, 🩺 general, 💊 pharmacology, 🧬 genetics, 👁️ ophthalmology, 🤰 OB/GYN, 👶 pediatrics, 🧫 micro, ⚗️ biochem, 🩹 trauma, 🛡️ immunology
 
@@ -491,6 +677,7 @@ HARD RULES:
 - Exactly ${count} cards. No more, no less.
 - Each card: Q: on one line, A: on next line, blank line after.
 - Tags in square brackets at start of every Q: line.
+- Every Q: line must have exactly two bracket tags: one clinical tag, one sourcing tag.
 - Questions end with ?
 - Answers: 1-2 sentences only — never more.
 - No "Q:" or "A:" anywhere inside question or answer text.
@@ -534,11 +721,6 @@ ${sheetSchemaBlock}`;
       : focusCard && !cardsOnly
       ? `Focus specifically on this concept: ${focusCard}\n\nTopic: ${notes}`
       : notes;
-
-    const OPENROUTER_API_KEY = Deno.env.get("OPENROUTER_API_KEY");
-    if (!OPENROUTER_API_KEY) {
-      throw new Error("OPENROUTER_API_KEY is not configured");
-    }
 
     // ── SERVER-SIDE IDENTITY & ENTITLEMENT ──────────────────────────────────
     // The JWT was verified above (authClient.auth.getUser). Pro status, account
@@ -628,11 +810,23 @@ ${sheetSchemaBlock}`;
       systemPrompt = isHaiku ? haikuSheetPrompt : gptOssSheetPrompt;
     }
 
+    // Only when there is history to resolve against — the instruction would
+    // otherwise point the model at prior turns that don't exist.
+    if (memoryTurns.length > 0) {
+      systemPrompt += MEMORY_FOLLOWUP_INSTRUCTION;
+    }
+
     const providerRouting = model.startsWith("openai/gpt-oss")
       ? { provider: { order: ["Cerebras", "Groq"], allow_fallbacks: true } }
       : model === "anthropic/claude-haiku-4.5"
       ? { provider: { order: ["Anthropic"], allow_fallbacks: true } }
       : {};
+
+    // Computed here (ahead of the log call below, which references it) rather
+    // than down in the quota section — referencing a const before its
+    // declaration throws a temporal-dead-zone ReferenceError, which used to
+    // crash every single request at this log call.
+    const quotaEligible = !explainMode && !enhanceMode;
 
     log("generation_start", {
       userId: user.id,
@@ -644,6 +838,11 @@ ${sheetSchemaBlock}`;
       cardsOnly: !!cardsOnly,
       explainMode: !!explainMode,
       enhanceMode: enhanceMode ?? null,
+      groundingAttempted,
+      retrievedChunks,
+      useMemory: useMemoryFlag,
+      memoryWindowId: memoryWindow?.windowId ?? null,
+      memoryTurnsInPrompt: memoryTurns.length / 2,
       quotaEligible,
     });
 
@@ -653,7 +852,6 @@ ${sheetSchemaBlock}`;
     // Consume before calling OpenRouter; refund below if the upstream call fails
     // so failed generations never burn quota.
     const DAILY_CAP = 5;
-    const quotaEligible = !explainMode && !enhanceMode;
     const usageKind = cardsOnly ? "cards" : "sheet";
     let quotaConsumed = false;
 
@@ -682,6 +880,25 @@ ${sheetSchemaBlock}`;
       }
     }
 
+    // Claim this turn before the model call, so a concurrent request can never
+    // reuse the turn number. Returns null if the compare-and-swap lost the
+    // race, in which case this request simply runs without writing memory.
+    let memoryClaim: { rowId: string; turnNumber: number; windowId: string } | null = null;
+    if (memoryWritable && memoryWindow) {
+      memoryClaim = await writeUserTurn(
+        authClient,
+        user.id,
+        memoryWindow.windowId,
+        memoryWindow.turnCount,
+        notes
+      );
+      log("memory_turn_claimed", {
+        windowId: memoryClaim?.windowId ?? memoryWindow.windowId,
+        turnNumber: memoryClaim?.turnNumber ?? null,
+        rolledOver: memoryClaim ? memoryClaim.windowId !== memoryWindow.windowId : null,
+      });
+    }
+
     let response: Response;
     try {
       response = await fetch(
@@ -701,6 +918,7 @@ ${sheetSchemaBlock}`;
             max_tokens: 8192,
             messages: [
               { role: "system", content: systemPrompt },
+              ...memoryTurns,
               { role: "user", content: userContent },
             ],
             ...providerRouting,
@@ -755,8 +973,44 @@ ${sheetSchemaBlock}`;
     const decoder = new TextDecoder();
     const encoder = new TextEncoder();
     let buffer = "";
+    let assistantText = "";
+
+    // Builds the assistant-side memory summary for this turn — never the
+    // full sheet JSON, which would exhaust the prompt budget within a few
+    // turns. Trimmed to 500 chars by the caller.
+    function buildMemorySummary(): string {
+      if (explainMode) return assistantText;
+      if (cardsOnly) return `${notes}: ${assistantText}`;
+      // sheet — deliberately not shared with cardsOnly above: the cards text
+      // format has no "overview" field, so it has nothing to parse for.
+      try {
+        const parsed = JSON.parse(sanitizeJsonOutput(assistantText));
+        const topic = typeof parsed?.topic === "string" && parsed.topic.trim() ? parsed.topic : notes;
+        const overview = typeof parsed?.overview === "string" ? parsed.overview : "";
+        return `${topic}: ${overview}`;
+      } catch {
+        return assistantText;
+      }
+    }
 
     const transform = new TransformStream<Uint8Array, Uint8Array>({
+      start(controller) {
+        // Retrieval already completed above (before the OpenRouter fetch), so
+        // the retrieval count/sources can go out before any model bytes arrive.
+        // This is a count, not a grounding *level* — the model hasn't reported
+        // sourceCoverage yet, so the client reconciles the final level itself
+        // once the sheet JSON parses (src/lib/grounding.ts).
+        //
+        // Emitted only when grounding was actually attempted: with grounding
+        // off, no __meta means the client leaves the sheet's grounding fields
+        // unset, so the sheet renders exactly as it did before this feature.
+        if (!groundingAttempted) return;
+        controller.enqueue(
+          encoder.encode(
+            `data: ${JSON.stringify({ __meta: { retrievedChunks, sources: ragChunks } })}\n\n`
+          )
+        );
+      },
       transform(chunk, controller) {
         buffer += decoder.decode(chunk, { stream: true });
         const events = buffer.split(/\r?\n\r?\n/);
@@ -780,6 +1034,7 @@ ${sheetSchemaBlock}`;
             const parsed = JSON.parse(payload);
             const text = parsed?.choices?.[0]?.delta?.content;
             if (typeof text !== "string" || text.length === 0) continue;
+            assistantText += text;
             controller.enqueue(
               encoder.encode(`data: ${JSON.stringify(parsed)}\n\n`)
             );
@@ -788,7 +1043,32 @@ ${sheetSchemaBlock}`;
           }
         }
       },
-      flush(controller) {
+      async flush(controller) {
+        // Second and final __meta frame, carrying the model's proposed book and
+        // chapter labels. It must go out before [DONE] — the client breaks out
+        // of its read loop on that sentinel. Raced against a timeout so a slow
+        // or hung label call can never hold the sheet's stream open; losing the
+        // labels only costs polish, since the source list already renders from
+        // the mechanical repair alone. The client validates every label against
+        // the raw chunk before showing or persisting it.
+        if (groundingAttempted) {
+          try {
+            const labels = await Promise.race([
+              sourceLabelsPromise,
+              new Promise<RawSourceLabel[]>((resolve) => setTimeout(() => resolve([]), 2500)),
+            ]);
+            if (labels.length > 0) {
+              controller.enqueue(
+                encoder.encode(`data: ${JSON.stringify({ __meta: { sourceLabels: labels } })}\n\n`)
+              );
+            }
+          } catch (labelErr: unknown) {
+            log("source_labels_failed", {
+              err: labelErr instanceof Error ? labelErr.message : String(labelErr),
+            });
+          }
+        }
+
         controller.enqueue(encoder.encode("data: [DONE]\n\n"));
         log("generation_stream_end", {
           userId: user.id,
@@ -796,6 +1076,14 @@ ${sheetSchemaBlock}`;
           isPremium: isPremiumGeneration,
           elapsedMs: Date.now() - startedAt,
         });
+
+        // Awaited before the controller is considered closed — the Deno
+        // isolate can be torn down the instant the response completes, so a
+        // fire-and-forget write here would silently lose the turn.
+        if (memoryClaim) {
+          const summary = trim500(buildMemorySummary()) || trim500(notes) || "(no answer)";
+          await completeTurn(authClient, memoryClaim.rowId, summary);
+        }
       },
     });
 
@@ -805,6 +1093,7 @@ ${sheetSchemaBlock}`;
         "Content-Type": "text/event-stream",
         "X-Model-Used": model,
         "X-Is-Premium": isPremiumGeneration ? "true" : "false",
+        "X-Retrieved-Chunks": String(retrievedChunks),
       },
     });
   } catch (e) {

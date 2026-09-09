@@ -32,15 +32,18 @@ const TopProgressBar = () => {
   const [visible, setVisible] = useState(false);
   const [width, setWidth] = useState(0);
   const [fading, setFading] = useState(false);
-  const creepTimer = useRef<number | null>(null);
-  const hideTimer = useRef<number | null>(null);
+  const creepTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const requestRef = useRef<ReturnType<typeof requestAnimationFrame> | null>(null);
 
   useEffect(() => {
     const clearTimers = () => {
-      if (creepTimer.current) window.clearInterval(creepTimer.current);
-      if (hideTimer.current) window.clearTimeout(hideTimer.current);
+      if (creepTimer.current) clearInterval(creepTimer.current);
+      if (hideTimer.current) clearTimeout(hideTimer.current);
+      if (requestRef.current) cancelAnimationFrame(requestRef.current);
       creepTimer.current = null;
       hideTimer.current = null;
+      requestRef.current = null;
     };
 
     const unsub = subscribe((active) => {
@@ -50,16 +53,16 @@ const TopProgressBar = () => {
         setFading(false);
         setWidth(0);
         // jump to 70% quickly, then creep toward 90%
-        window.requestAnimationFrame(() =>
-          window.requestAnimationFrame(() => setWidth(70))
+        requestRef.current = requestAnimationFrame(() =>
+          requestAnimationFrame(() => setWidth(70))
         );
-        creepTimer.current = window.setInterval(() => {
+        creepTimer.current = setInterval(() => {
           setWidth((w) => (w < 90 ? w + 2 : w));
         }, 800);
       } else {
         setWidth(100);
         setFading(true);
-        hideTimer.current = window.setTimeout(() => {
+        hideTimer.current = setTimeout(() => {
           setVisible(false);
           setWidth(0);
           setFading(false);

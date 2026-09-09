@@ -1,0 +1,177 @@
+/* =============================================================================
+   StudyBuddy design system
+
+   The app had ~20 distinct font sizes, 10 radii and a dozen ad-hoc paddings.
+   Nothing was wrong individually; together they read as unfinished, because
+   nothing repeated. This file is the vocabulary — one scale per dimension.
+
+   Tokens only. Components consume them; they do not invent values.
+   ============================================================================= */
+
+:root {
+    /* ---- Type -------------------------------------------------------------
+       Six sizes, not twenty. A study tool is read closely and scanned often,
+       so the body size is generous (15px) and the steps between levels are
+       small — big display jumps belong on marketing pages, not on a page
+       someone stares at for an hour. */
+    --t-display:    clamp(26px, 3.2vw, 32px);
+    --t-display-lh: 1.12;
+    --t-title:      20px;
+    --t-title-lh:   1.3;
+    --t-subtitle:   16px;
+    --t-body:       15px;
+    --t-body-lh:    1.6;
+    --t-small:      13px;
+    --t-meta:       12px;
+    --t-label:      11px;   /* uppercase mono eyebrows only */
+
+    --tracking-display: -0.021em;
+    --tracking-title:   -0.012em;
+    --tracking-label:    0.1em;
+
+    /* ---- Space ------------------------------------------------------------
+       4pt rhythm. `--sp-gutter` is the one value pages use for their outer
+       padding, so nothing has to guess. */
+    --sp-1: 4px;
+    --sp-2: 8px;
+    --sp-3: 12px;
+    --sp-4: 16px;
+    --sp-5: 20px;
+    --sp-6: 24px;
+    --sp-8: 32px;
+    --sp-10: 40px;
+    --sp-12: 48px;
+    --sp-16: 64px;
+
+    --sp-card:    20px;  /* inside a card */
+    --sp-card-lg: 24px;  /* inside a feature card */
+    --sp-stack:   24px;  /* between sibling blocks on a page */
+    --sp-section: 40px;  /* between major page sections */
+
+    /* ---- Radius -----------------------------------------------------------
+       Four steps. Was 4/6/8/10/12/14/16/20/24 plus five Tailwind names. */
+    --r-sm:   6px;   /* chips, badges, inputs */
+    --r-md:  10px;   /* buttons, dense cards */
+    --r-lg:  16px;   /* cards, panels */
+    --r-pill: 999px;
+
+    /* ---- Elevation --------------------------------------------------------
+       Cards are defined by their border, not a shadow. Shadow signals
+       *lift* — hover, overlays — so it means something when it appears. */
+    --shadow-rest:  none;
+    --shadow-hover: 0 2px 8px -2px rgba(14, 17, 22, .08),
+                    0 8px 24px -12px rgba(14, 17, 22, .10);
+    --shadow-float: 0 12px 32px -12px rgba(14, 17, 22, .18),
+                    0 2px 6px rgba(14, 17, 22, .05);
+
+    /* ---- Motion ----------------------------------------------------------- */
+    --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+    --dur-fast: 120ms;
+    --dur:      180ms;
+}
+
+[data-theme="dark"], .dark {
+    --shadow-hover: 0 2px 8px -2px rgba(0, 0, 0, .5),
+                    0 8px 24px -12px rgba(0, 0, 0, .6);
+    --shadow-float: 0 12px 32px -12px rgba(0, 0, 0, .7),
+                    0 2px 6px rgba(0, 0, 0, .4);
+}
+
+/* =============================================================================
+   Primitives
+   ============================================================================= */
+
+@layer components {
+
+    /* ---- Type roles ---------------------------------------------------- */
+    .ds-display {
+        font-family: var(--font-display);
+        font-size: var(--t-display);
+        line-height: var(--t-display-lh);
+        letter-spacing: var(--tracking-display);
+        font-weight: 500;
+        color: hsl(var(--foreground));
+        text-wrap: balance;
+        margin: 0;
+    }
+    .ds-title {
+        font-family: var(--font-sans);
+        font-size: var(--t-title);
+        line-height: var(--t-title-lh);
+        letter-spacing: var(--tracking-title);
+        font-weight: 600;
+        color: hsl(var(--foreground));
+        margin: 0;
+    }
+    .ds-subtitle {
+        font-size: var(--t-subtitle);
+        line-height: 1.5;
+        color: hsl(var(--muted-foreground));
+        margin: 0;
+    }
+    .ds-body  { font-size: var(--t-body);  line-height: var(--t-body-lh); }
+    .ds-small { font-size: var(--t-small); line-height: 1.5; color: hsl(var(--muted-foreground)); }
+    .ds-meta  { font-size: var(--t-meta);  line-height: 1.4; color: hsl(var(--muted-foreground)); }
+
+    /* The one eyebrow treatment. Was reimplemented inline on ~15 screens. */
+    .ds-label {
+        font-family: var(--font-mono);
+        font-size: var(--t-label);
+        font-weight: 500;
+        letter-spacing: var(--tracking-label);
+        text-transform: uppercase;
+        color: hsl(var(--muted-foreground));
+    }
+    .ds-label-accent { color: hsl(var(--primary)); }
+
+    /* ---- Surfaces -------------------------------------------------------
+       One card. Border-defined, no resting shadow. */
+    .ds-card {
+        background: hsl(var(--card));
+        border: 1px solid hsl(var(--sb-border));
+        border-radius: var(--r-lg);
+        padding: var(--sp-card);
+        box-shadow: var(--shadow-rest);
+    }
+    .ds-card-lg { padding: var(--sp-card-lg); }
+
+    /* Interactive cards earn the lift; static ones must not have it. */
+    .ds-card-interactive {
+        cursor: pointer;
+        text-align: start;
+        transition:
+            border-color var(--dur) var(--ease),
+            box-shadow var(--dur) var(--ease),
+            transform var(--dur) var(--ease);
+    }
+    .ds-card-interactive:hover {
+        border-color: hsl(var(--primary) / 0.45);
+        box-shadow: var(--shadow-hover);
+        transform: translateY(-1px);
+    }
+    .ds-card-interactive:active { transform: translateY(0); }
+    .ds-card-interactive:focus-visible {
+        outline: 2px solid hsl(var(--ring));
+        outline-offset: 2px;
+    }
+
+    /* The accent rail. Was hand-written as borderLeft: 3px solid on 9 surfaces. */
+    .ds-rail       { border-inline-start: 3px solid hsl(var(--primary)); }
+    .ds-rail-warn  { border-inline-start: 3px solid hsl(var(--warning)); }
+    .ds-rail-danger{ border-inline-start: 3px solid hsl(var(--danger)); }
+
+    /* ---- Stack / rhythm -------------------------------------------------- */
+    .ds-stack    > * + * { margin-block-start: var(--sp-stack); }
+    .ds-stack-sm > * + * { margin-block-start: var(--sp-3); }
+    .ds-stack-lg > * + * { margin-block-start: var(--sp-section); }
+
+    /* ---- Numerals -------------------------------------------------------
+       ONLY where digits align vertically — table rows, list columns, axis
+       ticks. Not on hero figures or stat-tile values: equal-width digits make
+       a large standalone number look loose ("121" gains a visible gap). Those
+       take the default proportional figures. */
+    .ds-num {
+        font-variant-numeric: tabular-nums;
+        letter-spacing: -0.01em;
+    }
+}

@@ -261,6 +261,217 @@
 }
 .openmed .hero-caption .play { color: var(--accent); }
 
+.openmed .hero-responsive {
+    position: relative;
+    isolation: isolate;
+}
+
+.openmed .hero-shell {
+    max-width: 1240px;
+    margin: 0 auto;
+    padding: 0 24px;
+    display: grid;
+    grid-template-columns: 1.05fr 0.95fr;
+    gap: 56px;
+    align-items: center;
+}
+
+.openmed .hero-copy {
+    max-width: 600px;
+    width: 100%;
+}
+
+.openmed .hero-actions {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-wrap: wrap;
+    margin-bottom: 28px;
+}
+
+.openmed .hero-trust {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 18px 16px;
+    color: #5A6472;
+    font-size: 14px;
+    font-weight: 500;
+}
+
+.openmed .hero-trust-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.openmed .hero-trust-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background-color: #00A896;
+    display: inline-block;
+}
+
+.openmed .hero-visual {
+    position: relative;
+    display: flex;
+    justify-content: center;
+    width: 100%;
+}
+
+.openmed .hero-panel {
+    position: relative;
+    width: 100%;
+    max-width: 560px;
+    border-radius: 32px;
+    background: #0B1F36;
+    border: 1px solid rgba(255,255,255,0.08);
+    box-shadow: 0 32px 80px -28px rgba(17, 24, 39, 0.55);
+    padding: 22px 22px 18px;
+    transform: rotate(2deg);
+}
+
+.openmed .hero-panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 18px;
+    color: #A9B7C8;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.openmed .hero-panel-body {
+    background: rgba(11,31,54,0.88);
+    border-radius: 22px;
+    border: 1px solid rgba(255,255,255,0.06);
+    padding: 18px 18px 16px;
+}
+
+.openmed .hero-panel-tags {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 14px;
+    flex-wrap: wrap;
+}
+
+.openmed .hero-panel-tag {
+    border-radius: 999px;
+    background: rgba(0, 168, 150, 0.1);
+    color: #00A896;
+    font-size: 11px;
+    font-weight: 700;
+    padding: 6px 10px;
+    border: 1px solid rgba(0, 168, 150, 0.2);
+}
+
+.openmed .hero-floating-card {
+    position: absolute;
+    right: -8px;
+    bottom: -22px;
+    background: #FFFFFF;
+    color: #1A1A2E;
+    border-radius: 18px;
+    padding: 14px 18px;
+    box-shadow: 0 18px 40px -22px rgba(15, 23, 42, 0.55);
+    border: 1px solid rgba(17, 24, 39, 0.06);
+    max-width: 220px;
+    z-index: 1;
+}
+
+@media (max-width: 1100px) {
+    .openmed .hero-shell {
+        grid-template-columns: 1fr;
+        gap: 40px;
+    }
+
+    .openmed .hero-copy {
+        max-width: 720px;
+        text-align: center;
+        margin: 0 auto;
+    }
+
+    .openmed .hero-badge {
+        margin-left: auto;
+        margin-right: auto;
+    }
+
+    .openmed .hero-actions {
+        justify-content: center;
+    }
+
+    .openmed .hero-trust {
+        justify-content: center;
+    }
+}
+
+@media (max-width: 720px) {
+    .openmed .hero-shell {
+        padding: 0 16px;
+    }
+
+    .openmed .hero-responsive {
+        padding-top: 24px;
+    }
+
+    .openmed .hero-actions {
+        flex-direction: column;
+        align-items: stretch;
+        width: 100%;
+    }
+
+    .openmed .hero-actions > * {
+        width: 100%;
+        justify-content: center;
+    }
+
+    .openmed .hero-panel {
+        max-width: 100%;
+        padding: 16px 16px 14px;
+        transform: none;
+    }
+
+    .openmed .hero-panel-header {
+        font-size: 10px;
+        gap: 12px;
+    }
+
+    .openmed .hero-panel-body {
+        padding: 14px 12px 12px;
+    }
+
+    .openmed .hero-floating-card {
+        position: static;
+        margin-top: 18px;
+        width: min(100%, 220px);
+        max-width: 100%;
+    }
+}
+
+@media (max-width: 480px) {
+    .openmed .hero-shell {
+        gap: 28px;
+    }
+
+    .openmed .hero-badge {
+        letter-spacing: 0.08em;
+        padding-inline: 10px;
+    }
+
+    .openmed .hero-trust {
+        gap: 10px 12px;
+        font-size: 12px;
+    }
+
+    .openmed .hero-title {
+        letter-spacing: -0.04em;
+    }
+}
+
 /* ---------- Question card (source: PHI demo card) ------------------------- */
 .openmed .phi-card {
     background: var(--surface-inverse);

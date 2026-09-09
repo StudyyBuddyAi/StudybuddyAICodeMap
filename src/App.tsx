@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect, useState } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Outlet, Route, Routes, useLocation } from "react-router-dom";
 import { Analytics } from "@vercel/analytics/react";
+import { AuthProvider } from "./contexts/AuthContext";
 import { QBankProvider } from "./contexts/QBankContext";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
@@ -11,7 +12,7 @@ import PageLoader from "@/components/PageLoader";
 import Index from "./pages/Index.tsx";
 import NotFound from "./pages/NotFound.tsx";
 import ResetPassword from "./pages/ResetPassword.tsx";
-import ProtectedRoute from "./components/ProtectedRoute";
+import AuthCallback from "./pages/AuthCallback.tsx";
 
 // Route pages are lazy-loaded so the heavy page chunks (Sheets, Flashcards,
 // QBank family) are only fetched on navigation instead of in the initial bundle.
@@ -23,8 +24,8 @@ const Sheets = lazy(() => import("./pages/Sheets.tsx"));
 const Flashcards = lazy(() => import("./pages/Flashcards.tsx"));
 const QBank = lazy(() => import("./pages/QBank.tsx"));
 const QBankSession = lazy(() => import("./pages/QBankSession.tsx"));
+const QBankGenerate = lazy(() => import("./pages/QBankGenerate.tsx"));
 const QBankSummary = lazy(() => import("./pages/QBankSummary.tsx"));
-const RagSearch = lazy(() => import("./pages/RagSearch.tsx"));
 
 const queryClient = new QueryClient();
 
@@ -59,31 +60,25 @@ const AppRoutes = () => {
   return (
     <div className={stage === "exit" ? "page-transition-exit" : "page-transition-enter"}>
       <Suspense fallback={<PageLoader context="generic" />}>
-       <Routes location={displayLocation}>
-  {/* Public routes */}
-  <Route path="/" element={<Index />} />
-  <Route path="/home" element={<Home />} />
-
-  {/* Registered users only */}
-  <Route element={<ProtectedRoute />}>
-    <Route path="/dashboard" element={<Dashboard />} />
-    <Route path="/roadmap" element={<Roadmap />} />
-    <Route path="/sheets" element={<Sheets />} />
-    <Route path="/flashcards" element={<Flashcards />} />
-    <Route path="/library" element={<Library />} />
-    <Route path="/guidelines" element={<RagSearch />} />
-
-    <Route element={<QBankProvider><Outlet /></QBankProvider>}>
-      <Route path="/qbank" element={<QBank />} />
-      <Route path="/qbank/session" element={<QBankSession />} />
-      <Route path="/qbank/summary" element={<QBankSummary />} />
-    </Route>
-  </Route>
-
-  <Route path="/reset-password" element={<ResetPassword />} />
-
-  <Route path="*" element={<NotFound />} />
-</Routes>
+        <Routes location={displayLocation}>
+          <Route path="/" element={<Index />} />
+          <Route path="/home" element={<Home />} />
+          <Route path="/dashboard" element={<Dashboard />} />
+          <Route path="/roadmap" element={<Roadmap />} />
+          <Route path="/sheets" element={<Sheets />} />
+          <Route path="/flashcards" element={<Flashcards />} />
+          <Route element={<QBankProvider><Outlet /></QBankProvider>}>
+            <Route path="/qbank" element={<QBank />} />
+            <Route path="/qbank/generate" element={<QBankGenerate />} />
+            <Route path="/qbank/session" element={<QBankSession />} />
+            <Route path="/qbank/summary" element={<QBankSummary />} />
+          </Route>
+          <Route path="/library" element={<Library />} />
+          <Route path="/reset-password" element={<ResetPassword />} />
+          <Route path="/auth/callback" element={<AuthCallback />} />
+          {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
+          <Route path="*" element={<NotFound />} />
+        </Routes>
       </Suspense>
     </div>
   );
@@ -93,10 +88,12 @@ const App = () => (
   <QueryClientProvider client={queryClient}>
     <TooltipProvider>
       <Toaster />
-      <Sonner />
+      {/* <Sonner /> */}
       <TopProgressBar />
       <BrowserRouter>
-        <AppRoutes />
+        <AuthProvider>
+          <AppRoutes />
+        </AuthProvider>
       </BrowserRouter>
       <Analytics />
     </TooltipProvider>

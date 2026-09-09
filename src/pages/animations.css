@@ -1,0 +1,152 @@
+/* ===== خلفيات متحركة (Blobs) ===== */
+.blob {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(80px);
+  opacity: 0.15;
+  animation: blobMove 20s infinite alternate ease-in-out;
+}
+.blob-1 {
+  width: 600px;
+  height: 600px;
+  top: -200px;
+  left: -200px;
+  background: var(--brand);
+  animation-duration: 25s;
+}
+.blob-2 {
+  width: 500px;
+  height: 500px;
+  bottom: -150px;
+  right: -150px;
+  background: #6366f1;
+  animation-duration: 30s;
+  animation-delay: -5s;
+}
+.blob-3 {
+  width: 400px;
+  height: 400px;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: #ec4899;
+  animation-duration: 35s;
+  animation-delay: -10s;
+  opacity: 0.08;
+}
+
+@keyframes blobMove {
+  0% {
+    transform: translate(0, 0) scale(1);
+  }
+  33% {
+    transform: translate(30px, -50px) scale(1.1);
+  }
+  66% {
+    transform: translate(-20px, 20px) scale(0.9);
+  }
+  100% {
+    transform: translate(10px, -10px) scale(1.05);
+  }
+}
+
+/* ===== شريط التمرير (Strip) ===== */
+.strip {
+  overflow: hidden;
+  background: var(--bg-panel);
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  padding: 12px 0;
+}
+.track {
+  display: flex;
+  gap: 24px;
+  white-space: nowrap;
+  animation: scrollStrip 30s linear infinite;
+}
+.track span {
+  font-weight: 700;
+  color: var(--brand);
+}
+@keyframes scrollStrip {
+  0% {
+    transform: translateX(0);
+  }
+  100% {
+    transform: translateX(-50%);
+  }
+}
+
+/* ===== عناوين الأقسام ===== */
+/* .section-head .eyebrow {
+  animation: fadeInUp 0.6s ease-out;
+} */
+
+/* ===== بطاقات مع hover ===== */
+.card-hover {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.card-hover:hover {
+  transform: translateY(-6px) scale(1.02);
+  box-shadow: 0 20px 40px -12px rgba(0, 0, 0, 0.2);
+}
+
+/* ===== نبض للأيقونات ===== */
+.pulse-icon {
+  animation: pulse 2s infinite;
+}
+@keyframes pulse {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.1);
+  }
+}
+
+/* ===== مؤشر التمرير ===== */
+.scroll-indicator {
+  animation: bounce 2s infinite;
+}
+@keyframes bounce {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-10px);
+  }
+}
+
+/* ===== فتح وإغلاق FAQ بانسيابية ===== */
+details summary::-webkit-details-marker {
+  display: none;
+}
+details[open] summary + * {
+  animation: slideDown 0.3s ease-out;
+}
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ===== تحسينات عامة ===== */
+* {
+  scroll-behavior: smooth;
+}
+
+/* إضافة تدرج خلفية ثابت للهيرو */
+.hero {
+  background: radial-gradient(
+    circle at 20% 30%,
+    rgba(var(--brand-rgb), 0.05) 0%,
+    transparent 60%
+  );
+}

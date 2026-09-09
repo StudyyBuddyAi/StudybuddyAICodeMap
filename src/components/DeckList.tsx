@@ -18,7 +18,8 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import type { Card as DeckCard } from "@/hooks/use-flashcard-deck";
+import { useDeckGrounding, type Card as DeckCard } from "@/hooks/use-flashcard-deck";
+import type { GroundingLevel } from "@/types/generated-sheet";
 
 interface DeckListProps {
   cards: DeckCard[];
@@ -50,8 +51,53 @@ interface DeckSummary {
   mastered: number;
   due: number;
   latest: number;
+  grounded: number;
   emoji?: string;
 }
+
+const GROUNDING_BADGES: Record<GroundingLevel, { label: string; className: string; title: string }> = {
+  full: {
+    label: "Grounded",
+    className: "border-success/40 bg-success/10 text-success",
+    title: "Every card in this deck was built from a retrieved clinical guideline.",
+  },
+  partial: {
+    label: "Partial",
+    className: "border-warning/40 bg-warning/10 text-warning",
+    title: "Some cards in this deck were written from general medical knowledge.",
+  },
+  none: {
+    label: "Unverified",
+    className: "border-border bg-transparent text-muted-foreground",
+    title: "No guideline context backed this deck — verify before exam use.",
+  },
+};
+
+/**
+ * Grounding badge for one deck.
+ *
+ * Prefers the deck's stored `grounding_metadata` (server accounts). Falls back
+ * to aggregating each card's own `grounded` flag, which is the only signal
+ * available for localStorage decks and for decks saved before the metadata
+ * column existed.
+ */
+const DeckGroundingBadge = ({ deck }: { deck: DeckSummary }) => {
+  const { data: meta } = useDeckGrounding(deck.topic);
+
+  const level: GroundingLevel =
+    meta?.groundingLevel ??
+    (deck.grounded === 0 ? "none" : deck.grounded === deck.total ? "full" : "partial");
+
+  const badge = GROUNDING_BADGES[level];
+  return (
+    <span
+      title={badge.title}
+      className={`shrink-0 inline-block px-1.5 py-0.5 rounded text-[9px] font-medium uppercase tracking-wider border ${badge.className}`}
+    >
+      {badge.label}
+    </span>
+  );
+};
 
 const DeckList = ({ cards, onStudyDeck, onDeleteDeck, onReviewAll }: DeckListProps) => {
   const [pendingDelete, setPendingDelete] = useState<DeckSummary | null>(null);
@@ -61,8 +107,9 @@ const DeckList = ({ cards, onStudyDeck, onDeleteDeck, onReviewAll }: DeckListPro
     const map = new Map<string, DeckSummary>();
     for (const c of cards) {
       const key = c.topic || "Untitled";
-      const cur = map.get(key) ?? { topic: key, total: 0, mastered: 0, due: 0, latest: 0, emoji: undefined as string | undefined };
+      const cur = map.get(key) ?? { topic: key, total: 0, mastered: 0, due: 0, latest: 0, grounded: 0, emoji: undefined as string | undefined };
       cur.total += 1;
+      if (c.grounded) cur.grounded += 1;
       if (c.interval >= 21) cur.mastered += 1;
       if (c.dueAt <= now) cur.due += 1;
       if (c.createdAt > cur.latest) cur.latest = c.createdAt;
@@ -147,9 +194,12 @@ const DeckList = ({ cards, onStudyDeck, onDeleteDeck, onReviewAll }: DeckListPro
                       {deck.emoji || initial}
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p style={{ fontSize: 13, fontWeight: 500, color: "var(--fg)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>
-                        {deck.topic}
-                      </p>
+                      <div className="flex items-center gap-2 min-w-0">
+                        <p style={{ fontSize: 13, fontWeight: 500, color: "var(--fg)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>
+                          {deck.topic}
+                        </p>
+                        <DeckGroundingBadge deck={deck} />
+                      </div>
                       <p style={{ fontSize: 12, color: "var(--fg-muted)", marginTop: 1 }}>
                         {deck.total} cards · {deck.mastered} mastered
                         {deck.due > 0 ? ` · ${deck.due} due` : ""}

@@ -102,4 +102,73 @@ describe("parseFlashcardsFromOutput", () => {
     const out = ["FLASHCARDS", "", "Q:", "A: Nothing.", "", "Q: Real?", "A:", ""].join("\n");
     expect(parseFlashcardsFromOutput(out, "Topic")).toEqual([]);
   });
+
+  // ── Sourcing tag ([Grounded] / [General]) ────────────────────────────────
+  // Where the parser meets the prompt. If the prompt's two-bracket format ever
+  // drifts, these are the tests that catch it.
+  describe("sourcing tag", () => {
+    const card = (q: string) =>
+      parseFlashcardsFromOutput(`FLASHCARDS
+
+Q: ${q}
+A: Ans.
+`, "Topic")[0];
+
+    it("splits a clinical tag and a [Grounded] sourcing tag", () => {
+      const c = card("[Mechanism][Grounded] Why?");
+      expect(c.tag).toBe("Mechanism");
+      expect(c.grounded).toBe(true);
+      expect(c.question).toBe("Why?");
+    });
+
+    it("reads [General] as ungrounded", () => {
+      const c = card("[Next Step][General] What next?");
+      expect(c.tag).toBe("Next Step");
+      expect(c.grounded).toBe(false);
+      expect(c.question).toBe("What next?");
+    });
+
+    it("accepts the sourcing tag first", () => {
+      const c = card("[Grounded][Diagnosis] Which?");
+      expect(c.tag).toBe("Diagnosis");
+      expect(c.grounded).toBe(true);
+      expect(c.question).toBe("Which?");
+    });
+
+    it("tolerates whitespace between the brackets", () => {
+      const c = card("[Complication] [Grounded] How?");
+      expect(c.tag).toBe("Complication");
+      expect(c.grounded).toBe(true);
+      expect(c.question).toBe("How?");
+    });
+
+    it("matches the sourcing tag case-insensitively", () => {
+      expect(card("[Mechanism][GROUNDED] Why?").grounded).toBe(true);
+      expect(card("[Mechanism][general] Why?").grounded).toBe(false);
+    });
+
+    it("defaults to ungrounded when only a clinical tag is present (legacy output)", () => {
+      const c = card("[Mechanism] Why?");
+      expect(c.tag).toBe("Mechanism");
+      expect(c.grounded).toBe(false);
+    });
+
+    it("defaults to ungrounded when there is no tag at all", () => {
+      const c = card("Why?");
+      expect(c.tag).toBe("");
+      expect(c.grounded).toBe(false);
+      expect(c.question).toBe("Why?");
+    });
+
+    it("keeps only the first clinical tag when the model emits extras", () => {
+      const c = card("[Mechanism][Diagnosis][Grounded] Why?");
+      expect(c.tag).toBe("Mechanism");
+      expect(c.grounded).toBe(true);
+    });
+
+    it("does not strip a bracket that appears after the question starts", () => {
+      const c = card("[Mechanism][Grounded] What does [sic] mean?");
+      expect(c.question).toBe("What does [sic] mean?");
+    });
+  });
 });

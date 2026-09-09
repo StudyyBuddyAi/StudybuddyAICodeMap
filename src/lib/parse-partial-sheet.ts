@@ -1,5 +1,6 @@
 import { stripFences } from "./sanitize-json";
 import { repairLlmJson } from "./repair-llm-json";
+import { parseSourceCoverage } from "./grounding";
 import type { Flashcard, GeneratedSheet } from "@/types/generated-sheet";
 
 /**
@@ -152,6 +153,10 @@ function normalize(raw: Record<string, unknown>): GeneratedSheet {
     examTraps: asStringArray(raw.examTraps),
     flashcards: asFlashcards(raw.flashcards),
     referenceNote: asString(raw.referenceNote),
+    // The model's self-reported grounding coverage. Normalize rebuilds the
+    // sheet from known fields only, so without this the field would be
+    // silently dropped before the caller could reconcile it against retrieval.
+    sourceCoverage: parseSourceCoverage(raw.sourceCoverage) ?? undefined,
   };
 }
 

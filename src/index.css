@@ -1,6 +1,9 @@
+@import "./styles/design-system.css";
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
 
 @layer base {
   :root {
@@ -749,5 +752,68 @@
     padding: 12px;
     background: hsl(var(--secondary));
     border-radius: var(--radius);
+  }
+
+  /* ─── Landing Page Pricing & Testimonial Animations ─── */
+  @keyframes fadeIn {
+    from {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  .tab-content {
+    animation: fadeIn 0.3s ease-out;
+  }
+
+  .pricing-card-pro {
+    transition: transform 0.3s ease, box-shadow 0.3s ease;
+  }
+
+  .pricing-card-pro:hover {
+    transform: scale(1.02);
+    box-shadow: 0 20px 40px -12px rgba(13, 148, 136, 0.25);
+  }
+
+  .feature-badge {
+    animation: pulse-subtle 2s infinite;
+  }
+
+  .testimonial-card {
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+  }
+
+  .testimonial-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 12px 24px -8px rgba(0, 0, 0, 0.1);
+  }
+
+  /* Mobile sticky CTA */
+  .mobile-sticky-cta {
+    animation: slide-up 0.3s ease-out;
+  }
+
+  @keyframes slide-up {
+    from {
+      transform: translateY(100%);
+      opacity: 0;
+    }
+    to {
+      transform: translateY(0);
+      opacity: 1;
+    }
+  }
+
+  @keyframes typewriter {
+    from {
+      width: 0;
+    }
+    to {
+      width: 100%;
+    }
   }
 }

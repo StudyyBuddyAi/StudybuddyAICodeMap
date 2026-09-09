@@ -1,17 +1,25 @@
 import { useState, useEffect, useRef } from "react";
-import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { History, Loader2, Layers, PenLine, Search, X, Check, Sparkles, ChevronRight, ArrowRight, Brain, Heart, Activity, Stethoscope } from "lucide-react";
+  Activity,
+  ArrowRight,
+  Brain,
+  BrainCircuit,
+  Check,
+  ChevronDown,
+  ChevronRight,
+  ChevronUp,
+  HeartPulse,
+  History,
+  Loader2,
+  Search,
+  Sparkles,
+  Stethoscope,
+  X,
+} from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { useFlashcardDeck } from "@/hooks/use-flashcard-deck";
+import { useFlashcardDeck, type GroundingMeta } from "@/hooks/use-flashcard-deck";
 import { useUsageLimit, MAX_DAILY_CARDS } from "@/hooks/use-usage-limit";
 import { useCitationUsage } from "@/hooks/use-citation-usage";
 import { usePremiumHook } from "@/hooks/use-premium-hook";
@@ -26,6 +34,12 @@ import CitationBadgeList from "@/components/CitationBadgeList";
 import GoProModal from "@/components/GoProModal";
 import AuthModal from "@/components/AuthModal";
 import { startTopProgress, finishTopProgress } from "@/components/TopProgressBar";
+import { useMemoryPreference } from "@/hooks/use-memory-preference";
+import { groundingLevelFromCards } from "@/lib/grounding";
+import { applySourceLabels } from "@/lib/source-labels";
+import GroundingNotice from "@/components/GroundingNotice";
+import SheetSources from "@/components/SheetSources";
+import type { SheetSource } from "@/types/generated-sheet";
 
 type CitationState = "idle" | "loading" | "found" | "locked" | "hidden";
 
@@ -40,20 +54,28 @@ interface FlashcardsGeneratorProps {
 
 const RECENT_FLASHCARD_TOPICS_KEY = "sb_recent_flashcard_topics_v1";
 
+// Line-icon chips rather than emoji, matching QUICKSTART_TOPICS on the sheet
+// configurator — the two panes sit in the same app and were reading as two
+// different products.
 const POPULAR_TOPICS = [
-  { label: "Myocardial Infarction", icon: "💔", category: "Cardiology" },
-  { label: "Pneumonia", icon: "🫁", category: "Pulmonology" },
-  { label: "Diabetic Ketoacidosis", icon: "🍬", category: "Endocrinology" },
-  { label: "Ischemic Stroke", icon: "🧠", category: "Neurology" },
-  { label: "Nephrotic Syndrome", icon: "🫀", category: "Nephrology" },
-  { label: "Sepsis", icon: "🚑", category: "Critical Care" },
-];
+  { label: "Myocardial Infarction", icon: HeartPulse, category: "Cardiology" },
+  { label: "Pneumonia", icon: Activity, category: "Pulmonology" },
+  { label: "Diabetic Ketoacidosis", icon: Brain, category: "Endocrinology" },
+  { label: "Ischemic Stroke", icon: BrainCircuit, category: "Neurology" },
+  { label: "Nephrotic Syndrome", icon: Activity, category: "Nephrology" },
+  { label: "Sepsis", icon: Stethoscope, category: "Critical Care" },
+] as const;
 
 const CARD_COUNT_OPTIONS = [
   { value: "5", label: "5 cards", description: "Quick review" },
   { value: "10", label: "10 cards", description: "Standard session" },
   { value: "20", label: "20 cards", description: "Deep dive" },
   { value: "30", label: "30 cards", description: "Comprehensive" },
+];
+
+const GROUNDING_OPTIONS = [
+  { value: true, label: "On", description: "Uses retrieved medical guidelines" },
+  { value: false, label: "Off", description: "General knowledge only" },
 ];
 
 const EXAM_MODES = [
@@ -73,6 +95,26 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated }: FlashcardsGene
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [citationState, setCitationState] = useState<CitationState>("idle");
   const [citations, setCitations] = useState<CitationResult[]>([]);
+  // Grounding controls, mirroring the sheet generator's defaults. topK and
+  // threshold are not exposed in the UI — the toggle is the only user-facing
+  // control; the numbers stay here so they are tunable in one place.
+  const [useGrounding, setUseGrounding] = useState(true);
+  const [groundingTopK] = useState(8);
+  const [groundingThreshold] = useState(0.6);
+  const [pendingGrounding, setPendingGrounding] = useState<GroundingMeta | null>(null);
+  // Whether grounding was on for the run that produced `pendingGrounding` —
+  // separates "we looked and found nothing" from "you turned it off", which
+  // GroundingNotice words very differently.
+  const [pendingGroundingRequested, setPendingGroundingRequested] = useState(true);
+  // The topic this deck was actually retrieved for, held separately because
+  // saving the deck clears the topic input — and the source list renders after
+  // that, so reading `topic` there would highlight the excerpts against "".
+  const [pendingGroundingQuery, setPendingGroundingQuery] = useState("");
+  // Step 2 is a disclosure, closed by default, exactly as "Customize" is on the
+  // sheet configurator: the defaults suit most decks, and what a first visit
+  // needs to see is the topic box. The header carries the current picks so a
+  // closed panel still says what it is about to do.
+  const [customizeOpen, setCustomizeOpen] = useState(false);
   const [goProOpen, setGoProOpen] = useState(false);
   const [recentTopics, setRecentTopics] = useState<string[]>(() => {
     try {
@@ -84,6 +126,12 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated }: FlashcardsGene
   });
 
   const activeTopicRef = useRef("");
+  // Null until the server's __meta event arrives. Staying null means the edge
+  // function ran ungrounded (or predates grounding) — not that it found nothing.
+  const groundingResultRef = useRef<{ retrievedChunks: number; sources: SheetSource[] } | null>(null);
+  // The save happens inside a long-lived interval closure that would capture a
+  // stale `pendingGrounding`. The ref is what that closure actually reads.
+  const pendingGroundingRef = useRef<GroundingMeta | null>(null);
   const { toast } = useToast();
   const { saveCards } = useFlashcardDeck();
   const {
@@ -100,6 +148,8 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated }: FlashcardsGene
     isLoading: modelLoading,
   } = useModelPreference();
   const { user, isAnonymous } = useAuth();
+  // Same shared window as the sheet generator — see use-memory-preference.
+  const { useMemory } = useMemoryPreference();
   const {
     canUseCitation,
     isLoggedIn,
@@ -149,6 +199,10 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated }: FlashcardsGene
     setGenerating(true, activeTopic);
     setCitationState("idle");
     setCitations([]);
+    setPendingGrounding(null);
+    pendingGroundingRef.current = null;
+    setPendingGroundingRequested(useGrounding);
+    groundingResultRef.current = null;
     try {
       const response = await callMedicalNotes({
         notes: activeTopic,
@@ -158,6 +212,10 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated }: FlashcardsGene
         length: "Concise",
         cardsOnly: true,
         cardCount: activeCardCount,
+        useGrounding,
+        topK: groundingTopK,
+        threshold: groundingThreshold,
+        useMemory,
         userId: user?.id ?? null,
         isAnonymous: isAnonymous ?? false,
         isPro: pro,
@@ -196,6 +254,32 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated }: FlashcardsGene
           if (jsonStr === "[DONE]") break;
           try {
             const parsed = JSON.parse(jsonStr);
+            // Grounding metadata arrives as one __meta event ahead of any model
+            // bytes. Intercept it before the delta read so it never lands in
+            // fullText and get parsed as a flashcard.
+            if (parsed.__meta) {
+              // The book/chapter labels arrive as a second __meta frame at the
+              // end of the stream and only refine the sources the first frame
+              // delivered, so merge rather than replace.
+              if (Array.isArray(parsed.__meta.sourceLabels)) {
+                const current = groundingResultRef.current;
+                if (current) {
+                  groundingResultRef.current = {
+                    ...current,
+                    sources: applySourceLabels(current.sources, parsed.__meta.sourceLabels),
+                  };
+                }
+              } else {
+                groundingResultRef.current = {
+                  retrievedChunks:
+                    typeof parsed.__meta.retrievedChunks === "number"
+                      ? parsed.__meta.retrievedChunks
+                      : 0,
+                  sources: Array.isArray(parsed.__meta.sources) ? parsed.__meta.sources : [],
+                };
+              }
+              continue;
+            }
             const content = parsed.choices?.[0]?.delta?.content;
             if (content) fullText += content;
           } catch {
@@ -206,7 +290,24 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated }: FlashcardsGene
       }
 
       const parsed = parseFlashcardsFromOutput(fullText, activeTopic);
+
+      // Retrieval is the ceiling; the per-card [Grounded]/[General] tags decide
+      // whether that ceiling was actually reached. No __meta at all means the
+      // generation ran ungrounded — record that as "none" so the deck is
+      // marked honestly rather than left unlabelled.
+      const grounding = groundingResultRef.current;
+      const groundingMeta: GroundingMeta = grounding
+        ? {
+            retrievedChunks: grounding.retrievedChunks,
+            groundingLevel: groundingLevelFromCards(grounding.retrievedChunks, parsed),
+            sources: grounding.sources,
+          }
+        : { retrievedChunks: 0, groundingLevel: "none", sources: [] };
+
       setPendingCards(parsed);
+      setPendingGrounding(groundingMeta);
+      setPendingGroundingQuery(activeTopic);
+      pendingGroundingRef.current = groundingMeta;
 
       // Citation lookup — runs after cards are saved. Serves from the local
       // topic cache when available (no quota consumed); otherwise the edge
@@ -242,6 +343,8 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated }: FlashcardsGene
       setGenerating(false, "");
       setLoadingMsg("");
       setPendingCards(null);
+      setPendingGrounding(null);
+      pendingGroundingRef.current = null;
       toast({
         title: "Error",
         description: e instanceof Error && e.message ? e.message : "Failed to generate flashcards",
@@ -287,7 +390,7 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated }: FlashcardsGene
           if (pending !== null) {
             clearInterval(interval);
             (async () => {
-              const added = await saveCards(pending);
+              const added = await saveCards(pending, pendingGroundingRef.current ?? undefined);
               localStorage.setItem("sb_first_deck_seen", "1");
               toast({
                 title: added > 0 ? `Added ${added} new cards to your deck` : "No new cards (all duplicates)",
@@ -323,19 +426,21 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated }: FlashcardsGene
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
-    <Card className="glass-card animate-fade-in rounded-2xl border border-border bg-card shadow-sm">
-      <CardContent className="p-6 space-y-6">
+    // Numbered panels on a plain column, not one glass card — the same shape
+    // the sheet configurator uses, so the two generators read as one system.
+    <div className="animate-fade-in space-y-6">
         {!isLoggedIn && (
           <CitationCTABanner onSignInClick={() => setAuthModalOpen(true)} />
         )}
 
-        {/* Step 1: Topic Selection */}
-        <div className="space-y-4">
-          <div className="flex items-center gap-2">
-            <div className="flex items-center justify-center w-7 h-7 rounded-full bg-primary text-primary-foreground text-xs font-bold">1</div>
-            <h2 className="text-sm font-serif font-semibold text-foreground">Medical Topic</h2>
+        {/* ── Step 1: Topic Selection ── */}
+        <div className="rounded-[26px] border border-[color:var(--color-border)] bg-[color:var(--color-card)] p-5 shadow-[0_18px_40px_rgba(15,23,42,0.04)]">
+          <div className="space-y-4">
+          <div className="flex items-center gap-2.5">
+            <div className="flex h-7 w-7 items-center justify-center rounded-full bg-[color:var(--color-accent)] text-[10px] font-bold text-[color:var(--color-background)]">1</div>
+            <h2 className="[font-family:var(--app-font-serif)] text-lg font-medium tracking-[-0.02em] text-[color:var(--color-foreground)]">Medical Topic</h2>
           </div>
-          
+
           <div className="space-y-3">
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
@@ -360,14 +465,22 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated }: FlashcardsGene
             <div className="pt-2">
               <p className="font-mono text-[11px] font-medium tracking-widest uppercase text-muted-foreground mb-3">Popular Topics</p>
               <div className="grid grid-cols-2 gap-2">
-                {POPULAR_TOPICS.slice(0, 6).map(({ label, icon, category }) => (
+                {POPULAR_TOPICS.slice(0, 6).map(({ label, icon: Icon, category }) => (
                   <button
                     key={label}
                     type="button"
                     onClick={() => { setTopic(label); setShowTextarea(false); }}
                     className="group flex flex-col items-center gap-1.5 p-3 rounded-xl border border-border bg-card hover:border-primary hover:shadow-sm transition-all duration-200"
                   >
-                    <span className="text-xl">{icon}</span>
+                    {/* Inverted chip, on the sheet configurator's own token pair
+                        rather than Tailwind's `foreground`/`primary`: those are
+                        near-black ink and a dark teal, which put the glyph at
+                        ~2.2:1 and rendered these tiles as blank dark circles.
+                        Dark mode inverts the pair, so the icon takes the ink
+                        colour there rather than the accent. */}
+                    <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-[color:var(--color-foreground)] text-[color:var(--color-accent)] dark:text-[color:var(--color-accent-foreground)]">
+                      <Icon className="h-4 w-4" strokeWidth={2.2} />
+                    </span>
                     <div className="text-center">
                       <p className="text-xs font-medium text-foreground group-hover:text-primary leading-tight">{label}</p>
                       <p className="text-[10px] text-muted-foreground">{category}</p>
@@ -377,16 +490,42 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated }: FlashcardsGene
               </div>
             </div>
           </div>
+          </div>
         </div>
 
-        {/* Step 2: Configure */}
-        <div className="space-y-4">
-          <div className="flex items-center gap-2">
-            <div className="flex items-center justify-center w-7 h-7 rounded-full bg-info text-primary-foreground text-xs font-bold">2</div>
-            <h2 className="text-sm font-serif font-semibold text-foreground">Configure</h2>
-          </div>
-          
+        {/* ── Step 2: Customize ── */}
+        <div className="rounded-[26px] border border-[color:var(--color-border)] bg-[color:var(--color-card)] p-5 shadow-[0_18px_40px_rgba(15,23,42,0.04)]">
           <div className="space-y-4">
+          <button
+            type="button"
+            onClick={() => setCustomizeOpen((v) => !v)}
+            aria-expanded={customizeOpen}
+            aria-controls="flashcards-customize"
+            className="flex w-full items-center gap-2.5 text-left"
+          >
+            <div className="flex h-7 w-7 items-center justify-center rounded-full border border-[color:var(--color-border)] bg-[color:var(--color-panel)] text-[10px] font-bold text-[color:var(--color-muted-foreground)]">2</div>
+            <h2 className="[font-family:var(--app-font-serif)] text-lg font-medium tracking-[-0.02em] text-[color:var(--color-foreground)]">Customize</h2>
+            <span className="ml-auto flex min-w-0 items-center gap-2">
+              {/* Current picks, so a closed panel still says what it will do.
+                  Deliberately shorter than the sheet's three-part summary: this
+                  pane is 320px, and spelling grounding out every time truncated
+                  the whole line. Grounding is named only when it is off, which
+                  is the setting worth the space. */}
+              {!customizeOpen && (
+                <span className="hidden truncate text-[11px] text-muted-foreground sm:block">
+                  {examMode} · {cardCount} cards{useGrounding ? "" : " · Ungrounded"}
+                </span>
+              )}
+              {customizeOpen ? (
+                <ChevronUp className="h-4 w-4 shrink-0 text-muted-foreground" />
+              ) : (
+                <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+              )}
+            </span>
+          </button>
+
+          {customizeOpen && (
+          <div id="flashcards-customize" className="animate-fade-in space-y-4">
             {/* Exam Mode */}
             <div className="space-y-2">
               <label className="block font-mono text-[11px] font-medium tracking-widest uppercase text-muted-foreground">
@@ -401,15 +540,19 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated }: FlashcardsGene
                       type="button"
                       onClick={() => setExamMode(opt.value)}
                       aria-pressed={active}
+                      // Exam Mode used the violet `info` token while the two
+                      // groups below it used `primary`, so one panel carried two
+                      // unrelated selection colours. Primary is the app's
+                      // selected-state colour, and the sheet's PillGroup uses it.
                       className={`inline-flex flex-col items-start gap-1 p-3 rounded-lg border text-left transition-all duration-200 ${
                         active
-                          ? "bg-info-soft border-info text-info"
-                          : "bg-card border-border text-muted-foreground hover:border-info hover:text-info"
+                          ? "bg-primary/10 border-primary text-primary"
+                          : "bg-card border-border text-muted-foreground hover:border-primary hover:text-primary"
                       }`}
                     >
                       <span className="text-sm font-medium">{opt.label}</span>
                       <span className="text-[10px] text-muted-foreground">{opt.description}</span>
-                      {active && <Check className="w-3 h-3 text-info" />}
+                      {active && <Check className="w-3 h-3 text-primary" />}
                     </button>
                   );
                 })}
@@ -444,12 +587,43 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated }: FlashcardsGene
                 })}
               </div>
             </div>
+
+            {/* Guideline Grounding */}
+            <div className="space-y-2">
+              <label className="block font-mono text-[11px] font-medium tracking-widest uppercase text-muted-foreground">
+                Guideline Grounding
+              </label>
+              <div className="flex gap-2">
+                {GROUNDING_OPTIONS.map(({ value, label, description }) => {
+                  const active = useGrounding === value;
+                  return (
+                    <button
+                      key={String(value)}
+                      type="button"
+                      onClick={() => setUseGrounding(value)}
+                      aria-pressed={active}
+                      className={`flex-1 inline-flex flex-col items-start gap-1 p-3 rounded-lg border text-left transition-all duration-200 ${
+                        active
+                          ? "bg-primary/10 border-primary text-primary"
+                          : "bg-card border-border text-muted-foreground hover:border-primary hover:text-primary"
+                      }`}
+                    >
+                      <span className="text-sm font-medium">{label}</span>
+                      <span className="text-[10px] text-muted-foreground">{description}</span>
+                      {active && <Check className="w-3 h-3 text-primary" />}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+          )}
           </div>
         </div>
 
-        {/* Generate Button */}
+        {/* ── Generate CTA — outside the panels, as on the sheet configurator ── */}
         <Button
-          className="w-full h-12 text-sm font-semibold rounded-xl bg-primary hover:bg-primary/90 text-primary-foreground shadow-md hover:shadow-lg transition-all duration-200"
+          className="w-full h-12 text-sm font-semibold rounded-[18px] bg-primary hover:bg-primary/90 text-primary-foreground shadow-md hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200"
           onClick={() => handleGenerate()}
           disabled={loading || !topic.trim()}
         >
@@ -556,10 +730,33 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated }: FlashcardsGene
             />
           </div>
         )}
-      </CardContent>
+
+        {/* Grounding result for the deck that was just generated */}
+        {!loading && pendingGrounding && (
+          <div className="space-y-3 pt-1">
+            <GroundingNotice
+              level={pendingGrounding.groundingLevel}
+              reason={
+                pendingGrounding.groundingLevel !== "none"
+                  ? undefined
+                  : !pendingGroundingRequested
+                  ? "disabled"
+                  : pendingGrounding.retrievedChunks === 0
+                  ? "no-match"
+                  : "not-relevant"
+              }
+            />
+            {pendingGrounding.sources.length > 0 && (
+              <SheetSources
+                sources={pendingGrounding.sources}
+                query={pendingGroundingQuery}
+              />
+            )}
+          </div>
+        )}
       <AuthModal open={authModalOpen} onOpenChange={setAuthModalOpen} />
       <GoProModal open={goProOpen} onOpenChange={setGoProOpen} />
-    </Card>
+    </div>
   );
 };
 

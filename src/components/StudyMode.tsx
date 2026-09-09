@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { X, BookOpen, Layers, ArrowLeft, RotateCcw } from "lucide-react";
+import { X, BookOpen, Layers, ArrowLeft, RotateCcw, AlertTriangle, CheckCircle2 } from "lucide-react";
 import { getTagColors } from "@/lib/tag-colors";
-import type { Card } from "@/hooks/use-flashcard-deck";
+import { type Card, useDeckGrounding } from "@/hooks/use-flashcard-deck";
 import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useUsageLimit } from "@/hooks/use-usage-limit";
@@ -11,8 +11,10 @@ import AuthModal from "@/components/AuthModal";
 import { useAuth } from "@/hooks/use-auth";
 import { getCitationsForTopic } from "@/lib/citation-store";
 import CitationBadgeList from "@/components/CitationBadgeList";
+import SheetSources from "@/components/SheetSources";
 import { startTopProgress, finishTopProgress } from "@/components/TopProgressBar";
 import { callMedicalNotes } from "@/lib/callMedicalNotes";
+import { useMemoryPreference } from "@/hooks/use-memory-preference";
 
 interface StudyModeProps {
   dueCards: Card[];
@@ -52,6 +54,18 @@ const StudyMode = ({ dueCards, onReview, onClose }: StudyModeProps) => {
 
   const current = sessionCards[index];
   const progress = sessionCards.length === 0 ? 0 : (reviewedCount / sessionCards.length) * 100;
+
+  // Scoped to whichever card is on screen, not the whole session — a due-cards
+  // or all-cards review can span multiple decks/topics, so there's no single
+  // session-wide source list that would always be correct. react-query caches
+  // by topic, so flipping between cards of the same deck doesn't refetch.
+  const { data: currentCardGrounding } = useDeckGrounding(current?.topic ?? null);
+
+  // Cards written before grounding existed default to grounded=false, so this
+  // count is honest about them too: nothing in this session was checked
+  // against a guideline unless the generator said so.
+  const ungroundedCount = sessionCards.filter((c) => !c.grounded).length;
+  const allUngrounded = ungroundedCount > 0 && ungroundedCount === sessionCards.length;
 
   const handleFlip = () => {
     vibrate("flip");
@@ -118,6 +132,25 @@ const StudyMode = ({ dueCards, onReview, onClose }: StudyModeProps) => {
           </div>
         ) : current ? (
           <div className="w-full max-w-xl space-y-4 md:space-y-6">
+            {sessionCards.length > 0 && (
+              ungroundedCount > 0 ? (
+                <div className="flex items-start gap-2 px-4 py-3 rounded-lg border border-warning/40 bg-warning/10 text-warning text-xs">
+                  <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                  <span>
+                    {allUngrounded
+                      ? "These cards were generated from general medical knowledge — verify before exam use."
+                      : `${ungroundedCount} of ${sessionCards.length} cards use general knowledge, not a verified guideline.`}
+                  </span>
+                </div>
+              ) : (
+                <div className="flex items-start gap-2 px-4 py-3 rounded-lg border border-success/40 bg-success/10 text-success text-xs">
+                  <CheckCircle2 className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                  <span>
+                    All {sessionCards.length} {sessionCards.length === 1 ? "card is" : "cards are"} grounded in the guideline library.
+                  </span>
+                </div>
+              )
+            )}
             {/* Card with flip — tap to flip; keyed wrapper drives slide transitions */}
             <div
               key={current.id}
@@ -210,6 +243,15 @@ const StudyMode = ({ dueCards, onReview, onClose }: StudyModeProps) => {
             <p className="text-center text-xs text-muted-foreground">
               Card {index + 1} of {sessionCards.length}
             </p>
+
+            {/* Guideline sources behind the current card's deck — same
+                component SheetGenerator renders below the document; self-hides
+                when the current card's deck has no retrieval metadata. The
+                deck's topic is what was retrieved on, so it is also what the
+                excerpts highlight against. */}
+            {currentCardGrounding && currentCardGrounding.sources.length > 0 && (
+              <SheetSources sources={currentCardGrounding.sources} query={current.topic} />
+            )}
           </div>
         ) : null}
       </div>
@@ -245,7 +287,7 @@ export const CardFace = ({
   }
   return (
     <div className="glass-card rounded-xl p-5 md:p-8 h-[260px] sm:h-[300px] flex flex-col gap-2.5">
-      <div className="shrink-0 flex items-center gap-2.5">
+      <div className="shrink-0 flex items-center gap-2.5 flex-wrap">
         {card.topicEmoji && (
           <span className="text-xl leading-none" aria-hidden>
             {card.topicEmoji}
@@ -256,6 +298,25 @@ export const CardFace = ({
         >
           {card.tag || "Card"}
         </span>
+        {/* Every card states its grounding status explicitly — same color
+            convention as DeckGroundingBadge in DeckList.tsx. */}
+        {card.grounded ? (
+          <span
+            title="Generated from and verified against a specific clinical guideline"
+            className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium uppercase tracking-wider border border-success/40 bg-success/10 text-success"
+          >
+            <CheckCircle2 className="w-2.5 h-2.5" />
+            Grounded
+          </span>
+        ) : (
+          <span
+            title="Generated from general medical knowledge — not verified against a specific guideline"
+            className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium uppercase tracking-wider border border-warning/40 bg-warning/10 text-warning"
+          >
+            <AlertTriangle className="w-2.5 h-2.5" />
+            Unverified
+          </span>
+        )}
       </div>
       <div className="flex-1 overflow-y-auto overflow-hidden pr-1">
         <p className={`${cardFontSize(text)} font-medium leading-relaxed text-foreground`}>
@@ -333,6 +394,8 @@ export const ExplainPanel = ({ open, scope, card, onClose }: ExplainPanelProps) 
   const { toast } = useToast();
   const { isSheetLimited } = useUsageLimit();
   const { isAnonymous } = useAuth();
+  // Same shared 10-turn window as sheets and cards — see use-memory-preference.
+  const { useMemory } = useMemoryPreference();
   const [output, setOutput] = useState("");
   const [loading, setLoading] = useState(false);
   const [started, setStarted] = useState(false);
@@ -374,11 +437,13 @@ export const ExplainPanel = ({ open, scope, card, onClose }: ExplainPanelProps) 
               notes: `CARD QUESTION: ${card.question}\n\nCARD ANSWER: ${card.answer}\n\nTOPIC CONTEXT: ${card.topic}`,
               examMode: "General",
               explainMode: true,
+              useMemory,
             }
           : {
               notes: `Topic: ${card.topic}\n\nQuestion being studied: ${card.question}`,
               examMode: "General",
               explainMode: true,
+              useMemory,
             };
         const response = await callMedicalNotes(body);
         if (!response.ok) {
