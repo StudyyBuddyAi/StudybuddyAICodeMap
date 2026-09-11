@@ -2,6 +2,7 @@ import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.39.8
 import {
   SYSTEM_NAMES,
   permuteToPlannedLetter,
+  buildDistractorExplanations,
   type BatchPlan,
   type OptionLetter,
   type SystemKey,
@@ -207,24 +208,6 @@ export function parseBatchContent(content: string): ParsedQuestion[] {
     .filter((q): q is ParsedQuestion => q !== null);
 }
 
-/**
- * The `questions` table has one explanation column, but the prompt produces two
- * things a learner needs: why the key is right, and why each distractor is
- * wrong. They are joined here so the existing player renders both without any
- * change — the explanation panel is `whitespace-pre-line`, so the line breaks
- * survive, and renderMarkdown keeps the bolding.
- *
- * Letters are upper-cased to match how the options are labelled on screen.
- */
-function composeExplanation(question: ParsedQuestion): string {
-  const wrong = OPTION_KEYS
-    .filter((k) => k !== question.correctOption && question.distractorExplanations[k])
-    .map((k) => `${k.toUpperCase()}. ${question.distractorExplanations[k]}`);
-
-  if (wrong.length === 0) return question.explanation;
-  return `${question.explanation}\n\nWhy the others are wrong\n${wrong.join("\n")}`;
-}
-
 export interface PersistInput {
   content: string;
   system: SystemKey;
@@ -254,7 +237,7 @@ export interface PreparedBatch {
  * Order matters. The permutation has to happen before the gate, because the gate
  * reads option positions and distractor-explanation letters, and the permuted
  * order is what the student will actually see. It has to happen before
- * composeExplanation for the same reason.
+ * buildDistractorExplanations for the same reason.
  *
  * Split out from the insert so the caller can run the cold-answering pass
  * against the same questions concurrently — the two are independent and the
@@ -305,8 +288,9 @@ function buildRow(
     option_d: question.options.d,
     option_e: question.options.e,
     correct_option: question.correctOption,
-    explanation: composeExplanation(question),
+    explanation: question.explanation,
     teaching_point: question.teachingPoint,
+    distractor_explanations: buildDistractorExplanations(question),
     is_active: false,
     origin: "generated",
     created_by: userId,
@@ -316,6 +300,7 @@ function buildRow(
       promptVersion: "v13.1-api",
       requestedTopic: input.topic,
       system: input.system,
+      challenge: input.plan.challenge,
       index: question.index,
       plannedAnswer: input.plan.questions.find((p) => p.index === question.index)?.answerLetter ?? null,
       plannedReasoningOrder:

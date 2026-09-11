@@ -355,6 +355,8 @@ const ExplanationContent = ({
 interface OptionTileProps {
   letter: OptionKey;
   text: string;
+  /** Why this option is wrong. Undefined for the key, and before grading. */
+  explanation?: string;
   answerState: AnswerState;
   pendingKey: OptionKey | null;
   onSelect: (key: OptionKey) => void;
@@ -364,7 +366,14 @@ const LETTER_LABELS: Record<OptionKey, string> = {
   a: "A", b: "B", c: "C", d: "D", e: "E",
 };
 
-const OptionTile = ({ letter, text, answerState, pendingKey, onSelect }: OptionTileProps) => {
+const OptionTile = ({
+  letter,
+  text,
+  explanation,
+  answerState,
+  pendingKey,
+  onSelect,
+}: OptionTileProps) => {
   const isAnswered = answerState.status === "answered";
   const isSelected = isAnswered && answerState.selected === letter;
   const isCorrect  = isAnswered && answerState.correct === letter;
@@ -408,7 +417,7 @@ const OptionTile = ({ letter, text, answerState, pendingKey, onSelect }: OptionT
     ? { background: "var(--accent)", color: "var(--bg)" }
     : { background: "var(--border)", color: "var(--fg-muted)" };
 
-  return (
+  const tile = (
     <button
       type="button"
       onClick={() => !isAnswered && onSelect(letter)}
@@ -444,6 +453,42 @@ const OptionTile = ({ letter, text, answerState, pendingKey, onSelect }: OptionT
       </span>
       <span style={{ fontSize: 14, lineHeight: 1.6, paddingTop: 2 }}>{text}</span>
     </button>
+  );
+
+  // Nothing to say until the question is graded, and never for the key — the
+  // reason the correct answer is correct is the explanation panel's job, and
+  // the writer is blocked from emitting a why-it-is-wrong for it.
+  if (!isAnswered || !explanation || isCorrect) return tile;
+
+  return (
+    <div>
+      {tile}
+      <div
+        style={{
+          marginTop: 6,
+          marginLeft: 40,
+          paddingLeft: 12,
+          borderLeft: isWrong ? "2px solid var(--signal)" : "2px solid var(--border)",
+        }}
+      >
+        {isWrong && (
+          <p
+            style={{
+              ...MONO_EYEBROW,
+              color: "var(--signal)",
+              marginBottom: 4,
+            }}
+          >
+            Why your answer is wrong
+          </p>
+        )}
+        <p
+          className="[&_strong]:text-foreground [&_strong]:font-semibold"
+          style={{ fontSize: 12, lineHeight: 1.7, color: "var(--fg-muted)" }}
+          dangerouslySetInnerHTML={{ __html: renderMarkdown(explanation) }}
+        />
+      </div>
+    </div>
   );
 };
 
@@ -1246,6 +1291,7 @@ const QBankSession = () => {
                   key={key}
                   letter={key}
                   text={text}
+                  explanation={displayQuestion!.distractor_explanations?.[key]}
                   answerState={effectiveAnswerState}
                   pendingKey={effectiveAnswerState.status === "selected" ? effectiveAnswerState.pending : null}
                   onSelect={handleSelect}

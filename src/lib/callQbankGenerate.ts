@@ -26,6 +26,12 @@ export interface QbankGenerateParams {
   startIndex?: number;
   /** Subtopics the set has already covered. The prompt's duplication guard. */
   avoidSubtopics?: string[];
+  /**
+   * How hard the student asked for. Shifts the reasoning-order mix the batch
+   * plan imposes; unknown values fall back to "balanced" server-side. Echoed on
+   * every wave so a set does not change character halfway through.
+   */
+  challenge?: string;
 }
 
 export interface CallQbankGenerateOptions {

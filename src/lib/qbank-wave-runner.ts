@@ -155,6 +155,8 @@ export interface RunGenerationOptions {
   alreadyCovered?: string[];
   /** Resuming: the system the set was routed to, so the brief does not change. */
   system?: string | null;
+  /** The reasoning-order mix the student asked for. Echoed on every wave. */
+  challenge?: string;
   /**
    * Overrides the retry backoff. Exists so the tests can exercise the give-up
    * paths without sitting through five real seconds per empty wave.
@@ -206,6 +208,7 @@ async function runWave(
     system: string | null;
     startIndex: number;
     avoidSubtopics: string[];
+    challenge?: string;
   },
   opts: RunGenerationOptions
 ): Promise<WaveResult> {
@@ -249,6 +252,7 @@ async function runWave(
         system: params.system ?? undefined,
         startIndex: params.startIndex,
         avoidSubtopics: params.avoidSubtopics,
+        challenge: params.challenge,
       },
       { signal: ac.signal }
     );
@@ -447,6 +451,7 @@ export async function runQbankGeneration(
             system,
             startIndex: nextIndex,
             avoidSubtopics: [...covered],
+            challenge: opts.challenge,
           },
           opts
         );

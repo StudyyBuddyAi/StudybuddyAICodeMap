@@ -34,6 +34,14 @@ export interface Question {
   correct_option?: OptionKey;
   explanation?: string;
   teaching_point?: string;
+  /**
+   * Why each wrong option is wrong, keyed by the letter it describes. Arrives
+   * with the grade, like the fields above it. Absent on curated questions and
+   * on generated ones written before the column existed — those carry the same
+   * text appended to `explanation` instead, so a reader must treat this as
+   * optional rather than assume every answered question has it.
+   */
+  distractor_explanations?: Partial<Record<OptionKey, string>>;
   media?: QuestionMedia[];
 }
 
@@ -63,6 +71,13 @@ export interface SessionGeneration {
   systemName: string | null;
   /** How many questions the set is meant to end with. */
   target: number;
+  /**
+   * The reasoning-order mix this set was asked for. Persisted because a resumed
+   * run rebuilds its own batch plan: without it, the waves written after a
+   * refresh would silently drop back to the default and the second half of the
+   * set would not match the first.
+   */
+  challenge: ChallengeLevel;
   nextIndex: number;
   covered: string[];
 }
@@ -102,6 +117,26 @@ export interface SessionState {
 // same as a curated one.
 
 export type ReasoningOrder = "1st" | "2nd" | "3rd";
+
+/**
+ * How hard the student asked for. Mirrors ChallengeLevel in
+ * supabase/functions/_shared/qbank-prompt.ts, which is the authority — the edge
+ * function narrows whatever arrives back onto that enum, so a stale client can
+ * only ever get the default rather than an error.
+ */
+export type ChallengeLevel = "foundations" | "balanced" | "challenge";
+
+export const CHALLENGE_LABELS: Record<ChallengeLevel, string> = {
+  foundations: "Foundations",
+  balanced: "Balanced",
+  challenge: "Challenge",
+};
+
+export const CHALLENGE_BLURBS: Record<ChallengeLevel, string> = {
+  foundations: "Mostly single-step recall and mechanism. Short vignettes.",
+  balanced: "Exam calibration — about 65-70% correct for a prepared student.",
+  challenge: "Multi-step reasoning and close discrimination between look-alikes.",
+};
 
 /** Where a `questions` row came from. Curated rows are the hand-authored bank. */
 export type QuestionOrigin = "curated" | "generated";

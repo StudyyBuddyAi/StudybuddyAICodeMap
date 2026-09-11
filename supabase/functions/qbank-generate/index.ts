@@ -12,6 +12,7 @@ import {
   SYSTEM_KEYS,
   buildBatchPlan,
   buildUserMessage,
+  asChallengeLevel,
   type BatchPlan,
   type SystemKey,
 } from "../_shared/qbank-prompt.ts";
@@ -217,12 +218,23 @@ serve(async (req) => {
       : await resolveSystem(config, cleanTopic);
     const system = routed.system;
 
-    const plan: BatchPlan = buildBatchPlan(system, waveCount, Math.random, waveStart);
+    // Unknown or absent values fall back to the default rather than 400ing:
+    // the level changes the shape of a set, never whether it can be written.
+    const challenge = asChallengeLevel(body?.challenge);
+
+    const plan: BatchPlan = buildBatchPlan(
+      system,
+      waveCount,
+      Math.random,
+      waveStart,
+      challenge
+    );
     log("generating", {
       system,
       confidence: routed.confidence,
       count: waveCount,
       startIndex: waveStart,
+      challenge,
       avoidCount: avoid.length,
       model: config.model,
       topicLength: cleanTopic.length,

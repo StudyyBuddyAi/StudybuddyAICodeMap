@@ -43,6 +43,50 @@ export type OptionLetter = "a" | "b" | "c" | "d" | "e";
 export type ReasoningOrder = "1st" | "2nd" | "3rd";
 
 /**
+ * How hard the student asked for the set to be.
+ *
+ * This is a reasoning-order dial, not a difficulty dial, because reasoning order
+ * is the thing the batch plan actually controls. The model self-labels
+ * difficulty, and it labels it downstream of the order it was told to write at —
+ * so moving the order mix is what moves the difficulty, and claiming to set
+ * difficulty directly would be claiming a control that does not exist.
+ */
+export type ChallengeLevel = "foundations" | "balanced" | "challenge";
+
+export const CHALLENGE_LEVELS: ChallengeLevel[] = [
+  "foundations",
+  "balanced",
+  "challenge",
+];
+
+export const DEFAULT_CHALLENGE: ChallengeLevel = "balanced";
+
+/**
+ * Target share of 1st- and 3rd-order items per level; 2nd-order takes the rest.
+ *
+ * The floors are what stop a small set collapsing to one note. "balanced" keeps
+ * one item at each end however short the batch — the shape the mix has always
+ * had. The other two drop the floor on the end they are moving away from, so
+ * "foundations" is allowed to contain no 3rd-order item at all rather than
+ * being forced to carry one.
+ */
+const CHALLENGE_MIX: Record<
+  ChallengeLevel,
+  { first: number; third: number; minFirst: number; minThird: number }
+> = {
+  foundations: { first: 0.5, third: 0.1, minFirst: 1, minThird: 0 },
+  balanced: { first: 0.2, third: 0.2, minFirst: 1, minThird: 1 },
+  challenge: { first: 0.1, third: 0.5, minFirst: 0, minThird: 1 },
+};
+
+/** Narrows unknown input — a request body, say — onto the enum. */
+export function asChallengeLevel(value: unknown): ChallengeLevel {
+  return CHALLENGE_LEVELS.includes(value as ChallengeLevel)
+    ? (value as ChallengeLevel)
+    : DEFAULT_CHALLENGE;
+}
+
+/**
  * System keys. The display names match `curriculum_topics.system` exactly so
  * generated items can be linked to the roadmap later without a mapping table,
  * and so the three systems that already hold curated questions
@@ -428,6 +472,7 @@ export interface PlannedQuestion {
 export interface BatchPlan {
   system: SystemKey;
   systemName: string;
+  challenge: ChallengeLevel;
   questions: PlannedQuestion[];
 }
 
@@ -465,9 +510,11 @@ function shuffledLetters(random: () => number): OptionLetter[] {
  * Reasoning order mix.
  *
  * Generated items cluster at Bloom's Remember/Understand tier, so the mix is
- * imposed rather than left to the model: a majority of 2nd-order with one item
- * at each end. For five questions that is 1 / 3 / 1. The shape generalises so a
- * later batch size does not need a second code path.
+ * imposed rather than left to the model. At the default level that is a
+ * majority of 2nd-order with one item at each end — for five questions, 1/3/1.
+ * The other levels shift the same shape toward one end or the other; see
+ * CHALLENGE_MIX. It generalises over count, so a later batch size does not need
+ * a second code path.
  *
  * Shuffled across positions, because emitting it in order made every set
  * identical in shape. A measured run put the single 1st-order item at index 1
@@ -476,9 +523,14 @@ function shuffledLetters(random: () => number): OptionLetter[] {
  * and every Hard one was its fourth or fifth. A student who generates two sets
  * learns the ramp and stops reading the early items carefully.
  */
-function reasoningOrderMix(count: number, random: () => number): ReasoningOrder[] {
-  const firsts = Math.max(1, Math.round(count * 0.2));
-  const thirds = Math.max(1, Math.round(count * 0.2));
+function reasoningOrderMix(
+  count: number,
+  random: () => number,
+  challenge: ChallengeLevel = DEFAULT_CHALLENGE
+): ReasoningOrder[] {
+  const mixFor = CHALLENGE_MIX[challenge];
+  const firsts = Math.max(mixFor.minFirst, Math.round(count * mixFor.first));
+  const thirds = Math.max(mixFor.minThird, Math.round(count * mixFor.third));
   const seconds = Math.max(0, count - firsts - thirds);
   const mix = [
     ...Array<ReasoningOrder>(firsts).fill("1st"),
@@ -505,14 +557,16 @@ export function buildBatchPlan(
   system: SystemKey,
   count: number,
   random: () => number = Math.random,
-  startIndex = 1
+  startIndex = 1,
+  challenge: ChallengeLevel = DEFAULT_CHALLENGE
 ): BatchPlan {
   const letters = shuffledLetters(random);
-  const orders = reasoningOrderMix(count, random);
+  const orders = reasoningOrderMix(count, random, challenge);
 
   return {
     system,
     systemName: SYSTEM_NAMES[system],
+    challenge,
     questions: Array.from({ length: count }, (_, i) => ({
       index: startIndex + i,
       answerLetter: letters[i % letters.length],
@@ -526,6 +580,40 @@ export interface PermutableQuestion {
   options: Record<OptionLetter, string>;
   correctOption: OptionLetter;
   distractorExplanations: Partial<Record<OptionLetter, string>>;
+}
+
+/**
+ * The wrong-option explanations, keyed by the letter each one describes.
+ *
+ * These used to be flattened into the single `explanation` column, because the
+ * questions table had nowhere else to put them. The student got the words but
+ * lost the association: nothing tied the sentence about option C to option C,
+ * and the one explanation that matters most — why the option THEY chose is
+ * wrong — sat in the middle of a list. questions.distractor_explanations now
+ * holds them keyed by letter, so the player can put each under its own option.
+ *
+ * The key never gets an entry: an explanation of why the correct answer is
+ * wrong is a contradiction, and the QA gate blocks an item that emits one
+ * (`distractor-explains-key`). This is the last place it can be stopped before
+ * it renders under the option the student got right.
+ *
+ * Lives here rather than in qbank-persist because it operates on exactly the
+ * shape permuteToPlannedLetter rewrites and has to run AFTER it — the two are a
+ * pair, and this module is the one both runtimes can import.
+ *
+ * Empty rather than null when the model wrote none, so a reader can tell "this
+ * set wrote none" from "this row predates the column".
+ */
+export function buildDistractorExplanations(
+  question: PermutableQuestion
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const k of LETTERS) {
+    if (k === question.correctOption) continue;
+    const text = question.distractorExplanations[k];
+    if (text) out[k] = text;
+  }
+  return out;
 }
 
 /**
@@ -564,6 +652,23 @@ export function permuteToPlannedLetter<T extends PermutableQuestion>(
   return { ...question, options, correctOption: target, distractorExplanations: explanations };
 }
 
+/**
+ * One line per level, appended to the batch plan.
+ *
+ * The plan already assigns a reasoning order per item, which is the binding
+ * instruction; this only tells the model what the set as a whole is for, so its
+ * vignette length and its own difficulty labelling follow the same intent
+ * instead of drifting back to the middle.
+ */
+const CHALLENGE_BRIEFS: Record<ChallengeLevel, string> = {
+  foundations:
+    "This set is for consolidating fundamentals. Favour single-step recall and mechanism identification, keep vignettes short, and do not stack findings — one clear signal per item.",
+  balanced:
+    "This set is standard exam calibration: aim for roughly 65-70% correct for a prepared student.",
+  challenge:
+    "This set is for a student who already knows the fundamentals. Favour multi-step reasoning: make them connect a mechanism to a consequence, or discriminate between two conditions that share a presentation. Do not achieve difficulty by obscurity — the medicine stays high-yield.",
+};
+
 export interface UserMessageInput {
   /** The student's free-text topic, verbatim. */
   topic: string;
@@ -600,6 +705,8 @@ ${SYSTEM_BRIEFS[plan.system]}
 ${planRows}
 
 Write each item at the reasoning order assigned to it, and put its correct answer on whichever option is correct.
+
+${CHALLENGE_BRIEFS[plan.challenge]}
 ${avoidBlock}
 ## Requested topic
 

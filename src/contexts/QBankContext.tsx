@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useCallback, useMemo, useRef, ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
 import type {
@@ -9,6 +9,7 @@ import type {
   SessionAnswer,
   SessionState,
   SessionGeneration,
+  ChallengeLevel,
 } from "@/lib/qbank-types";
 import {
   runQbankGeneration,
@@ -89,10 +90,6 @@ interface SessionSummary {
 }
 
 interface QBankContextValue {
-  questionCount: number;
-  availableSystems: string[];
-  allDomainMeta: { subject: string; domain: string }[];
-  allQuestionMeta: { id: string; domain: string; subject: string }[];
   session: SessionState | null;
   currentQuestion: Question | null;
   currentIndex: number;
@@ -104,12 +101,15 @@ interface QBankContextValue {
   /** The generation behind the most recently finished session, if it had one. */
   lastGeneration: SessionGeneration | null;
   progress: number;
-  startSession: (config?: SessionConfig) => Promise<void>;
   /**
    * Generates a set and starts playing it as soon as the first question exists.
    * Resolves once the session is live, while the rest keeps being written.
    */
-  startGeneratedSession: (topic: string, target: number) => Promise<void>;
+  startGeneratedSession: (
+    topic: string,
+    target: number,
+    challenge?: ChallengeLevel
+  ) => Promise<void>;
   /** Cancels an in-flight set. Whatever landed stays playable. */
   stopGeneration: () => void;
   /**
@@ -175,56 +175,6 @@ export const QBankProvider = ({ children }: { children: ReactNode }) => {
   // it rather than replacing it.
   const heldBackRef = useRef(0);
   const heldBackItemsRef = useRef<HeldBackItem[]>([]);
-
-  const { data: questionCount = 0 } = useQuery({
-    queryKey: ["qbank-count"],
-    queryFn: async (): Promise<number> => {
-      // select("id") not "*": answer columns are REVOKE'd, so a `*` count 403s.
-      const { count, error } = await supabase
-        .from("questions")
-        .select("id", { count: "exact", head: true })
-        .eq("is_active", true);
-      if (error) throw error;
-      return count ?? 0;
-    },
-  });
-
-  const { data: availableSystems = [] } = useQuery({
-    queryKey: ["qbank-systems"],
-    queryFn: async (): Promise<string[]> => {
-      const { data, error } = await supabase
-        .from("questions")
-        .select("subject")
-        .eq("is_active", true);
-      if (error) throw error;
-      const unique = [...new Set((data ?? []).map((r: { subject: string }) => r.subject))].sort();
-      return unique;
-    },
-  });
-
-  const { data: allDomainMeta = [] } = useQuery({
-    queryKey: ["qbank-domain-meta"],
-    queryFn: async (): Promise<{ subject: string; domain: string }[]> => {
-      const { data, error } = await supabase
-        .from("questions")
-        .select("subject, domain")
-        .eq("is_active", true);
-      if (error) throw error;
-      return (data ?? []) as { subject: string; domain: string }[];
-    },
-  });
-
-  const { data: allQuestionMeta = [] } = useQuery({
-    queryKey: ["qbank-meta"],
-    queryFn: async (): Promise<{ id: string; domain: string; subject: string }[]> => {
-      const { data, error } = await supabase
-        .from("questions")
-        .select("id, domain, subject")
-        .eq("is_active", true);
-      if (error) throw error;
-      return (data ?? []) as { id: string; domain: string; subject: string }[];
-    },
-  });
 
   const flaggedIds: Set<string> = useMemo(
     () => new Set(session?.flaggedIds ?? []),
@@ -388,6 +338,7 @@ export const QBankProvider = ({ children }: { children: ReactNode }) => {
         correct_option: OptionKey;
         explanation: string;
         teaching_point: string;
+        distractor_explanations: Partial<Record<OptionKey, string>> | null;
       };
 
       const answer: SessionAnswer = {
@@ -407,6 +358,7 @@ export const QBankProvider = ({ children }: { children: ReactNode }) => {
               correct_option: graded.correct_option,
               explanation: graded.explanation,
               teaching_point: graded.teaching_point,
+              distractor_explanations: graded.distractor_explanations ?? undefined,
             }
           : q
       );
@@ -548,6 +500,7 @@ export const QBankProvider = ({ children }: { children: ReactNode }) => {
       covered: string[];
       system: string | null;
       systemName: string | null;
+      challenge: ChallengeLevel;
       createSession?: (questionId: string, meta: SessionGeneration) => Promise<void>;
     }): Promise<GenerationOutcome> => {
       const controller = new AbortController();
@@ -562,6 +515,7 @@ export const QBankProvider = ({ children }: { children: ReactNode }) => {
         system: cfg.system,
         systemName: cfg.systemName,
         target: cfg.setTarget,
+        challenge: cfg.challenge,
         nextIndex: cfg.startIndex,
         covered: cfg.covered,
       };
@@ -586,6 +540,7 @@ export const QBankProvider = ({ children }: { children: ReactNode }) => {
         startIndex: cfg.startIndex,
         alreadyCovered: cfg.covered,
         system: cfg.system,
+        challenge: cfg.challenge,
         shouldContinue: () => !controller.signal.aborted,
         onMeta: ({ systemName }) => {
           meta.systemName = systemName;
@@ -678,7 +633,7 @@ export const QBankProvider = ({ children }: { children: ReactNode }) => {
   );
 
   const startGeneratedSession = useCallback(
-    async (topic: string, target: number) => {
+    async (topic: string, target: number, challenge: ChallengeLevel = "balanced") => {
       stopGeneration();
       sessionIdRef.current = null;
       heldBackRef.current = 0;
@@ -705,6 +660,7 @@ export const QBankProvider = ({ children }: { children: ReactNode }) => {
         covered: [],
         system: null,
         systemName: null,
+        challenge,
         createSession: async (questionId, meta) => {
           await startSession({
             domains: [],
@@ -776,6 +732,9 @@ export const QBankProvider = ({ children }: { children: ReactNode }) => {
         covered: meta.covered,
         system: meta.system,
         systemName: meta.systemName,
+        // A set written before this field existed resumes at the default, which
+        // is the mix it was actually written with.
+        challenge: meta.challenge ?? "balanced",
       }).catch(() => undefined);
     })
       // The flag is claimed up front so two mounts cannot both start resuming.
@@ -1035,10 +994,6 @@ export const QBankProvider = ({ children }: { children: ReactNode }) => {
   return (
     <QBankContext.Provider
       value={{
-        questionCount,
-        availableSystems,
-        allDomainMeta,
-        allQuestionMeta,
         session,
         currentQuestion,
         currentIndex: session?.currentIndex ?? 0,
@@ -1048,7 +1003,6 @@ export const QBankProvider = ({ children }: { children: ReactNode }) => {
         generation,
         lastGeneration,
         progress,
-        startSession,
         startGeneratedSession,
         stopGeneration,
         resumeGeneration,

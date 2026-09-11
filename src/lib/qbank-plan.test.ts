@@ -2,7 +2,10 @@ import { describe, it, expect } from "vitest";
 import {
   buildBatchPlan,
   permuteToPlannedLetter,
+  asChallengeLevel,
   type PermutableQuestion,
+  type ChallengeLevel,
+  type ReasoningOrder,
 } from "../../supabase/functions/_shared/qbank-prompt.ts";
 
 /** Deterministic stand-in for Math.random, so a plan is reproducible. */
@@ -80,5 +83,62 @@ describe("buildBatchPlan", () => {
   it("spreads the answer letters across all five before repeating", () => {
     const letters = buildBatchPlan("renal", 5, seeded(3)).questions.map((q) => q.answerLetter);
     expect(new Set(letters).size).toBe(5);
+  });
+});
+
+describe("buildBatchPlan challenge levels", () => {
+  const ordersFor = (level: ChallengeLevel, count = 20) =>
+    buildBatchPlan("renal", count, seeded(11), 1, level).questions.map(
+      (q) => q.reasoningOrder
+    );
+
+  const count = (orders: ReasoningOrder[], of: ReasoningOrder) =>
+    orders.filter((o) => o === of).length;
+
+  it("defaults to the balanced mix when no level is given", () => {
+    const withDefault = buildBatchPlan("renal", 20, seeded(11)).questions.map(
+      (q) => q.reasoningOrder
+    );
+    expect(withDefault).toEqual(ordersFor("balanced"));
+  });
+
+  it("shifts toward 1st-order for foundations and 3rd-order for challenge", () => {
+    const foundations = ordersFor("foundations");
+    const challenge = ordersFor("challenge");
+
+    // The dial has to actually move the thing it claims to move: more recall
+    // at the easy end, more multi-step at the hard end, in both directions.
+    expect(count(foundations, "1st")).toBeGreaterThan(count(challenge, "1st"));
+    expect(count(challenge, "3rd")).toBeGreaterThan(count(foundations, "3rd"));
+  });
+
+  it("keeps every set to the size it was asked for, at every level", () => {
+    for (const level of ["foundations", "balanced", "challenge"] as ChallengeLevel[]) {
+      for (const size of [5, 10, 15, 20]) {
+        expect(ordersFor(level, size)).toHaveLength(size);
+      }
+    }
+  });
+
+  it("records the level on the plan, so the prompt can name it", () => {
+    expect(buildBatchPlan("renal", 5, seeded(1), 1, "challenge").challenge).toBe(
+      "challenge"
+    );
+  });
+});
+
+describe("asChallengeLevel", () => {
+  it("passes the three real levels through", () => {
+    expect(asChallengeLevel("foundations")).toBe("foundations");
+    expect(asChallengeLevel("balanced")).toBe("balanced");
+    expect(asChallengeLevel("challenge")).toBe("challenge");
+  });
+
+  it("falls back to the default for anything else", () => {
+    // A request body is untrusted input, and an unknown level must not be able
+    // to fail a generation — it is a shape control, not a precondition.
+    for (const bad of [undefined, null, "", "hard", 3, {}, ["challenge"]]) {
+      expect(asChallengeLevel(bad)).toBe("balanced");
+    }
   });
 });
