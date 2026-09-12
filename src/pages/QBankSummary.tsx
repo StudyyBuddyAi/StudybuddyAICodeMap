@@ -1,11 +1,27 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { FlaskConical, CheckCircle, XCircle, Clock, RotateCcw, ChevronRight, Flag } from "lucide-react";
+import {
+  FlaskConical,
+  CheckCircle,
+  XCircle,
+  Clock,
+  RotateCcw,
+  ChevronRight,
+  Flag,
+  ShieldCheck,
+  ImageOff,
+} from "lucide-react";
 import DashboardLayout from "@/components/dashboard/DashboardLayout";
 import PageLoader from "@/components/PageLoader";
 import { useQBankContext } from "@/contexts/QBankContext";
 import { supabase } from "@/integrations/supabase/client";
 import type { Question, QuestionMedia, SessionAnswer } from "@/lib/qbank-types";
+import { CHALLENGE_LABELS, EXAM_MODE_LABELS } from "@/lib/qbank-types";
+import { ruleLabel } from "@/lib/qbank-rule-labels";
+import {
+  fetchGenerationReport,
+  type GenerationReport,
+} from "@/lib/qbank-generation-report";
 
 interface SummaryData {
   questions: Question[];
@@ -43,8 +59,112 @@ interface ReviewQuestion {
   correct_option: string;
   explanation: string;
   teaching_point: string;
+  distractor_explanations: Partial<Record<string, string>> | null;
   media: ReviewMedia[] | null;
 }
+
+const REASONING_LABELS: Record<string, string> = {
+  "1st": "1st-order",
+  "2nd": "2nd-order",
+  "3rd": "3rd-order",
+};
+
+/**
+ * How the set was written, from the signals every generated row already stores.
+ *
+ * The point is not the numbers, it is that the numbers exist: a set that says
+ * "twenty-two written, twenty admitted, two rewritten because the correct
+ * answer stood out by length" is making a claim a student can weigh. Held-back
+ * items are reported as counts and rule labels only — never tied to a question,
+ * since a summary is reachable while its own set is still being reviewed.
+ */
+const GenerationReportPanel = ({ report }: { report: GenerationReport }) => {
+  const heldBack = report.blocked + report.disputed;
+  const findings = Object.entries(report.findings).sort((a, b) => b[1] - a[1]);
+  const mix = ["1st", "2nd", "3rd"]
+    .map((order) => ({ order, n: report.reasoning_mix[order] ?? 0 }))
+    .filter((m) => m.n > 0);
+
+  // "Asked for as Step 2 CK at balanced level." Either half can be missing on
+  // a set written before its control existed, so the sentence is assembled
+  // from whatever the rows recorded.
+  const examName = report.exam_mode ? EXAM_MODE_LABELS[report.exam_mode] : null;
+  const levelName = report.challenge ? CHALLENGE_LABELS[report.challenge] : null;
+  const askedFor =
+    examName && levelName
+      ? ` Asked for as ${examName} at ${levelName.toLowerCase()} level.`
+      : examName
+        ? ` Asked for as ${examName}.`
+        : levelName
+          ? ` Asked for at ${levelName.toLowerCase()} level.`
+          : "";
+
+  return (
+    <div
+      style={{
+        border: "1px solid var(--border)",
+        borderRadius: "var(--radius-lg)",
+        background: "var(--bg-elevated)",
+        padding: 20,
+      }}
+    >
+      <div className="flex items-center gap-2">
+        <ShieldCheck style={{ width: 14, height: 14, color: "var(--accent)" }} />
+        <p style={{ ...MONO_EYEBROW, color: "var(--accent)" }}>How this set was written</p>
+      </div>
+
+      <p style={{ fontSize: 13, lineHeight: 1.7, color: "var(--fg-muted)", marginTop: 10 }}>
+        {report.written} question{report.written === 1 ? "" : "s"} written,{" "}
+        {report.admitted} kept
+        {heldBack > 0 ? `, ${heldBack} held back and rewritten` : ""}.
+        {askedFor}
+      </p>
+
+      {mix.length > 0 && (
+        <p
+          style={{
+            fontFamily: "var(--font-mono)",
+            fontSize: 11,
+            color: "var(--fg-subtle)",
+            marginTop: 8,
+          }}
+        >
+          {mix.map((m) => `${REASONING_LABELS[m.order] ?? m.order} ${m.n}`).join(" · ")}
+        </p>
+      )}
+
+      {findings.length > 0 && (
+        <div style={{ marginTop: 14 }}>
+          <p style={{ ...MONO_EYEBROW, marginBottom: 6 }}>Checks that fired</p>
+          <ul className="flex flex-col gap-1">
+            {findings.map(([rule, n]) => (
+              <li
+                key={rule}
+                style={{ fontSize: 12, lineHeight: 1.6, color: "var(--fg-muted)" }}
+              >
+                {ruleLabel(rule)}
+                {n > 1 ? ` · ${n}` : ""}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {report.wants_image > 0 && (
+        <div
+          className="flex items-start gap-2"
+          style={{ marginTop: 14, fontSize: 12, lineHeight: 1.6, color: "var(--fg-subtle)" }}
+        >
+          <ImageOff style={{ width: 13, height: 13, marginTop: 3, flexShrink: 0 }} />
+          <span>
+            {report.wants_image} question{report.wants_image === 1 ? "" : "s"} would read
+            better with a figure. There is no image library to draw one from yet.
+          </span>
+        </div>
+      )}
+    </div>
+  );
+};
 
 const ScoreRing = ({ score, total }: { score: number; total: number }) => {
   const pct = total > 0 ? Math.round((score / total) * 100) : 0;
@@ -160,7 +280,16 @@ const QBankSummary = () => {
   const [searchParams] = useSearchParams();
   const sessionId = searchParams.get("session");
 
-  const { lastSummary, startSession, enterSummaryReview, setReviewIndex, loadSummary } = useQBankContext();
+  const {
+    lastSummary,
+    startGeneratedSession,
+    lastGeneration,
+    enterSummaryReview,
+    setReviewIndex,
+    loadSummary,
+  } = useQBankContext();
+  const [retrying, setRetrying] = useState(false);
+  const [report, setReport] = useState<GenerationReport | null>(null);
 
   const [summaryData, setSummaryData] = useState<SummaryData | null>(null);
   const [summaryFlaggedIds, setSummaryFlaggedIds] = useState<Set<string>>(new Set());
@@ -256,6 +385,21 @@ const QBankSummary = () => {
     load();
   }, [sessionId, lastSummary, navigate, loadSummary]);
 
+  useEffect(() => {
+    const generationId = lastGeneration?.generationId;
+    if (!generationId) {
+      setReport(null);
+      return;
+    }
+    let cancelled = false;
+    void fetchGenerationReport(generationId).then((r) => {
+      if (!cancelled) setReport(r);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [lastGeneration?.generationId]);
+
   if (loading) {
     return (
       <DashboardLayout wide>
@@ -290,9 +434,32 @@ const QBankSummary = () => {
     return { diff, correct, total: qs.length };
   }).filter((d) => d.total > 0);
 
+  /**
+   * Another go at the same thing.
+   *
+   * For a generated set that means writing a NEW set on the same topic, at the
+   * same size. An old session opened by id has no generation behind it to
+   * repeat, so that case goes back to the generator rather than starting
+   * something the student did not ask for.
+   */
   const handleTryAgain = async () => {
-    await startSession();
-    navigate("/qbank/session");
+    if (retrying) return;
+    setRetrying(true);
+    try {
+      if (!lastGeneration) {
+        navigate("/qbank");
+        return;
+      }
+      await startGeneratedSession(
+        lastGeneration.topic,
+        lastGeneration.target,
+        lastGeneration.challenge,
+        lastGeneration.examMode ?? "step1"
+      );
+      navigate("/qbank/session");
+    } catch {
+      setRetrying(false);
+    }
   };
 
   const handleReviewQuestion = (index: number) => {
@@ -429,6 +596,10 @@ const QBankSummary = () => {
           )}
         </div>
 
+        {report && report.written > 0 && (
+          <GenerationReportPanel report={report} />
+        )}
+
         <div className="space-y-3">
           <p style={{ ...MONO_EYEBROW, paddingLeft: 4 }}>Question breakdown</p>
           {questions.some((q) => summaryFlaggedIds.has(q.id)) && (
@@ -499,9 +670,18 @@ const QBankSummary = () => {
         </div>
 
         <div className="flex flex-col sm:flex-row gap-3 pb-8">
-          <button type="button" onClick={handleTryAgain} style={DARK_BUTTON_STYLE}>
+          <button
+            type="button"
+            onClick={handleTryAgain}
+            disabled={retrying}
+            style={{ ...DARK_BUTTON_STYLE, opacity: retrying ? 0.5 : 1 }}
+          >
             <RotateCcw style={{ width: 16, height: 16 }} />
-            Try Again
+            {retrying
+              ? "Writing…"
+              : lastGeneration
+                ? `Another ${lastGeneration.target} on this topic`
+                : "Try Again"}
           </button>
           <button
             type="button"

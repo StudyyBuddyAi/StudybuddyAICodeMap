@@ -355,6 +355,7 @@ export type Database = {
           correct_option: 'a' | 'b' | 'c' | 'd' | 'e'
           explanation: string
           teaching_point: string
+          distractor_explanations: Record<string, string> | null
           is_active: boolean
           created_at: string
           external_id: string | null
@@ -376,6 +377,7 @@ export type Database = {
           correct_option: 'a' | 'b' | 'c' | 'd' | 'e'
           explanation: string
           teaching_point: string
+          distractor_explanations?: Record<string, string> | null
           is_active?: boolean
           created_at?: string
           external_id?: string | null
@@ -397,6 +399,7 @@ export type Database = {
           correct_option?: 'a' | 'b' | 'c' | 'd' | 'e'
           explanation?: string
           teaching_point?: string
+          distractor_explanations?: Record<string, string> | null
           is_active?: boolean
           created_at?: string
           external_id?: string | null
@@ -696,6 +699,13 @@ export type Database = {
         }
         Returns: Json
       }
+      claim_generated_questions: {
+        Args: {
+          p_session: string
+          p_generation_id: string
+        }
+        Returns: Json
+      }
       submit_answer: {
         Args: {
           p_session: string
@@ -711,6 +721,10 @@ export type Database = {
       }
       get_session_review: {
         Args: { p_session: string }
+        Returns: Json
+      }
+      get_generation_report: {
+        Args: { p_generation_id: string }
         Returns: Json
       }
     }

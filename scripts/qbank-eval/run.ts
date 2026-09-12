@@ -32,8 +32,8 @@ for (const line of fs.readFileSync(path.join(ROOT, ".env"), "utf8").split(/\r?\n
 (globalThis as unknown as { Deno: unknown }).Deno = { env: { get: (k: string) => process.env[k] } };
 
 const {
-  QBANK_SYSTEM_PROMPT, SYSTEM_ROUTER_PROMPT, SYSTEM_KEYS,
-  buildBatchPlan, buildUserMessage,
+  QBANK_SYSTEM_PROMPTS, SYSTEM_ROUTER_PROMPT, SYSTEM_KEYS,
+  buildBatchPlan, buildUserMessage, asExamMode,
 } = await import(path.join(ROOT, "supabase/functions/_shared/qbank-prompt.ts"));
 const { parseBatchContent, prepareBatch } =
   await import(path.join(ROOT, "supabase/functions/_shared/qbank-persist.ts"));
@@ -46,8 +46,18 @@ const { parsePartialQuestions } =
 // -- the run ----------------------------------------------------------------
 const COUNT = Number(process.env.QBANK_EVAL_COUNT ?? 5);
 
+/**
+ * EXAM_MODE=step1|step2ck|mixed selects the system prompt and briefs, exactly
+ * as the edge function does from the request body. Defaults to step1, so a run
+ * with no knob set is the same run it always was. Two readings to take from a
+ * step2ck run against a step1 run: that the Step 2 items are genuinely
+ * management/diagnostic, AND that Step 1's block rate, reasoning-order mix and
+ * verifier agreement have not moved.
+ */
+const EXAM_MODE = asExamMode(process.env.EXAM_MODE);
+
 /** Ten topics: ten different systems, three phrasing styles. */
-const TOPICS: { topic: string; expectSystem: string; note: string }[] = [
+const DEFAULT_TOPICS: { topic: string; expectSystem: string; note: string }[] = [
   { topic: "preload, afterload and the pressure-volume loop in heart failure", expectSystem: "cardiovascular", note: "textbook physiology phrasing" },
   { topic: "acid-base compensation in the renal tubule", expectSystem: "renal", note: "textbook physiology phrasing" },
   { topic: "thyroid hormone synthesis and the Wolff-Chaikoff effect", expectSystem: "endocrine", note: "named-effect phrasing" },
@@ -59,6 +69,21 @@ const TOPICS: { topic: string; expectSystem: string; note: string }[] = [
   { topic: "the four hypersensitivity reactions", expectSystem: "immune", note: "list-shaped topic - duplication risk" },
   { topic: "beta lactam resistance mechanisms in gram negatives", expectSystem: "infectious_disease", note: "pharm/micro overlap" },
 ];
+
+/**
+ * QBANK_EVAL_TOPICS=path/to/topics.json swaps the topic list.
+ *
+ * The built-in ten are Step 1-shaped — mechanisms, pathways, named effects.
+ * Run against EXAM_MODE=step2ck they measure whether the mode can redirect a
+ * basic-science prompt to management, which is a real question but not the
+ * same one as "does step2ck write good items on the topics a Step 2 student
+ * actually searches for". That needs its own list; this is how it is supplied.
+ *
+ * Shape: the same { topic, expectSystem, note } triples, as a JSON array.
+ */
+const TOPICS: typeof DEFAULT_TOPICS = process.env.QBANK_EVAL_TOPICS
+  ? JSON.parse(fs.readFileSync(process.env.QBANK_EVAL_TOPICS, "utf8"))
+  : DEFAULT_TOPICS;
 
 const OPTS = ["a", "b", "c", "d", "e"] as const;
 const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 48);
@@ -72,7 +97,7 @@ async function routeTopic(config: unknown, topic: string) {
   const t0 = Date.now();
   try {
     const raw = await cortiComplete(config, {
-      model: "corti-s1-mini-instant", temperature: 0, maxTokens: 200, json: true,
+      model: (config as { routerModel: string }).routerModel, temperature: 0, maxTokens: 200, json: true,
       messages: [
         { role: "system", content: SYSTEM_ROUTER_PROMPT },
         { role: "user", content: topic },
@@ -94,7 +119,7 @@ async function generate(config: unknown, topic: string, plan: unknown) {
   const res: Response = await cortiChatCompletion(config, {
     stream: true, temperature: 0.7, maxTokens: 32768, json: true,
     messages: [
-      { role: "system", content: QBANK_SYSTEM_PROMPT },
+      { role: "system", content: QBANK_SYSTEM_PROMPTS[EXAM_MODE] },
       { role: "user", content: buildUserMessage({ topic, plan }) },
     ],
     signal: AbortSignal.timeout(420_000),
@@ -165,7 +190,7 @@ async function generate(config: unknown, topic: string, plan: unknown) {
 // -- main -------------------------------------------------------------------
 fs.mkdirSync(path.join(OUT_DIR, "raw"), { recursive: true });
 const config = cortiConfigFromEnv();
-console.log(`[eval] model=${config.model} region=${config.region} tenant=${config.tenant} count=${COUNT} topics=${TOPICS.length}`);
+console.log(`[eval] model=${config.model} verifier=${config.verifierModel} router=${config.routerModel} region=${config.region} tenant=${config.tenant} examMode=${EXAM_MODE} count=${COUNT} topics=${TOPICS.length}`);
 
 const runs: unknown[] = [];
 const runStarted = Date.now();
@@ -179,7 +204,7 @@ for (const [i, spec] of SELECTED.entries()) {
   const label = `${i + 1}/${TOPICS.length} ${slug(spec.topic)}`;
   console.log(`[eval] ${label} - routing`);
   const router = await routeTopic(config, spec.topic);
-  const plan = buildBatchPlan(router.system, COUNT);
+  const plan = buildBatchPlan(router.system, COUNT, Math.random, 1, "balanced", EXAM_MODE);
   console.log(`[eval] ${label} - routed=${router.system} (${router.confidence}) in ${router.ms}ms; generating`);
 
   let gen: Awaited<ReturnType<typeof generate>> | null = null;
@@ -242,6 +267,10 @@ for (const [i, spec] of SELECTED.entries()) {
     }));
     record.questions = drafts.map((d, n: number) => ({
       index: d.index, domain: d.domain, subtopic: d.subtopic, competency: d.competency,
+      // The plan's track beside the model's self-report: a mismatch is the
+      // mode instruction not taking. Off-track lead-ins are the other tell —
+      // count step1 items matching /next (best )?step|most appropriate/i.
+      examTrack: d.examTrack, examTrackReported: d.examTrackReported,
       difficulty: d.difficulty, reasoningOrder: d.reasoningOrder,
       plannedOrder: plan.questions[n]?.reasoningOrder ?? null,
       correctOption: d.correctOption, plannedLetter: plan.questions[n]?.answerLetter ?? null,
@@ -264,7 +293,7 @@ for (const [i, spec] of SELECTED.entries()) {
   runs.push(record);
   fs.writeFileSync(
     path.join(OUT_DIR, "report.json"),
-    JSON.stringify({ startedAt: new Date(runStarted).toISOString(), model: config.model, count: COUNT, runs }, null, 2),
+    JSON.stringify({ startedAt: new Date(runStarted).toISOString(), model: config.model, verifierModel: config.verifierModel, routerModel: config.routerModel, examMode: EXAM_MODE, count: COUNT, runs }, null, 2),
     "utf8"
   );
 }

@@ -209,6 +209,57 @@ describe("checkQuestion", () => {
       .not.toContain("explanation-meta-language");
   });
 
+  it("does not read a therapy ladder as reasoning scaffolding", () => {
+    // Step 2 CK explanations live on treatment ladders. Each of these matched
+    // one of the meta-language patterns — the preposition form on "to step 3",
+    // the label form on the full stop after "GINA step 3" — and blocked a
+    // correct management item.
+    const ladders = [
+      "Uncontrolled symptoms on a low-dose **inhaled corticosteroid** mean escalating to step 3 therapy: add a **long-acting beta agonist** rather than raising the steroid dose.",
+      "Pain persisting on regular paracetamol moves the patient to step 2 of the WHO analgesic ladder, where a **weak opioid** is added.",
+      "This patient is already on GINA step 3. The next escalation is a medium-dose ICS-LABA combination, not an oral steroid.",
+      "**Weekly symptoms** with normal spirometry are persistent asthma, so the patient starts at step 2 treatment.",
+    ];
+    for (const explanation of ladders) {
+      expect(rules(draft({ explanation })), explanation).not.toContain("explanation-meta-language");
+      expect(checkQuestion(draft({ explanation })).blocked).toBe(false);
+    }
+    // The scaffold itself still blocks.
+    expect(rules(draft({ explanation: "Low potassium at step 2 means a thiazide." })))
+      .toContain("explanation-meta-language");
+  });
+
+  it("does not block a compound management key against parallel distractors", () => {
+    // A Step 2 CK key routinely names a drug, a route and a companion drug.
+    // The gate compares it to the longest distractor, so parallel options of
+    // comparable specificity — which the Step 2 prompt requires — pass, and
+    // only a key padded past the field would block.
+    const d = draft({
+      subtopic: "Community-acquired pneumonia in the inpatient",
+      vignette:
+        "A 68-year-old woman with COPD is admitted with fever, productive cough and a right lower lobe consolidation. Blood pressure is 118/72 mm Hg, pulse 96/min, oxygen saturation 91% on room air. Creatinine is 1.1 mg/dL. She has no drug allergies.",
+      leadIn: "Which of the following is the most appropriate initial antibiotic regimen?",
+      options: {
+        a: "Intravenous vancomycin plus piperacillin-tazobactam",
+        b: "Intravenous ceftriaxone plus oral azithromycin",
+        c: "Oral amoxicillin-clavulanate plus oral doxycycline",
+        d: "Intravenous levofloxacin plus intravenous linezolid",
+        e: "Oral azithromycin as a single agent",
+      },
+      correctOption: "b",
+      explanation:
+        "A hospitalised, non-ICU patient with community-acquired pneumonia and structural lung disease is covered with a **beta-lactam plus a macrolide**; ceftriaxone covers pneumococcus and typical gram-negatives, azithromycin the atypicals.",
+      distractorExplanations: {
+        a: "Broad anti-pseudomonal and MRSA cover is reserved for risk factors this patient lacks.",
+        c: "Oral therapy is for outpatients; she is hypoxic and admitted.",
+        d: "Linezolid adds MRSA cover with no indication here.",
+        e: "Macrolide monotherapy is inadequate in a hospitalised patient with comorbidity.",
+      },
+    });
+    expect(rules(d)).not.toContain("key-longest");
+    expect(checkQuestion(d).blocked).toBe(false);
+  });
+
   it("flags options that are not all the category the lead-in asked for", () => {
     const d = draft({
       leadIn: "Which cord of the brachial plexus carries the disrupted fibres?",
@@ -354,6 +405,46 @@ describe("checkBatch", () => {
       distractorExplanations: { b: "No.", c: "No.", d: "No.", e: "No." },
     });
     expect(checkBatch([a, b])[0].findings.map((f) => f.rule)).not.toContain("repeated-lead-in");
+  });
+
+  it("does not call five next-best-step lead-ins a repeated question", () => {
+    // Every Step 2 CK wave asks the same task five times, and that is the
+    // exam, not a duplicate. Before the task words were treated as filler,
+    // "Which of the following is the most appropriate next step in
+    // management?" reduced to exactly four content words and fired on every
+    // pair — ten warns per wave.
+    const stems = [
+      ["Acute coronary syndrome", "A 61-year-old man has 40 minutes of crushing chest pain and ST elevation in leads II, III and aVF."],
+      ["Diabetic ketoacidosis", "A 19-year-old woman has vomiting, Kussmaul breathing, glucose of 480 mg/dL and a bicarbonate of 9 mEq/L."],
+      ["Pulmonary embolism", "A 45-year-old woman has sudden pleuritic chest pain and tachycardia two days after a long-haul flight."],
+      ["Acute cholangitis", "A 70-year-old man has fever, jaundice and right upper quadrant pain with a dilated common bile duct on ultrasound."],
+      ["Status epilepticus", "A 32-year-old man has been convulsing for eight minutes with no return of consciousness."],
+    ];
+    const leadIns = [
+      "Which of the following is the most appropriate next step in management?",
+      "Which of the following is the most appropriate next step in management?",
+      "What is the most appropriate next step in the management of this patient?",
+      "Which of the following is the most appropriate initial step in management?",
+      "Which of the following is the best next step in management?",
+    ];
+    const batch = stems.map(([subtopic, vignette], i) =>
+      draft({
+        index: i + 1,
+        subtopic,
+        vignette,
+        leadIn: leadIns[i],
+        options: {
+          a: `Option A for item ${i + 1}`,
+          b: `Option B for item ${i + 1}`,
+          c: `Option C for item ${i + 1}`,
+          d: `Option D for item ${i + 1}`,
+          e: `Option E for item ${i + 1}`,
+        },
+      })
+    );
+    for (const result of checkBatch(batch)) {
+      expect(result.findings.map((f) => f.rule)).not.toContain("repeated-lead-in");
+    }
   });
 
   it("flags two questions drawing their options from one pool", () => {

@@ -1,0 +1,12 @@
+[
+  { "topic": "chest pain in the emergency department", "expectSystem": "cardiovascular", "note": "core ED presentation, undifferentiated" },
+  { "topic": "managing diabetic ketoacidosis on the wards", "expectSystem": "endocrine", "note": "acute inpatient management" },
+  { "topic": "new-onset atrial fibrillation in a 68-year-old", "expectSystem": "cardiovascular", "note": "rate vs rhythm, anticoagulation decision" },
+  { "topic": "deciding admission versus outpatient treatment for community-acquired pneumonia", "expectSystem": "respiratory", "note": "site-of-care decision, systems-based practice" },
+  { "topic": "colorectal cancer screening intervals and choice of modality", "expectSystem": "gastrointestinal", "note": "health maintenance - absent from the step1 topic list" },
+  { "topic": "preoperative cardiac risk assessment before elective noncardiac surgery", "expectSystem": "cardiovascular", "note": "patient safety / perioperative systems" },
+  { "topic": "acute kidney injury in a hospitalized patient", "expectSystem": "renal", "note": "diagnosis then management, common ward problem" },
+  { "topic": "postpartum hemorrhage", "expectSystem": "repro", "note": "obstetric emergency, stepwise intervention" },
+  { "topic": "the febrile infant under three months", "expectSystem": "peds_dev", "note": "pediatric workup algorithm" },
+  { "topic": "assessing suicide risk and deciding disposition", "expectSystem": "psych", "note": "ethics, capacity and disposition - absent from the step1 topic list" }
+]
