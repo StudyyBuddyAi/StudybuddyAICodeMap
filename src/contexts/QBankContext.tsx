@@ -10,6 +10,7 @@ import type {
   SessionState,
   SessionGeneration,
   ChallengeLevel,
+  ExamMode,
 } from "@/lib/qbank-types";
 import {
   runQbankGeneration,
@@ -108,7 +109,8 @@ interface QBankContextValue {
   startGeneratedSession: (
     topic: string,
     target: number,
-    challenge?: ChallengeLevel
+    challenge?: ChallengeLevel,
+    examMode?: ExamMode
   ) => Promise<void>;
   /** Cancels an in-flight set. Whatever landed stays playable. */
   stopGeneration: () => void;
@@ -501,6 +503,7 @@ export const QBankProvider = ({ children }: { children: ReactNode }) => {
       system: string | null;
       systemName: string | null;
       challenge: ChallengeLevel;
+      examMode: ExamMode;
       createSession?: (questionId: string, meta: SessionGeneration) => Promise<void>;
     }): Promise<GenerationOutcome> => {
       const controller = new AbortController();
@@ -516,6 +519,7 @@ export const QBankProvider = ({ children }: { children: ReactNode }) => {
         systemName: cfg.systemName,
         target: cfg.setTarget,
         challenge: cfg.challenge,
+        examMode: cfg.examMode,
         nextIndex: cfg.startIndex,
         covered: cfg.covered,
       };
@@ -541,6 +545,7 @@ export const QBankProvider = ({ children }: { children: ReactNode }) => {
         alreadyCovered: cfg.covered,
         system: cfg.system,
         challenge: cfg.challenge,
+        examMode: cfg.examMode,
         shouldContinue: () => !controller.signal.aborted,
         onMeta: ({ systemName }) => {
           meta.systemName = systemName;
@@ -633,7 +638,12 @@ export const QBankProvider = ({ children }: { children: ReactNode }) => {
   );
 
   const startGeneratedSession = useCallback(
-    async (topic: string, target: number, challenge: ChallengeLevel = "balanced") => {
+    async (
+      topic: string,
+      target: number,
+      challenge: ChallengeLevel = "balanced",
+      examMode: ExamMode = "step1"
+    ) => {
       stopGeneration();
       sessionIdRef.current = null;
       heldBackRef.current = 0;
@@ -661,6 +671,7 @@ export const QBankProvider = ({ children }: { children: ReactNode }) => {
         system: null,
         systemName: null,
         challenge,
+        examMode,
         createSession: async (questionId, meta) => {
           await startSession({
             domains: [],
@@ -732,9 +743,10 @@ export const QBankProvider = ({ children }: { children: ReactNode }) => {
         covered: meta.covered,
         system: meta.system,
         systemName: meta.systemName,
-        // A set written before this field existed resumes at the default, which
-        // is the mix it was actually written with.
+        // A set written before these fields existed resumes at the defaults,
+        // which are the mix and the exam it was actually written with.
         challenge: meta.challenge ?? "balanced",
+        examMode: meta.examMode ?? "step1",
       }).catch(() => undefined);
     })
       // The flag is claimed up front so two mounts cannot both start resuming.

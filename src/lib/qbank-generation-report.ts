@@ -1,5 +1,5 @@
 import { supabase } from "@/integrations/supabase/client";
-import type { ChallengeLevel } from "./qbank-types";
+import type { ChallengeLevel, ExamMode } from "./qbank-types";
 
 /**
  * What happened while a set was written.
@@ -28,6 +28,12 @@ export interface GenerationReport {
   wants_image: number;
   /** The level asked for; null for a set written before the control existed. */
   challenge: ChallengeLevel | null;
+  /**
+   * The exam asked for — "mixed" for a mixed set, since this reports what the
+   * student chose rather than the per-row track. Null before the control
+   * existed.
+   */
+  exam_mode: ExamMode | null;
   /** Reasoning order of the admitted questions, keyed "1st" | "2nd" | "3rd". */
   reasoning_mix: Record<string, number>;
   /** Rule slug → how many times it fired, across every row written. */
@@ -59,6 +65,7 @@ export async function fetchGenerationReport(
     disputed: raw.disputed ?? 0,
     wants_image: raw.wants_image ?? 0,
     challenge: raw.challenge ?? null,
+    exam_mode: raw.exam_mode ?? null,
     reasoning_mix: raw.reasoning_mix ?? {},
     findings: raw.findings ?? {},
   };

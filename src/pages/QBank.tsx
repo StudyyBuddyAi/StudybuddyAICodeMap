@@ -4,6 +4,8 @@ import {
   LogIn,
   History,
   ChevronRight,
+  ChevronDown,
+  ChevronUp,
   Clock,
   Trash2,
   Sparkles,
@@ -24,7 +26,10 @@ import { MIN_SET_SIZE, MAX_SET_SIZE, SET_SIZE_STEP } from "@/lib/qbank-wave-runn
 import {
   CHALLENGE_LABELS,
   CHALLENGE_BLURBS,
+  EXAM_MODE_LABELS,
+  EXAM_MODE_BLURBS,
   type ChallengeLevel,
+  type ExamMode,
 } from "@/lib/qbank-types";
 
 interface SessionRow {
@@ -78,6 +83,19 @@ const SET_SIZES = Array.from(
 
 const CHALLENGE_ORDER: ChallengeLevel[] = ["foundations", "balanced", "challenge"];
 
+const EXAM_MODE_ORDER: ExamMode[] = ["step1", "step2ck", "mixed"];
+
+/**
+ * The pill classes shared by every option group in the generator card. A
+ * near-copy of the sheet configurator's PillGroup at h-8 rather than h-9,
+ * kept inline deliberately: extracting a shared primitive would touch the
+ * sheet's layout, which does not belong in a change about question content.
+ */
+const PILL_BASE =
+  "inline-flex items-center gap-2 h-8 px-4 rounded-lg text-sm font-medium transition-all duration-200 border disabled:cursor-not-allowed disabled:opacity-50";
+const PILL_ON = "bg-primary border-primary text-primary-foreground shadow-md";
+const PILL_OFF = "bg-card border-border text-muted-foreground hover:border-primary hover:text-primary";
+
 type StepState = "pending" | "active" | "done";
 
 /**
@@ -121,6 +139,10 @@ const QBank = () => {
   const [topic, setTopic] = useState("");
   const [setSize, setSetSize] = useState(MIN_SET_SIZE);
   const [challenge, setChallenge] = useState<ChallengeLevel>("balanced");
+  const [examMode, setExamMode] = useState<ExamMode>("step1");
+  // Collapsed by default, as on the sheet and deck generators: the topic is
+  // the one thing every student has to type, and the rest has sane defaults.
+  const [customizeOpen, setCustomizeOpen] = useState(false);
   const [isStarting, setIsStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [elapsed, setElapsed] = useState(0);
@@ -215,7 +237,7 @@ const QBank = () => {
     try {
       // Resolves the moment the first question exists and the session is live.
       // The remaining waves keep running against the provider.
-      await startGeneratedSession(trimmed, setSize, challenge);
+      await startGeneratedSession(trimmed, setSize, challenge, examMode);
       navigate("/qbank/session");
     } catch (err) {
       const message = err instanceof Error ? err.message : "Generation failed";
@@ -227,7 +249,7 @@ const QBank = () => {
       });
       setIsStarting(false);
     }
-  }, [topic, setSize, challenge, isStarting, startGeneratedSession, navigate, toast]);
+  }, [topic, setSize, challenge, examMode, isStarting, startGeneratedSession, navigate, toast]);
 
   const { data: sessionHistory, isLoading: historyLoading } = useQuery({
     queryKey: ["qbank-sessions", user?.id, page],
@@ -576,69 +598,123 @@ const QBank = () => {
                   </div>
                 </div>
 
-                {/* How many */}
-                <div>
-                  <p className={`${MONO_EYEBROW} text-muted-foreground mb-2`}>Questions</p>
-                  <div className="flex flex-wrap gap-2">
-                    {SET_SIZES.map((size) => {
-                      const active = size === setSize;
-                      return (
-                        <button
-                          key={size}
-                          type="button"
-                          onClick={() => setSetSize(size)}
-                          disabled={isStarting}
-                          aria-pressed={active}
-                          className={`inline-flex items-center gap-2 h-8 px-4 rounded-lg text-sm font-medium tabular-nums transition-all duration-200 border disabled:cursor-not-allowed disabled:opacity-50 ${
-                            active
-                              ? "bg-primary border-primary text-primary-foreground shadow-md"
-                              : "bg-card border-border text-muted-foreground hover:border-primary hover:text-primary"
-                          }`}
-                        >
-                          {active && <Check className="w-4 h-4" />}
-                          {size}
-                        </button>
-                      );
-                    })}
-                  </div>
-                  <p className="mt-2 text-[11px] text-muted-foreground">
-                    A question takes about twenty seconds to write, so a set of {setSize}{" "}
-                    finishes in roughly {estimatedMinutes} minute
-                    {estimatedMinutes === 1 ? "" : "s"} — but you will be answering it long
-                    before then.
-                  </p>
-                </div>
+                {/* Customize — collapsed by default, header carrying the current
+                    picks so a closed panel still says what it will do. The same
+                    disclosure the sheet and deck generators use. */}
+                <div className="border-t border-[color:var(--color-border)] pt-4">
+                  <button
+                    type="button"
+                    onClick={() => setCustomizeOpen((v) => !v)}
+                    aria-expanded={customizeOpen}
+                    aria-controls="qbank-customize"
+                    className="flex w-full items-center gap-2.5 text-left"
+                  >
+                    <p className={`${MONO_EYEBROW} text-muted-foreground`}>Customize</p>
+                    <span className="ml-auto flex min-w-0 items-center gap-2">
+                      {!customizeOpen && (
+                        <span className="truncate text-[11px] text-muted-foreground">
+                          {EXAM_MODE_LABELS[examMode]} · {setSize} questions ·{" "}
+                          {CHALLENGE_LABELS[challenge]}
+                        </span>
+                      )}
+                      {customizeOpen ? (
+                        <ChevronUp className="h-4 w-4 shrink-0 text-muted-foreground" />
+                      ) : (
+                        <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+                      )}
+                    </span>
+                  </button>
 
-                {/* Challenge — a reasoning-order dial, not a difficulty one.
-                    Reasoning order is what the batch plan actually controls;
-                    the model labels difficulty downstream of it. */}
-                <div>
-                  <p className={`${MONO_EYEBROW} text-muted-foreground mb-2`}>Challenge</p>
-                  <div className="flex flex-wrap gap-2">
-                    {CHALLENGE_ORDER.map((level) => {
-                      const active = level === challenge;
-                      return (
-                        <button
-                          key={level}
-                          type="button"
-                          onClick={() => setChallenge(level)}
-                          disabled={isStarting}
-                          aria-pressed={active}
-                          className={`inline-flex items-center gap-2 h-8 px-4 rounded-lg text-sm font-medium transition-all duration-200 border disabled:cursor-not-allowed disabled:opacity-50 ${
-                            active
-                              ? "bg-primary border-primary text-primary-foreground shadow-md"
-                              : "bg-card border-border text-muted-foreground hover:border-primary hover:text-primary"
-                          }`}
-                        >
-                          {active && <Check className="w-4 h-4" />}
-                          {CHALLENGE_LABELS[level]}
-                        </button>
-                      );
-                    })}
-                  </div>
-                  <p className="mt-2 text-[11px] text-muted-foreground">
-                    {CHALLENGE_BLURBS[challenge]}
-                  </p>
+                  {customizeOpen && (
+                    <div id="qbank-customize" className="animate-fade-in mt-4 space-y-5">
+                      {/* Exam mode — selects the system prompt and briefs the
+                          set is written against. */}
+                      <div>
+                        <p className={`${MONO_EYEBROW} text-muted-foreground mb-2`}>Exam Mode</p>
+                        <div className="flex flex-wrap gap-2">
+                          {EXAM_MODE_ORDER.map((mode) => {
+                            const active = mode === examMode;
+                            return (
+                              <button
+                                key={mode}
+                                type="button"
+                                onClick={() => setExamMode(mode)}
+                                disabled={isStarting}
+                                aria-pressed={active}
+                                className={`${PILL_BASE} ${active ? PILL_ON : PILL_OFF}`}
+                              >
+                                {active && <Check className="w-4 h-4" />}
+                                {EXAM_MODE_LABELS[mode]}
+                              </button>
+                            );
+                          })}
+                        </div>
+                        <p className="mt-2 text-[11px] text-muted-foreground">
+                          {EXAM_MODE_BLURBS[examMode]}
+                        </p>
+                      </div>
+
+                      {/* How many */}
+                      <div>
+                        <p className={`${MONO_EYEBROW} text-muted-foreground mb-2`}>Questions</p>
+                        <div className="flex flex-wrap gap-2">
+                          {SET_SIZES.map((size) => {
+                            const active = size === setSize;
+                            return (
+                              <button
+                                key={size}
+                                type="button"
+                                onClick={() => setSetSize(size)}
+                                disabled={isStarting}
+                                aria-pressed={active}
+                                className={`${PILL_BASE} tabular-nums ${active ? PILL_ON : PILL_OFF}`}
+                              >
+                                {active && <Check className="w-4 h-4" />}
+                                {size}
+                              </button>
+                            );
+                          })}
+                        </div>
+                        <p className="mt-2 text-[11px] text-muted-foreground">
+                          A question takes about twenty seconds to write, so a set of {setSize}{" "}
+                          finishes in roughly {estimatedMinutes} minute
+                          {estimatedMinutes === 1 ? "" : "s"} — but you will be answering it
+                          long before then.
+                        </p>
+                      </div>
+
+                      {/* Difficulty — a reasoning-order dial underneath, not a
+                          difficulty one. Reasoning order is what the batch plan
+                          actually controls; the model labels difficulty
+                          downstream of it, and the prompt names the band each
+                          level should land in. The wire parameter stays
+                          `challenge`. */}
+                      <div>
+                        <p className={`${MONO_EYEBROW} text-muted-foreground mb-2`}>Difficulty</p>
+                        <div className="flex flex-wrap gap-2">
+                          {CHALLENGE_ORDER.map((level) => {
+                            const active = level === challenge;
+                            return (
+                              <button
+                                key={level}
+                                type="button"
+                                onClick={() => setChallenge(level)}
+                                disabled={isStarting}
+                                aria-pressed={active}
+                                className={`${PILL_BASE} ${active ? PILL_ON : PILL_OFF}`}
+                              >
+                                {active && <Check className="w-4 h-4" />}
+                                {CHALLENGE_LABELS[level]}
+                              </button>
+                            );
+                          })}
+                        </div>
+                        <p className="mt-2 text-[11px] text-muted-foreground">
+                          {CHALLENGE_BLURBS[challenge]}
+                        </p>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
 

@@ -1,5 +1,5 @@
 import { cortiComplete, type CortiConfig } from "./corti.ts";
-import type { OptionLetter } from "./qbank-prompt.ts";
+import { EXAM_TRACK_NAMES, type ExamTrack, type OptionLetter } from "./qbank-prompt.ts";
 
 /**
  * Independent cold-answering pass.
@@ -8,11 +8,11 @@ import type { OptionLetter } from "./qbank-prompt.ts";
  * itself: factual accuracy is not decidable from the text, and belongs to a
  * pass that actually tries to answer the question. This is that pass.
  *
- * A second model — a small, cheap one, at temperature 0 — is shown the stem,
- * the lead-in and the five options and nothing else. No explanation, no key, no
- * reasoning chain. If it lands somewhere other than the key, one of two things
- * is true: the item is wrong, or the item is hard enough to fool a prepared
- * reader. Both are worth a human look before a student sits it.
+ * A second model, at temperature 0, is shown the stem, the lead-in and the
+ * five options and nothing else. No explanation, no key, no reasoning chain.
+ * If it lands somewhere other than the key, one of two things is true: the
+ * item is wrong, or the item is hard enough to fool a prepared reader. Both
+ * are worth a human look before a student sits it.
  *
  * Measured on a 50-item run before this existed: the probe disagreed on 5 items.
  * Read by hand, 2 of those 5 were genuinely defective — including the only item
@@ -20,6 +20,14 @@ import type { OptionLetter } from "./qbank-prompt.ts";
  * either missed or reported as a warning. The other 3 were the probe falling for
  * a well-built distractor, which is the cost of the check and the reason a
  * disagreement holds an item back for review rather than deleting it.
+ *
+ * That measurement was taken on `corti-s1-mini-instant` with a 300-token
+ * budget. The probe is the weakest model in the pipeline yet a disagreement
+ * withholds a question from the student, so it was raised to `corti-s1-instant`:
+ * the same strength as the writer, with no reasoning pass to run out of budget.
+ * `corti-s1` was tried here and measured worse than either — see corti.ts.
+ * A probe primed for Step 1 judging Step 2 CK management items would add false
+ * disagreements of its own, which is why the prompt is per track.
  *
  * Two deliberate choices:
  *
@@ -31,16 +39,37 @@ import type { OptionLetter } from "./qbank-prompt.ts";
  *    information and is not worth the tokens to read.
  */
 
-/** Model for the probe. Deliberately not the writer — an independent read. */
-const VERIFIER_MODEL = "corti-s1-mini-instant" as const;
+/**
+ * Output budget for the probe. The answer is a ~50-token JSON object and the
+ * probe runs on a non-reasoning model, so this is headroom, not a think budget.
+ *
+ * It was briefly 6000, sized for a reasoning probe on `corti-s1`. Measured on
+ * a 10-item run: half the probes never emitted an answer at all, returning
+ * "Unexpected end of JSON input" after burning the budget on reasoning, and
+ * because the pass fails open those items shipped silently unverified. See
+ * VERIFIER_MODEL.
+ */
+const VERIFIER_MAX_TOKENS = 800;
 
-/** One item is a few hundred tokens; well clear of any reasonable answer. */
-const VERIFIER_MAX_TOKENS = 300;
-
-/** Per-item ceiling. The whole batch runs in parallel, so this is the wall. */
+/**
+ * Per-item ceiling. Items are verified individually as they close mid-stream,
+ * so this bounds one question's wait, not the wave's. Raised from 45s for the
+ * reasoning pass; a probe that runs out the clock still fails open.
+ */
 const VERIFIER_TIMEOUT_MS = 45_000;
 
-const VERIFIER_PROMPT = `You are a well-prepared US medical student sitting USMLE Step 1. You are given one question and five options and nothing else — no explanation, no answer key.
+/**
+ * The probe is told which exam it is sitting. It withholds questions, and a
+ * student primed to answer with the mechanism will disagree with a correct
+ * management key more often than one primed for the standard of care.
+ */
+const VERIFIER_ROLE: Record<ExamTrack, string> = {
+  step1: `You are a well-prepared US medical student sitting USMLE ${EXAM_TRACK_NAMES.step1}.`,
+  step2ck: `You are a well-prepared US medical student sitting USMLE ${EXAM_TRACK_NAMES.step2ck}. Answer as the current standard of care would have you act for the patient in the stem.`,
+};
+
+const verifierPrompt = (track: ExamTrack) =>
+  `${VERIFIER_ROLE[track]} You are given one question and five options and nothing else — no explanation, no answer key.
 
 Pick the single best answer. Then judge the item itself.
 
@@ -57,6 +86,8 @@ export interface VerifiableQuestion {
   leadIn: string;
   options: Record<OptionLetter, string>;
   correctOption: OptionLetter;
+  /** The exam the item was written on. Absent on pre-mode shapes: Step 1. */
+  examTrack?: ExamTrack;
 }
 
 export interface VerificationResult {
@@ -79,20 +110,25 @@ function renderItem(question: VerifiableQuestion): string {
   return `${question.vignette}\n\n${question.leadIn}\n\n${options}`;
 }
 
+/**
+ * Answers one item blind. `track` is per question rather than per batch
+ * because a mixed set carries both exams in one wave.
+ */
 export async function verifyOne(
   config: CortiConfig,
-  question: VerifiableQuestion
+  question: VerifiableQuestion,
+  track: ExamTrack = question.examTrack ?? "step1"
 ): Promise<VerificationResult> {
   const base = { index: question.index, answer: null, solvable: true, issue: "" };
 
   try {
     const raw = await cortiComplete(config, {
-      model: VERIFIER_MODEL,
+      model: config.verifierModel,
       temperature: 0,
       maxTokens: VERIFIER_MAX_TOKENS,
       json: true,
       messages: [
-        { role: "system", content: VERIFIER_PROMPT },
+        { role: "system", content: verifierPrompt(track) },
         { role: "user", content: renderItem(question) },
       ],
       signal: AbortSignal.timeout(VERIFIER_TIMEOUT_MS),
@@ -127,8 +163,8 @@ export async function verifyOne(
  * Answers every item in the batch blind, in parallel.
  *
  * Parallel because the batch is small and the calls are independent, so the
- * whole pass costs about one item's latency — roughly a second against the
- * ninety the generation itself takes.
+ * whole pass costs about one item's latency. Each item is judged on its own
+ * track, so a mixed batch needs no special handling here.
  */
 export function verifyBatch(
   config: CortiConfig,

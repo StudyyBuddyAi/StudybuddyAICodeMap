@@ -6,13 +6,14 @@ import {
   cortiComplete,
 } from "../_shared/corti.ts";
 import {
-  QBANK_SYSTEM_PROMPT,
+  QBANK_SYSTEM_PROMPTS,
   SYSTEM_ROUTER_PROMPT,
   SYSTEM_NAMES,
   SYSTEM_KEYS,
   buildBatchPlan,
   buildUserMessage,
   asChallengeLevel,
+  asExamMode,
   type BatchPlan,
   type SystemKey,
 } from "../_shared/qbank-prompt.ts";
@@ -126,7 +127,7 @@ async function resolveSystem(
 ): Promise<{ system: SystemKey; confidence: number | null }> {
   try {
     const raw = await cortiComplete(config, {
-      model: "corti-s1-mini-instant",
+      model: config.routerModel,
       temperature: 0,
       maxTokens: 200,
       json: true,
@@ -221,13 +222,17 @@ serve(async (req) => {
     // Unknown or absent values fall back to the default rather than 400ing:
     // the level changes the shape of a set, never whether it can be written.
     const challenge = asChallengeLevel(body?.challenge);
+    // Same posture. A client that predates the control gets Step 1, which is
+    // the only thing it could have been asking for.
+    const examMode = asExamMode(body?.examMode);
 
     const plan: BatchPlan = buildBatchPlan(
       system,
       waveCount,
       Math.random,
       waveStart,
-      challenge
+      challenge,
+      examMode
     );
     log("generating", {
       system,
@@ -235,6 +240,7 @@ serve(async (req) => {
       count: waveCount,
       startIndex: waveStart,
       challenge,
+      examMode,
       avoidCount: avoid.length,
       model: config.model,
       topicLength: cleanTopic.length,
@@ -247,7 +253,8 @@ serve(async (req) => {
         maxTokens: MAX_OUTPUT_TOKENS,
         json: true,
         messages: [
-          { role: "system", content: QBANK_SYSTEM_PROMPT },
+          // Per mode, and static within a mode, so each stays cacheable.
+          { role: "system", content: QBANK_SYSTEM_PROMPTS[examMode] },
           {
             role: "user",
             content: buildUserMessage({ topic: cleanTopic, plan, avoidSubtopics: avoid }),
@@ -302,6 +309,13 @@ serve(async (req) => {
     let verifications: VerificationResult[] = [];
     let subtopics: string[] = [];
     let insertFailures = 0;
+    /**
+     * The database's reason for the first refused insert, kept for the closing
+     * summary. First rather than last because when the table itself is the
+     * problem every question fails the same way, so the first one already says
+     * what is wrong and the rest are echoes.
+     */
+    let insertError: string | null = null;
 
     const persistInput = (): PersistInput => ({
       content,
@@ -347,11 +361,12 @@ serve(async (req) => {
           (async () => {
             // Verified before the insert, not after, so the row stores the
             // verdict it was written with rather than one bolted on later.
-            // Fails open — see qbank-verify.
-            const verdict = await verifyOne(config, question);
+            // Fails open — see qbank-verify. The track is per question: a
+            // mixed wave carries both exams.
+            const verdict = await verifyOne(config, question, question.examTrack);
             verifications.push(verdict);
 
-            const id = await persistOne(
+            const { id, error: rowError } = await persistOne(
               authClient,
               user.id,
               persistInput(),
@@ -360,8 +375,17 @@ serve(async (req) => {
               [verdict]
             );
 
-            if (id) persistedIds.push(id);
-            else insertFailures++;
+            if (id) {
+              persistedIds.push(id);
+            } else {
+              insertFailures++;
+              if (!insertError) insertError = rowError;
+              // The only place the database's own words survive. Without this a
+              // schema the deployed function has outgrown looks exactly like a
+              // topic that generated nothing, and the client retries it eight
+              // more times.
+              log("insert_failed", { index: question.index, reason: rowError });
+            }
 
             // Announced only once it is committed, and never allowed to fail the
             // write: if the client has disconnected this throws, and the question
@@ -460,6 +484,7 @@ serve(async (req) => {
               system,
               systemName: SYSTEM_NAMES[system],
               model: config.model,
+              examMode,
               plan: plan.questions,
               startIndex: waveStart,
             },
@@ -520,6 +545,7 @@ serve(async (req) => {
             verifications = [];
             subtopics = [];
             insertFailures = 0;
+            insertError = null;
             controller.enqueue(frame({ __meta: { restart: true } }));
             response = retried;
           }
@@ -548,6 +574,7 @@ serve(async (req) => {
           blocked,
           disputed,
           insertFailures,
+          insertError,
           verifierErrors: verifications.filter((v) => v.error).length,
         });
 
@@ -564,6 +591,10 @@ serve(async (req) => {
                 blocked,
                 disputed,
                 insertFailures,
+                // Why they failed, when any did. A wave that wrote questions and
+                // could not commit one of them is not a wave worth repeating, so
+                // the client needs the reason, not just the count.
+                insertError,
                 startIndex: waveStart,
                 // Advanced by what was ASKED for, not by what landed, so a wave
                 // that came up short cannot let the next one reuse its numbers.

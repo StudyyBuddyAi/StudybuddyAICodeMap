@@ -32,6 +32,12 @@ export interface QbankGenerateParams {
    * every wave so a set does not change character halfway through.
    */
   challenge?: string;
+  /**
+   * Which exam the set is for: "step1" | "step2ck" | "mixed". Selects the
+   * system prompt and briefs server-side; unknown values fall back to "step1".
+   * Echoed on every wave, as `challenge` is.
+   */
+  examMode?: string;
 }
 
 export interface CallQbankGenerateOptions {

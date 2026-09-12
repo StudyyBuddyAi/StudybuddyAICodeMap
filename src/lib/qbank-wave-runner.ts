@@ -157,6 +157,8 @@ export interface RunGenerationOptions {
   system?: string | null;
   /** The reasoning-order mix the student asked for. Echoed on every wave. */
   challenge?: string;
+  /** The exam the set is for. Echoed on every wave, like `challenge`. */
+  examMode?: string;
   /**
    * Overrides the retry backoff. Exists so the tests can exercise the give-up
    * paths without sitting through five real seconds per empty wave.
@@ -209,6 +211,7 @@ async function runWave(
     startIndex: number;
     avoidSubtopics: string[];
     challenge?: string;
+    examMode?: string;
   },
   opts: RunGenerationOptions
 ): Promise<WaveResult> {
@@ -253,6 +256,7 @@ async function runWave(
         startIndex: params.startIndex,
         avoidSubtopics: params.avoidSubtopics,
         challenge: params.challenge,
+        examMode: params.examMode,
       },
       { signal: ac.signal }
     );
@@ -345,6 +349,34 @@ async function runWave(
             if (typeof summary.system === "string") result.system = summary.system;
             if (typeof summary.systemName === "string") result.systemName = summary.systemName;
             if (typeof summary.streamError === "string") result.streamError = summary.streamError;
+
+            /**
+             * A wave that wrote questions and could not commit a single one.
+             *
+             * This is the sibling of the out-of-date-function check below, and
+             * it is here for the same reason: retrying cannot fix it. An insert
+             * the database refuses is refused for every question equally — a
+             * column the deployed function writes that the table does not have
+             * is the usual cause — so the loop would spend its two connect
+             * retries and three empty waves, about nine generations, and then
+             * blame the student's topic for a schema that is behind.
+             *
+             * Gated on nothing having landed. A wave that committed some of its
+             * questions and lost others is the ordinary shortfall persistOne was
+             * built to absorb, and the next wave replaces them.
+             */
+            const insertFailures =
+              typeof summary.insertFailures === "number" ? summary.insertFailures : 0;
+            const persisted = typeof summary.persisted === "number" ? summary.persisted : 0;
+            if (insertFailures > 0 && persisted === 0) {
+              const reason =
+                typeof summary.insertError === "string" && summary.insertError
+                  ? ` The database said: ${summary.insertError}.`
+                  : "";
+              result.fatal =
+                `The questions were written but none of them could be saved.${reason}` +
+                " The database schema is probably behind the deployed function — apply the pending migrations and try again.";
+            }
           }
           continue;
         }
@@ -452,6 +484,7 @@ export async function runQbankGeneration(
             startIndex: nextIndex,
             avoidSubtopics: [...covered],
             challenge: opts.challenge,
+            examMode: opts.examMode,
           },
           opts
         );

@@ -78,6 +78,12 @@ export interface SessionGeneration {
    * set would not match the first.
    */
   challenge: ChallengeLevel;
+  /**
+   * The exam the set was asked for. Persisted for the same reason as
+   * `challenge`: a resumed run must keep writing Step 2 CK items to a Step 2
+   * CK set. A set saved before this field existed resumes as Step 1.
+   */
+  examMode: ExamMode;
   nextIndex: number;
   covered: string[];
 }
@@ -133,9 +139,29 @@ export const CHALLENGE_LABELS: Record<ChallengeLevel, string> = {
 };
 
 export const CHALLENGE_BLURBS: Record<ChallengeLevel, string> = {
-  foundations: "Mostly single-step recall and mechanism. Short vignettes.",
+  // Worded for both exams: "recall and mechanism" was a Step 1 description.
+  foundations: "Mostly single-step items — recognise the pattern, name the answer. Short vignettes.",
   balanced: "Exam calibration — about 65-70% correct for a prepared student.",
   challenge: "Multi-step reasoning and close discrimination between look-alikes.",
+};
+
+/**
+ * Which exam the set is written for. Mirrors ExamMode in
+ * supabase/functions/_shared/qbank-prompt.ts, the authority; the edge function
+ * narrows whatever arrives onto that enum, so a stale client gets Step 1.
+ */
+export type ExamMode = "step1" | "step2ck" | "mixed";
+
+export const EXAM_MODE_LABELS: Record<ExamMode, string> = {
+  step1: "Step 1",
+  step2ck: "Step 2 CK",
+  mixed: "Mixed",
+};
+
+export const EXAM_MODE_BLURBS: Record<ExamMode, string> = {
+  step1: "Foundational science — mechanism, anatomy, pathophysiology, pharmacology MOA.",
+  step2ck: "Clinical decisions — diagnosis, next best step, the study to order, the drug to give.",
+  mixed: "Half and half, shuffled — each question is written to one exam or the other.",
 };
 
 /** Where a `questions` row came from. Curated rows are the hand-authored bank. */

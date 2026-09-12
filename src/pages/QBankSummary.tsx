@@ -16,7 +16,7 @@ import PageLoader from "@/components/PageLoader";
 import { useQBankContext } from "@/contexts/QBankContext";
 import { supabase } from "@/integrations/supabase/client";
 import type { Question, QuestionMedia, SessionAnswer } from "@/lib/qbank-types";
-import { CHALLENGE_LABELS } from "@/lib/qbank-types";
+import { CHALLENGE_LABELS, EXAM_MODE_LABELS } from "@/lib/qbank-types";
 import { ruleLabel } from "@/lib/qbank-rule-labels";
 import {
   fetchGenerationReport,
@@ -85,6 +85,20 @@ const GenerationReportPanel = ({ report }: { report: GenerationReport }) => {
     .map((order) => ({ order, n: report.reasoning_mix[order] ?? 0 }))
     .filter((m) => m.n > 0);
 
+  // "Asked for as Step 2 CK at balanced level." Either half can be missing on
+  // a set written before its control existed, so the sentence is assembled
+  // from whatever the rows recorded.
+  const examName = report.exam_mode ? EXAM_MODE_LABELS[report.exam_mode] : null;
+  const levelName = report.challenge ? CHALLENGE_LABELS[report.challenge] : null;
+  const askedFor =
+    examName && levelName
+      ? ` Asked for as ${examName} at ${levelName.toLowerCase()} level.`
+      : examName
+        ? ` Asked for as ${examName}.`
+        : levelName
+          ? ` Asked for at ${levelName.toLowerCase()} level.`
+          : "";
+
   return (
     <div
       style={{
@@ -103,9 +117,7 @@ const GenerationReportPanel = ({ report }: { report: GenerationReport }) => {
         {report.written} question{report.written === 1 ? "" : "s"} written,{" "}
         {report.admitted} kept
         {heldBack > 0 ? `, ${heldBack} held back and rewritten` : ""}.
-        {report.challenge && CHALLENGE_LABELS[report.challenge]
-          ? ` Asked for at ${CHALLENGE_LABELS[report.challenge].toLowerCase()} level.`
-          : ""}
+        {askedFor}
       </p>
 
       {mix.length > 0 && (
@@ -441,7 +453,8 @@ const QBankSummary = () => {
       await startGeneratedSession(
         lastGeneration.topic,
         lastGeneration.target,
-        lastGeneration.challenge
+        lastGeneration.challenge,
+        lastGeneration.examMode ?? "step1"
       );
       navigate("/qbank/session");
     } catch {

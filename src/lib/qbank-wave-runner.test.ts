@@ -81,6 +81,10 @@ interface WaveSpec {
   broken?: boolean;
   /** Speak the pre-incremental protocol: no questionReady, no waveComplete. */
   legacy?: boolean;
+  /** Questions written and announced, then refused by the database. */
+  insertFailures?: number;
+  /** The database's reason, as the edge function relays it. */
+  insertError?: string;
 }
 
 function waveFrames(spec: WaveSpec, startIndex: number): unknown[] {
@@ -119,12 +123,33 @@ function waveFrames(spec: WaveSpec, startIndex: number): unknown[] {
     });
   }
 
+  // A refused row is still announced — the write is attempted before the frame
+  // — so the client sees a ready question carrying no id.
+  const insertFailures = spec.insertFailures ?? 0;
+  for (let i = 0; i < insertFailures; i++) {
+    frames.push({
+      __meta: {
+        questionReady: {
+          id: null,
+          index: startIndex + spec.delivers + i,
+          blocked: false,
+          blockRule: null,
+          difficulty: "Medium",
+          reasoningOrder: "2nd",
+          agreed: true,
+        },
+      },
+    });
+  }
+
   if (!spec.broken) {
     frames.push({
       __meta: {
         waveComplete: {
-          requested: spec.delivers,
+          requested: spec.delivers + insertFailures,
           persisted: spec.delivers,
+          insertFailures,
+          insertError: spec.insertError ?? null,
           system: spec.system ?? "renal",
           systemName: spec.systemName ?? "Renal",
           subtopics: spec.subtopics ?? [],
@@ -312,6 +337,39 @@ describe("runQbankGeneration", () => {
     expect(outcome.status).toBe("failed");
     expect(outcome.error).toMatch(/out of date/i);
     expect(calls).toHaveLength(1);
+  });
+
+  it("names the database rather than the topic when nothing can be saved", async () => {
+    // The sibling of the case above. The questions were written and were fine;
+    // the table would not take them. Retrying regenerates perfectly good items
+    // into the same refusal, so the run ends on the first wave and the message
+    // points at the schema instead of at what the student asked for.
+    const { call, calls } = fakeCall([
+      {
+        delivers: 0,
+        insertFailures: 2,
+        insertError: '42703: column "exam_mode" of relation "questions" does not exist',
+      },
+    ]);
+
+    const outcome = await runQbankGeneration({ ...baseOpts(), target: 10, call });
+
+    expect(outcome.status).toBe("failed");
+    expect(outcome.error).toMatch(/none of them could be saved/i);
+    expect(outcome.error).toMatch(/exam_mode/);
+    expect(calls).toHaveLength(1);
+  });
+
+  it("treats a wave that saved some and lost others as an ordinary shortfall", async () => {
+    // One refused row is the shortfall persistOne was built to absorb: the wave
+    // still advanced the set, so the loop makes the difference up rather than
+    // declaring the schema broken.
+    const { call } = fakeCall([{ delivers: 4, insertFailures: 1 }, { delivers: 6 }]);
+
+    const outcome = await runQbankGeneration({ ...baseOpts(), target: 10, call });
+
+    expect(outcome.status).toBe("complete");
+    expect(outcome.delivered).toBe(10);
   });
 
   it("stops immediately on a refusal that retrying cannot fix", async () => {

@@ -1,9 +1,13 @@
 import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.39.8";
 import {
   SYSTEM_NAMES,
+  TRACK_ENUMS,
+  EXAM_TRACKS,
+  PROMPT_VERSION,
   permuteToPlannedLetter,
   buildDistractorExplanations,
   type BatchPlan,
+  type ExamTrack,
   type OptionLetter,
   type SystemKey,
 } from "./qbank-prompt.ts";
@@ -37,14 +41,26 @@ const OPTION_KEYS: OptionLetter[] = ["a", "b", "c", "d", "e"];
 const DIFFICULTIES = ["Easy", "Medium", "Hard"];
 const REASONING_ORDERS = ["1st", "2nd", "3rd"];
 
-/** The `questions` domain column has no constraint, but the prompt's enum does. */
-const DOMAINS = [
-  "Anatomy", "Embryology", "Histopathology", "Physiology",
-  "Pathology", "Pharmacology", "Pattern Recognition",
-];
+// The domain and competency enums are NOT restated here. This file used to
+// carry its own copy of DOMAINS, which meant a change to the prompt's enum had
+// no effect on persistence: every value the copy did not know was coerced to
+// "Pathology" with no flag. The prompt module's TRACK_ENUMS is the one source,
+// and the fallback is chosen by the track the item was written on.
 
 export interface ParsedQuestion {
   index: number;
+  /**
+   * The exam the item was written on, from the batch plan — never from the
+   * model. Set in prepareBatch once the question is matched to its plan row;
+   * a bare parse defaults it to step1.
+   */
+  examTrack: ExamTrack;
+  /**
+   * What the model said its track was, when the contract asked it to say
+   * (mixed mode only). A self-report, stored beside the plan's value as a free
+   * "did the track instruction take?" metric.
+   */
+  examTrackReported: ExamTrack | null;
   domain: string;
   subtopic: string;
   competency: string;
@@ -122,6 +138,10 @@ function completedElements(text: string): string[] {
  * on the rest: a missing teaching point is a slightly poorer item, not a broken
  * one, and out-of-enum values are coerced rather than rejected so a single odd
  * label cannot cost the user the whole question.
+ *
+ * Domain and competency leave here as the model wrote them. Which enum they
+ * are held to depends on the item's track, and the track is only known once
+ * the question is matched to its plan row — see withTrackEnums.
  */
 function toQuestion(raw: Record<string, unknown>, fallbackIndex: number): ParsedQuestion | null {
   const rawOptions = raw.options;
@@ -152,13 +172,17 @@ function toQuestion(raw: Record<string, unknown>, fallbackIndex: number): Parsed
 
   const difficulty = asString(raw.difficulty);
   const reasoningOrder = asString(raw.reasoningOrder);
-  const domain = asString(raw.domain);
+  const reportedTrack = asString(raw.examTrack);
 
   return {
     index: typeof raw.index === "number" ? raw.index : fallbackIndex,
-    domain: DOMAINS.includes(domain) ? domain : "Pathology",
+    examTrack: "step1",
+    examTrackReported: EXAM_TRACKS.includes(reportedTrack as ExamTrack)
+      ? (reportedTrack as ExamTrack)
+      : null,
+    domain: asString(raw.domain),
     subtopic: asString(raw.subtopic) || "Untitled",
-    competency: asString(raw.competency) || "Foundational Science",
+    competency: asString(raw.competency),
     difficulty: DIFFICULTIES.includes(difficulty) ? difficulty : "Medium",
     reasoningOrder: REASONING_ORDERS.includes(reasoningOrder) ? reasoningOrder : "2nd",
     reasoningChain: asString(raw.reasoningChain),
@@ -175,8 +199,27 @@ function toQuestion(raw: Record<string, unknown>, fallbackIndex: number): Parsed
   };
 }
 
-/** Parses the finished response, salvaging what it can from a damaged tail. */
-export function parseBatchContent(content: string): ParsedQuestion[] {
+/**
+ * Pins a question to its track and holds its enums to that track's lists.
+ *
+ * `competency` used to be stored unvalidated, asymmetric with `domain`; both
+ * now coerce the same way, with a fallback that belongs to the track rather
+ * than a Step 1 value stamped on a Step 2 CK item.
+ */
+function withTrackEnums(question: ParsedQuestion, track: ExamTrack): ParsedQuestion {
+  const enums = TRACK_ENUMS[track];
+  return {
+    ...question,
+    examTrack: track,
+    domain: enums.domains.includes(question.domain) ? question.domain : enums.defaultDomain,
+    competency: enums.competencies.includes(question.competency)
+      ? question.competency
+      : enums.defaultCompetency,
+  };
+}
+
+/** The model's questions as written, before any track is applied. */
+function parseRaw(content: string): ParsedQuestion[] {
   const text = stripFences(content);
 
   try {
@@ -206,6 +249,15 @@ export function parseBatchContent(content: string): ParsedQuestion[] {
       }
     })
     .filter((q): q is ParsedQuestion => q !== null);
+}
+
+/**
+ * Parses the finished response, salvaging what it can from a damaged tail.
+ * Every question is held to one track; a batch that mixes tracks goes through
+ * prepareBatch, which reads the track per plan row.
+ */
+export function parseBatchContent(content: string, track: ExamTrack = "step1"): ParsedQuestion[] {
+  return parseRaw(content).map((q) => withTrackEnums(q, track));
 }
 
 export interface PersistInput {
@@ -244,15 +296,21 @@ export interface PreparedBatch {
  * batch should not pay for both in series.
  */
 export function prepareBatch(content: string, plan: BatchPlan): PreparedBatch {
-  const parsed = parseBatchContent(content);
+  const parsed = parseRaw(content);
+
+  // A plan written before modes existed (an old eval report replayed through
+  // regate.ts, say) has no examMode and no per-row track: Step 1, as it was.
+  const planTrack: ExamTrack = plan.examMode === "step2ck" ? "step2ck" : "step1";
 
   const questions = parsed.map((question, i) => {
     // Fall back to position when the model's own index is missing or wrong;
     // the plan is per-index and a batch that mislabels one is still playable.
-    const planned =
-      plan.questions.find((p) => p.index === question.index)?.answerLetter ??
-      plan.questions[i]?.answerLetter;
-    return planned ? permuteToPlannedLetter(question, planned) : question;
+    const row = plan.questions.find((p) => p.index === question.index) ?? plan.questions[i];
+    // The track comes from the row, never from the model's examTrack field.
+    // The row is the instruction; the field is the model's report of having
+    // followed it, and the two are stored side by side so they can be compared.
+    const tracked = withTrackEnums(question, row?.examTrack ?? planTrack);
+    return row ? permuteToPlannedLetter(tracked, row.answerLetter) : tracked;
   });
 
   return { questions, qa: checkBatch(questions) };
@@ -291,16 +349,23 @@ function buildRow(
     explanation: question.explanation,
     teaching_point: question.teachingPoint,
     distractor_explanations: buildDistractorExplanations(question),
+    // The concrete track the item was written on, never "mixed": a mixed set
+    // yields individually filterable rows. What the student asked for is
+    // generation_meta.examMode.
+    exam_mode: question.examTrack,
     is_active: false,
     origin: "generated",
     created_by: userId,
     generation_meta: {
       generationId: input.generationId,
       model: input.model,
-      promptVersion: "v13.1-api",
+      promptVersion: PROMPT_VERSION,
       requestedTopic: input.topic,
       system: input.system,
       challenge: input.plan.challenge,
+      examMode: input.plan.examMode,
+      examTrack: question.examTrack,
+      examTrackReported: question.examTrackReported,
       index: question.index,
       plannedAnswer: input.plan.questions.find((p) => p.index === question.index)?.answerLetter ?? null,
       plannedReasoningOrder:
@@ -358,17 +423,44 @@ export async function persistBatch(
 }
 
 /**
- * Writes one question and returns its id, or null if the insert failed.
+ * The outcome of writing one question: its id, or the database's reason for
+ * refusing it.
+ *
+ * The reason is carried rather than dropped because the two failures it
+ * distinguishes need opposite responses. A row rejected for its own sake — a
+ * constraint the question itself violates — is the shortfall this function was
+ * built to absorb, and a later wave simply writes another one. A row rejected
+ * because the TABLE cannot accept it, a column the deployed function writes and
+ * the schema does not have, fails identically for every question ever written
+ * and no amount of regenerating will help. Both arrive here as `error`; only
+ * the caller, which knows how many of the wave's inserts failed, can tell them
+ * apart — and it can only do that if the message survives this far.
+ */
+export interface PersistOneResult {
+  id: string | null;
+  /**
+   * The database's `code: message`, or null when the row landed.
+   *
+   * PostgREST's `details` is deliberately dropped: on a constraint violation it
+   * carries the failing row, which is model output, and this string is both
+   * logged and relayed to the client. `code` and `message` name the schema
+   * object at fault and nothing else.
+   */
+  error: string | null;
+}
+
+/**
+ * Writes one question and returns its id, or the reason it could not be saved.
  *
  * The incremental counterpart to persistBatch: a question is written the moment
  * it closes mid-stream rather than at the end of the batch, which is what lets
  * the student start on question one while the rest are still being written.
  *
- * It returns null rather than throwing because a single failed insert is a
- * shortfall, not a dead batch. The wave loop above it is driven by how many
- * questions have actually landed, so a lost row is simply regenerated by a
- * later wave — whereas throwing here would abort a stream that still had
- * perfectly good questions coming.
+ * It reports rather than throws because a single failed insert is a shortfall,
+ * not a dead batch. The wave loop above it is driven by how many questions have
+ * actually landed, so a lost row is simply regenerated by a later wave —
+ * whereas throwing here would abort a stream that still had perfectly good
+ * questions coming.
  */
 export async function persistOne(
   client: SupabaseClient,
@@ -377,13 +469,15 @@ export async function persistOne(
   question: ParsedQuestion,
   qaResult: QaResult | undefined,
   verification: VerificationResult[] = []
-): Promise<string | null> {
+): Promise<PersistOneResult> {
   const { data, error } = await client
     .from("questions")
     .insert(buildRow(question, userId, input, qaResult, verification))
     .select("id")
     .single();
 
-  if (error) return null;
-  return (data as { id: string } | null)?.id ?? null;
+  if (error) {
+    return { id: null, error: [error.code, error.message].filter(Boolean).join(": ") };
+  }
+  return { id: (data as { id: string } | null)?.id ?? null, error: null };
 }
