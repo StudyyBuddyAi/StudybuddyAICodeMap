@@ -130,8 +130,8 @@ function Dashboard() {
   <>
     <DashboardLayout >
       {/* <DashboardHeader /> */}
-      <main className="dashboard-main">
-        <div className="dashboard-container">
+      <main className="dashboard-main ">
+        <div className="dashboard-container max-w-[88%] mx-auto">
           <section className="dashboard-welcome" aria-labelledby="dashboard-title">
             <div>
               <div className="dashboard-eyebrow"><span className="dashboard-eyebrow-dot" /> Your study space</div>

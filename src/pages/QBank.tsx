@@ -263,7 +263,7 @@ const QBank = () => {
   return (
     <DashboardLayout wide>
       {/* The layout owns the page gutter; no padding of our own on top of it. */}
-      <div className="flex flex-col gap-6 lg:flex-row lg:gap-8">
+      <div className="flex flex-col gap-6 lg:flex-row lg:gap-8 max-w-[86%] mx-auto">
         {/* Left Panel - Configuration */}
         <div className="flex-1 max-w-2xl mx-auto lg:mx-0 lg:max-w-none space-y-6 animate-fade-in">
           {/* Header — same voice as Sheets: mono eyebrow, serif headline, one-line lede. */}

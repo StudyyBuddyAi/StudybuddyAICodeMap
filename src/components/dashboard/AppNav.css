@@ -1,0 +1,312 @@
+.site-header {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  border-bottom: 1px solid color-mix(in srgb, var(--color-border) 75%, transparent);
+  background: color-mix(in srgb, var(--color-background) 90%, transparent);
+  backdrop-filter: blur(16px);
+}
+
+.header-inner {
+  min-height: 73px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 0 1.5rem;
+  max-width: 1160px;
+  margin: 0 auto;
+}
+
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  flex-shrink: 0;
+  text-decoration: none;
+  color: var(--color-foreground);
+}
+
+.brand-mark {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  color: var(--color-accent);
+  background: var(--color-foreground);
+  border-radius: 9px;
+}
+
+.brand-name {
+  font-weight: 700;
+  font-size: 16px;
+  letter-spacing: -0.03em;
+}
+
+.brand-name b {
+  color: var(--color-accent);
+  font-weight: 700;
+}
+
+.brand-beta {
+  margin-left: 2px;
+  font: 500 9px var(--app-font-mono);
+  letter-spacing: 0.08em;
+  color: var(--color-accent);
+  border: 1px solid color-mix(in srgb, var(--color-accent) 40%, transparent);
+  padding: 3px 5px;
+  border-radius: 4px;
+}
+
+.desktop-nav {
+  display: flex;
+  align-items: center;
+  gap: clamp(18px, 3vw, 34px);
+  margin-left: auto;
+  margin-right: 16px;
+}
+
+@media (min-width: 1024px) {
+  .desktop-nav {
+    display: flex;
+  }
+}
+
+.desktop-nav a {
+  color: var(--color-muted-foreground);
+  font-size: 13px;
+  transition: color 0.2s ease;
+}
+
+.desktop-nav a:hover {
+  color: var(--color-foreground);
+}
+
+.desktop-nav a.active {
+  color: var(--color-foreground);
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.theme-button,
+.menu-button {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  color: var(--color-muted-foreground);
+  border: 1px solid var(--color-border);
+  background: transparent;
+  border-radius: 50%;
+  cursor: pointer;
+  transition: color 0.2s ease, background 0.2s ease, border-color 0.2s ease;
+}
+
+.theme-button:hover,
+.menu-button:hover {
+  color: var(--color-foreground);
+  border-color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 9%, transparent);
+}
+
+.menu-button {
+  display: none;
+  border-radius: 9px;
+}
+
+.pro-badge {
+  margin-left: 2px;
+  font: 500 9px var(--app-font-mono);
+  letter-spacing: 0.08em;
+  color: var(--color-accent);
+  border: 1px solid color-mix(in srgb, var(--color-accent) 40%, transparent);
+  padding: 3px 5px;
+  border-radius: 4px;
+}
+
+.go-pro-button {
+  display: none;
+}
+
+.icon-button {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  color: var(--color-muted-foreground);
+  border: 1px solid var(--color-border);
+  background: transparent;
+  border-radius: 50%;
+  cursor: pointer;
+  transition: color 0.2s ease, background 0.2s ease, border-color 0.2s ease;
+}
+
+.icon-button:hover {
+  color: var(--color-foreground);
+  border-color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 9%, transparent);
+}
+
+.cta-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  min-height: 45px;
+  padding: 11px 19px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  cursor: pointer;
+  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease, background 0.2s ease;
+  background: var(--color-foreground);
+  color: var(--color-background);
+  box-shadow: 0 7px 18px color-mix(in srgb, var(--color-foreground) 16%, transparent);
+}
+
+.cta-button:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 11px 23px color-mix(in srgb, var(--color-foreground) 24%, transparent);
+}
+
+.cta-button:active {
+  transform: translateY(0);
+}
+
+@media (max-width: 1023px) {
+  .menu-button {
+    display: grid;
+  }
+}
+
+@media (min-width: 1024px) {
+  .menu-button {
+    display: none;
+  }
+}
+
+/* Responsive styles */
+@media (max-width: 960px) {
+  .desktop-nav {
+    gap: 17px;
+    margin-right: 3px;
+  }
+
+  .header-inner {
+    padding: 0 1rem;
+  }
+}
+
+@media (max-width: 700px) {
+  .site-header {
+    min-height: 64px;
+  }
+
+  .header-inner {
+    min-height: 64px;
+    padding: 0 1.25rem;
+  }
+
+  .desktop-nav {
+    display: none;
+  }
+
+  .menu-button {
+    display: grid;
+  }
+
+  .mobile-nav {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    max-height: 0;
+    overflow: hidden;
+    padding-inline: 20px;
+    transition: max-height 0.3s ease, padding-bottom 0.3s ease;
+  }
+
+  .site-header.menu-open .mobile-nav {
+    display: flex;
+    max-height: 320px;
+    padding-bottom: 17px;
+  }
+
+  .mobile-nav a {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 11px 0;
+    border-bottom: 1px solid var(--color-border);
+    color: var(--color-muted-foreground);
+    font-size: 14px;
+    text-decoration: none;
+  }
+
+  .mobile-nav a:hover {
+    color: var(--color-foreground);
+  }
+
+  .mobile-nav a.active {
+    color: var(--color-foreground);
+  }
+
+  .mobile-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 10px 0 4px;
+  }
+
+  .mobile-action-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 9px;
+    min-height: 45px;
+    padding: 11px 19px;
+    border: 1px solid var(--color-border);
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    cursor: pointer;
+    transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease, background 0.2s ease;
+    background: transparent;
+    color: var(--color-foreground);
+    width: 100%;
+  }
+
+  .mobile-action-button:hover {
+    border-color: var(--color-foreground);
+  }
+
+  .mobile-action-button.cta-button {
+    border-color: transparent;
+    background: var(--color-foreground);
+    color: var(--color-background);
+    box-shadow: 0 7px 18px color-mix(in srgb, var(--color-foreground) 16%, transparent);
+  }
+
+  .mobile-action-button.cta-button:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 11px 23px color-mix(in srgb, var(--color-foreground) 24%, transparent);
+  }
+}
+
+@media (max-width: 420px) {
+  .brand-beta {
+    display: none;
+  }
+
+  .header-inner {
+    padding: 0 1rem;
+  }
+}

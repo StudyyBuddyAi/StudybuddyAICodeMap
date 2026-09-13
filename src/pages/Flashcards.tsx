@@ -803,7 +803,7 @@ const Flashcards = () => {
 
   return (
     <DashboardLayout wide>
-      <div className="space-y-6">
+      <div className="space-y-6 max-w-[86%] mx-auto">
         <div className="mb-6">
           <p className="font-mono text-[11px] font-medium tracking-widest uppercase text-primary mb-2">
             Flashcards · Spaced repetition

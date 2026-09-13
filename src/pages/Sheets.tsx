@@ -54,7 +54,7 @@ const Sheets = () => {
  
   return (
     <DashboardLayout wide>
-      <div className="space-y-8">
+      <div className="space-y-8 max-w-[86%] mx-auto">
         {/* Header */}
         <div>
           <p
