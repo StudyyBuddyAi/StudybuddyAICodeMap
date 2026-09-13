@@ -88,9 +88,58 @@ export interface SessionGeneration {
   covered: string[];
 }
 
+/**
+ * How a set is sat. Distinct from ExamMode, which is WHAT the set is written
+ * for (Step 1 / Step 2 CK). Mirrors qbank_sessions.mode.
+ *
+ * - tutor: each answer is graded when confirmed, explanation shown right away.
+ * - timed: selections are kept ungraded and changeable until the block ends,
+ *   against a countdown; nothing about the key reaches the client before then.
+ */
+export type PlayMode = "tutor" | "timed";
+
+export const PLAY_MODE_LABELS: Record<PlayMode, string> = {
+  tutor: "Tutor",
+  timed: "Timed",
+};
+
+export const PLAY_MODE_BLURBS: Record<PlayMode, string> = {
+  tutor: "Answer, then see the explanation straight away.",
+  timed: "Exam conditions — answers and explanations are hidden until you end the block. 90 seconds per question.",
+};
+
+/** Seconds a timed block allows per question, as on the real exam. */
+export const TIMED_SECONDS_PER_QUESTION = 90;
+
+/** A highlighted run of the stem, as [start, end) character offsets. */
+export type HighlightRange = [number, number];
+
+/**
+ * The student's marks on a set: struck-out options and highlighted stem text,
+ * keyed by question id. Saved with the session's progress so they survive
+ * Save & Exit and follow the student to another device.
+ */
+export interface SessionAnnotations {
+  struck: Record<string, OptionKey[]>;
+  highlights: Record<string, HighlightRange[]>;
+}
+
 export interface SessionState {
   // Server session id, created up front by start_qbank_session.
   sessionId: string | null;
+  mode: PlayMode;
+  /**
+   * Timed mode only: the option currently chosen per question. Ungraded and
+   * changeable until the block ends. Always empty in tutor mode, where a
+   * confirmed choice is an entry in `answers` instead.
+   */
+  selections: Record<string, OptionKey>;
+  annotations: SessionAnnotations;
+  /**
+   * The highest progress snapshot sequence this client knows the server has.
+   * Saves are ordered by it, so a late flush never overwrites a newer save.
+   */
+  progressSeq: number;
   questions: Question[];
   currentIndex: number;
   answers: SessionAnswer[];
@@ -98,6 +147,12 @@ export interface SessionState {
   questionStartedAt: number;
   accumulatedMs: number;
   resumedAt: number;
+  /**
+   * False while the clock is paused — waiting on a question that has not been
+   * written yet. Elapsed time is accumulatedMs, plus now − resumedAt only while
+   * this is true.
+   */
+  clockRunning: boolean;
   skippedIds: string[];
   flaggedIds: string[];
   /**

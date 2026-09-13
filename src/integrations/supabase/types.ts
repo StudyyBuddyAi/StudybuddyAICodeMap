@@ -490,7 +490,7 @@ export type Database = {
           selected_option: 'a' | 'b' | 'c' | 'd' | 'e'
           is_correct: boolean
           time_taken_ms: number | null
-          attempted_at: string
+          created_at: string
           session_id: string | null
         }
         Insert: {
@@ -500,7 +500,7 @@ export type Database = {
           selected_option: 'a' | 'b' | 'c' | 'd' | 'e'
           is_correct: boolean
           time_taken_ms?: number | null
-          attempted_at?: string
+          created_at?: string
           session_id?: string | null
         }
         Update: {
@@ -510,7 +510,7 @@ export type Database = {
           selected_option?: 'a' | 'b' | 'c' | 'd' | 'e'
           is_correct?: boolean
           time_taken_ms?: number | null
-          attempted_at?: string
+          created_at?: string
           session_id?: string | null
         }
         Relationships: [
@@ -576,34 +576,50 @@ export type Database = {
           id: string
           user_id: string
           started_at: string
-          ended_at: string
+          ended_at: string | null
           score: number
           total: number
           total_time_ms: number
           system: string
           created_at: string
+          status: string
+          mode: string
+          question_ids: string[] | null
+          current_index: number
+          skipped_ids: string[]
+          elapsed_ms: number
+          expected_total: number | null
+          generation: Json | null
+          annotations: Json
+          progress_seq: number
+          last_activity_at: string | null
         }
         Insert: {
           id?: string
           user_id: string
           started_at: string
-          ended_at: string
+          ended_at?: string | null
           score: number
           total: number
           total_time_ms: number
           system?: string
           created_at?: string
+          status?: string
+          mode?: string
+          question_ids?: string[] | null
         }
         Update: {
           id?: string
           user_id?: string
           started_at?: string
-          ended_at?: string
+          ended_at?: string | null
           score?: number
           total?: number
           total_time_ms?: number
           system?: string
           created_at?: string
+          status?: string
+          mode?: string
         }
         Relationships: [
           {
@@ -696,6 +712,55 @@ export type Database = {
           p_limit: number
           p_system: string | null
           p_question_ids: string[] | null
+          p_mode?: string
+        }
+        Returns: Json
+      }
+      save_qbank_progress: {
+        Args: {
+          p_session: string
+          p_seq: number
+          p_current_index: number
+          p_skipped_ids: string[]
+          p_elapsed_ms: number
+          p_expected_total: number
+          p_generation: Json | null
+          p_annotations: Json
+          p_flagged_ids?: string[] | null
+        }
+        Returns: Json
+      }
+      set_question_flag: {
+        Args: { p_session: string; p_question: string; p_flagged: boolean }
+        Returns: Json
+      }
+      list_unfinished_sessions: {
+        Args: Record<PropertyKey, never>
+        Returns: {
+          id: string
+          mode: string
+          system: string
+          topic: string | null
+          exam_mode: string | null
+          started_at: string
+          last_activity_at: string | null
+          question_count: number
+          expected_total: number
+          answered_count: number
+          flagged_count: number
+          elapsed_ms: number
+        }[]
+      }
+      resume_qbank_session: {
+        Args: { p_session: string }
+        Returns: Json
+      }
+      record_timed_answer: {
+        Args: {
+          p_session: string
+          p_question: string
+          p_selected: string | null
+          p_time_ms: number
         }
         Returns: Json
       }

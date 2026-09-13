@@ -11,6 +11,13 @@ export default defineConfig({
     },
   },
   plugins: [react()],
+  optimizeDeps: {
+    // Dependencies reached only through lazily loaded pages are discovered on
+    // first visit, and Vite reloads the page to re-optimise. The QBank player
+    // is one of those pages, so that reload landed mid-session. Pre-bundling
+    // them at startup keeps the first visit from reloading.
+    include: ["@radix-ui/react-popover", "@radix-ui/react-alert-dialog", "@radix-ui/react-tabs"],
+  },
   build: {
     rollupOptions: {
       output: {

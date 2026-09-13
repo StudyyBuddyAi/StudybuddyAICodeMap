@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   FlaskConical,
@@ -8,6 +8,8 @@ import {
   RotateCcw,
   ChevronRight,
   Flag,
+  AlertTriangle,
+  MinusCircle,
   ShieldCheck,
   ImageOff,
 } from "lucide-react";
@@ -15,7 +17,7 @@ import DashboardLayout from "@/components/dashboard/DashboardLayout";
 import PageLoader from "@/components/PageLoader";
 import { useQBankContext } from "@/contexts/QBankContext";
 import { supabase } from "@/integrations/supabase/client";
-import type { Question, QuestionMedia, SessionAnswer } from "@/lib/qbank-types";
+import type { PlayMode, Question, QuestionMedia, SessionAnswer } from "@/lib/qbank-types";
 import { CHALLENGE_LABELS, EXAM_MODE_LABELS } from "@/lib/qbank-types";
 import { ruleLabel } from "@/lib/qbank-rule-labels";
 import {
@@ -24,12 +26,15 @@ import {
 } from "@/lib/qbank-generation-report";
 
 interface SummaryData {
+  /** Answered questions first, then any the set left unanswered. */
   questions: Question[];
   answers: SessionAnswer[];
   totalTime: number;
   score: number;
   total: number;
   flaggedIds: string[];
+  /** Questions the set held that were never answered. */
+  omitted?: number;
 }
 
 // Raw shapes returned by the get_session_review RPC (before mapping to app types).
@@ -284,19 +289,35 @@ const QBankSummary = () => {
     lastSummary,
     startGeneratedSession,
     lastGeneration,
+    lastMode,
     enterSummaryReview,
     setReviewIndex,
     loadSummary,
   } = useQBankContext();
   const [retrying, setRetrying] = useState(false);
   const [report, setReport] = useState<GenerationReport | null>(null);
+  const [sessionMode, setSessionMode] = useState<PlayMode>(lastMode);
 
   const [summaryData, setSummaryData] = useState<SummaryData | null>(null);
   const [summaryFlaggedIds, setSummaryFlaggedIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [loadAttempt, setLoadAttempt] = useState(0);
+
+  // Read through a ref, not a dependency. A successful load calls loadSummary,
+  // which replaces lastSummary; as a dependency that re-ran the load, which
+  // called loadSummary again — a request loop that stayed hidden only because
+  // get_session_review had always failed (see 20260916000000).
+  const lastSummaryRef = useRef(lastSummary);
+  lastSummaryRef.current = lastSummary;
 
   useEffect(() => {
+    let cancelled = false;
     const load = async () => {
+      setLoading(true);
+      setLoadError(null);
+      let reviewError: string | null = null;
+
       if (sessionId) {
         try {
           // Answer fields are REVOKE'd from direct table selects; the owner-only
@@ -304,6 +325,11 @@ const QBankSummary = () => {
           const { data, error } = await supabase.rpc("get_session_review", {
             p_session: sessionId,
           });
+          if (cancelled) return;
+          if (error) {
+            console.error("get_session_review failed:", error);
+            reviewError = error.message;
+          }
 
           if (!error && data) {
             const review = data as unknown as {
@@ -313,6 +339,8 @@ const QBankSummary = () => {
                 total_time_ms: number;
                 started_at: string;
                 ended_at: string;
+                mode?: string;
+                question_count?: number;
               };
               attempts: Array<{
                 question_id: string;
@@ -321,28 +349,37 @@ const QBankSummary = () => {
                 time_taken_ms: number | null;
                 question: ReviewQuestion | null;
               }>;
+              omitted?: ReviewQuestion[];
               flagged: string[];
             };
 
-            const questions: Question[] = review.attempts
-              .map((a) => {
-                const q = a.question;
-                if (!q) return null;
-                const media: QuestionMedia[] = (q.media ?? []).map((m: ReviewMedia) => ({
-                  file_url: m.file_url,
-                  media_type: m.media_type,
-                  caption: m.caption ?? null,
-                  license: m.license ?? null,
-                  attribution: m.attribution ?? null,
-                  display_context: m.display_context as
-                    | "stem"
-                    | "explanation"
-                    | "both",
-                  display_order: m.display_order ?? 0,
-                }));
-                return { ...q, media } as Question;
-              })
-              .filter(Boolean) as Question[];
+            const toQuestion = (q: ReviewQuestion | null): Question | null => {
+              if (!q) return null;
+              const media: QuestionMedia[] = (q.media ?? []).map((m: ReviewMedia) => ({
+                file_url: m.file_url,
+                media_type: m.media_type,
+                caption: m.caption ?? null,
+                license: m.license ?? null,
+                attribution: m.attribution ?? null,
+                display_context: m.display_context as
+                  | "stem"
+                  | "explanation"
+                  | "both",
+                display_order: m.display_order ?? 0,
+              }));
+              return { ...q, media } as Question;
+            };
+
+            // Omitted questions go after the answered ones, so the review walks
+            // through what was answered first and ends on what was left.
+            const omittedQuestions = (review.omitted ?? []).map(toQuestion).filter(Boolean) as Question[];
+            const questions: Question[] = [
+              ...(review.attempts.map((a) => toQuestion(a.question)).filter(Boolean) as Question[]),
+              ...omittedQuestions,
+            ];
+            if (review.session.mode === "timed" || review.session.mode === "tutor") {
+              setSessionMode(review.session.mode);
+            }
 
             const answers: SessionAnswer[] = review.attempts.map((a) => ({
               question_id: a.question_id,
@@ -360,6 +397,10 @@ const QBankSummary = () => {
               score: review.session.score,
               total: review.session.total,
               flaggedIds: [...flagSet],
+              omitted:
+                typeof review.session.question_count === "number"
+                  ? Math.max(0, review.session.question_count - review.session.total)
+                  : omittedQuestions.length,
             };
             setSummaryData(loaded);
             setSummaryFlaggedIds(flagSet);
@@ -369,12 +410,27 @@ const QBankSummary = () => {
           }
         } catch (err) {
           console.error("Failed to load session review, falling back to memory:", err);
+          reviewError = err instanceof Error ? err.message : String(err);
         }
       }
+      if (cancelled) return;
 
-      if (lastSummary) {
-        setSummaryData(lastSummary);
-        setSummaryFlaggedIds(new Set(lastSummary.flaggedIds ?? []));
+      const memory = lastSummaryRef.current;
+      if (memory) {
+        setSummaryData(memory);
+        setSummaryFlaggedIds(new Set(memory.flaggedIds ?? []));
+        setLoading(false);
+        return;
+      }
+
+      // Nothing to fall back on — always the case for a timed set, which has no
+      // grades in memory. Say so, rather than dropping the student on /qbank.
+      if (sessionId) {
+        setLoadError(
+          reviewError?.includes("session_not_found")
+            ? "These results don't exist, or they belong to another account."
+            : reviewError ?? "The results could not be loaded."
+        );
         setLoading(false);
         return;
       }
@@ -382,8 +438,11 @@ const QBankSummary = () => {
       navigate("/qbank");
     };
 
-    load();
-  }, [sessionId, lastSummary, navigate, loadSummary]);
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionId, loadAttempt, navigate, loadSummary]);
 
   useEffect(() => {
     const generationId = lastGeneration?.generationId;
@@ -408,9 +467,42 @@ const QBankSummary = () => {
     );
   }
 
+  if (loadError) {
+    return (
+      <DashboardLayout wide>
+        <div className="mx-auto mt-16 max-w-sm space-y-3 text-center">
+          <AlertTriangle className="mx-auto h-6 w-6 text-amber-500" />
+          <p className="text-sm font-medium" style={{ color: "var(--fg)" }}>
+            Couldn’t load your results.
+          </p>
+          <p className="text-xs" style={{ color: "var(--fg-muted)" }}>
+            {loadError}
+          </p>
+          <div className="flex items-center justify-center gap-2 pt-1">
+            <button
+              type="button"
+              onClick={() => setLoadAttempt((n) => n + 1)}
+              style={{ ...DARK_BUTTON_STYLE, flex: "none", padding: "0 20px" }}
+            >
+              <RotateCcw style={{ width: 16, height: 16 }} /> Try again
+            </button>
+            <button
+              type="button"
+              onClick={() => navigate("/qbank")}
+              style={{ ...OUTLINE_BUTTON_STYLE, flex: "none", padding: "0 16px" }}
+            >
+              Back to QBank
+            </button>
+          </div>
+        </div>
+      </DashboardLayout>
+    );
+  }
+
   if (!summaryData) return null;
 
   const { questions, answers, totalTime, score, total } = summaryData;
+  const omitted = summaryData.omitted ?? 0;
 
   // The title was hardcoded to "Cardiovascular System", which was merely
   // misleading while the bank held three systems and every session drew from
@@ -429,7 +521,8 @@ const QBankSummary = () => {
     : 0;
 
   const difficultyBreakdown = ["Easy", "Medium", "Hard"].map((diff) => {
-    const qs = questions.filter((q) => q.difficulty === diff);
+    // Graded questions only: an omitted question has no result to count.
+    const qs = questions.filter((q) => q.difficulty === diff && answers.some((a) => a.question_id === q.id));
     const correct = qs.filter((q) => answers.find((a) => a.question_id === q.id)?.is_correct).length;
     return { diff, correct, total: qs.length };
   }).filter((d) => d.total > 0);
@@ -450,13 +543,14 @@ const QBankSummary = () => {
         navigate("/qbank");
         return;
       }
-      await startGeneratedSession(
+      const id = await startGeneratedSession(
         lastGeneration.topic,
         lastGeneration.target,
         lastGeneration.challenge,
-        lastGeneration.examMode ?? "step1"
+        lastGeneration.examMode ?? "step1",
+        sessionMode
       );
-      navigate("/qbank/session");
+      navigate(id ? `/qbank/session?session=${id}` : "/qbank/session");
     } catch {
       setRetrying(false);
     }
@@ -493,7 +587,7 @@ const QBankSummary = () => {
           </div>
           <div>
             <p style={{ ...MONO_EYEBROW, color: "var(--accent)", marginBottom: 4 }}>
-              Session complete
+              {sessionMode === "timed" ? "Timed block complete" : "Session complete"}
             </p>
             <h1
               style={{
@@ -517,7 +611,10 @@ const QBankSummary = () => {
             <div className="flex-1 space-y-4 text-center sm:text-left">
               <div>
                 <p className="text-lg font-semibold tracking-tight" style={{ color: perf.color }}>{perf.text}</p>
-                <p className="text-sm text-muted-foreground mt-0.5">{score} correct out of {total} questions</p>
+                <p className="text-sm text-muted-foreground mt-0.5">
+                  {score} correct out of {total} answered
+                  {omitted > 0 ? ` · ${omitted} omitted` : ""}
+                </p>
               </div>
               <div className="flex flex-wrap gap-3 justify-center sm:justify-start">
                 {[`${formatTime(totalTime)} total`, `~${avgTime}s per question`].map((label) => (
@@ -612,6 +709,7 @@ const QBankSummary = () => {
             {questions.map((q, i) => {
               const ans = answers.find((a) => a.question_id === q.id);
               const isCorrect = ans?.is_correct ?? false;
+              const isOmitted = !ans;
               const diffColor = q.difficulty === "Easy" ? "#059669" : q.difficulty === "Medium" ? "#d97706" : "#dc2626";
               const stemSnippet = q.question_text.length > 80
                 ? q.question_text.slice(0, 80).trimEnd() + "…"
@@ -624,7 +722,9 @@ const QBankSummary = () => {
                   className="w-full flex items-start gap-3 text-left group"
                   style={{
                     border: "1px solid var(--border)",
-                    borderLeft: isCorrect
+                    borderLeft: isOmitted
+                      ? "3px solid var(--border)"
+                      : isCorrect
                       ? "3px solid var(--accent)"
                       : "3px solid var(--signal)",
                     borderRadius: "var(--radius-md)",
@@ -634,7 +734,9 @@ const QBankSummary = () => {
                   }}
                 >
                   <div className="shrink-0 mt-0.5">
-                    {isCorrect
+                    {isOmitted
+                      ? <MinusCircle style={{ width: 15, height: 15, color: "var(--fg-subtle)" }} />
+                      : isCorrect
                       ? <CheckCircle style={{ width: 15, height: 15, color: "var(--accent)" }} />
                       : <XCircle style={{ width: 15, height: 15, color: "var(--signal)" }} />
                     }
@@ -651,9 +753,14 @@ const QBankSummary = () => {
                     <p className="text-[11px] text-muted-foreground leading-snug truncate">{stemSnippet}</p>
                   </div>
                   <div className="shrink-0 flex items-center gap-2 mt-0.5">
-                    {!isCorrect && ans && (
+                    {!isCorrect && ans && q.correct_option && (
                       <span className="text-[10px] text-red-600 dark:text-red-400 font-medium">
                         {ans.selected_option.toUpperCase()} → {q.correct_option.toUpperCase()}
+                      </span>
+                    )}
+                    {isOmitted && (
+                      <span className="text-[10px] text-muted-foreground font-medium">
+                        Omitted{q.correct_option ? ` · ${q.correct_option.toUpperCase()}` : ""}
                       </span>
                     )}
                     {ans && (
