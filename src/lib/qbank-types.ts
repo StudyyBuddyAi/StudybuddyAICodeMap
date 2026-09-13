@@ -34,6 +34,14 @@ export interface Question {
   correct_option?: OptionKey;
   explanation?: string;
   teaching_point?: string;
+  /**
+   * Why each wrong option is wrong, keyed by the letter it describes. Arrives
+   * with the grade, like the fields above it. Absent on curated questions and
+   * on generated ones written before the column existed — those carry the same
+   * text appended to `explanation` instead, so a reader must treat this as
+   * optional rather than assume every answered question has it.
+   */
+  distractor_explanations?: Partial<Record<OptionKey, string>>;
   media?: QuestionMedia[];
 }
 
@@ -42,6 +50,42 @@ export interface SessionAnswer {
   selected_option: OptionKey;
   is_correct: boolean;
   time_taken_ms: number;
+}
+
+/**
+ * What a generated session needs to keep generating after the player has taken
+ * over — and, more to the point, what it needs to RESUME after a refresh.
+ *
+ * Everything here is persisted alongside the session. `generationId` is the
+ * thread back to the rows in the table, so a reload can reconcile the session
+ * against questions that were written while the tab was closed. `nextIndex` and
+ * `covered` are what a resumed run needs to avoid renumbering questions over
+ * the top of each other or re-covering ground the set already covered.
+ */
+export interface SessionGeneration {
+  generationId: string;
+  /** The student's topic, verbatim — a resumed run needs it to keep writing. */
+  topic: string;
+  /** The system the first wave routed to. Every later wave reuses it. */
+  system: string | null;
+  systemName: string | null;
+  /** How many questions the set is meant to end with. */
+  target: number;
+  /**
+   * The reasoning-order mix this set was asked for. Persisted because a resumed
+   * run rebuilds its own batch plan: without it, the waves written after a
+   * refresh would silently drop back to the default and the second half of the
+   * set would not match the first.
+   */
+  challenge: ChallengeLevel;
+  /**
+   * The exam the set was asked for. Persisted for the same reason as
+   * `challenge`: a resumed run must keep writing Step 2 CK items to a Step 2
+   * CK set. A set saved before this field existed resumes as Step 1.
+   */
+  examMode: ExamMode;
+  nextIndex: number;
+  covered: string[];
 }
 
 export interface SessionState {
@@ -56,6 +100,19 @@ export interface SessionState {
   resumedAt: number;
   skippedIds: string[];
   flaggedIds: string[];
+  /**
+   * How many questions this session will end up with.
+   *
+   * Distinct from `questions.length` only while a generated set is still being
+   * written: the player shows "Q2 of 20" from the moment the session starts,
+   * and it is what tells the difference between "this is the last question" and
+   * "the next one has not been written yet". Reconciled down to the real count
+   * when generation finishes, so a set that ended short says so rather than
+   * waiting forever for questions that are not coming.
+   */
+  expectedTotal: number;
+  /** Null for a curated session — those are complete the moment they start. */
+  generation: SessionGeneration | null;
 }
 
 // ─── On-demand generation ───────────────────────────────────────────────────
@@ -66,6 +123,46 @@ export interface SessionState {
 // same as a curated one.
 
 export type ReasoningOrder = "1st" | "2nd" | "3rd";
+
+/**
+ * How hard the student asked for. Mirrors ChallengeLevel in
+ * supabase/functions/_shared/qbank-prompt.ts, which is the authority — the edge
+ * function narrows whatever arrives back onto that enum, so a stale client can
+ * only ever get the default rather than an error.
+ */
+export type ChallengeLevel = "foundations" | "balanced" | "challenge";
+
+export const CHALLENGE_LABELS: Record<ChallengeLevel, string> = {
+  foundations: "Foundations",
+  balanced: "Balanced",
+  challenge: "Challenge",
+};
+
+export const CHALLENGE_BLURBS: Record<ChallengeLevel, string> = {
+  // Worded for both exams: "recall and mechanism" was a Step 1 description.
+  foundations: "Mostly single-step items — recognise the pattern, name the answer. Short vignettes.",
+  balanced: "Exam calibration — about 65-70% correct for a prepared student.",
+  challenge: "Multi-step reasoning and close discrimination between look-alikes.",
+};
+
+/**
+ * Which exam the set is written for. Mirrors ExamMode in
+ * supabase/functions/_shared/qbank-prompt.ts, the authority; the edge function
+ * narrows whatever arrives onto that enum, so a stale client gets Step 1.
+ */
+export type ExamMode = "step1" | "step2ck" | "mixed";
+
+export const EXAM_MODE_LABELS: Record<ExamMode, string> = {
+  step1: "Step 1",
+  step2ck: "Step 2 CK",
+  mixed: "Mixed",
+};
+
+export const EXAM_MODE_BLURBS: Record<ExamMode, string> = {
+  step1: "Foundational science — mechanism, anatomy, pathophysiology, pharmacology MOA.",
+  step2ck: "Clinical decisions — diagnosis, next best step, the study to order, the drug to give.",
+  mixed: "Half and half, shuffled — each question is written to one exam or the other.",
+};
 
 /** Where a `questions` row came from. Curated rows are the hand-authored bank. */
 export type QuestionOrigin = "curated" | "generated";

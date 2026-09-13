@@ -123,7 +123,7 @@ function Dashboard() {
     isAnonymous ? anonymousMessage : <><strong>0</strong> cards due today</>
   );
   const qbankStat = statsLoading ? <span className="dashboard-stat-loading" aria-label="Loading">•••</span> : (
-    <><strong>0</strong> questions ready</>
+    <span className="dashboard-stat-muted">Any topic, on demand</span>
   );
 
   return (
@@ -197,7 +197,7 @@ function Dashboard() {
               <ToolCard
                 icon={<FlaskConical size={19} />}
                 title="QBank"
-                description="USMLE-style questions for Step 1 and Step 2, human-verified and built for clinical reasoning."
+                description="USMLE-style questions written on demand for any topic, to NBME item-writing rules."
                 stat={qbankStat}
                 href="/qbank"
                 testId="card-tool-qbank"

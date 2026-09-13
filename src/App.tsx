@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useState } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Outlet, Route, Routes, useLocation } from "react-router-dom";
+import { BrowserRouter, Navigate, Outlet, Route, Routes, useLocation } from "react-router-dom";
 import { Analytics } from "@vercel/analytics/react";
 import { AuthProvider } from "./contexts/AuthContext";
 import { QBankProvider } from "./contexts/QBankContext";
@@ -24,7 +24,6 @@ const Sheets = lazy(() => import("./pages/Sheets.tsx"));
 const Flashcards = lazy(() => import("./pages/Flashcards.tsx"));
 const QBank = lazy(() => import("./pages/QBank.tsx"));
 const QBankSession = lazy(() => import("./pages/QBankSession.tsx"));
-const QBankGenerate = lazy(() => import("./pages/QBankGenerate.tsx"));
 const QBankSummary = lazy(() => import("./pages/QBankSummary.tsx"));
 
 const queryClient = new QueryClient();
@@ -69,7 +68,8 @@ const AppRoutes = () => {
           <Route path="/flashcards" element={<Flashcards />} />
           <Route element={<QBankProvider><Outlet /></QBankProvider>}>
             <Route path="/qbank" element={<QBank />} />
-            <Route path="/qbank/generate" element={<QBankGenerate />} />
+            {/* Generation merged into /qbank; the old entry point still resolves. */}
+            <Route path="/qbank/generate" element={<Navigate to="/qbank" replace />} />
             <Route path="/qbank/session" element={<QBankSession />} />
             <Route path="/qbank/summary" element={<QBankSummary />} />
           </Route>

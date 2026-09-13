@@ -90,10 +90,25 @@ const BANNED_OPTION_PHRASES = [
  * actually after is a numbered scaffold label — "Step 2:", "fails at step 3" —
  * so it now requires the numeral to be used as a label rather than as part of
  * an ordinary noun phrase.
+ *
+ * Therapy ladders are the remaining false positive, and Step 2 CK items live
+ * on them: "escalate to step 3 therapy" (GINA), "move to step 2 of the WHO
+ * analgesic ladder" both matched the preposition form, and "…GINA step 3." at
+ * the end of a sentence matched the label form on its full stop. A step in a
+ * treatment ladder is medicine, not scaffolding, so both forms now stand down
+ * when the surrounding words say ladder — a following therapy word, or a
+ * preceding guideline or ladder name. "Step 2: therefore a thiazide" still
+ * blocks; nothing about a ladder precedes or follows it.
  */
 const META_LANGUAGE: { pattern: RegExp; label: string }[] = [
-  { pattern: /\bsteps?\s*[123]\b\s*[:.\-–—]/i, label: "Step 1:" },
-  { pattern: /\b(?:at|in|from|to|after|before)\s+step\s*[123]\b/i, label: "at step 2" },
+  {
+    pattern: /(?<!\b(?:gina|gold|who|ladder|asthma|copd|analgesic|therapy|treatment)\s+)\bsteps?\s*[123]\b\s*[:.\-–—]/i,
+    label: "Step 1:",
+  },
+  {
+    pattern: /\b(?:at|in|from|to|after|before)\s+step\s*[123]\b(?!\s+(?:therapy|treatment|controller|care|management|regimen|of\s+the\s+(?:who|gina|gold|ladder)|on\s+the\s+(?:who|gina|gold|ladder)))/i,
+    label: "at step 2",
+  },
   { pattern: /\bfails?\s+at\s+step\b/i, label: "fails at step" },
   { pattern: /\breasoning chain\b/i, label: "reasoning chain" },
 ];
@@ -231,6 +246,9 @@ const UNCATEGORICAL_NOUNS = new Set([
   "mechanism", "process", "change", "finding", "statement", "option",
   "condition", "explanation", "reason", "cause", "effect", "result",
   "feature", "property", "characteristic", "best", "additional", "other",
+  // The Step 2 CK task words. "Which step in management" asks for an action,
+  // and no option will contain the word "step".
+  "step", "management", "action", "next",
 ]);
 
 /**
@@ -502,12 +520,23 @@ const LEAD_IN_PREFIX_WORDS = 4;
  * Without them the check compared raw opening words and matched four items in
  * one batch on "which of the following best", which is how most lead-ins open
  * and told nobody anything.
+ *
+ * The second group is the Step 2 CK task vocabulary. "Which of the following
+ * is the most appropriate next step in management?" reduced to exactly
+ * `appropriate next step management` — four words, the full prefix — so every
+ * pair of Step 2 items in a wave fired this: ten warns per five-item wave,
+ * none of them information. With the task words dropped that lead-in has no
+ * content words left and the check stands down, which is correct: on Step 2
+ * the task legitimately repeats and `duplicate-question` still covers the
+ * stems.
  */
 const LEAD_IN_FILLER = new Set([
   "which", "what", "of", "the", "following", "is", "are", "was", "were", "be",
   "best", "most", "likely", "this", "that", "these", "those", "in", "on", "at",
   "a", "an", "and", "or", "to", "for", "from", "by", "with", "does", "do",
   "patient", "patients", "his", "her", "their", "its",
+  "appropriate", "next", "step", "management", "initial", "indicated",
+  "action", "further",
 ]);
 
 /** The opening content words of a lead-in, as one comparable key. */

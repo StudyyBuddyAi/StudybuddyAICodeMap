@@ -57,12 +57,58 @@ const DEFAULT_REGION: CortiRegion = "eu";
 const DEFAULT_MODEL: CortiModel = "corti-s1-instant";
 const DEFAULT_TENANT = "base";
 
+/**
+ * The two side-calls have their own defaults, chosen on different grounds
+ * from the writer's.
+ *
+ * The verifier gets `corti-s1-instant`. It is the component that withholds
+ * questions from the student — a disagreement blocks delivery — so it is worth
+ * the strongest model that can actually answer.
+ *
+ * `corti-s1` was the obvious candidate and was tried: the task is bounded, so
+ * the writer's reasoning blow-up looked inapplicable. Measured on a 10-item run
+ * at a 6000-token budget it was worse than either alternative — 50% of probes
+ * returned "Unexpected end of JSON input", having spent the budget reasoning
+ * without emitting an answer, at 60-100s per item against roughly a second for
+ * `-mini-instant`. Because the pass fails open, those items shipped unverified:
+ * a probe that is slower AND checks half as much. The reasoning variant is not
+ * usable here for the same reason it is not usable for the writer.
+ *
+ * The cost is that the probe is now the same model as the writer, weakening the
+ * independence it is built on — a model tends to ratify its own output. It is
+ * still a blind read at temperature 0 with no key, and a probe that works is
+ * worth more than a purer one that does not. Watch the disagreement rate: if it
+ * falls toward zero, the independence has been lost and `-mini-instant` is the
+ * honest fallback.
+ *
+ * The router gets `corti-s1-instant`, up from `-mini-instant`. One JSON object
+ * and 200 tokens, but a misroute picks the wrong System Brief for the entire
+ * set and fails silently to the cardiovascular fallback.
+ */
+const DEFAULT_ROUTER_MODEL: CortiModel = "corti-s1-instant";
+const DEFAULT_VERIFIER_MODEL: CortiModel = "corti-s1-instant";
+
 export interface CortiConfig {
   clientId: string;
   clientSecret: string;
   tenant: string;
   region: CortiRegion;
+  /** The writer. */
   model: CortiModel;
+  /** Topic-to-system classification. */
+  routerModel: CortiModel;
+  /** The independent cold-answering probe. */
+  verifierModel: CortiModel;
+}
+
+/** Narrows an env value onto the model enum, or falls back. */
+function asCortiModel(raw: string | undefined, fallback: CortiModel): CortiModel {
+  return raw === "corti-s1" ||
+    raw === "corti-s1-instant" ||
+    raw === "corti-s1-mini" ||
+    raw === "corti-s1-mini-instant"
+    ? raw
+    : fallback;
 }
 
 /**
@@ -88,21 +134,16 @@ export function cortiConfigFromEnv(): CortiConfig {
   const rawRegion = Deno.env.get("CORTI_REGION");
   const region: CortiRegion = rawRegion === "us" ? "us" : DEFAULT_REGION;
 
-  const rawModel = Deno.env.get("CORTI_MODEL");
-  const model: CortiModel =
-    rawModel === "corti-s1" ||
-    rawModel === "corti-s1-instant" ||
-    rawModel === "corti-s1-mini" ||
-    rawModel === "corti-s1-mini-instant"
-      ? rawModel
-      : DEFAULT_MODEL;
-
+  // Each model is an env override with its own default, so a model regression
+  // on any of the three is an env rollback rather than a redeploy.
   return {
     clientId,
     clientSecret,
     tenant: Deno.env.get("CORTI_TENANT") || DEFAULT_TENANT,
     region,
-    model,
+    model: asCortiModel(Deno.env.get("CORTI_MODEL"), DEFAULT_MODEL),
+    routerModel: asCortiModel(Deno.env.get("CORTI_ROUTER_MODEL"), DEFAULT_ROUTER_MODEL),
+    verifierModel: asCortiModel(Deno.env.get("CORTI_VERIFIER_MODEL"), DEFAULT_VERIFIER_MODEL),
   };
 }
 
@@ -185,7 +226,7 @@ export interface CortiMessage {
 
 export interface CortiCompletionOptions {
   messages: CortiMessage[];
-  /** Overrides the configured model — used for the cheap verifier pass. */
+  /** Overrides the writer model — the router and verifier pass their own. */
   model?: CortiModel;
   stream?: boolean;
   /** 0–1. Item writing wants some variety; the verifier wants 0. */
