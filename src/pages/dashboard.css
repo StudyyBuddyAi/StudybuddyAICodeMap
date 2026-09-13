@@ -85,8 +85,14 @@
 }
 
 .dashboard-container {
-  max-width: 1200px;
+  max-width: 78%;
   margin: 0 auto;
+}
+
+@media (max-width: 700px) {
+  .dashboard-container {
+    width: 100%;
+  }
 }
 
 /* Welcome Section */

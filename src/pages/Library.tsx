@@ -97,7 +97,7 @@ const Library = () => {
   };
 
   return (
-    <DashboardLayout wide>
+    <DashboardLayout wide >
       {studyOpen && (
         <StudyMode
           dueCards={studySessionCards}
@@ -106,7 +106,7 @@ const Library = () => {
         />
       )}
 
-      <div className="space-y-8">
+      <div className="space-y-8 max-w-[86%] mx-auto">
         {/* Header — same voice as Sheets: mono eyebrow, serif headline, one-line lede. */}
         <div>
           <p

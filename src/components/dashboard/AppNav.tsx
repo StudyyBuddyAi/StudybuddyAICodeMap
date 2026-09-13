@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
   LayoutDashboard,
@@ -13,13 +13,18 @@ import {
   Sparkles,
   Menu,
   X,
+  HeartPulse,
+  ArrowRight,
+  ArrowUpRight,
+  Moon,
+  Sun,
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
-import ThemeToggle from "@/components/ThemeToggle";
 import GoProModal from "@/components/GoProModal";
+import "./AppNav.css";
 
 interface ProfileRow {
   is_pro: boolean;
@@ -49,6 +54,22 @@ const AppNav = ({ onNavigate, onOpenAuth, onOpenAccount }: AppNavProps) => {
   const navigate = useNavigate();
   const [goProOpen, setGoProOpen] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [isDark, setIsDark] = useState(() => {
+    try {
+      return localStorage.getItem("studybuddy-theme") === "dark";
+    } catch {
+      return false;
+    }
+  });
+
+  useEffect(() => {
+    document.documentElement.classList.toggle("dark", isDark);
+    try {
+      localStorage.setItem("studybuddy-theme", isDark ? "dark" : "light");
+    } catch {
+      // Storage can be unavailable in private browsing; theme still works in-memory.
+    }
+  }, [isDark]);
 
   const userId = user?.id ?? null;
   const profileQuery = useQuery({
@@ -92,57 +113,22 @@ const AppNav = ({ onNavigate, onOpenAuth, onOpenAccount }: AppNavProps) => {
   return (
     <>
       <header
-        className="sticky top-0 z-50 border-b"
-        style={{
-          background: "color-mix(in srgb, var(--bg) 82%, transparent)",
-          backdropFilter: "blur(14px)",
-          WebkitBackdropFilter: "blur(14px)",
-          borderColor: "var(--border)",
-          height: "var(--nav-h, 64px)",
-        }}
+        className={`site-header ${mobileOpen ? "menu-open" : ""}`}
       >
-        <div
-          className="flex items-center justify-between gap-4 h-full px-6"
-          style={{ maxWidth: "var(--max-w, 1280px)", margin: "0 auto" }}
-        >
-          {/* Brand */}
+        <div className="header-inner">
           <Link
             to="/dashboard"
             onClick={handleNav}
-            className="flex items-center gap-2.5 shrink-0 no-underline"
-            style={{ color: "var(--fg)" }}
+            className="brand"
+            aria-label="StudyBuddy AI home"
           >
-            <span
-              style={{
-                fontFamily: "var(--font-display)",
-                fontWeight: 500,
-                fontSize: 22,
-                letterSpacing: "-0.02em",
-                lineHeight: 1,
-                color: "var(--fg)",
-              }}
-            >
-              StudyBuddy
-              <span style={{ fontStyle: "italic", color: "var(--accent)" }}> AI</span>
-            </span>
-            <span
-              style={{
-                fontFamily: "var(--font-mono)",
-                fontSize: 10,
-                color: "var(--fg-muted)",
-                letterSpacing: "0.12em",
-                textTransform: "uppercase",
-                padding: "2px 6px",
-                border: "1px solid var(--border-strong)",
-                borderRadius: 4,
-              }}
-            >
-              Beta
-            </span>
+            <span className="brand-mark"><HeartPulse size={18} strokeWidth={2.25} /></span>
+            <span className="brand-name">StudyBuddy <b>AI</b></span>
+            <span className="brand-beta">BETA</span>
           </Link>
-
+          
           {/* Desktop nav links */}
-          <nav className="hidden lg:flex items-center gap-1">
+          <nav className="desktop-nav" aria-label="Primary navigation">
             {navItems.map((item) => {
               const active = isActive(item.to);
               return (
@@ -151,25 +137,7 @@ const AppNav = ({ onNavigate, onOpenAuth, onOpenAccount }: AppNavProps) => {
                   to={item.to}
                   onClick={handleNav}
                   aria-current={active ? "page" : undefined}
-                  style={{
-                    fontFamily: "var(--font-sans)",
-                    fontSize: 14,
-                    fontWeight: 500,
-                    color: active ? "var(--fg)" : "var(--fg-muted)",
-                    textDecoration: "none",
-                    padding: "6px 12px 3px",
-                    borderBottom: active
-                      ? "1px solid var(--accent)"
-                      : "1px solid transparent",
-                    transition:
-                      "color var(--dur-micro) var(--ease-out), border-color var(--dur-micro) var(--ease-out)",
-                  }}
-                  onMouseEnter={(e) => {
-                    if (!active) e.currentTarget.style.color = "var(--fg)";
-                  }}
-                  onMouseLeave={(e) => {
-                    if (!active) e.currentTarget.style.color = "var(--fg-muted)";
-                  }}
+                  className={active ? "active" : ""}
                 >
                   {item.label}
                 </Link>
@@ -178,55 +146,18 @@ const AppNav = ({ onNavigate, onOpenAuth, onOpenAccount }: AppNavProps) => {
           </nav>
 
           {/* Desktop right actions */}
-          <div className="hidden lg:flex items-center gap-2 shrink-0">
-            {isPro && (
-              <span
-                style={{
-                  fontFamily: "var(--font-mono)",
-                  fontSize: 10,
-                  letterSpacing: "0.1em",
-                  textTransform: "uppercase",
-                  padding: "4px 10px",
-                  border: "1px solid var(--accent)",
-                  borderRadius: "var(--radius-pill)",
-                  color: "var(--accent)",
-                }}
-              >
-                Pro
-              </span>
-            )}
+          <div className="header-actions">
+            <button 
+              className="theme-button" 
+              type="button" 
+              onClick={() => setIsDark((value) => !value)} 
+              aria-label={isDark ? "Switch to light theme" : "Switch to dark theme"}
+            >
+              {isDark ? <Sun size={17} /> : <Moon size={17} />}
+            </button>
 
-            {!isPro && !isAnonymous && user && (
-              <button
-                onClick={() => setGoProOpen(true)}
-                style={{
-                  fontFamily: "var(--font-sans)",
-                  fontSize: 14,
-                  fontWeight: 500,
-                  padding: "9px 14px",
-                  borderRadius: "var(--radius-md)",
-                  border: "1px solid var(--border-strong)",
-                  background: "transparent",
-                  color: "var(--fg)",
-                  cursor: "pointer",
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 6,
-                  transition:
-                    "background var(--dur-micro) var(--ease-out), border-color var(--dur-micro) var(--ease-out)",
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.background = "var(--bg-panel)";
-                  e.currentTarget.style.borderColor = "var(--fg)";
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.background = "transparent";
-                  e.currentTarget.style.borderColor = "var(--border-strong)";
-                }}
-              >
-                <Sparkles style={{ width: 14, height: 14 }} />
-                Go Pro
-              </button>
+            {isPro && (
+              <span className="pro-badge">Pro</span>
             )}
 
             {!isAnonymous && user && (
@@ -234,52 +165,18 @@ const AppNav = ({ onNavigate, onOpenAuth, onOpenAccount }: AppNavProps) => {
                 onClick={onOpenAccount}
                 title="Settings"
                 aria-label="Settings"
-                style={{
-                  width: 36,
-                  height: 36,
-                  display: "inline-flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  background: "transparent",
-                  border: "1px solid var(--border-strong)",
-                  borderRadius: "var(--radius-pill)",
-                  cursor: "pointer",
-                  color: "var(--fg)",
-                  transition:
-                    "background var(--dur-micro) var(--ease-out), border-color var(--dur-micro) var(--ease-out)",
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.background = "var(--bg-panel)";
-                  e.currentTarget.style.borderColor = "var(--fg)";
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.background = "transparent";
-                  e.currentTarget.style.borderColor = "var(--border-strong)";
-                }}
+                className="icon-button"
               >
-                <Settings style={{ width: 16, height: 16 }} />
+                <Settings size={16} />
               </button>
             )}
 
             {isAnonymous || !user ? (
               <button
                 onClick={onOpenAuth}
-                style={{
-                  fontFamily: "var(--font-sans)",
-                  fontSize: 14,
-                  fontWeight: 500,
-                  padding: "9px 14px",
-                  borderRadius: "var(--radius-md)",
-                  border: "1px solid transparent",
-                  background: "var(--fg)",
-                  color: "var(--bg)",
-                  cursor: "pointer",
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 6,
-                }}
+                className="cta-button"
               >
-                <LogIn style={{ width: 14, height: 14 }} />
+                <LogIn size={14} />
                 Sign in
               </button>
             ) : (
@@ -287,209 +184,89 @@ const AppNav = ({ onNavigate, onOpenAuth, onOpenAccount }: AppNavProps) => {
                 onClick={handleSignOut}
                 title="Sign out"
                 aria-label="Sign out"
-                style={{
-                  width: 36,
-                  height: 36,
-                  display: "inline-flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  background: "transparent",
-                  border: "1px solid var(--border-strong)",
-                  borderRadius: "var(--radius-pill)",
-                  cursor: "pointer",
-                  color: "var(--fg-muted)",
-                  transition: "color var(--dur-micro) var(--ease-out)",
-                }}
-                onMouseEnter={(e) => (e.currentTarget.style.color = "var(--fg)")}
-                onMouseLeave={(e) => (e.currentTarget.style.color = "var(--fg-muted)")}
+                className="icon-button"
               >
-                <LogOut style={{ width: 16, height: 16 }} />
+                <LogOut size={16} />
               </button>
             )}
 
-            <ThemeToggle />
-          </div>
-
-          {/* Mobile actions */}
-          <div className="flex lg:hidden items-center gap-2">
-            <ThemeToggle />
-            <button
-              onClick={() => setMobileOpen((v) => !v)}
-              aria-label={mobileOpen ? "Close menu" : "Open menu"}
+            <button 
+              className="menu-button" 
+              type="button" 
+              onClick={() => setMobileOpen((value) => !value)} 
               aria-expanded={mobileOpen}
-              style={{
-                width: 36,
-                height: 36,
-                display: "inline-flex",
-                alignItems: "center",
-                justifyContent: "center",
-                background: "transparent",
-                border: "1px solid var(--border-strong)",
-                borderRadius: "var(--radius-pill)",
-                cursor: "pointer",
-                color: "var(--fg)",
-              }}
+              aria-label={mobileOpen ? "Close menu" : "Open menu"}
             >
-              {mobileOpen ? (
-                <X style={{ width: 16, height: 16 }} />
-              ) : (
-                <Menu style={{ width: 16, height: 16 }} />
-              )}
+              {mobileOpen ? <X size={22} /> : <Menu size={22} />}
             </button>
           </div>
         </div>
 
         {/* Mobile dropdown */}
-        {mobileOpen && (
-          <div
-            className="lg:hidden absolute left-0 right-0 top-full"
-            style={{
-              background: "var(--bg)",
-              borderBottom: "1px solid var(--border)",
-              boxShadow: "var(--shadow-2)",
-              zIndex: 49,
-            }}
-          >
-            <nav style={{ padding: "6px 16px 10px" }}>
-              {navItems.map((item) => {
-                const active = isActive(item.to);
-                const Icon = item.icon;
-                return (
-                  <Link
-                    key={item.to}
-                    to={item.to}
-                    onClick={handleNav}
-                    aria-current={active ? "page" : undefined}
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 10,
-                      padding: "13px 0",
-                      borderBottom: "1px solid var(--border)",
-                      fontFamily: "var(--font-sans)",
-                      fontSize: 15,
-                      fontWeight: 500,
-                      color: active ? "var(--accent)" : "var(--fg)",
-                      textDecoration: "none",
-                    }}
-                  >
-                    <Icon style={{ width: 16, height: 16 }} />
-                    {item.label}
-                  </Link>
-                );
-              })}
+        <nav id="mobile-nav" className="mobile-nav" aria-label="Mobile navigation">
+          {navItems.map((item) => {
+            const active = isActive(item.to);
+            const Icon = item.icon;
+            return (
+              <Link
+                key={item.to}
+                to={item.to}
+                onClick={handleNav}
+                aria-current={active ? "page" : undefined}
+                className={active ? "active" : ""}
+              >
+                {item.label}
+                <ArrowUpRight size={14} />
+              </Link>
+            );
+          })}
 
-              <div style={{ display: "flex", gap: 8, padding: "12px 0 4px" }}>
-                {!isPro && !isAnonymous && user && (
-                  <button
-                    onClick={() => {
-                      setGoProOpen(true);
-                      setMobileOpen(false);
-                    }}
-                    style={{
-                      flex: 1,
-                      fontFamily: "var(--font-sans)",
-                      fontSize: 14,
-                      fontWeight: 500,
-                      padding: "10px 0",
-                      borderRadius: "var(--radius-md)",
-                      border: "1px solid var(--border-strong)",
-                      background: "transparent",
-                      color: "var(--fg)",
-                      cursor: "pointer",
-                      display: "inline-flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      gap: 6,
-                    }}
-                  >
-                    <Sparkles style={{ width: 14, height: 14 }} />
-                    Go Pro
-                  </button>
-                )}
+          <div className="mobile-actions">
+            <button 
+              className="mobile-action-button" 
+              type="button" 
+              onClick={() => setIsDark((value) => !value)} 
+              aria-label={isDark ? "Switch to light theme" : "Switch to dark theme"}
+            >
+              {isDark ? <Sun size={14} /> : <Moon size={14} />}
+              {isDark ? "Light Mode" : "Dark Mode"}
+            </button>
 
-                {!isAnonymous && user && (
-                  <button
-                    onClick={() => {
-                      onOpenAccount();
-                      setMobileOpen(false);
-                    }}
-                    style={{
-                      flex: 1,
-                      fontFamily: "var(--font-sans)",
-                      fontSize: 14,
-                      fontWeight: 500,
-                      padding: "10px 0",
-                      borderRadius: "var(--radius-md)",
-                      border: "1px solid var(--border-strong)",
-                      background: "transparent",
-                      color: "var(--fg)",
-                      cursor: "pointer",
-                      display: "inline-flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      gap: 6,
-                    }}
-                  >
-                    <Settings style={{ width: 14, height: 14 }} />
-                    Settings
-                  </button>
-                )}
+            {!isAnonymous && user && (
+              <button
+                onClick={() => {
+                  onOpenAccount();
+                  setMobileOpen(false);
+                }}
+                className="mobile-action-button"
+              >
+                <Settings size={14} />
+                Settings
+              </button>
+            )}
 
-                {!isAnonymous && user ? (
-                  <button
-                    onClick={handleSignOut}
-                    style={{
-                      flex: 1,
-                      fontFamily: "var(--font-sans)",
-                      fontSize: 14,
-                      fontWeight: 500,
-                      padding: "10px 0",
-                      borderRadius: "var(--radius-md)",
-                      border: "1px solid var(--border-strong)",
-                      background: "transparent",
-                      color: "var(--fg-muted)",
-                      cursor: "pointer",
-                      display: "inline-flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      gap: 6,
-                    }}
-                  >
-                    <LogOut style={{ width: 14, height: 14 }} />
-                    Sign out
-                  </button>
-                ) : (
-                  <button
-                    onClick={() => {
-                      onOpenAuth();
-                      setMobileOpen(false);
-                    }}
-                    style={{
-                      flex: 1,
-                      fontFamily: "var(--font-sans)",
-                      fontSize: 14,
-                      fontWeight: 500,
-                      padding: "10px 0",
-                      borderRadius: "var(--radius-md)",
-                      border: "1px solid transparent",
-                      background: "var(--fg)",
-                      color: "var(--bg)",
-                      cursor: "pointer",
-                      display: "inline-flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      gap: 6,
-                    }}
-                  >
-                    <LogIn style={{ width: 14, height: 14 }} />
-                    Sign in
-                  </button>
-                )}
-              </div>
-            </nav>
+            {!isAnonymous && user ? (
+              <button
+                onClick={handleSignOut}
+                className="mobile-action-button"
+              >
+                <LogOut size={14} />
+                Sign out
+              </button>
+            ) : (
+              <button
+                onClick={() => {
+                  onOpenAuth();
+                  setMobileOpen(false);
+                }}
+                className="mobile-action-button cta-button"
+              >
+                <LogIn size={14} />
+                Sign in
+              </button>
+            )}
           </div>
-        )}
+        </nav>
       </header>
 
       <GoProModal open={goProOpen} onOpenChange={setGoProOpen} />
