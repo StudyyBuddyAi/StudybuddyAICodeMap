@@ -18,6 +18,16 @@ import {
 } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import DashboardLayout from "@/components/dashboard/DashboardLayout";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { useAuth } from "@/hooks/use-auth";
 import { useQBankContext } from "@/contexts/QBankContext";
 import { supabase } from "@/integrations/supabase/client";
@@ -28,8 +38,11 @@ import {
   CHALLENGE_BLURBS,
   EXAM_MODE_LABELS,
   EXAM_MODE_BLURBS,
+  PLAY_MODE_LABELS,
+  PLAY_MODE_BLURBS,
   type ChallengeLevel,
   type ExamMode,
+  type PlayMode,
 } from "@/lib/qbank-types";
 
 interface SessionRow {
@@ -38,8 +51,36 @@ interface SessionRow {
   total: number;
   total_time_ms: number;
   system: string;
-  ended_at: string;
+  ended_at: string | null;
 }
+
+interface UnfinishedRow {
+  id: string;
+  mode: string;
+  system: string;
+  topic: string | null;
+  exam_mode: string | null;
+  started_at: string;
+  last_activity_at: string | null;
+  question_count: number;
+  expected_total: number;
+  answered_count: number;
+  flagged_count: number;
+  elapsed_ms: number;
+}
+
+const formatRelative = (iso: string | null): string => {
+  if (!iso) return "";
+  const diff = Date.now() - new Date(iso).getTime();
+  const min = Math.round(diff / 60_000);
+  if (min < 1) return "just now";
+  if (min < 60) return `${min}m ago`;
+  const h = Math.round(min / 60);
+  if (h < 24) return `${h}h ago`;
+  const d = Math.round(h / 24);
+  if (d < 7) return `${d}d ago`;
+  return formatSessionDate(iso);
+};
 
 const formatSessionDate = (iso: string) => {
   const d = new Date(iso);
@@ -85,6 +126,8 @@ const CHALLENGE_ORDER: ChallengeLevel[] = ["foundations", "balanced", "challenge
 
 const EXAM_MODE_ORDER: ExamMode[] = ["step1", "step2ck", "mixed"];
 
+const PLAY_MODE_ORDER: PlayMode[] = ["tutor", "timed"];
+
 /**
  * The pill classes shared by every option group in the generator card. A
  * near-copy of the sheet configurator's PillGroup at h-8 rather than h-9,
@@ -125,21 +168,24 @@ const QBank = () => {
     startGeneratedSession,
     generation,
     session,
-    restoreSession,
-    resetSession,
+    resumeSession,
+    discardSession,
   } = useQBankContext();
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
   const [page, setPage] = useState(0);
-  const [hasSavedSession, setHasSavedSession] = useState(false);
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [discardTarget, setDiscardTarget] = useState<UnfinishedRow | null>(null);
+  const [isDiscarding, setIsDiscarding] = useState(false);
+  const [resumingId, setResumingId] = useState<string | null>(null);
 
   const [topic, setTopic] = useState("");
   const [setSize, setSetSize] = useState(MIN_SET_SIZE);
   const [challenge, setChallenge] = useState<ChallengeLevel>("balanced");
   const [examMode, setExamMode] = useState<ExamMode>("step1");
+  const [playMode, setPlayMode] = useState<PlayMode>("tutor");
   // Collapsed by default, as on the sheet and deck generators: the topic is
   // the one thing every student has to type, and the rest has sane defaults.
   const [customizeOpen, setCustomizeOpen] = useState(false);
@@ -159,67 +205,46 @@ const QBank = () => {
     return () => window.clearInterval(id);
   }, [isStarting]);
 
-  useEffect(() => {
-    if (!user || isAnonymous) return;
+  // Every set left unfinished, on any device — the server is the only copy.
+  const { data: unfinished } = useQuery({
+    queryKey: ["qbank-unfinished", user?.id],
+    enabled: !!user && !isAnonymous,
+    queryFn: async (): Promise<UnfinishedRow[]> => {
+      const { data, error: rpcError } = await supabase.rpc("list_unfinished_sessions");
+      if (rpcError) throw rpcError;
+      return (data ?? []) as UnfinishedRow[];
+    },
+  });
 
+  const handleResume = async (id: string) => {
+    if (resumingId) return;
+    setResumingId(id);
     try {
-      const raw = localStorage.getItem("sb_qbank_session");
-      if (!raw) return;
-      const parsed = JSON.parse(raw);
-      const TWENTY_FOUR_HOURS = 24 * 60 * 60 * 1000;
-      if (
-        parsed.savedAt &&
-        Date.now() - parsed.savedAt < TWENTY_FOUR_HOURS &&
-        Array.isArray(parsed.questions) &&
-        parsed.questions.length > 0 &&
-        typeof parsed.currentIndex === "number" &&
-        Array.isArray(parsed.answers)
-      ) {
-        setHasSavedSession(true);
-      }
-    } catch {
-      // ignore
-    }
-  }, [user, isAnonymous]);
-
-  const savedSessionMeta = (() => {
-    if (!hasSavedSession) return null;
-    try {
-      const raw = localStorage.getItem("sb_qbank_session");
-      if (!raw) return null;
-      const parsed = JSON.parse(raw);
-
-      const loaded = Array.isArray(parsed.questions) ? parsed.questions.length : 0;
-      // A generated set is saved while it is still being written, so the
-      // questions it currently holds are not the size of the session. Counting
-      // progress against them would show a set of twenty as "2/2 answered" with
-      // a full bar, which is exactly backwards.
-      const expected =
-        typeof parsed.expectedTotal === "number" ? Math.max(parsed.expectedTotal, loaded) : loaded;
-
-      return {
-        answered: Array.isArray(parsed.answers) ? parsed.answers.length : 0,
-        loaded,
-        total: expected,
-        stillWriting: !!parsed.generation && loaded < expected,
-        topic: typeof parsed.generation?.topic === "string" ? parsed.generation.topic : null,
-        system: parsed.questions?.[0]?.subject ?? "your last set",
-      };
-    } catch {
-      return null;
-    }
-  })();
-
-  const handleResume = () => {
-    const restored = restoreSession();
-    if (restored) {
-      navigate("/qbank/session");
+      const { outcome, error: resumeError } = await resumeSession(id, { explicit: true });
+      if (outcome === "resumed") navigate(`/qbank/session?session=${id}`);
+      else if (outcome === "completed") navigate(`/qbank/summary?session=${id}`);
+      else
+        toast({
+          title: "Could not resume that set",
+          description: resumeError ?? "Check your connection and try again.",
+          variant: "destructive",
+        });
+    } finally {
+      setResumingId(null);
     }
   };
 
-  const handleDiscard = () => {
-    resetSession();
-    setHasSavedSession(false);
+  const handleDiscard = async () => {
+    if (!discardTarget) return;
+    setIsDiscarding(true);
+    try {
+      await discardSession(discardTarget.id);
+      setDiscardTarget(null);
+    } catch {
+      toast({ title: "Failed to discard the set", description: "Please try again.", variant: "destructive" });
+    } finally {
+      setIsDiscarding(false);
+    }
   };
 
   // A set that is still being written while the student is back on this page —
@@ -237,8 +262,9 @@ const QBank = () => {
     try {
       // Resolves the moment the first question exists and the session is live.
       // The remaining waves keep running against the provider.
-      await startGeneratedSession(trimmed, setSize, challenge, examMode);
-      navigate("/qbank/session");
+      const id = await startGeneratedSession(trimmed, setSize, challenge, examMode, playMode);
+      queryClient.invalidateQueries({ queryKey: ["qbank-unfinished"] });
+      navigate(id ? `/qbank/session?session=${id}` : "/qbank/session");
     } catch (err) {
       const message = err instanceof Error ? err.message : "Generation failed";
       setError(message);
@@ -249,7 +275,7 @@ const QBank = () => {
       });
       setIsStarting(false);
     }
-  }, [topic, setSize, challenge, examMode, isStarting, startGeneratedSession, navigate, toast]);
+  }, [topic, setSize, challenge, examMode, playMode, isStarting, startGeneratedSession, navigate, toast, queryClient]);
 
   const { data: sessionHistory, isLoading: historyLoading } = useQuery({
     queryKey: ["qbank-sessions", user?.id, page],
@@ -259,6 +285,9 @@ const QBank = () => {
         .from("qbank_sessions")
         .select("id, score, total, total_time_ms, system, ended_at")
         .eq("user_id", user!.id)
+        // Unfinished sets have their own list. Left in, they sorted to the top
+        // (NULL ended_at sorts first descending) with a score of zero.
+        .eq("status", "completed")
         .order("ended_at", { ascending: false })
         .range(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE);
 
@@ -394,7 +423,7 @@ const QBank = () => {
                         {formatSessionTime(s.total_time_ms)}
                       </span>
                       <span className="text-[11px] text-muted-foreground">
-                        {formatSessionDate(s.ended_at)}
+                        {s.ended_at ? formatSessionDate(s.ended_at) : ""}
                       </span>
                     </div>
                   </div>
@@ -506,63 +535,128 @@ const QBank = () => {
             </div>
           ) : (
             <>
-              {/* Resume Session Card */}
-              {hasSavedSession && savedSessionMeta && (
-                <div className="space-y-3 rounded-2xl border border-[color:var(--color-border)] border-l-4 border-l-[color:var(--color-accent)] bg-[color:var(--color-card)] p-4 shadow-[0_12px_30px_rgba(15,23,42,0.05)]">
-                  <div className="flex items-center gap-3">
-                    <div className="flex items-center justify-center w-9 h-9 rounded-lg border border-border bg-card flex-shrink-0">
-                      <History className="w-4 h-4 text-primary" />
-                    </div>
-                    <div>
-                      <p className="text-sm font-medium text-foreground">
-                        Resume previous session
-                      </p>
-                      <p className="font-mono text-[11px] text-muted-foreground mt-0.5">
-                        {savedSessionMeta.topic ?? savedSessionMeta.system} ·{" "}
-                        {savedSessionMeta.answered}/{savedSessionMeta.total} answered
-                      </p>
-                      {savedSessionMeta.stillWriting && (
-                        <p className="font-mono text-[11px] text-muted-foreground mt-0.5">
-                          {savedSessionMeta.loaded} of {savedSessionMeta.total} written —
-                          continue to finish the set
-                        </p>
-                      )}
-                    </div>
+              {/* Unfinished sets — every set left open, on any device. */}
+              {unfinished && unfinished.length > 0 && (
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <History className="w-3.5 h-3.5 text-muted-foreground" />
+                    <p className={`${MONO_EYEBROW} text-muted-foreground`}>
+                      Unfinished sets ({unfinished.length})
+                    </p>
                   </div>
+                  {unfinished.map((u) => {
+                    const total = Math.max(u.expected_total, u.question_count);
+                    const pct = total > 0 ? (u.answered_count / total) * 100 : 0;
+                    const stillWriting = u.question_count < u.expected_total;
+                    const timed = u.mode === "timed";
+                    return (
+                      <div
+                        key={u.id}
+                        className="space-y-3 rounded-2xl border border-[color:var(--color-border)] border-l-4 border-l-[color:var(--color-accent)] bg-[color:var(--color-card)] p-4 shadow-[0_12px_30px_rgba(15,23,42,0.05)]"
+                      >
+                        <div className="flex items-start gap-3">
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2">
+                              <p className="truncate text-sm font-medium text-foreground">
+                                {u.topic ?? u.system}
+                              </p>
+                              <span
+                                className="shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider"
+                                style={
+                                  timed
+                                    ? { background: "rgba(217,119,6,0.12)", color: "#d97706" }
+                                    : { background: "var(--color-accent-soft, rgba(17,85,90,0.1))", color: "var(--color-accent)" }
+                                }
+                              >
+                                {timed ? "Timed" : "Tutor"}
+                              </span>
+                            </div>
+                            <p className="font-mono text-[11px] text-muted-foreground mt-0.5">
+                              {u.answered_count}/{total} answered
+                              {u.flagged_count > 0 ? ` · ${u.flagged_count} flagged` : ""}
+                              {u.exam_mode && EXAM_MODE_LABELS[u.exam_mode as ExamMode]
+                                ? ` · ${EXAM_MODE_LABELS[u.exam_mode as ExamMode]}`
+                                : ""}
+                              {" · "}
+                              {formatRelative(u.last_activity_at)}
+                            </p>
+                            {stillWriting && (
+                              <p className="font-mono text-[11px] text-muted-foreground mt-0.5">
+                                {u.question_count} of {u.expected_total} written — the rest is written when you resume
+                              </p>
+                            )}
+                          </div>
+                        </div>
 
-                  <div className="w-full h-1 rounded-full bg-border overflow-hidden">
-                    <div
-                      className="transition-all h-full rounded-full bg-primary"
-                      style={{
-                        width: `${savedSessionMeta.total > 0 ? (savedSessionMeta.answered / savedSessionMeta.total) * 100 : 0}%`,
-                      }}
-                    />
-                  </div>
+                        <div className="w-full h-1 rounded-full bg-border overflow-hidden">
+                          <div
+                            className="transition-all h-full rounded-full bg-primary"
+                            style={{ width: `${pct}%` }}
+                          />
+                        </div>
 
-                  <div className="flex gap-2">
-                    <button
-                      type="button"
-                      onClick={handleResume}
-                      className="flex-1 h-10 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors flex items-center justify-center gap-1.5"
-                    >
-                      <ChevronRight className="w-4 h-4" />
-                      Continue
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleDiscard}
-                      className="h-10 px-4 rounded-lg border border-border bg-transparent text-muted-foreground text-sm font-medium hover:bg-secondary transition-colors"
-                    >
-                      Discard
-                    </button>
-                  </div>
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            onClick={() => handleResume(u.id)}
+                            disabled={!!resumingId}
+                            className="flex-1 h-10 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors flex items-center justify-center gap-1.5 disabled:opacity-60"
+                          >
+                            {resumingId === u.id ? (
+                              <Loader2 className="w-4 h-4 animate-spin" />
+                            ) : (
+                              <ChevronRight className="w-4 h-4" />
+                            )}
+                            Resume
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setDiscardTarget(u)}
+                            className="h-10 px-4 rounded-lg border border-border bg-transparent text-muted-foreground text-sm font-medium hover:bg-secondary transition-colors"
+                          >
+                            Discard
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               )}
+
+              <AlertDialog open={!!discardTarget} onOpenChange={(open) => !open && setDiscardTarget(null)}>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Discard this set?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      {discardTarget
+                        ? `“${discardTarget.topic ?? discardTarget.system}” and its ${discardTarget.answered_count} answer${
+                            discardTarget.answered_count === 1 ? "" : "s"
+                          } will be deleted. This can’t be undone.`
+                        : ""}
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel disabled={isDiscarding}>Keep it</AlertDialogCancel>
+                    <AlertDialogAction
+                      disabled={isDiscarding}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        void handleDiscard();
+                      }}
+                      className="bg-danger text-white hover:bg-danger/90"
+                    >
+                      {isDiscarding ? "Discarding…" : "Discard"}
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
 
               {runInProgress && (
                 <button
                   type="button"
-                  onClick={() => navigate("/qbank/session")}
+                  onClick={() =>
+                    navigate(session?.sessionId ? `/qbank/session?session=${session.sessionId}` : "/qbank/session")
+                  }
                   className="inline-flex items-center gap-2 rounded-lg border px-3.5 py-2.5 text-sm transition-opacity hover:opacity-80"
                   style={{
                     borderColor: "var(--color-border)",
@@ -613,7 +707,7 @@ const QBank = () => {
                     <span className="ml-auto flex min-w-0 items-center gap-2">
                       {!customizeOpen && (
                         <span className="truncate text-[11px] text-muted-foreground">
-                          {EXAM_MODE_LABELS[examMode]} · {setSize} questions ·{" "}
+                          {PLAY_MODE_LABELS[playMode]} · {EXAM_MODE_LABELS[examMode]} · {setSize} questions ·{" "}
                           {CHALLENGE_LABELS[challenge]}
                         </span>
                       )}
@@ -627,6 +721,30 @@ const QBank = () => {
 
                   {customizeOpen && (
                     <div id="qbank-customize" className="animate-fade-in mt-4 space-y-5">
+                      {/* Mode — how the set is sat, not what it is written for. */}
+                      <div>
+                        <p className={`${MONO_EYEBROW} text-muted-foreground mb-2`}>Mode</p>
+                        <div className="flex flex-wrap gap-2">
+                          {PLAY_MODE_ORDER.map((m) => {
+                            const active = m === playMode;
+                            return (
+                              <button
+                                key={m}
+                                type="button"
+                                onClick={() => setPlayMode(m)}
+                                disabled={isStarting}
+                                aria-pressed={active}
+                                className={`${PILL_BASE} ${active ? PILL_ON : PILL_OFF}`}
+                              >
+                                {active && <Check className="w-4 h-4" />}
+                                {PLAY_MODE_LABELS[m]}
+                              </button>
+                            );
+                          })}
+                        </div>
+                        <p className="mt-2 text-[11px] text-muted-foreground">{PLAY_MODE_BLURBS[playMode]}</p>
+                      </div>
+
                       {/* Exam mode — selects the system prompt and briefs the
                           set is written against. */}
                       <div>

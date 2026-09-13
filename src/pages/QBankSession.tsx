@@ -3,43 +3,46 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   FlaskConical,
   ArrowRight,
-  ChevronRight,
+  ArrowLeft,
   CheckCircle,
   XCircle,
   ChevronDown,
-  Clock,
   Flag,
-  SkipForward,
   Loader2,
   AlertTriangle,
+  X,
+  Undo2,
 } from "lucide-react";
 import DashboardLayout from "@/components/dashboard/DashboardLayout";
 import PageLoader from "@/components/PageLoader";
+import PlayerToolbar from "@/components/qbank/PlayerToolbar";
+import EndBlockDialog from "@/components/qbank/EndBlockDialog";
+import LabValuesSheet from "@/components/qbank/LabValuesSheet";
+import ShortcutsDialog from "@/components/qbank/ShortcutsDialog";
+import HighlightableText from "@/components/qbank/HighlightableText";
 import { useQBankContext, type GenerationState } from "@/contexts/QBankContext";
+import { useQBankFontScale } from "@/hooks/use-qbank-font-scale";
+import { useToast } from "@/hooks/use-toast";
 import { ruleLabel } from "@/lib/qbank-rule-labels";
 import { renderMarkdown } from "@/lib/render-markdown";
-import type { OptionKey, QuestionMedia } from "@/lib/qbank-types";
+import type { OptionKey, PlayMode, QuestionMedia } from "@/lib/qbank-types";
 
 type AnswerState =
   | { status: "unanswered" }
+  /** Tutor: picked, not yet confirmed. Timed: the recorded choice. */
   | { status: "selected"; pending: OptionKey }
   | {
       status: "answered";
       selected: OptionKey;
       correct: OptionKey;
       isCorrect: boolean;
-    };
-
-const formatElapsed = (ms: number): string => {
-  const totalSec = Math.floor(ms / 1000);
-  const h = Math.floor(totalSec / 3600);
-  const m = Math.floor((totalSec % 3600) / 60);
-  const s = totalSec % 60;
-  if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
-  return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
-};
+    }
+  /** Review of a question the set left unanswered: the key, and no choice. */
+  | { status: "revealed"; correct: OptionKey };
 
 type Difficulty = "Easy" | "Medium" | "Hard";
+
+const OPTION_KEYS: OptionKey[] = ["a", "b", "c", "d", "e"];
 
 // ── OpenMed token styles ────────────────────────────────────────────────────
 
@@ -51,6 +54,9 @@ const MONO_EYEBROW: React.CSSProperties = {
   textTransform: "uppercase",
   color: "var(--fg-muted)",
 };
+
+/** Scales a base pixel size by the player's text-size preference. */
+const fs = (px: number) => `calc(${px}px * var(--qb-scale, 1))`;
 
 /** Dark CTA — the OpenMed primary button (ink on light, parchment on dark). */
 const darkButtonStyle = (disabled = false): React.CSSProperties => ({
@@ -72,138 +78,175 @@ const darkButtonStyle = (disabled = false): React.CSSProperties => ({
   transition: "opacity var(--dur-micro) var(--ease-out)",
 });
 
-interface QuestionCounterProps {
-  total: number;
-  currentIndex: number;
-  answers: { question_id: string; is_correct: boolean }[];
-  questions: { id: string }[];
-  reviewIndex: number | null;
-  onReview: (index: number) => void;
-  onNavigate: (index: number) => void;
-  flaggedIds: Set<string>;
-  skippedIds: string[];
+const outlineButtonStyle = (disabled = false): React.CSSProperties => ({
+  ...darkButtonStyle(disabled),
+  background: "transparent",
+  color: "var(--fg-muted)",
+  border: "1px solid var(--border)",
+  padding: "0 16px",
+});
+
+// ── Question grid ───────────────────────────────────────────────────────────
+
+type CellKind = "correct" | "incorrect" | "answered" | "skipped" | "unanswered" | "unwritten";
+
+interface GridCell {
+  kind: CellKind;
+  current: boolean;
+  flagged: boolean;
 }
 
-const QuestionCounter = ({
-  total,
-  currentIndex,
-  answers,
-  questions,
-  reviewIndex,
-  onReview,
-  onNavigate,
-  flaggedIds,
-  skippedIds,
-}: QuestionCounterProps) => {
-  return (
-    <div className="hidden md:flex flex-col items-center gap-1.5 w-8 shrink-0 pt-1">
-      <div className="flex flex-col gap-1.5 overflow-y-auto max-h-[calc(100vh-160px)] scrollbar-none">
-        {Array.from({ length: total }, (_, i) => {
-          const q = questions[i];
-          const answer = q ? answers.find((a) => a.question_id === q.id) : undefined;
-          const isAnswered = !!answer;
-          const isCurrent = i === currentIndex && reviewIndex === null;
-          const isReviewing = i === reviewIndex;
-          const isCorrect = answer?.is_correct;
-          const isSkipped = q ? skippedIds.includes(q.id) : false;
-          const isFlaggedQ = q ? flaggedIds.has(q.id) : false;
+const CELL_STYLE: Record<CellKind, React.CSSProperties> = {
+  correct: { background: "rgba(5,150,105,0.15)", color: "#059669", border: "1px solid rgba(5,150,105,0.4)" },
+  incorrect: { background: "rgba(220,38,38,0.12)", color: "#dc2626", border: "1px solid rgba(220,38,38,0.35)" },
+  answered: { background: "var(--accent-soft)", color: "var(--accent)", border: "1px solid var(--accent)" },
+  skipped: { background: "rgba(217,119,6,0.15)", color: "#d97706", border: "1px solid rgba(217,119,6,0.35)" },
+  unanswered: { background: "var(--bg-elevated)", color: "var(--fg-subtle)", border: "1px solid var(--border)" },
+  // Not written yet. A generated set shows its full length from the start, so
+  // these slots exist before their questions do — dashed and dimmed so the
+  // student can see the set filling in.
+  unwritten: { background: "transparent", color: "var(--fg-subtle)", border: "1px dashed var(--border)", opacity: 0.5 },
+};
 
-          const dotStyle: React.CSSProperties = isCurrent
-            ? {
-                background: "var(--accent-soft)",
-                color: "var(--accent)",
-                border: "1px solid var(--accent)",
-              }
-            : isReviewing
-            ? {
-                background: "var(--accent-soft)",
-                color: "var(--accent)",
-                border: "2px solid var(--accent)",
-              }
-            : isAnswered && isCorrect
-            ? {
-                background: "rgba(5,150,105,0.15)",
-                color: "#059669",
-                border: "1px solid rgba(5,150,105,0.4)",
-                cursor: "pointer",
-              }
-            : isAnswered
-            ? {
-                background: "rgba(220,38,38,0.12)",
-                color: "#dc2626",
-                border: "1px solid rgba(220,38,38,0.35)",
-                cursor: "pointer",
-              }
-            : isSkipped
-            ? {
-                background: "rgba(217,119,6,0.15)",
-                color: "#d97706",
-                border: "1px solid rgba(217,119,6,0.35)",
-                cursor: "pointer",
-              }
-            : q
-            ? {
-                background: "var(--bg-elevated)",
-                color: "var(--fg-subtle)",
-                border: "1px solid var(--border)",
-              }
-            : {
-                // Not written yet. A generated set shows its full length from the
-                // start, so these slots exist before their questions do — dashed
-                // and dimmed so the student can see the set filling in rather
-                // than wondering why a numbered question will not open.
-                background: "transparent",
-                color: "var(--fg-subtle)",
-                border: "1px dashed var(--border)",
-                opacity: 0.5,
-              };
+const CELL_TITLE: Record<CellKind, string> = {
+  correct: "correct",
+  incorrect: "incorrect",
+  answered: "answered",
+  skipped: "skipped",
+  unanswered: "unanswered",
+  unwritten: "not written yet",
+};
 
-          const canClick = isAnswered || (isSkipped && !isCurrent);
+const cellStyle = (cell: GridCell): React.CSSProperties =>
+  cell.current
+    ? { ...CELL_STYLE[cell.kind], boxShadow: "0 0 0 2px var(--accent)", opacity: 1 }
+    : CELL_STYLE[cell.kind];
 
-          return (
-            <button
-              key={i}
-              disabled={!canClick && !isCurrent}
-              onClick={() => {
-                if (isAnswered) onReview(i);
-                else if (isSkipped && !isCurrent) onNavigate(i);
-              }}
-              className="relative shrink-0 transition-opacity hover:opacity-80"
-              style={{
-                ...dotStyle,
-                width: 28,
-                height: 28,
-                borderRadius: "var(--radius-sm)",
-                fontFamily: "var(--font-mono)",
-                fontSize: 10,
-                fontWeight: 700,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-              }}
-              title={
-                isAnswered
-                  ? `Q${i + 1} — click to review`
-                  : isSkipped && !isCurrent
-                  ? `Q${i + 1} — skipped, click to answer`
-                  : !q
-                  ? `Q${i + 1} — not written yet`
-                  : `Q${i + 1}`
-              }
-            >
-              {i + 1}
-              {isFlaggedQ && (
-                <span className="absolute -top-1 -right-1 flex h-3 w-3 items-center justify-center rounded-full bg-amber-500 border border-background">
-                  <Flag className="h-1.5 w-1.5 text-white" fill="currentColor" />
-                </span>
-              )}
-            </button>
-          );
-        })}
-      </div>
+const FlagDot = ({ size = 12 }: { size?: number }) => (
+  <span
+    className="absolute -top-1 -right-1 flex items-center justify-center rounded-full bg-amber-500 border border-background"
+    style={{ width: size, height: size }}
+  >
+    <Flag className="text-white" style={{ width: size / 2, height: size / 2 }} fill="currentColor" />
+  </span>
+);
+
+interface GridProps {
+  cells: GridCell[];
+  onSelect: (index: number) => void;
+}
+
+const QuestionCounter = ({ cells, onSelect }: GridProps) => (
+  <div className="hidden md:flex flex-col items-center gap-1.5 w-8 shrink-0 pt-1">
+    <div className="flex flex-col gap-1.5 overflow-y-auto max-h-[calc(100vh-160px)] scrollbar-none p-0.5">
+      {cells.map((cell, i) => (
+        <button
+          key={i}
+          disabled={cell.kind === "unwritten"}
+          onClick={() => onSelect(i)}
+          className="relative shrink-0 transition-opacity hover:opacity-80 disabled:cursor-default"
+          style={{
+            ...cellStyle(cell),
+            width: 28,
+            height: 28,
+            borderRadius: "var(--radius-sm)",
+            fontFamily: "var(--font-mono)",
+            fontSize: 10,
+            fontWeight: 700,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+          title={`Q${i + 1} — ${CELL_TITLE[cell.kind]}${cell.flagged ? ", flagged" : ""}`}
+        >
+          {i + 1}
+          {cell.flagged && <FlagDot />}
+        </button>
+      ))}
     </div>
+  </div>
+);
+
+const QuestionNavigator = ({
+  cells,
+  onSelect,
+  displayedNumber,
+  mode,
+}: GridProps & { displayedNumber: number; mode: PlayMode | "review" }) => {
+  const [open, setOpen] = useState(false);
+  const legend: CellKind[] =
+    mode === "timed" ? ["answered", "skipped", "unanswered"] : ["correct", "incorrect", "skipped", "unanswered"];
+
+  return (
+    <>
+      <button
+        onClick={() => setOpen(true)}
+        className="md:hidden inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1 text-[11px] font-medium text-muted-foreground hover:bg-accent transition-colors"
+      >
+        Q{displayedNumber} of {cells.length}
+        <ChevronDown className="h-3 w-3" />
+      </button>
+
+      {open && <div className="md:hidden fixed inset-0 bg-black/40 z-40" onClick={() => setOpen(false)} />}
+
+      <div
+        className={`md:hidden fixed inset-x-0 bottom-0 z-50 bg-card border-t border-border/60 rounded-t-2xl transition-transform duration-300 ease-out ${
+          open ? "translate-y-0" : "translate-y-full"
+        }`}
+      >
+        <div className="flex flex-col items-center pt-3 pb-2 px-4">
+          <div className="w-10 h-1 rounded-full bg-border/60 mb-3" />
+          <div className="flex items-center justify-between w-full">
+            <span className="text-xs font-bold text-foreground">Questions ({cells.length})</span>
+            <button
+              onClick={() => setOpen(false)}
+              className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-4 px-4 pb-3 flex-wrap">
+          {legend.map((kind) => (
+            <div key={kind} className="flex items-center gap-1.5">
+              <div className="w-3 h-3 rounded-sm" style={CELL_STYLE[kind]} />
+              <span className="text-[10px] text-muted-foreground capitalize">{CELL_TITLE[kind]}</span>
+            </div>
+          ))}
+          <div className="flex items-center gap-1.5">
+            <span className="flex h-2.5 w-2.5 items-center justify-center rounded-full bg-amber-500">
+              <Flag className="h-1.5 w-1.5 text-white" fill="currentColor" />
+            </span>
+            <span className="text-[10px] text-muted-foreground">Flagged</span>
+          </div>
+        </div>
+
+        <div className="px-4 pb-8 max-h-[50vh] overflow-y-auto">
+          <div className="grid grid-cols-8 gap-2 p-0.5">
+            {cells.map((cell, i) => (
+              <button
+                key={i}
+                disabled={cell.kind === "unwritten"}
+                onClick={() => {
+                  onSelect(i);
+                  setOpen(false);
+                }}
+                className="relative aspect-square rounded-lg text-[10px] font-bold flex items-center justify-center transition-opacity hover:opacity-80 disabled:cursor-default"
+                style={cellStyle(cell)}
+              >
+                {i + 1}
+                {cell.flagged && <FlagDot size={10} />}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+    </>
   );
 };
+
+// ── Explanation ─────────────────────────────────────────────────────────────
 
 const PULSE_CONFIG: Record<Difficulty, { bars: number; color: string; label: string }> = {
   Easy:   { bars: 1, color: "#059669", label: "Easy"   },
@@ -212,7 +255,7 @@ const PULSE_CONFIG: Record<Difficulty, { bars: number; color: string; label: str
 };
 
 const StethoscopePulse = ({ difficulty }: { difficulty: Difficulty }) => {
-  const cfg = PULSE_CONFIG[difficulty];
+  const cfg = PULSE_CONFIG[difficulty] ?? PULSE_CONFIG.Medium;
 
   const heights = [8, 16, 24];
   const activeHeights = [8, 18, 28];
@@ -240,10 +283,7 @@ const StethoscopePulse = ({ difficulty }: { difficulty: Difficulty }) => {
         })}
       </div>
 
-      <span
-        className="text-[11px] font-semibold"
-        style={{ color: cfg.color }}
-      >
+      <span className="text-[11px] font-semibold" style={{ color: cfg.color }}>
         {cfg.label}
       </span>
     </div>
@@ -254,7 +294,8 @@ interface ExplanationContentProps {
   explanation: string;
   teachingPoint: string;
   difficulty: Difficulty;
-  isCorrect: boolean;
+  /** Null for a question the set left unanswered. */
+  isCorrect: boolean | null;
   media?: QuestionMedia[];
   onOpenLightbox: (items: QuestionMedia[], index: number) => void;
   domain: string;
@@ -278,20 +319,22 @@ const ExplanationContent = ({
           gap: 6,
           padding: "4px 12px",
           borderRadius: "var(--radius-pill)",
-          border: isCorrect ? "1px solid var(--accent)" : "1px solid var(--signal)",
-          background: isCorrect ? "var(--accent-soft)" : "rgba(197,69,58,0.08)",
-          color: isCorrect ? "var(--accent)" : "var(--signal)",
+          border:
+            isCorrect === null ? "1px solid var(--border)" : isCorrect ? "1px solid var(--accent)" : "1px solid var(--signal)",
+          background:
+            isCorrect === null ? "var(--bg-subtle)" : isCorrect ? "var(--accent-soft)" : "rgba(197,69,58,0.08)",
+          color: isCorrect === null ? "var(--fg-muted)" : isCorrect ? "var(--accent)" : "var(--signal)",
           fontFamily: "var(--font-sans)",
           fontSize: 12,
           fontWeight: 500,
         }}
       >
-        {isCorrect ? (
+        {isCorrect === null ? null : isCorrect ? (
           <CheckCircle style={{ width: 13, height: 13 }} />
         ) : (
           <XCircle style={{ width: 13, height: 13 }} />
         )}
-        {isCorrect ? "Correct" : "Incorrect"}
+        {isCorrect === null ? "Omitted" : isCorrect ? "Correct" : "Incorrect"}
       </div>
       <StethoscopePulse difficulty={difficulty} />
     </div>
@@ -303,12 +346,10 @@ const ExplanationContent = ({
     )}
 
     <div>
-      <p style={{ ...MONO_EYEBROW, color: "var(--accent)", marginBottom: 8 }}>
-        Explanation
-      </p>
+      <p style={{ ...MONO_EYEBROW, color: "var(--accent)", marginBottom: 8 }}>Explanation</p>
       <p
         className="whitespace-pre-line [&_strong]:text-foreground [&_strong]:font-bold"
-        style={{ fontSize: 12, lineHeight: 1.8, color: "var(--fg-muted)" }}
+        style={{ fontSize: fs(12), lineHeight: 1.8, color: "var(--fg-muted)" }}
         dangerouslySetInnerHTML={{ __html: renderMarkdown(explanation ?? "") }}
       />
     </div>
@@ -322,11 +363,9 @@ const ExplanationContent = ({
         padding: "12px 16px",
       }}
     >
-      <p style={{ ...MONO_EYEBROW, color: "var(--accent)", marginBottom: 6 }}>
-        Key teaching point
-      </p>
+      <p style={{ ...MONO_EYEBROW, color: "var(--accent)", marginBottom: 6 }}>Key teaching point</p>
       <p
-        style={{ fontSize: 13, lineHeight: 1.6, color: "var(--fg)" }}
+        style={{ fontSize: fs(13), lineHeight: 1.6, color: "var(--fg)" }}
         dangerouslySetInnerHTML={{ __html: renderMarkdown(teachingPoint ?? "") }}
       />
     </div>
@@ -352,60 +391,38 @@ const ExplanationContent = ({
   </div>
 );
 
+// ── Options ─────────────────────────────────────────────────────────────────
+
 interface OptionTileProps {
   letter: OptionKey;
   text: string;
   /** Why this option is wrong. Undefined for the key, and before grading. */
   explanation?: string;
   answerState: AnswerState;
-  pendingKey: OptionKey | null;
+  struck: boolean;
+  /** Absent when the question can no longer be marked. */
+  onToggleStrike?: (key: OptionKey) => void;
   onSelect: (key: OptionKey) => void;
 }
 
-const LETTER_LABELS: Record<OptionKey, string> = {
-  a: "A", b: "B", c: "C", d: "D", e: "E",
-};
-
-const OptionTile = ({
-  letter,
-  text,
-  explanation,
-  answerState,
-  pendingKey,
-  onSelect,
-}: OptionTileProps) => {
-  const isAnswered = answerState.status === "answered";
-  const isSelected = isAnswered && answerState.selected === letter;
-  const isCorrect  = isAnswered && answerState.correct === letter;
-  const isWrong    = isSelected && !isCorrect;
-  const isDimmed   = isAnswered && !isSelected && !isCorrect;
-
-  const isPending = answerState.status === "selected" && pendingKey === letter;
+const OptionTile = ({ letter, text, explanation, answerState, struck, onToggleStrike, onSelect }: OptionTileProps) => {
+  const isGraded = answerState.status === "answered" || answerState.status === "revealed";
+  const correctKey = isGraded ? answerState.correct : null;
+  const isSelected = answerState.status === "answered" && answerState.selected === letter;
+  const isCorrect = correctKey === letter;
+  const isWrong = isSelected && !isCorrect;
+  const isDimmed = isGraded && !isSelected && !isCorrect;
+  const isPending = answerState.status === "selected" && answerState.pending === letter;
 
   const tileStyle: React.CSSProperties = isCorrect
     ? { border: "1px solid var(--accent)", background: "var(--accent-soft)", color: "var(--accent)" }
     : isWrong
     ? { border: "1px solid var(--signal)", background: "rgba(197,69,58,0.08)", color: "var(--signal)" }
     : isDimmed
-    ? {
-        border: "1px solid var(--border)",
-        background: "var(--bg-elevated)",
-        color: "var(--fg-subtle)",
-        cursor: "default",
-      }
+    ? { border: "1px solid var(--border)", background: "var(--bg-elevated)", color: "var(--fg-subtle)", cursor: "default" }
     : isPending
-    ? {
-        border: "1px solid var(--accent)",
-        background: "var(--accent-soft)",
-        color: "var(--fg)",
-        cursor: "pointer",
-      }
-    : {
-        border: "1px solid var(--border)",
-        background: "var(--bg-elevated)",
-        color: "var(--fg)",
-        cursor: "pointer",
-      };
+    ? { border: "1px solid var(--accent)", background: "var(--accent-soft)", color: "var(--fg)", cursor: "pointer" }
+    : { border: "1px solid var(--border)", background: "var(--bg-elevated)", color: "var(--fg)", cursor: "pointer" };
 
   const letterStyle: React.CSSProperties = isCorrect
     ? { background: "var(--accent)", color: "var(--bg)" }
@@ -418,47 +435,78 @@ const OptionTile = ({
     : { background: "var(--border)", color: "var(--fg-muted)" };
 
   const tile = (
-    <button
-      type="button"
-      onClick={() => !isAnswered && onSelect(letter)}
-      disabled={isAnswered}
-      style={{
-        width: "100%",
-        display: "flex",
-        alignItems: "flex-start",
-        gap: 12,
-        padding: "14px 16px",
-        borderRadius: "var(--radius-md)",
-        textAlign: "left",
-        transition: "all var(--dur-micro) var(--ease-out)",
-        ...tileStyle,
-      }}
-    >
-      <span
+    <div className="group relative">
+      <button
+        type="button"
+        onClick={() => !isGraded && onSelect(letter)}
+        onContextMenu={(e) => {
+          if (!onToggleStrike) return;
+          e.preventDefault();
+          onToggleStrike(letter);
+        }}
+        disabled={isGraded}
+        aria-pressed={isPending}
         style={{
+          width: "100%",
           display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          width: 28,
-          height: 28,
-          borderRadius: "var(--radius-sm)",
-          fontFamily: "var(--font-mono)",
-          fontSize: 12,
-          fontWeight: 600,
-          flexShrink: 0,
-          ...letterStyle,
+          alignItems: "flex-start",
+          gap: 12,
+          padding: onToggleStrike ? "14px 44px 14px 16px" : "14px 16px",
+          borderRadius: "var(--radius-md)",
+          textAlign: "left",
+          transition: "all var(--dur-micro) var(--ease-out)",
+          ...tileStyle,
+          opacity: struck && !isCorrect && !isSelected ? 0.55 : 1,
         }}
       >
-        {LETTER_LABELS[letter]}
-      </span>
-      <span style={{ fontSize: 14, lineHeight: 1.6, paddingTop: 2 }}>{text}</span>
-    </button>
+        <span
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            width: 28,
+            height: 28,
+            borderRadius: "var(--radius-sm)",
+            fontFamily: "var(--font-mono)",
+            fontSize: 12,
+            fontWeight: 600,
+            flexShrink: 0,
+            ...letterStyle,
+          }}
+        >
+          {letter.toUpperCase()}
+        </span>
+        <span
+          style={{
+            fontSize: fs(14),
+            lineHeight: 1.6,
+            paddingTop: 2,
+            textDecoration: struck ? "line-through" : undefined,
+          }}
+        >
+          {text}
+        </span>
+      </button>
+      {onToggleStrike && (
+        <button
+          type="button"
+          onClick={() => onToggleStrike(letter)}
+          aria-label={struck ? `Restore option ${letter.toUpperCase()}` : `Strike out option ${letter.toUpperCase()}`}
+          title={struck ? "Restore (Shift+" + letter.toUpperCase() + ")" : "Strike out (Shift+" + letter.toUpperCase() + ")"}
+          className={`absolute right-2 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md transition-opacity hover:bg-[var(--bg-subtle)] ${
+            struck ? "opacity-100" : "opacity-40 group-hover:opacity-100 focus:opacity-100"
+          }`}
+          style={{ color: "var(--fg-muted)" }}
+        >
+          {struck ? <Undo2 className="h-3.5 w-3.5" /> : <X className="h-3.5 w-3.5" />}
+        </button>
+      )}
+    </div>
   );
 
   // Nothing to say until the question is graded, and never for the key — the
-  // reason the correct answer is correct is the explanation panel's job, and
-  // the writer is blocked from emitting a why-it-is-wrong for it.
-  if (!isAnswered || !explanation || isCorrect) return tile;
+  // reason the correct answer is correct is the explanation panel's job.
+  if (!isGraded || !explanation || isCorrect) return tile;
 
   return (
     <div>
@@ -472,19 +520,11 @@ const OptionTile = ({
         }}
       >
         {isWrong && (
-          <p
-            style={{
-              ...MONO_EYEBROW,
-              color: "var(--signal)",
-              marginBottom: 4,
-            }}
-          >
-            Why your answer is wrong
-          </p>
+          <p style={{ ...MONO_EYEBROW, color: "var(--signal)", marginBottom: 4 }}>Why your answer is wrong</p>
         )}
         <p
           className="[&_strong]:text-foreground [&_strong]:font-semibold"
-          style={{ fontSize: 12, lineHeight: 1.7, color: "var(--fg-muted)" }}
+          style={{ fontSize: fs(12), lineHeight: 1.7, color: "var(--fg-muted)" }}
           dangerouslySetInnerHTML={{ __html: renderMarkdown(explanation) }}
         />
       </div>
@@ -535,234 +575,13 @@ const MediaBlock = ({ media, context, onOpen }: MediaBlockProps) => {
   );
 };
 
-interface QuestionNavigatorProps {
-  total: number;
-  currentIndex: number;
-  answers: { question_id: string; is_correct: boolean }[];
-  questions: { id: string }[];
-  reviewIndex: number | null;
-  onReview: (index: number) => void;
-  onNavigate: (index: number) => void;
-  displayedNumber: number;
-  flaggedIds: Set<string>;
-  skippedIds: string[];
-}
-
-const QuestionNavigator = ({
-  total,
-  currentIndex,
-  answers,
-  questions,
-  reviewIndex,
-  onReview,
-  onNavigate,
-  displayedNumber,
-  flaggedIds,
-  skippedIds,
-}: QuestionNavigatorProps) => {
-  const [open, setOpen] = useState(false);
-
-  return (
-    <>
-      <button
-        onClick={() => setOpen(true)}
-        className="md:hidden inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1 text-[11px] font-medium text-muted-foreground hover:bg-accent transition-colors"
-      >
-        Q{displayedNumber} of {total}
-        <ChevronDown className="h-3 w-3" />
-      </button>
-
-      {open && (
-        <div
-          className="md:hidden fixed inset-0 bg-black/40 z-40"
-          onClick={() => setOpen(false)}
-        />
-      )}
-
-      <div
-        className={`md:hidden fixed inset-x-0 bottom-0 z-50 bg-card border-t border-border/60 rounded-t-2xl transition-transform duration-300 ease-out ${
-          open ? "translate-y-0" : "translate-y-full"
-        }`}
-      >
-        <div className="flex flex-col items-center pt-3 pb-2 px-4">
-          <div className="w-10 h-1 rounded-full bg-border/60 mb-3" />
-          <div className="flex items-center justify-between w-full">
-            <span className="text-xs font-bold text-foreground">
-              Questions ({total})
-            </span>
-            <button
-              onClick={() => setOpen(false)}
-              className="text-xs text-muted-foreground hover:text-foreground transition-colors"
-            >
-              Close
-            </button>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-4 px-4 pb-3 flex-wrap">
-          <div className="flex items-center gap-1.5">
-            <div className="w-3 h-3 rounded-sm bg-emerald-500/20 border border-emerald-500/40" />
-            <span className="text-[10px] text-muted-foreground">Correct</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <div className="w-3 h-3 rounded-sm bg-red-500/20 border border-red-500/40" />
-            <span className="text-[10px] text-muted-foreground">Incorrect</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <div className="w-3 h-3 rounded-sm bg-muted/30 border border-border/20" />
-            <span className="text-[10px] text-muted-foreground">Unanswered</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <div className="w-3 h-3 rounded-sm bg-amber-500/20 border border-amber-500/40" />
-            <span className="text-[10px] text-muted-foreground">Skipped</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <div className="relative w-3 h-3 rounded-sm bg-muted/30 border border-border/20">
-              <span className="absolute -top-0.5 -right-0.5 flex h-2 w-2 items-center justify-center rounded-full bg-amber-500">
-                <Flag className="h-1 w-1 text-white" fill="currentColor" />
-              </span>
-            </div>
-            <span className="text-[10px] text-muted-foreground">Flagged</span>
-          </div>
-        </div>
-
-        <div className="px-4 pb-8 max-h-[50vh] overflow-y-auto">
-          <div className="grid grid-cols-8 gap-2">
-            {Array.from({ length: total }, (_, i) => {
-              const q = questions[i];
-              const answer = q ? answers.find((a) => a.question_id === q.id) : undefined;
-              const isAnswered = !!answer;
-              const isCurrent = i === currentIndex && reviewIndex === null;
-              const isReviewingThis = i === reviewIndex;
-              const isCorrect = answer?.is_correct;
-              const isSkipped = q ? skippedIds.includes(q.id) : false;
-              const isFlaggedQ = q ? flaggedIds.has(q.id) : false;
-
-              let bg = "bg-muted/30 text-muted-foreground border-border/20";
-              if (isCurrent || isReviewingThis) {
-                bg = "bg-primary/20 text-primary border-primary/50";
-              } else if (isAnswered) {
-                bg = isCorrect
-                  ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/40"
-                  : "bg-red-500/15 text-red-600 dark:text-red-400 border-red-500/40";
-              } else if (isSkipped) {
-                bg = "bg-amber-500/20 text-amber-400 border-amber-500/40";
-              }
-
-              const canClick = isAnswered || (isSkipped && !isCurrent);
-
-              return (
-                <button
-                  key={i}
-                  disabled={!canClick && !isCurrent}
-                  onClick={() => {
-                    if (isAnswered) {
-                      onReview(i);
-                      setOpen(false);
-                    } else if (isSkipped && !isCurrent) {
-                      onNavigate(i);
-                      setOpen(false);
-                    }
-                  }}
-                  className={`relative aspect-square rounded-lg border text-[10px] font-bold flex items-center justify-center transition-opacity ${bg} ${
-                    canClick ? "cursor-pointer hover:opacity-80" : "cursor-default"
-                  }`}
-                >
-                  {i + 1}
-                  {isFlaggedQ && (
-                    <span className="absolute -top-0.5 -right-0.5 flex h-2.5 w-2.5 items-center justify-center rounded-full bg-amber-500 border border-background">
-                      <Flag className="h-1.5 w-1.5 text-white" fill="currentColor" />
-                    </span>
-                  )}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      </div>
-    </>
-  );
-};
-
-interface ReviewExplanationDrawerProps {
-  explanation: string;
-  teachingPoint: string;
-  difficulty: Difficulty;
-  isCorrect: boolean;
-  media?: QuestionMedia[];
-  onOpenLightbox: (items: QuestionMedia[], index: number) => void;
-  domain: string;
-}
-
-const ReviewExplanationDrawer = ({
-  explanation,
-  teachingPoint,
-  difficulty,
-  isCorrect,
-  media,
-  onOpenLightbox,
-  domain,
-}: ReviewExplanationDrawerProps) => {
-  const [open, setOpen] = useState(true);
-
-  return (
-    <div
-      className={`relative bg-card border-t border-border/60 rounded-t-2xl transition-transform duration-300 ease-out ${
-        open ? "translate-y-0" : "translate-y-[calc(100%-48px)]"
-      }`}
-    >
-      <button
-        onClick={() => setOpen((o) => !o)}
-        className="w-full flex flex-col items-center gap-1 pt-3 pb-2 px-4"
-      >
-        <div className="w-10 h-1 rounded-full bg-border/60" />
-        <div className="flex items-center justify-between w-full mt-1">
-          <span className="text-[11px] font-semibold tracking-wider text-primary uppercase">
-            Explanation
-          </span>
-          <div className="flex items-center gap-2">
-            <span
-              className={`text-[10px] font-bold ${
-                isCorrect ? "text-emerald-600 dark:text-emerald-400" : "text-red-600 dark:text-red-400"
-              }`}
-            >
-              {isCorrect ? "✓ Correct" : "✗ Incorrect"}
-            </span>
-            <ChevronDown
-              className={`h-4 w-4 text-muted-foreground transition-transform ${
-                open ? "rotate-0" : "rotate-180"
-              }`}
-            />
-          </div>
-        </div>
-      </button>
-
-      <div className="px-4 pb-8 max-h-[55vh] overflow-y-auto">
-        <ExplanationContent
-          explanation={explanation}
-          teachingPoint={teachingPoint}
-          difficulty={difficulty}
-          isCorrect={isCorrect}
-          media={media}
-          onOpenLightbox={onOpenLightbox}
-          domain={domain}
-        />
-      </div>
-    </div>
-  );
-};
-
 /**
  * Live state of the set being written underneath the session.
  *
- * The generation used to have a page of its own, where the student watched it
- * finish before playing anything. Now it runs behind the player, which means
- * the only honest way to report it is in the player — otherwise a run that
- * stalls or dies is invisible until the student reaches the end and finds the
- * set shorter than they asked for.
- *
- * Silent once a set has been delivered in full: at that point it is an ordinary
- * session and a banner about how it was made is just noise.
+ * The generation runs behind the player, which means the only honest way to
+ * report it is in the player — otherwise a run that stalls or dies is invisible
+ * until the student reaches the end and finds the set shorter than they asked
+ * for. Silent once a set has been delivered in full.
  */
 const GenerationStrip = ({
   generation,
@@ -779,8 +598,7 @@ const GenerationStrip = ({
 
   // Grouped by reason rather than listed per question. The held-back items are
   // not in the session, so they have no question number the student could match
-  // them to — a list of "one question was rewritten" repeated four times says
-  // less than "4 rewritten" and reads worse.
+  // them to.
   const heldBackByReason = generation.heldBackItems.reduce<Record<string, number>>(
     (acc, item) => {
       acc[item.reason] = (acc[item.reason] ?? 0) + 1;
@@ -850,18 +668,38 @@ const GenerationStrip = ({
   );
 };
 
+const isTypingTarget = (target: EventTarget | null): boolean => {
+  const el = target as HTMLElement | null;
+  if (!el) return false;
+  const tag = el.tagName;
+  return (
+    tag === "INPUT" ||
+    tag === "TEXTAREA" ||
+    tag === "SELECT" ||
+    el.isContentEditable ||
+    !!el.closest?.("[data-qbank-capture-keys]")
+  );
+};
+
+// ── The player ──────────────────────────────────────────────────────────────
+
 const QBankSession = () => {
   const navigate = useNavigate();
+  const { toast } = useToast();
   const {
     session,
     currentIndex,
     totalQuestions,
-    isLastQuestion,
     isAwaitingMore,
+    isWaitingForNext,
     generation,
     resumeGeneration,
+    resumeSession,
+    saveAndExit,
     submitAnswer,
+    selectTimedAnswer,
     nextQuestion,
+    prevQuestion,
     endSession,
     reviewIndex,
     setReviewIndex,
@@ -869,219 +707,347 @@ const QBankSession = () => {
     displayAnswer,
     isReviewing,
     lastSummary,
-    restoreSession,
-    snapshotTimer,
+    getElapsedMs,
+    getTimeRemainingMs,
     flaggedIds,
     toggleFlag,
-    isFlagLoading,
-    skipQuestion,
+    toggleStrike,
+    addHighlight,
+    removeHighlight,
     goToQuestion,
-    unansweredCount,
+    endBlockStats,
+    saveState,
   } = useQBankContext();
-
-  const isFlagged = displayQuestion ? flaggedIds.has(displayQuestion.id) : false;
-
-  const restoredRef = useRef(false);
 
   const [searchParams] = useSearchParams();
   const sessionIdParam = searchParams.get("session");
   const reviewParam = searchParams.get("review");
 
-  const [answerState, setAnswerState] = useState<AnswerState>({ status: "unanswered" });
+  const [pendingKey, setPendingKey] = useState<OptionKey | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const [elapsedDisplay, setElapsedDisplay] = useState(0);
+  const [labsOpen, setLabsOpen] = useState(false);
+  const [calcOpen, setCalcOpen] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [endDialogOpen, setEndDialogOpen] = useState(false);
+  const [ending, setEnding] = useState(false);
+  const [exiting, setExiting] = useState(false);
+  /** Why the set could not be loaded from the server, when it could not. */
+  const [loadError, setLoadError] = useState<string | null>(null);
+  /** Bumped by Try again, to re-run the load. */
+  const [loadAttempt, setLoadAttempt] = useState(0);
+  const [retrying, setRetrying] = useState(false);
   const [lightboxItems, setLightboxItems] = useState<QuestionMedia[]>([]);
   const [lightboxIndex, setLightboxIndex] = useState(0);
   const [zoomScale, setZoomScale] = useState(1);
   const [zoomOffset, setZoomOffset] = useState({ x: 0, y: 0 });
   const lightboxOpen = lightboxItems.length > 0;
   const currentLightboxItem = lightboxItems[lightboxIndex] ?? null;
+  const font = useQBankFontScale();
+  const loadStartedRef = useRef<string | null>(null);
 
-  useEffect(() => {
-    if (!lightboxOpen) return;
-    const handleKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') { setLightboxItems([]); setZoomScale(1); setZoomOffset({ x: 0, y: 0 }); }
-      if (e.key === 'ArrowRight') { setLightboxIndex((i) => Math.min(i + 1, lightboxItems.length - 1)); setZoomScale(1); setZoomOffset({ x: 0, y: 0 }); }
-      if (e.key === 'ArrowLeft') { setLightboxIndex((i) => Math.max(i - 1, 0)); setZoomScale(1); setZoomOffset({ x: 0, y: 0 }); }
-    };
-    window.addEventListener('keydown', handleKey);
-    return () => window.removeEventListener('keydown', handleKey);
-  }, [lightboxOpen, lightboxItems.length]);
+  const mode: PlayMode = session?.mode ?? "tutor";
+  const inSession = !!session && !isReviewing;
 
-  const openLightbox = useCallback((items: QuestionMedia[], idx: number) => {
-    setLightboxItems(items);
-    setLightboxIndex(idx);
-  }, []);
+  // ── Loading ───────────────────────────────────────────────────────────────
+  //
+  // The URL is the source of truth. ?session=<id> with nothing in memory — a
+  // refresh, a bookmark, another device — loads the set from the server.
+  // ?review=<i> is the read-only walk from a finished set's summary.
 
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (reviewParam !== null) {
       const idx = parseInt(reviewParam, 10);
-      if (!isNaN(idx)) setReviewIndex(idx);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (!restoredRef.current) {
-      restoredRef.current = true;
-
-      if (session) return;
-
-      const didRestore = restoreSession();
-
-      if (!didRestore && !sessionIdParam && !lastSummary) {
-        navigate("/qbank");
-      }
-
+      if (lastSummary && !isNaN(idx)) setReviewIndex(idx);
+      else navigate(sessionIdParam ? `/qbank/summary?session=${sessionIdParam}` : "/qbank", { replace: true });
       return;
     }
 
-    if (!session && !sessionIdParam && !lastSummary) {
-      navigate("/qbank");
+    if (session && (!sessionIdParam || sessionIdParam === session.sessionId)) {
+      // Put the id in the URL, so a refresh comes back to this set.
+      if (session.sessionId && sessionIdParam !== session.sessionId) {
+        navigate(`/qbank/session?session=${session.sessionId}`, { replace: true });
+      }
+      return;
     }
-  }, [session, sessionIdParam, lastSummary, navigate, restoreSession]);
+
+    if (!sessionIdParam) {
+      navigate("/qbank", { replace: true });
+      return;
+    }
+
+    if (loadStartedRef.current === sessionIdParam) return;
+    loadStartedRef.current = sessionIdParam;
+    setLoadError(null);
+
+    void resumeSession(sessionIdParam).then(({ outcome, error }) => {
+      if (outcome === "completed") {
+        navigate(`/qbank/summary?session=${sessionIdParam}`, { replace: true });
+      } else if (outcome === "failed") {
+        setLoadError(error ?? "Something went wrong loading this set.");
+      }
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session?.sessionId, sessionIdParam, reviewParam, loadAttempt]);
 
   /**
    * Picks an interrupted set back up.
    *
    * A generated session can be re-entered with its set unfinished: the tab was
-   * closed, the browser was refreshed, or the student walked to /dashboard and
-   * back, any of which drops the in-memory wave loop. This reconciles against
-   * the table first — questions written while we were gone are already paid for
-   * and simply need collecting — and only then starts writing again for whatever
-   * is genuinely still missing. Safe to call repeatedly; it no-ops for a curated
-   * session, a finished one, or a run that is already going.
+   * closed, the student saved and exited, or they are on another device. This
+   * reconciles against the table first and only then writes whatever is still
+   * missing. Keyed on the generation's identity rather than the object it hangs
+   * off, which is rewritten after every wave.
    */
-  // Keyed on the generation's identity rather than the object it hangs off:
-  // session.generation is rewritten after every wave to persist the resume
-  // point, so depending on it would re-fire this on each one.
   useEffect(() => {
     if (!session?.generation) return;
     resumeGeneration();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.sessionId, session?.generation?.generationId, resumeGeneration]);
 
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+  // A tutor pick is per question; moving on forgets it.
+  const questionId = displayQuestion?.id ?? null;
   useEffect(() => {
-    const q = session?.questions[currentIndex];
-    const existingAnswer = q
-      ? session?.answers.find((a) => a.question_id === q.id)
-      : undefined;
-
-    if (existingAnswer && q) {
-      setAnswerState({
-        status: "answered",
-        selected: existingAnswer.selected_option as OptionKey,
-        correct: q.correct_option as OptionKey,
-        isCorrect: existingAnswer.is_correct,
-      });
-    } else {
-      setAnswerState({ status: "unanswered" });
-    }
+    setPendingKey(null);
     setDrawerOpen(false);
-  }, [currentIndex]);
+  }, [questionId]);
+
+  // ── Lightbox ──────────────────────────────────────────────────────────────
+
+  const closeLightbox = useCallback(() => {
+    setLightboxItems([]);
+    setZoomScale(1);
+    setZoomOffset({ x: 0, y: 0 });
+  }, []);
 
   useEffect(() => {
-    if (!session) return;
-    const tick = () => {
-      setElapsedDisplay(session.accumulatedMs + (Date.now() - session.resumedAt));
+    if (!lightboxOpen) return;
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') closeLightbox();
+      if (e.key === 'ArrowRight') { setLightboxIndex((i) => Math.min(i + 1, lightboxItems.length - 1)); setZoomScale(1); setZoomOffset({ x: 0, y: 0 }); }
+      if (e.key === 'ArrowLeft') { setLightboxIndex((i) => Math.max(i - 1, 0)); setZoomScale(1); setZoomOffset({ x: 0, y: 0 }); }
     };
-    tick();
-    const id = window.setInterval(tick, 1000);
-    return () => window.clearInterval(id);
-  }, [session]);
+    window.addEventListener('keydown', handleKey);
+    return () => window.removeEventListener('keydown', handleKey);
+  }, [lightboxOpen, lightboxItems.length, closeLightbox]);
 
-  useEffect(() => {
-    return () => {
-      snapshotTimer();
-    };
-  }, [snapshotTimer]);
+  const openLightbox = useCallback((items: QuestionMedia[], idx: number) => {
+    setLightboxItems(items);
+    setLightboxIndex(idx);
+  }, []);
+
+  // ── Answer state ──────────────────────────────────────────────────────────
+
+  const currentAnswer =
+    inSession && displayQuestion ? session!.answers.find((a) => a.question_id === displayQuestion.id) : undefined;
+  const timedSelection = inSession && displayQuestion && mode === "timed" ? session!.selections[displayQuestion.id] : undefined;
+
+  const answerState: AnswerState = (() => {
+    if (!displayQuestion) return { status: "unanswered" };
+    if (isReviewing) {
+      if (displayAnswer && displayQuestion.correct_option) {
+        return {
+          status: "answered",
+          selected: displayAnswer.selected_option as OptionKey,
+          correct: displayQuestion.correct_option,
+          isCorrect: displayAnswer.is_correct,
+        };
+      }
+      return displayQuestion.correct_option
+        ? { status: "revealed", correct: displayQuestion.correct_option }
+        : { status: "unanswered" };
+    }
+    if (mode === "timed") return timedSelection ? { status: "selected", pending: timedSelection } : { status: "unanswered" };
+    if (currentAnswer && displayQuestion.correct_option) {
+      return {
+        status: "answered",
+        selected: currentAnswer.selected_option,
+        correct: displayQuestion.correct_option,
+        isCorrect: currentAnswer.is_correct,
+      };
+    }
+    return pendingKey ? { status: "selected", pending: pendingKey } : { status: "unanswered" };
+  })();
+
+  const isGraded = answerState.status === "answered" || answerState.status === "revealed";
+  const canMark = inSession && !isGraded;
 
   const handleSelect = useCallback(
     (key: OptionKey) => {
-      if (isReviewing) return;
-      if (answerState.status === "answered") return;
-      setAnswerState({ status: "selected", pending: key });
+      if (!inSession || isGraded) return;
+      if (mode === "timed") selectTimedAnswer(key);
+      else setPendingKey(key);
     },
-    [isReviewing, answerState]
+    [inSession, isGraded, mode, selectTimedAnswer]
   );
 
   const handleConfirm = useCallback(async () => {
-    if (answerState.status !== "selected") return;
-    if (submitting) return;
-    const pending = answerState.pending;
+    if (mode !== "tutor" || !pendingKey || submitting || isGraded) return;
     setSubmitting(true);
     try {
-      const result = await submitAnswer(pending);
-      if (!result) return;
-      setAnswerState({
-        status: "answered",
-        selected: pending,
-        correct: result.correct_option,
-        isCorrect: result.is_correct,
-      });
+      const result = await submitAnswer(pendingKey);
+      if (!result) {
+        toast({ title: "Could not check that answer", description: "Try again in a moment.", variant: "destructive" });
+        return;
+      }
+      setPendingKey(null);
       setTimeout(() => setDrawerOpen(true), 300);
     } finally {
       setSubmitting(false);
     }
-  }, [answerState, submitAnswer, submitting]);
+  }, [mode, pendingKey, submitting, isGraded, submitAnswer, toast]);
 
-  const handleNext = useCallback(async () => {
+  // ── Navigation ────────────────────────────────────────────────────────────
+
+  const loadedCount = isReviewing ? lastSummary?.questions.length ?? 0 : session?.questions.length ?? 0;
+  const position = isReviewing ? reviewIndex ?? 0 : currentIndex;
+  const canPrev = position > 0;
+  const canNext = position < loadedCount - 1;
+
+  const handlePrev = useCallback(() => {
     setDrawerOpen(false);
-    // "Everything loaded is answered" is not the same as "the set is done" while
-    // questions are still being written, so ending on it would cut a set of
-    // twenty short at whatever had landed.
-    if (unansweredCount === 0 && !isAwaitingMore) {
+    if (isReviewing) {
+      if (reviewIndex! > 0) setReviewIndex(reviewIndex! - 1);
+    } else prevQuestion();
+  }, [isReviewing, reviewIndex, setReviewIndex, prevQuestion]);
+
+  const handleNext = useCallback(() => {
+    setDrawerOpen(false);
+    if (isReviewing) {
+      if (reviewIndex! + 1 < loadedCount) setReviewIndex(reviewIndex! + 1);
+    } else nextQuestion();
+  }, [isReviewing, reviewIndex, loadedCount, setReviewIndex, nextQuestion]);
+
+  const handleEndBlock = useCallback(async () => {
+    if (ending) return;
+    setEnding(true);
+    try {
       await endSession();
-    } else {
-      nextQuestion();
+    } finally {
+      setEnding(false);
+      setEndDialogOpen(false);
     }
-  }, [unansweredCount, isAwaitingMore, endSession, nextQuestion]);
+  }, [ending, endSession]);
 
-  /** The deliberate way out of a set that is still being written. */
-  const handleFinishNow = useCallback(async () => {
-    setDrawerOpen(false);
-    await endSession();
-  }, [endSession]);
+  const handleTimeUp = useCallback(() => {
+    toast({ title: "Time’s up", description: "Your block has been submitted for grading." });
+    void handleEndBlock();
+  }, [handleEndBlock, toast]);
+
+  const handleSaveExit = useCallback(async () => {
+    if (exiting) return;
+    setExiting(true);
+    try {
+      await saveAndExit();
+    } finally {
+      setExiting(false);
+    }
+  }, [exiting, saveAndExit]);
+
+  // ── Keyboard ──────────────────────────────────────────────────────────────
 
   useEffect(() => {
-    if (isReviewing) return;
-    if (lightboxOpen) return;
-    if (answerState.status === "answered") return;
+    if (lightboxOpen || endDialogOpen || shortcutsOpen) return;
 
     const handleKey = (e: KeyboardEvent) => {
-      const target = e.target as HTMLElement | null;
-      const tag = target?.tagName;
-      if (tag === "INPUT" || tag === "TEXTAREA" || target?.isContentEditable) return;
+      if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey) return;
+      if (isTypingTarget(e.target)) return;
+      // A held key repeats. Every shortcut here is a one-shot action — and for
+      // toggles (flag, strike, panels) a repeat flips them back and forth.
+      if (e.repeat) return;
 
       const k = e.key.toLowerCase();
-      if (k === "a" || k === "b" || k === "c" || k === "d" || k === "e") {
+      if (OPTION_KEYS.includes(k as OptionKey)) {
+        if (!displayQuestion) return;
         e.preventDefault();
-        handleSelect(k as OptionKey);
-      } else if (e.key === "Enter" && answerState.status === "selected") {
+        if (e.shiftKey) {
+          if (canMark) toggleStrike(displayQuestion.id, k as OptionKey);
+        } else handleSelect(k as OptionKey);
+        return;
+      }
+      if (e.key === "Enter" && pendingKey && mode === "tutor" && inSession) {
         e.preventDefault();
-        handleConfirm();
+        void handleConfirm();
+      } else if (e.key === "ArrowRight") {
+        if (canNext) {
+          e.preventDefault();
+          handleNext();
+        }
+      } else if (e.key === "ArrowLeft") {
+        if (canPrev) {
+          e.preventDefault();
+          handlePrev();
+        }
+      } else if (k === "f" && inSession && displayQuestion) {
+        e.preventDefault();
+        void toggleFlag(displayQuestion.id);
+      } else if (k === "l") {
+        e.preventDefault();
+        setLabsOpen((o) => !o);
+      } else if (k === "k") {
+        e.preventDefault();
+        setCalcOpen((o) => !o);
+      } else if (e.key === "?") {
+        e.preventDefault();
+        setShortcutsOpen(true);
       }
     };
 
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
-  }, [isReviewing, lightboxOpen, answerState, handleSelect, handleConfirm]);
+  }, [
+    lightboxOpen,
+    endDialogOpen,
+    shortcutsOpen,
+    displayQuestion,
+    canMark,
+    toggleStrike,
+    handleSelect,
+    pendingKey,
+    mode,
+    inSession,
+    handleConfirm,
+    canNext,
+    canPrev,
+    handleNext,
+    handlePrev,
+    toggleFlag,
+  ]);
 
-  const sessionQuestions = session?.questions ?? lastSummary?.questions ?? [];
-  const sessionAnswers = session?.answers ?? lastSummary?.answers ?? [];
-  const effectiveTotalQuestions = session ? totalQuestions : lastSummary?.total ?? 0;
+  // ── Render ────────────────────────────────────────────────────────────────
 
-  /**
-   * Standing at the end of what has been written, with more still expected.
-   *
-   * This is the one state the player did not previously have. Without it the
-   * student answers question one of twenty, the engine sees nothing unanswered,
-   * and offers to finish the session.
-   */
-  const waitingForNext =
-    !!session && isAwaitingMore && currentIndex >= session.questions.length - 1;
+  if (loadError && !session) {
+    const retry = () => {
+      setRetrying(true);
+      setLoadError(null);
+      loadStartedRef.current = null;
+      setLoadAttempt((n) => n + 1);
+      // The spinner is only there so a fast second failure is visibly a retry.
+      window.setTimeout(() => setRetrying(false), 600);
+    };
+    return (
+      <DashboardLayout wide>
+        <div className="mx-auto mt-16 max-w-sm space-y-3 text-center">
+          <AlertTriangle className="mx-auto h-6 w-6 text-amber-500" />
+          <p className="text-sm font-medium" style={{ color: "var(--fg)" }}>
+            This set couldn’t be loaded.
+          </p>
+          <p className="text-xs" style={{ color: "var(--fg-muted)" }}>
+            {loadError}
+          </p>
+          <div className="flex items-center justify-center gap-2 pt-1">
+            <button type="button" onClick={retry} disabled={retrying} style={darkButtonStyle(retrying)}>
+              {retrying && <Loader2 className="h-4 w-4 animate-spin" />}
+              Try again
+            </button>
+            <button type="button" onClick={() => navigate("/qbank")} style={outlineButtonStyle()}>
+              Back to QBank
+            </button>
+          </div>
+        </div>
+      </DashboardLayout>
+    );
+  }
 
   if (!displayQuestion) {
     return (
@@ -1091,460 +1057,373 @@ const QBankSession = () => {
     );
   }
 
-  const effectiveAnswerState: AnswerState =
-    isReviewing && displayAnswer && displayQuestion
-      ? {
-          status: "answered",
-          selected: displayAnswer.selected_option as OptionKey,
-          correct: displayQuestion.correct_option,
-          isCorrect: displayAnswer.is_correct,
-        }
-      : answerState;
+  const q = displayQuestion;
+  const totalForDisplay = isReviewing ? lastSummary?.questions.length ?? 0 : totalQuestions;
+  const displayedNumber = position + 1;
 
-  const isAnsweredEffective = effectiveAnswerState.status === "answered";
+  const cells: GridCell[] = isReviewing
+    ? (lastSummary?.questions ?? []).map((sq, i) => {
+        const a = lastSummary?.answers.find((x) => x.question_id === sq.id);
+        return {
+          kind: a ? (a.is_correct ? "correct" : "incorrect") : "unanswered",
+          current: i === reviewIndex,
+          flagged: (lastSummary?.flaggedIds ?? []).includes(sq.id),
+        };
+      })
+    : Array.from({ length: totalQuestions }, (_, i) => {
+        const sq = session?.questions[i];
+        if (!sq) return { kind: "unwritten" as const, current: false, flagged: false };
+        const a = session!.answers.find((x) => x.question_id === sq.id);
+        const kind: CellKind =
+          mode === "timed"
+            ? session!.selections[sq.id]
+              ? "answered"
+              : session!.skippedIds.includes(sq.id)
+                ? "skipped"
+                : "unanswered"
+            : a
+              ? a.is_correct
+                ? "correct"
+                : "incorrect"
+              : session!.skippedIds.includes(sq.id)
+                ? "skipped"
+                : "unanswered";
+        return { kind, current: i === currentIndex, flagged: flaggedIds.has(sq.id) };
+      });
 
-  const options: { key: OptionKey; text: string }[] = [
-    { key: "a", text: displayQuestion!.option_a },
-    { key: "b", text: displayQuestion!.option_b },
-    { key: "c", text: displayQuestion!.option_c },
-    { key: "d", text: displayQuestion!.option_d },
-    { key: "e", text: displayQuestion!.option_e },
-  ];
+  const onGridSelect = (i: number) => {
+    setDrawerOpen(false);
+    if (isReviewing) setReviewIndex(i);
+    else goToQuestion(i);
+  };
 
-  const displayedNumber = (isReviewing ? reviewIndex! : currentIndex) + 1;
+  const answeredCount = session ? (mode === "timed" ? Object.keys(session.selections).length : session.answers.length) : 0;
+  const showExplanation = isGraded && (isReviewing || mode === "tutor");
+  const struckKeys = (session?.annotations.struck[q.id] ?? []) as OptionKey[];
+  const highlights = session?.annotations.highlights[q.id] ?? [];
+  const isFlagged = flaggedIds.has(q.id);
+  const atEndOfWritten = inSession && currentIndex >= (session?.questions.length ?? 0) - 1;
+
+  const explanationProps = showExplanation
+    ? {
+        explanation: q.explanation ?? "",
+        teachingPoint: q.teaching_point ?? "",
+        difficulty: q.difficulty as Difficulty,
+        isCorrect: answerState.status === "answered" ? answerState.isCorrect : null,
+        media: q.media,
+        onOpenLightbox: openLightbox,
+        domain: q.domain,
+      }
+    : null;
+
+  /** Next, or End block when there is nothing after this one. */
+  const primaryNav = (fullWidth = false) => {
+    const size: React.CSSProperties = fullWidth ? { width: "100%", height: 44 } : {};
+    if (isWaitingForNext || (atEndOfWritten && isAwaitingMore)) {
+      return (
+        <div
+          className="flex items-center gap-2.5 rounded-xl px-4 py-3"
+          style={{ border: "1px solid var(--border)", background: "var(--bg-subtle)", ...size, height: undefined }}
+        >
+          <Loader2 className="h-4 w-4 shrink-0 animate-spin" style={{ color: "var(--fg-muted)" }} />
+          <p className="text-xs font-medium" style={{ color: "var(--fg-muted)" }}>
+            Writing question {(session?.questions.length ?? 0) + 1} of {totalQuestions}… it appears here in a moment
+            {mode === "timed" ? " — your clock is paused." : "."}
+          </p>
+        </div>
+      );
+    }
+    if (atEndOfWritten) {
+      return (
+        <button type="button" onClick={() => setEndDialogOpen(true)} style={{ ...darkButtonStyle(), ...size }}>
+          End block
+        </button>
+      );
+    }
+    return (
+      <button type="button" onClick={handleNext} style={{ ...darkButtonStyle(), ...size }}>
+        Next question <ArrowRight style={{ width: 16, height: 16 }} />
+      </button>
+    );
+  };
 
   return (
     <DashboardLayout wide>
-      {isReviewing && (() => {
-        const fromSummary = !session && !!lastSummary;
-        const hasNext = reviewIndex! + 1 < effectiveTotalQuestions;
-        return (
+      <div style={{ ["--qb-scale" as string]: font.scale } as React.CSSProperties}>
+        {isReviewing ? (
           <div className="flex items-center justify-between mb-4 px-3 py-2 rounded-xl bg-primary/5 border border-primary/20">
             <button
               onClick={() => {
-                if (fromSummary) {
-                  setReviewIndex(null);
-                  navigate("/qbank/summary");
-                } else {
-                  setReviewIndex(null);
-                }
+                setReviewIndex(null);
+                navigate(sessionIdParam ? `/qbank/summary?session=${sessionIdParam}` : "/qbank/summary");
               }}
               className="text-xs font-semibold text-primary hover:text-primary/80 transition-colors"
             >
-              {fromSummary ? "← Back to Summary" : "← Back to current question"}
+              ← Back to Summary
             </button>
             <span className="text-xs font-semibold text-primary">
-              Reviewing Q{reviewIndex! + 1} of {effectiveTotalQuestions} — read only
+              Reviewing Q{displayedNumber} of {totalForDisplay} — read only
             </span>
-            <button
-              onClick={() => {
-                if (hasNext) {
-                  setReviewIndex(reviewIndex! + 1);
-                } else if (fromSummary) {
-                  setReviewIndex(null);
-                  navigate("/qbank/summary");
-                } else {
-                  setReviewIndex(null);
-                }
-              }}
-              className="text-xs font-semibold text-primary hover:text-primary/80 transition-colors"
-            >
-              {hasNext ? "Next →" : fromSummary ? "← Back to Summary" : "← Back to current question"}
-            </button>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={handlePrev}
+                disabled={!canPrev}
+                className="text-xs font-semibold text-primary hover:text-primary/80 disabled:opacity-30 transition-colors"
+              >
+                ← Prev
+              </button>
+              <button
+                onClick={handleNext}
+                disabled={!canNext}
+                className="text-xs font-semibold text-primary hover:text-primary/80 disabled:opacity-30 transition-colors"
+              >
+                Next →
+              </button>
+            </div>
           </div>
-        );
-      })()}
-
-      {session?.generation && generation && (
-        <GenerationStrip generation={generation} loaded={session.questions.length} />
-      )}
-
-      <div className="flex gap-3 items-start">
-        {effectiveTotalQuestions > 0 && (
-          <QuestionCounter
-            total={effectiveTotalQuestions}
-            currentIndex={currentIndex}
-            answers={sessionAnswers}
-            questions={sessionQuestions}
-            reviewIndex={reviewIndex}
-            onReview={(i) => setReviewIndex(i)}
-            onNavigate={(i) => {
-              setReviewIndex(null);
-              goToQuestion(i);
-            }}
-            flaggedIds={flaggedIds}
-            skippedIds={session?.skippedIds ?? []}
-          />
+        ) : (
+          session && (
+            <PlayerToolbar
+              mode={mode}
+              displayedNumber={displayedNumber}
+              total={totalQuestions}
+              getElapsedMs={getElapsedMs}
+              getTimeRemainingMs={getTimeRemainingMs}
+              clockPaused={!session.clockRunning}
+              onTimeUp={handleTimeUp}
+              canPrev={canPrev}
+              canNext={canNext}
+              onPrev={handlePrev}
+              onNext={handleNext}
+              isFlagged={isFlagged}
+              onFlag={() => void toggleFlag(q.id)}
+              labsOpen={labsOpen}
+              onToggleLabs={() => setLabsOpen((o) => !o)}
+              calcOpen={calcOpen}
+              onCalcOpenChange={setCalcOpen}
+              fontStep={font.step}
+              maxFontStep={font.maxStep}
+              onFontStep={font.change}
+              onShortcuts={() => setShortcutsOpen(true)}
+              saving={exiting}
+              saveState={saveState}
+              onSaveExit={handleSaveExit}
+              onEndBlock={() => setEndDialogOpen(true)}
+              mobileNavigator={
+                <QuestionNavigator cells={cells} onSelect={onGridSelect} displayedNumber={displayedNumber} mode={mode} />
+              }
+            />
+          )
         )}
 
-        <div className="flex-1 min-w-0 flex gap-6 items-start">
-          <div
-            key={isReviewing ? `review-${reviewIndex}` : `question-${currentIndex}`}
-            className="question-enter flex-1 min-w-0 space-y-5"
-          >
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="inline-flex items-center rounded-full border border-primary/20 bg-primary/10 px-3 py-1 text-[11px] font-semibold text-primary">
-                {displayQuestion!.subject}
-              </span>
-              <span className="hidden md:inline-flex items-center rounded-full border border-border bg-card px-3 py-1 text-[11px] font-medium text-muted-foreground">
-                Q{displayedNumber} of {effectiveTotalQuestions}
-              </span>
+        {session?.generation && generation && !isReviewing && (
+          <GenerationStrip generation={generation} loaded={session.questions.length} />
+        )}
 
-              {effectiveTotalQuestions > 0 && (
-                <QuestionNavigator
-                  total={effectiveTotalQuestions}
-                  currentIndex={currentIndex}
-                  answers={sessionAnswers}
-                  questions={sessionQuestions}
-                  reviewIndex={reviewIndex}
-                  onReview={(i) => setReviewIndex(i)}
-                  onNavigate={(i) => {
-                    setReviewIndex(null);
-                    goToQuestion(i);
-                  }}
-                  displayedNumber={displayedNumber}
-                  flaggedIds={flaggedIds}
-                  skippedIds={session?.skippedIds ?? []}
-                />
-              )}
+        <div className="flex gap-3 items-start">
+          {cells.length > 0 && <QuestionCounter cells={cells} onSelect={onGridSelect} />}
 
-              {session && !isReviewing && (
-                <span className="inline-flex items-center rounded-full border border-border bg-card px-3 py-1 text-[11px] font-medium text-muted-foreground gap-1.5 tabular-nums">
-                  <Clock className="h-3 w-3" />
-                  {formatElapsed(elapsedDisplay)}
-                </span>
-              )}
-
-              {!isReviewing && (
-                <button
-                  type="button"
-                  onClick={() => displayQuestion && toggleFlag(displayQuestion.id)}
-                  disabled={isFlagLoading || !displayQuestion}
-                  className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-[11px] font-medium transition-colors ${
-                    isFlagged
-                      ? "border-amber-500/50 bg-amber-500/10 text-amber-600 dark:text-amber-400 hover:bg-amber-500/20"
-                      : "border-border bg-card text-muted-foreground hover:border-amber-500/40 hover:text-amber-600 dark:hover:text-amber-400"
-                  } disabled:opacity-50`}
-                  aria-label={isFlagged ? "Unflag question" : "Flag for review"}
-                >
-                  <Flag className="h-3 w-3" fill={isFlagged ? "currentColor" : "none"} />
-                  <span className="hidden sm:inline">{isFlagged ? "Flagged" : "Flag"}</span>
-                </button>
-              )}
-            </div>
-
-            {/* Animated session progress fill */}
-            {effectiveTotalQuestions > 0 && (
-              <div
-                className="h-1 w-full rounded-full overflow-hidden"
-                style={{ background: "var(--border)" }}
-                aria-hidden
-              >
-                <div
-                  className="h-full rounded-full transition-all duration-500 ease-out"
-                  style={{
-                    width: `${(sessionAnswers.length / effectiveTotalQuestions) * 100}%`,
-                    background: "var(--accent)",
-                  }}
-                />
-              </div>
-            )}
-
+          <div className="flex-1 min-w-0 flex gap-6 items-start">
             <div
-              style={{
-                border: "1px solid var(--border)",
-                borderLeft: "3px solid var(--accent)",
-                borderRadius: "var(--radius-md)",
-                background: "var(--bg-elevated)",
-                padding: "20px 20px 24px",
-              }}
+              key={isReviewing ? `review-${reviewIndex}` : `question-${q.id}`}
+              className={`question-enter flex-1 min-w-0 space-y-5 ${explanationProps ? "pb-16 lg:pb-0" : ""}`}
             >
-              <p style={{ ...MONO_EYEBROW, marginBottom: 12 }}>Clinical vignette</p>
-              <p
-                style={{
-                  fontFamily: "var(--font-sans)",
-                  fontSize: 15,
-                  lineHeight: 1.75,
-                  color: "var(--fg)",
-                  whiteSpace: "pre-line",
-                }}
-              >
-                {displayQuestion!.question_text}
-              </p>
-            </div>
-
-            {displayQuestion!.media && displayQuestion!.media.length > 0 && (
-              <MediaBlock media={displayQuestion!.media} context="stem" onOpen={openLightbox} />
-            )}
-
-            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-              <div style={{ flex: 1, height: 1, background: "var(--border)" }} />
-              <span style={{ ...MONO_EYEBROW, letterSpacing: "0.1em" }}>
-                Select one answer
-              </span>
-              <div style={{ flex: 1, height: 1, background: "var(--border)" }} />
-            </div>
-
-            <div className="space-y-2.5">
-              {options.map(({ key, text }) => (
-                <OptionTile
-                  key={key}
-                  letter={key}
-                  text={text}
-                  explanation={displayQuestion!.distractor_explanations?.[key]}
-                  answerState={effectiveAnswerState}
-                  pendingKey={effectiveAnswerState.status === "selected" ? effectiveAnswerState.pending : null}
-                  onSelect={handleSelect}
-                />
-              ))}
-            </div>
-
-            {answerState.status === "unanswered" && !isReviewing && !isLastQuestion && (
-              <div className="flex justify-start pt-1">
-                <button
-                  type="button"
-                  onClick={skipQuestion}
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: 6,
-                    height: 40,
-                    padding: "0 16px",
-                    borderRadius: "var(--radius-md)",
-                    border: "1px solid var(--border)",
-                    background: "transparent",
-                    color: "var(--fg-muted)",
-                    fontFamily: "var(--font-sans)",
-                    fontSize: 14,
-                    fontWeight: 500,
-                    cursor: "pointer",
-                  }}
-                >
-                  <SkipForward style={{ width: 16, height: 16 }} />
-                  Skip for now
-                </button>
-              </div>
-            )}
-
-            {effectiveAnswerState.status === "selected" && !isReviewing && (
-              <div className="flex justify-end pt-1 animate-fade-in">
-                <button
-                  type="button"
-                  onClick={handleConfirm}
-                  disabled={submitting}
-                  style={darkButtonStyle(submitting)}
-                >
-                  <CheckCircle style={{ width: 16, height: 16 }} />
-                  {submitting ? "Checking…" : "Confirm Answer"}
-                </button>
-              </div>
-            )}
-
-            {isAnsweredEffective && !isReviewing && (
-              waitingForNext ? (
-                <div className="flex flex-col gap-2 pt-1 animate-fade-in">
-                  <div
-                    className="flex items-center gap-2.5 rounded-xl px-4 py-3"
-                    style={{ border: "1px solid var(--border)", background: "var(--bg-subtle)" }}
-                  >
-                    <Loader2 className="h-4 w-4 shrink-0 animate-spin" style={{ color: "var(--fg-muted)" }} />
-                    <p className="text-xs font-medium" style={{ color: "var(--fg-muted)" }}>
-                      Writing question {sessionQuestions.length + 1} of {effectiveTotalQuestions}…
-                      it appears here in a moment.
-                    </p>
-                  </div>
-                  {/* Always available. A student who does not want to wait for the
-                      rest of the set must never be trapped by it — the score is
-                      computed from the questions they actually answered. */}
-                  <button
-                    type="button"
-                    onClick={handleFinishNow}
-                    className="self-end text-xs underline underline-offset-4 transition-opacity hover:opacity-70"
-                    style={{ color: "var(--fg-muted)" }}
-                  >
-                    Finish now with {sessionAnswers.length} question
-                    {sessionAnswers.length === 1 ? "" : "s"}
-                  </button>
-                </div>
-              ) : unansweredCount > 0 && isLastQuestion ? (
-                <div className="flex flex-col gap-2 pt-1 animate-fade-in">
-                  <div className="flex items-center gap-2 rounded-xl border border-amber-500/20 bg-amber-500/5 px-4 py-3">
-                    <SkipForward className="h-4 w-4 text-amber-400 shrink-0" />
-                    <p className="text-xs text-amber-400 font-medium">
-                      {unansweredCount === 1
-                        ? "You have 1 unanswered question — go back and answer it to finish."
-                        : `You have ${unansweredCount} unanswered questions — go back and answer them to finish.`}
-                    </p>
-                  </div>
-                </div>
-              ) : unansweredCount === 0 && !isAwaitingMore ? (
-                <div className="flex justify-end pt-1 animate-fade-in">
-                  <button type="button" onClick={handleNext} style={darkButtonStyle()}>
-                    Finish Session <ChevronRight style={{ width: 16, height: 16 }} />
-                  </button>
-                </div>
-              ) : (
-                <div className="flex justify-end pt-1 animate-fade-in">
-                  <button type="button" onClick={handleNext} style={darkButtonStyle()}>
-                    Next Question <ArrowRight style={{ width: 16, height: 16 }} />
-                  </button>
-                </div>
-              )
-            )}
-          </div>
-
-          <div
-            className={`hidden lg:flex flex-col w-80 xl:w-96 shrink-0 transition-all duration-300 ${
-              isAnsweredEffective ? "opacity-100 translate-x-0" : "opacity-0 pointer-events-none translate-x-4"
-            }`}
-          >
-            {isAnsweredEffective && effectiveAnswerState.status === "answered" && (
-              <div
-                className="animate-fade-in sticky top-6"
-                style={{
-                  border: "1px solid var(--border)",
-                  borderRadius: "var(--radius-lg)",
-                  background: "var(--bg-elevated)",
-                  padding: 20,
-                }}
-              >
-                <ExplanationContent
-                  explanation={displayQuestion!.explanation}
-                  teachingPoint={displayQuestion!.teaching_point}
-                  difficulty={displayQuestion!.difficulty as Difficulty}
-                  isCorrect={effectiveAnswerState.status === "answered" && effectiveAnswerState.isCorrect}
-                  media={displayQuestion!.media}
-                  onOpenLightbox={openLightbox}
-                  domain={displayQuestion!.domain}
-                />
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {isAnsweredEffective && effectiveAnswerState.status === "answered" && !isReviewing && (
-        <div className="lg:hidden fixed inset-x-0 bottom-0 z-50">
-          <div
-            className={`fixed inset-0 bg-black/40 transition-opacity duration-300 ${
-              drawerOpen ? "opacity-100" : "opacity-0 pointer-events-none"
-            }`}
-            onClick={() => setDrawerOpen(false)}
-          />
-
-          <div
-            className={`relative bg-card border-t border-border/60 rounded-t-2xl transition-transform duration-300 ease-out ${
-              drawerOpen ? "translate-y-0" : "translate-y-full"
-            }`}
-          >
-            <button
-              onClick={() => setDrawerOpen((o) => !o)}
-              className="w-full flex flex-col items-center gap-1 pt-3 pb-2 px-4"
-            >
-              <div className="w-10 h-1 rounded-full bg-border/60" />
-              <div className="flex items-center justify-between w-full mt-1">
-                <span className="text-[11px] font-semibold tracking-wider text-primary uppercase">
-                  Explanation
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="inline-flex items-center rounded-full border border-primary/20 bg-primary/10 px-3 py-1 text-[11px] font-semibold text-primary">
+                  {q.subject}
                 </span>
-                <ChevronDown
-                  className={`h-4 w-4 text-muted-foreground transition-transform ${
-                    drawerOpen ? "rotate-0" : "rotate-180"
-                  }`}
-                />
-              </div>
-            </button>
-
-            <div className="px-4 pb-6 max-h-[60vh] overflow-y-auto">
-              <ExplanationContent
-                explanation={displayQuestion!.explanation}
-                teachingPoint={displayQuestion!.teaching_point}
-                difficulty={displayQuestion!.difficulty as Difficulty}
-                isCorrect={effectiveAnswerState.status === "answered" && effectiveAnswerState.isCorrect}
-                media={displayQuestion!.media}
-                onOpenLightbox={openLightbox}
-                domain={displayQuestion!.domain}
-              />
-
-              <div className="pt-4">
-                {waitingForNext ? (
-                  <div className="flex flex-col gap-2">
-                    <div
-                      className="flex items-center gap-2.5 rounded-xl px-4 py-3"
-                      style={{ border: "1px solid var(--border)", background: "var(--bg-subtle)" }}
-                    >
-                      <Loader2
-                        className="h-4 w-4 shrink-0 animate-spin"
-                        style={{ color: "var(--fg-muted)" }}
-                      />
-                      <p className="text-xs font-medium" style={{ color: "var(--fg-muted)" }}>
-                        Writing question {sessionQuestions.length + 1} of{" "}
-                        {effectiveTotalQuestions}…
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={handleFinishNow}
-                      className="self-end text-xs underline underline-offset-4 transition-opacity hover:opacity-70"
-                      style={{ color: "var(--fg-muted)" }}
-                    >
-                      Finish now with {sessionAnswers.length} question
-                      {sessionAnswers.length === 1 ? "" : "s"}
-                    </button>
-                  </div>
-                ) : unansweredCount > 0 && isLastQuestion ? (
-                  <div className="flex items-center gap-2 rounded-xl border border-amber-500/20 bg-amber-500/5 px-4 py-3">
-                    <SkipForward className="h-4 w-4 text-amber-400 shrink-0" />
-                    <p className="text-xs text-amber-400 font-medium">
-                      {unansweredCount === 1
-                        ? "You have 1 unanswered question — go back and answer it to finish."
-                        : `You have ${unansweredCount} unanswered questions — go back and answer them to finish.`}
-                    </p>
-                  </div>
-                ) : unansweredCount === 0 && !isAwaitingMore ? (
-                  <button
-                    type="button"
-                    onClick={handleNext}
-                    style={{ ...darkButtonStyle(), width: "100%", height: 44 }}
-                  >
-                    Finish Session <ChevronRight style={{ width: 16, height: 16 }} />
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={handleNext}
-                    style={{ ...darkButtonStyle(), width: "100%", height: 44 }}
-                  >
-                    Next Question <ArrowRight style={{ width: 16, height: 16 }} />
-                  </button>
+                {isReviewing && (
+                  <QuestionNavigator
+                    cells={cells}
+                    onSelect={onGridSelect}
+                    displayedNumber={displayedNumber}
+                    mode="review"
+                  />
+                )}
+                {inSession && isFlagged && (
+                  <span className="inline-flex items-center gap-1 text-[11px] font-medium text-amber-600 dark:text-amber-400">
+                    <Flag className="h-3 w-3" fill="currentColor" /> Flagged
+                  </span>
                 )}
               </div>
+
+              {/* Session progress fill */}
+              {totalForDisplay > 0 && !isReviewing && (
+                <div className="h-1 w-full rounded-full overflow-hidden" style={{ background: "var(--border)" }} aria-hidden>
+                  <div
+                    className="h-full rounded-full transition-all duration-500 ease-out"
+                    style={{
+                      width: `${(answeredCount / totalForDisplay) * 100}%`,
+                      background: "var(--accent)",
+                    }}
+                  />
+                </div>
+              )}
+
+              <div
+                style={{
+                  border: "1px solid var(--border)",
+                  borderLeft: "3px solid var(--accent)",
+                  borderRadius: "var(--radius-md)",
+                  background: "var(--bg-elevated)",
+                  padding: "20px 20px 24px",
+                }}
+              >
+                <div className="mb-3 flex items-center justify-between gap-2">
+                  <p style={MONO_EYEBROW}>Clinical vignette</p>
+                  {inSession && (
+                    <p className="hidden text-[10px] sm:block" style={{ color: "var(--fg-subtle)" }}>
+                      Select text to highlight
+                    </p>
+                  )}
+                </div>
+                <HighlightableText
+                  text={q.question_text}
+                  ranges={highlights}
+                  onAdd={inSession ? (range) => addHighlight(q.id, range, q.question_text.length) : undefined}
+                  onRemove={inSession ? (offset) => removeHighlight(q.id, offset) : undefined}
+                  style={{
+                    fontFamily: "var(--font-sans)",
+                    fontSize: fs(15),
+                    lineHeight: 1.75,
+                    color: "var(--fg)",
+                  }}
+                />
+              </div>
+
+              {q.media && q.media.length > 0 && (
+                <MediaBlock media={q.media} context="stem" onOpen={openLightbox} />
+              )}
+
+              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                <div style={{ flex: 1, height: 1, background: "var(--border)" }} />
+                <span style={{ ...MONO_EYEBROW, letterSpacing: "0.1em" }}>
+                  {mode === "timed" && inSession ? "Choose one answer — you can change it" : "Select one answer"}
+                </span>
+                <div style={{ flex: 1, height: 1, background: "var(--border)" }} />
+              </div>
+
+              <div className="space-y-2.5">
+                {OPTION_KEYS.map((key) => (
+                  <OptionTile
+                    key={key}
+                    letter={key}
+                    text={q[`option_${key}` as const]}
+                    explanation={showExplanation ? q.distractor_explanations?.[key] : undefined}
+                    answerState={answerState}
+                    struck={struckKeys.includes(key)}
+                    onToggleStrike={canMark ? (k) => toggleStrike(q.id, k) : undefined}
+                    onSelect={handleSelect}
+                  />
+                ))}
+              </div>
+
+              {inSession && (
+                <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                  <button type="button" onClick={handlePrev} disabled={!canPrev} style={outlineButtonStyle(!canPrev)}>
+                    <ArrowLeft style={{ width: 16, height: 16 }} /> Previous
+                  </button>
+
+                  {mode === "tutor" && answerState.status === "selected" ? (
+                    <button
+                      type="button"
+                      onClick={handleConfirm}
+                      disabled={submitting}
+                      style={darkButtonStyle(submitting)}
+                      className="animate-fade-in"
+                    >
+                      <CheckCircle style={{ width: 16, height: 16 }} />
+                      {submitting ? "Checking…" : "Confirm Answer"}
+                    </button>
+                  ) : (
+                    <div className="flex items-center gap-2">{primaryNav()}</div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <div
+              className={`hidden lg:flex flex-col w-80 xl:w-96 shrink-0 transition-all duration-300 ${
+                showExplanation ? "opacity-100 translate-x-0" : "opacity-0 pointer-events-none translate-x-4"
+              }`}
+            >
+              {explanationProps && (
+                <div
+                  className="animate-fade-in sticky top-20"
+                  style={{
+                    border: "1px solid var(--border)",
+                    borderRadius: "var(--radius-lg)",
+                    background: "var(--bg-elevated)",
+                    padding: 20,
+                  }}
+                >
+                  <ExplanationContent {...explanationProps} />
+                </div>
+              )}
             </div>
           </div>
         </div>
-      )}
 
-      {isReviewing && effectiveAnswerState.status === "answered" && (
-        <div className="md:hidden fixed inset-x-0 bottom-0 z-40">
-          <ReviewExplanationDrawer
-            explanation={displayQuestion!.explanation}
-            teachingPoint={displayQuestion!.teaching_point}
-            difficulty={displayQuestion!.difficulty as Difficulty}
-            isCorrect={effectiveAnswerState.isCorrect}
-            media={displayQuestion!.media}
-            onOpenLightbox={openLightbox}
-            domain={displayQuestion!.domain}
+        {/* Mobile explanation drawer. */}
+        {explanationProps && (
+          <div className={`lg:hidden fixed inset-x-0 bottom-0 ${isReviewing ? "z-40" : "z-50"}`}>
+            <div
+              className={`fixed inset-0 bg-black/40 transition-opacity duration-300 ${
+                drawerOpen ? "opacity-100" : "opacity-0 pointer-events-none"
+              }`}
+              onClick={() => setDrawerOpen(false)}
+            />
+
+            <div
+              className={`relative bg-card border-t border-border/60 rounded-t-2xl transition-transform duration-300 ease-out ${
+                drawerOpen ? "translate-y-0" : "translate-y-[calc(100%-48px)]"
+              }`}
+            >
+              <button
+                onClick={() => setDrawerOpen((o) => !o)}
+                className="w-full flex flex-col items-center gap-1 pt-3 pb-2 px-4"
+              >
+                <div className="w-10 h-1 rounded-full bg-border/60" />
+                <div className="flex items-center justify-between w-full mt-1">
+                  <span className="text-[11px] font-semibold tracking-wider text-primary uppercase">Explanation</span>
+                  <ChevronDown
+                    className={`h-4 w-4 text-muted-foreground transition-transform ${drawerOpen ? "rotate-0" : "rotate-180"}`}
+                  />
+                </div>
+              </button>
+
+              <div className="px-4 pb-6 max-h-[60vh] overflow-y-auto">
+                <ExplanationContent {...explanationProps} />
+                {inSession && <div className="pt-4">{primaryNav(true)}</div>}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {inSession && session && (
+        <>
+          <EndBlockDialog
+            open={endDialogOpen}
+            onOpenChange={setEndDialogOpen}
+            stats={endBlockStats}
+            mode={mode}
+            ending={ending}
+            onConfirm={handleEndBlock}
           />
-        </div>
+          <ShortcutsDialog open={shortcutsOpen} onOpenChange={setShortcutsOpen} mode={mode} />
+        </>
       )}
+      <LabValuesSheet open={labsOpen} onOpenChange={setLabsOpen} />
 
       {lightboxOpen && currentLightboxItem && (
         <div
           className="fixed inset-0 z-[100] flex items-center justify-center bg-black/85"
-          onClick={() => { setLightboxItems([]); setZoomScale(1); setZoomOffset({ x: 0, y: 0 }); }}
+          onClick={closeLightbox}
         >
           <button
             className="absolute top-4 right-4 text-white/70 hover:text-white text-3xl font-light leading-none z-10"
-            onClick={() => { setLightboxItems([]); setZoomScale(1); setZoomOffset({ x: 0, y: 0 }); }}
+            onClick={closeLightbox}
             aria-label="Close"
           >
             ×
