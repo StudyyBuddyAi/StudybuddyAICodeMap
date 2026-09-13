@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { BookOpen, ChevronRight, ExternalLink } from "lucide-react";
 import type { SheetSource } from "@/types/generated-sheet";
+import { sanitizeUrl } from "@/lib/url";
 import {
   cleanExcerpt,
   groupSources,
@@ -261,6 +262,7 @@ const ChapterGroup = ({ chapter, query }: { chapter: SourceChapter; query: strin
 
 const BookGroup = ({ book, query }: { book: SourceBook; query: string }) => {
   const sourceUrl = book.chapters.flatMap((c) => c.passages).find((p) => p.sourceUrl)?.sourceUrl;
+  const safeSourceUrl = sanitizeUrl(sourceUrl);
 
   return (
     <div>
@@ -277,9 +279,9 @@ const BookGroup = ({ book, query }: { book: SourceBook; query: string }) => {
         >
           {book.title}
         </h4>
-        {sourceUrl && (
+        {safeSourceUrl && (
           <a
-            href={sourceUrl}
+            href={safeSourceUrl}
             target="_blank"
             rel="noopener noreferrer"
             title="Open the original document"

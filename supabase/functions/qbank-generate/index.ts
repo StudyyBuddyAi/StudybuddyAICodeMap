@@ -45,11 +45,27 @@ import { verifyBatch, type VerificationResult } from "../_shared/qbank-verify.ts
  * _shared/qbank-verify.ts.
  */
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
+const ALLOWED_ORIGINS = new Set([
+  "https://studyybuddyai.com",
+  "https://www.studyybuddyai.com",
+  "http://localhost:8080",
+]);
+
+const BASE_CORS_HEADERS: Record<string, string> = {
   "Access-Control-Allow-Headers":
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
+  "Access-Control-Expose-Headers": "x-model-used",
 };
+
+// Origin-aware CORS. Only allowlisted origins get Access-Control-Allow-Origin;
+// anything else gets no CORS headers (browser denies the cross-origin call).
+function buildCorsHeaders(req: Request): Record<string, string> {
+  const origin = req.headers.get("Origin");
+  if (!origin || !ALLOWED_ORIGINS.has(origin)) {
+    return { ...BASE_CORS_HEADERS };
+  }
+  return { ...BASE_CORS_HEADERS, "Access-Control-Allow-Origin": origin };
+}
 
 /** Metadata only — never log topic content, model output, tokens or keys. */
 const log = (event: string, fields: Record<string, unknown> = {}) => {
@@ -75,10 +91,71 @@ const DEFAULT_COUNT = 5;
  */
 const MAX_OUTPUT_TOKENS = 32768;
 
-const json = (body: unknown, status: number) =>
+/** Reject bodies over this before req.json() — mirrors rag-generate's 100 KB cap. */
+const MAX_BODY_BYTES = 102_400;
+
+/** Server-side daily cap for non-Pro; derived from JWT + profiles, never the body. */
+const DAILY_QBANK_CAP = 5;
+
+/**
+ * Best-effort per-instance burst limiter. Deno isolates are ephemeral (a
+ * module-level Map does not survive cold starts and is not shared across
+ * instances), so this only flattens bursts — it is NOT a distributed limit.
+ * The daily usage_records quota is the authoritative control.
+ */
+const QBANK_BURST_PER_MINUTE = 3;
+const burstBuckets = new Map<string, number[]>();
+
+function checkBurstLimit(userId: string, nowMs: number): boolean {
+  const cutoff = nowMs - 60_000;
+  const recent = (burstBuckets.get(userId) ?? []).filter((t) => t > cutoff);
+  if (recent.length >= QBANK_BURST_PER_MINUTE) {
+    burstBuckets.set(userId, recent);
+    return false;
+  }
+  recent.push(nowMs);
+  burstBuckets.set(userId, recent);
+  return true;
+}
+
+/** One generation per user at a time; a concurrent request gets a 429. */
+const inflightGenerations = new Map<string, number>();
+
+/**
+ * Reads a request body up to `maxBytes`, streaming so an oversized body is
+ * refused as it arrives instead of being buffered whole. Throws
+ * "body_too_large" once the stream exceeds the cap. Complements (never
+ * replaces) the Content-Length fast-path below: chunked bodies and lying
+ * clients still end up measured in real bytes.
+ */
+async function readRequestBody(req: Request, maxBytes: number): Promise<Uint8Array> {
+  if (!req.body) return new Uint8Array();
+  const reader = req.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > maxBytes) {
+      await reader.cancel().catch(() => {});
+      throw new Error("body_too_large");
+    }
+    chunks.push(value);
+  }
+  const out = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    out.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return out;
+}
+
+const json = (body: unknown, status: number, req: Request) =>
   new Response(JSON.stringify(body), {
     status,
-    headers: { ...corsHeaders, "Content-Type": "application/json" },
+    headers: { ...buildCorsHeaders(req), "Content-Type": "application/json" },
   });
 
 /**
@@ -120,7 +197,7 @@ async function resolveSystem(
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
-    return new Response(null, { headers: corsHeaders });
+    return new Response(null, { headers: buildCorsHeaders(req) });
   }
 
   const startedAt = Date.now();
@@ -129,18 +206,35 @@ serve(async (req) => {
     // ── JWT verification ─────────────────────────────────────────────────────
     const authHeader = req.headers.get("Authorization") ?? "";
     const token = authHeader.replace(/^Bearer\s+/i, "").trim();
-    if (!token) return json({ error: "invalid_token" }, 401);
+    if (!token) return json({ error: "invalid_token" }, 401, req);
 
     const authClient = createClient(
       Deno.env.get("SUPABASE_URL")!,
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
     );
     const { data: { user }, error: authError } = await authClient.auth.getUser(token);
-    if (authError || !user) return json({ error: "invalid_token" }, 401);
+    if (authError || !user) return json({ error: "invalid_token" }, 401, req);
 
-    const { topic, count } = await req.json();
+    const declaredLength = Number(req.headers.get("Content-Length"));
+    if (Number.isFinite(declaredLength) && declaredLength > MAX_BODY_BYTES) {
+      log("body_too_large", { declaredLength });
+      return json({ error: "Request body too large" }, 400, req);
+    }
+
+    // Enforce the cap on the real bytes, not just the declared Content-Length.
+    // readRequestBody streams and refuses anything larger before it is parsed.
+    let bodyBytes: Uint8Array;
+    try {
+      bodyBytes = await readRequestBody(req, MAX_BODY_BYTES);
+    } catch (err) {
+      const isTooLarge = err instanceof Error && err.message === "body_too_large";
+      log("body_too_large", isTooLarge ? { streamed: true } : { message: String(err) });
+      return json({ error: "Request body too large" }, 400, req);
+    }
+
+    const { topic, count } = JSON.parse(new TextDecoder().decode(bodyBytes));
     if (!topic || typeof topic !== "string" || !topic.trim()) {
-      return json({ error: "Topic is required" }, 400);
+      return json({ error: "Topic is required" }, 400, req);
     }
 
     const requested = Number(count) || DEFAULT_COUNT;
@@ -155,8 +249,74 @@ serve(async (req) => {
       config = cortiConfigFromEnv();
     } catch (err) {
       log("config_missing", { message: err instanceof Error ? err.message : String(err) });
-      return json({ error: "Question generation is not configured" }, 500);
+      return json({ error: "Question generation is not configured" }, 500, req);
     }
+
+    // ── Server-side entitlement & quota ────────────────────────────────────
+    // Entitlement is derived from the verified JWT + profiles row, never from
+    // the body. Pro users are uncapped; non-Pro get DAILY_QBANK_CAP batches.
+    const { data: profile } = await authClient
+      .from("profiles")
+      .select("is_pro, pro_expires_at")
+      .eq("id", user.id)
+      .maybeSingle();
+
+    const isProUser =
+      profile?.is_pro === true &&
+      (profile.pro_expires_at === null ||
+        new Date(profile.pro_expires_at) > new Date());
+
+    if (!checkBurstLimit(user.id, Date.now())) {
+      return json({ error: "Too many requests. Try again in a moment." }, 429, req);
+    }
+
+    const active = inflightGenerations.get(user.id) ?? 0;
+    if (active >= 1) {
+      return json({ error: "A generation is already in progress." }, 429, req);
+    }
+    inflightGenerations.set(user.id, active + 1);
+
+    // Every failure between here and the stream must release the slot, or a
+    // rejected request would leave the user permanently stuck in "a generation
+    // is already in progress". The stream path releases it in its own finally.
+    const releaseInflight = () => {
+      inflightGenerations.set(user.id, Math.max(0, (inflightGenerations.get(user.id) ?? 1) - 1));
+    };
+
+    let quotaConsumed = false;
+    let refundIssued = false;
+    if (!isProUser) {
+      const { data: consumeResult, error: consumeError } = await authClient.rpc(
+        "consume_usage",
+        { p_user: user.id, p_kind: "qbank_generate", p_cap: DAILY_QBANK_CAP }
+      );
+      if (consumeError) {
+        log("consume_usage_failed", { message: consumeError.message });
+        releaseInflight();
+        return json({ error: "quota_check_failed" }, 500, req);
+      }
+      if (!consumeResult?.allowed) {
+        releaseInflight();
+        return json(
+          { error: "Daily generation limit reached. Try again tomorrow." },
+          429,
+          req
+        );
+      }
+      quotaConsumed = true;
+    }
+
+    // Refund a consumed unit when nothing usable survived, so a failed
+    // generation never burns quota. No-op when the user was not billed.
+    const refundQuota = async () => {
+      if (!quotaConsumed || refundIssued) return;
+      // Idempotent: the end-of-stream path and the error path can both fire a
+      // refund for the same request; only the first one counts.
+      refundIssued = true;
+      await authClient
+        .rpc("refund_usage", { p_user: user.id, p_kind: "qbank_generate" })
+        .catch(() => {});
+    };
 
     const { system, confidence } = await resolveSystem(config, cleanTopic);
     const plan: BatchPlan = buildBatchPlan(system, questionCount);
@@ -189,19 +349,24 @@ serve(async (req) => {
       // corti_auth_failed comes from the token exchange, which names its own
       // reason — worth separating from a model-side failure in the response.
       const isAuth = message.startsWith("corti_auth_failed");
+      await refundQuota();
+      releaseInflight();
       return json(
         { error: isAuth ? "Question generation is not configured" : "AI service unreachable" },
-        isAuth ? 500 : 502
+        isAuth ? 500 : 502,
+        req
       );
     }
 
     if (!upstream.ok || !upstream.body) {
       const body = await upstream.text().catch(() => "");
       log("upstream_status", { status: upstream.status, bodyLength: body.length });
+      await refundQuota();
+      releaseInflight();
       if (upstream.status === 429) {
-        return json({ error: "Rate limit exceeded. Please try again in a moment." }, 429);
+        return json({ error: "Rate limit exceeded. Please try again in a moment." }, 429, req);
       }
-      return json({ error: "AI service error" }, 502);
+      return json({ error: "AI service error" }, 502, req);
     }
 
     // ── Relay ────────────────────────────────────────────────────────────────
@@ -264,128 +429,161 @@ serve(async (req) => {
 
     const stream = new ReadableStream<Uint8Array>({
       async start(controller) {
-        controller.enqueue(
-          frame({
-            __meta: {
-              system,
-              systemName: SYSTEM_NAMES[system],
-              model: config.model,
-              plan: plan.questions,
-            },
-          })
-        );
-
-        // ── Generation, with one retry on a mid-stream death ────────────────
-        // Measured: one batch in ten aborted with a bare `terminated` after the
-        // student had already waited, and the identical request succeeded on
-        // re-run. The retry is deliberately narrow — it only fires when nothing
-        // survived, because a stream that died after three complete questions
-        // has produced something worth keeping, and restarting would throw it
-        // away and charge for it twice.
-        let response = upstream;
-        let attempts = 1;
-        let streamError: string | null = null;
-
-        for (;;) {
-          try {
-            await relay(response.body!, controller);
-            streamError = null;
-            break;
-          } catch (err) {
-            streamError = err instanceof Error ? err.message : String(err);
-            const salvaged = parseBatchContent(content).length;
-            log("stream_aborted", { message: streamError, attempts, salvaged });
-
-            if (attempts > 1 || salvaged > 0) break;
-
-            let retried: Response | null = null;
-            try {
-              retried = await startGeneration();
-            } catch (retryErr) {
-              log("retry_failed", {
-                message: retryErr instanceof Error ? retryErr.message : String(retryErr),
-              });
-            }
-
-            if (!retried?.ok || !retried.body) break;
-
-            // The client has already been handed a partial JSON document, so it
-            // has to be told to throw it away before the replacement arrives.
-            attempts++;
-            content = "";
-            controller.enqueue(frame({ __meta: { restart: true } }));
-            response = retried;
-          }
-        }
-
-        // ── Gate, verify, persist ──────────────────────────────────────────
-        // A question is only worth storing once it is whole, and the client
-        // cannot start a session until it has ids anyway, so all of this
-        // happens after the stream rather than per question.
+        // The in-flight release must run on every path through this handler
+        // (including a stream that died after the client vanished), so the
+        // whole body is wrapped in try/catch/finally.
         let questionIds: string[] = [];
         let verification: VerificationResult[] = [];
         let persistError: string | null = null;
+        try {
+          controller.enqueue(
+            frame({
+              __meta: {
+                system,
+                systemName: SYSTEM_NAMES[system],
+                model: config.model,
+                // The plan is a per-index answer-letter assignment; the client
+                // only ever reads index + reasoningOrder (see QBankGenerate.tsx),
+                // so the letters are dropped before they leave this function.
+                plan: plan.questions.map(({ index, reasoningOrder }) => ({
+                  index,
+                  reasoningOrder,
+                })),
+              },
+            })
+          );
 
-        const prepared = prepareBatch(content, plan);
+          // ── Generation, with one retry on a mid-stream death ──────────────
+          // Measured: one batch in ten aborted with a bare `terminated` after the
+          // student had already waited, and the identical request succeeded on
+          // re-run. The retry is deliberately narrow — it only fires when nothing
+          // survived, because a stream that died after three complete questions
+          // has produced something worth keeping, and restarting would throw it
+          // away and charge for it twice.
+          let response = upstream;
+          let attempts = 1;
+          let streamError: string | null = null;
 
-        if (prepared.questions.length > 0) {
-          // Verification runs before the insert, not alongside it, so its
-          // verdict can be stored on the row it is about. The whole batch is
-          // answered in parallel and lands in about a second — see verifyBatch —
-          // against the ninety the generation itself took.
-          verification = await verifyBatch(config, prepared.questions);
+          for (;;) {
+            try {
+              await relay(response.body!, controller);
+              streamError = null;
+              break;
+            } catch (err) {
+              streamError = err instanceof Error ? err.message : String(err);
+              const salvaged = parseBatchContent(content).length;
+              log("stream_aborted", { message: streamError, attempts, salvaged });
 
-          questionIds = await persistBatch(
-            authClient,
-            user.id,
-            { content, system, plan, topic: cleanTopic, model: config.model },
-            prepared,
-            verification
-          ).catch((err: unknown) => {
-            persistError = err instanceof Error ? err.message : String(err);
-            log("persist_failed", { message: persistError });
-            return [] as string[];
+              if (attempts > 1 || salvaged > 0) break;
+
+              let retried: Response | null = null;
+              try {
+                retried = await startGeneration();
+              } catch (retryErr) {
+                log("retry_failed", {
+                  message: retryErr instanceof Error ? retryErr.message : String(retryErr),
+                });
+              }
+
+              if (!retried?.ok || !retried.body) break;
+
+              // The client has already been handed a partial JSON document, so it
+              // has to be told to throw it away before the replacement arrives.
+              attempts++;
+              content = "";
+              controller.enqueue(frame({ __meta: { restart: true } }));
+              response = retried;
+            }
+          }
+
+          // ── Gate, verify, persist ──────────────────────────────────────────
+          // A question is only worth storing once it is whole, and the client
+          // cannot start a session until it has ids anyway, so all of this
+          // happens after the stream rather than per question.
+          const prepared = prepareBatch(content, plan);
+
+          if (prepared.questions.length > 0) {
+            // Verification runs before the insert, not alongside it, so its
+            // verdict can be stored on the row it is about. The whole batch is
+            // answered in parallel and lands in about a second — see verifyBatch —
+            // against the ninety the generation itself took.
+            verification = await verifyBatch(config, prepared.questions);
+
+            questionIds = await persistBatch(
+              authClient,
+              user.id,
+              { content, system, plan, topic: cleanTopic, model: config.model },
+              prepared,
+              verification
+            ).catch((err: unknown) => {
+              persistError = err instanceof Error ? err.message : String(err);
+              log("persist_failed", { message: persistError });
+              return [] as string[];
+            });
+          }
+
+          // A consumed unit corresponds to a usable generation. If nothing
+          // persisted (the whole batch died), give the unit back so a failed
+          // generation never burns quota.
+          if (quotaConsumed && questionIds.length === 0) {
+            await refundQuota();
+          }
+
+          const blocked = prepared.qa.filter((r) => r.blocked).length;
+          const disputed = verification.filter((v) => !v.agreed).length;
+
+          log("complete", {
+            ms: Date.now() - startedAt,
+            persisted: questionIds.length,
+            requested: questionCount,
+            contentChars: content.length,
+            attempts,
+            streamError,
+            blocked,
+            disputed,
+            verifierErrors: verification.filter((v) => v.error).length,
+            persistError,
           });
+
+          controller.enqueue(
+            frame({
+              __meta: {
+                questionIds,
+                // A boolean, not the underlying error message: raw database
+                // errors can name tables/columns, and the client only needs to
+                // know the rows were not written. Full details stay in the
+                // server-side `log("complete", …)` / `log("persist_failed", …)`.
+                persistError: persistError !== null,
+                // The gate's findings and the blind answer, so the client shows
+                // the same verdict the row was stored with rather than a second
+                // opinion computed from its own parse of the stream.
+                qa: prepared.qa,
+                verification,
+              },
+            })
+          );
+
+          controller.close();
+        } catch (err) {
+          // Any unplanned failure after the quota was consumed — an exception
+          // out of prepareBatch/verifyBatch/persistBatch, or an enqueue that
+          // blows up after the client vanished — refunds the unit unless at
+          // least one question was already persisted. The stream errors exactly
+          // as it did before; only the quota is reconciled. refundQuota is
+          // idempotent, so the end-of-stream refund above cannot double-fire.
+          if (quotaConsumed && questionIds.length === 0) {
+            await refundQuota();
+          }
+          throw err;
+        } finally {
+          releaseInflight();
         }
-
-        const blocked = prepared.qa.filter((r) => r.blocked).length;
-        const disputed = verification.filter((v) => !v.agreed).length;
-
-        log("complete", {
-          ms: Date.now() - startedAt,
-          persisted: questionIds.length,
-          requested: questionCount,
-          contentChars: content.length,
-          attempts,
-          streamError,
-          blocked,
-          disputed,
-          verifierErrors: verification.filter((v) => v.error).length,
-          persistError,
-        });
-
-        controller.enqueue(
-          frame({
-            __meta: {
-              questionIds,
-              persistError,
-              streamError,
-              // The gate's findings and the blind answer, so the client shows
-              // the same verdict the row was stored with rather than a second
-              // opinion computed from its own parse of the stream.
-              qa: prepared.qa,
-              verification,
-            },
-          })
-        );
-
-        controller.close();
       },
     });
 
     return new Response(stream, {
       headers: {
-        ...corsHeaders,
+        ...buildCorsHeaders(req),
         "Content-Type": "text/event-stream",
         "Cache-Control": "no-cache",
         Connection: "keep-alive",
@@ -396,6 +594,6 @@ serve(async (req) => {
       ms: Date.now() - startedAt,
       message: err instanceof Error ? err.message : String(err),
     });
-    return json({ error: "Internal error" }, 500);
+    return json({ error: "Internal error" }, 500, req);
   }
 });

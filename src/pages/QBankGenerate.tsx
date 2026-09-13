@@ -260,7 +260,7 @@ const QBankGenerate = () => {
             if (Array.isArray(frame.verification)) {
               setVerification(frame.verification as Verification[]);
             }
-            if (typeof frame.persistError === "string" && frame.persistError) {
+            if (frame.persistError === true) {
               setError("The questions were written but could not be saved.");
             }
             continue;
