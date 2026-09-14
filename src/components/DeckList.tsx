@@ -19,6 +19,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { useDeckGrounding, type Card as DeckCard } from "@/hooks/use-flashcard-deck";
+import { SrsState, isMature, nextStudyDayStart } from "@/lib/spaced-repetition";
 import type { GroundingLevel } from "@/types/generated-sheet";
 
 interface DeckListProps {
@@ -48,8 +49,12 @@ function hashTopic(topic: string): number {
 interface DeckSummary {
   topic: string;
   total: number;
+  /** Review cards with stability of 21+ days (Anki's "mature"). */
   mastered: number;
+  /** Learning cards and review cards due before the next study day. */
   due: number;
+  fresh: number;
+  leeches: number;
   latest: number;
   grounded: number;
   emoji?: string;
@@ -103,15 +108,17 @@ const DeckList = ({ cards, onStudyDeck, onDeleteDeck, onReviewAll }: DeckListPro
   const [pendingDelete, setPendingDelete] = useState<DeckSummary | null>(null);
 
   const decks = useMemo<DeckSummary[]>(() => {
-    const now = Date.now();
+    const dayEnd = nextStudyDayStart(Date.now());
     const map = new Map<string, DeckSummary>();
     for (const c of cards) {
       const key = c.topic || "Untitled";
-      const cur = map.get(key) ?? { topic: key, total: 0, mastered: 0, due: 0, latest: 0, grounded: 0, emoji: undefined as string | undefined };
+      const cur = map.get(key) ?? { topic: key, total: 0, mastered: 0, due: 0, fresh: 0, leeches: 0, latest: 0, grounded: 0, emoji: undefined as string | undefined };
       cur.total += 1;
       if (c.grounded) cur.grounded += 1;
-      if (c.interval >= 21) cur.mastered += 1;
-      if (c.dueAt <= now) cur.due += 1;
+      if (isMature(c)) cur.mastered += 1;
+      if (c.state === SrsState.New) cur.fresh += 1;
+      else if (c.dueAt < dayEnd) cur.due += 1;
+      if (c.isLeech) cur.leeches += 1;
       if (c.createdAt > cur.latest) cur.latest = c.createdAt;
       if (!cur.emoji && c.topicEmoji) cur.emoji = c.topicEmoji;
       map.set(key, cur);
@@ -202,7 +209,9 @@ const DeckList = ({ cards, onStudyDeck, onDeleteDeck, onReviewAll }: DeckListPro
                       </div>
                       <p style={{ fontSize: 12, color: "var(--fg-muted)", marginTop: 1 }}>
                         {deck.total} cards · {deck.mastered} mastered
+                        {deck.fresh > 0 ? ` · ${deck.fresh} new` : ""}
                         {deck.due > 0 ? ` · ${deck.due} due` : ""}
+                        {deck.leeches > 0 ? ` · ${deck.leeches} ${deck.leeches === 1 ? "leech" : "leeches"}` : ""}
                       </p>
                     </div>
                     <div className="hidden sm:block w-20 h-1 rounded-full overflow-hidden shrink-0" style={{ background: "var(--border)" }}>

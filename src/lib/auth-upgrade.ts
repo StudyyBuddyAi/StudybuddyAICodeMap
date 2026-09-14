@@ -1,5 +1,6 @@
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
+import { normalizeStoredCard, type Card } from "@/hooks/use-flashcard-deck";
 
 // ── Anonymous → permanent account upgrade ───────────────────────────────────
 //
@@ -28,20 +29,6 @@ type LocalHistoryItem = {
   };
 };
 
-type LocalCard = {
-  id: string;
-  question: string;
-  answer: string;
-  tag: string;
-  topic: string;
-  topicEmoji?: string;
-  createdAt: number;
-  interval: number;
-  dueAt: number;
-  lastReviewed: number | null;
-  reviewCount: number;
-};
-
 export async function migrateLocalCardsToServer(userId: string): Promise<void> {
   let raw: string | null = null;
   try {
@@ -51,10 +38,11 @@ export async function migrateLocalCardsToServer(userId: string): Promise<void> {
   }
   if (!raw) return;
 
-  let cards: LocalCard[];
+  let cards: Card[];
   try {
     const parsed = JSON.parse(raw);
-    cards = Array.isArray(parsed) ? parsed : [];
+    // Normalizing converts cards stored before FSRS (ladder fields only).
+    cards = Array.isArray(parsed) ? parsed.map(normalizeStoredCard) : [];
   } catch {
     return;
   }
@@ -102,12 +90,22 @@ export async function migrateLocalCardsToServer(userId: string): Promise<void> {
         tag: c.tag,
         topic: c.topic,
         topic_emoji: c.topicEmoji ?? null,
-        interval_days: c.interval ?? 0,
+        grounded: c.grounded,
+        // The FSRS schedule travels with the card, so signing up doesn't
+        // reset what an anonymous student already learned.
+        srs_state: c.state,
+        stability: c.stability,
+        difficulty: c.difficulty,
+        scheduled_days: c.scheduledDays,
+        learning_steps: c.learningSteps,
+        lapses: c.lapses,
+        is_leech: c.isLeech,
+        interval_days: c.scheduledDays,
         due_at: new Date(c.dueAt ?? Date.now()).toISOString(),
         last_reviewed_at: c.lastReviewed
           ? new Date(c.lastReviewed).toISOString()
           : null,
-        review_count: c.reviewCount ?? 0,
+        review_count: c.reps,
       };
     })
     .filter((r): r is NonNullable<typeof r> => r !== null);
