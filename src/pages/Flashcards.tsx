@@ -1,15 +1,18 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { ArrowRight, BookOpen, BrainCircuit, Layers, PanelLeftClose, PanelLeftOpen, PenLine, Play, Repeat, Settings2, Shuffle, X, Sparkles, Check, ChevronRight, ArrowLeft, RotateCcw, Bookmark, AlertTriangle, CheckCircle2 } from "lucide-react";
+import { ArrowRight, BookOpen, BrainCircuit, Clock, Layers, PanelLeftClose, PanelLeftOpen, PenLine, Play, Repeat, Settings2, Shuffle, SkipForward, X, Sparkles, Check, ChevronRight, RotateCcw, AlertTriangle, CheckCircle2, SlidersHorizontal } from "lucide-react";
 import DashboardLayout from "@/components/dashboard/DashboardLayout";
 import FlashcardsGenerator, { type GeneratedCard } from "@/components/FlashcardsGenerator";
 import DeckList from "@/components/DeckList";
 import { CardFace, ExplainPanel } from "@/components/StudyMode";
 import SheetSources from "@/components/SheetSources";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
+import RatingButtons from "@/components/flashcards/RatingButtons";
+import SrsSettingsDialog from "@/components/flashcards/SrsSettings";
 import { useFlashcardDeck, makeCardId, useDeckGrounding, type Card as DeckCard } from "@/hooks/use-flashcard-deck";
+import { useRatingKeys, useStudySession } from "@/hooks/use-study-session";
 import { useToast } from "@/hooks/use-toast";
+import { shouldSuggestOptimize } from "@/lib/fsrs-items";
+import { formatInterval, newSrsFields, type ReviewRating } from "@/lib/spaced-repetition";
 
 const RECENT_DECK_LIMIT = 5;
 
@@ -86,24 +89,35 @@ const HowItWorks = () => (
 );
 
 type RightPhase = "idle" | "generating" | "reviewing";
-type Rating = "again" | "good" | "easy";
 
 const DueCardsReminderStrip = ({
   dueCount,
+  counts,
   onStartReview,
 }: {
   dueCount: number;
+  counts: { learning: number; review: number; new: number };
   onStartReview: () => void;
 }) => (
   <div className="flex items-center justify-between gap-2 rounded-xl border-l-4 border-l-primary border border-border bg-primary/5 p-3.5 animate-fade-in">
     <div className="flex items-center gap-2 min-w-0">
       <Repeat className="w-4 h-4 text-primary flex-shrink-0" />
-      <span className="text-sm text-foreground">
-        <span key={dueCount} className="flip-number font-semibold text-primary">
-          {dueCount}
-        </span>{" "}
-        {dueCount === 1 ? "card" : "cards"} due today
-      </span>
+      <div className="min-w-0">
+        <span className="text-sm text-foreground">
+          <span key={dueCount} className="flip-number font-semibold text-primary">
+            {dueCount}
+          </span>{" "}
+          {dueCount === 1 ? "card" : "cards"} to study today
+        </span>
+        {/* Anki's three queue counts: new, learning, review. */}
+        <p className="text-[11px] text-muted-foreground tabular-nums">
+          <span className="text-info">{counts.new} new</span>
+          {" · "}
+          <span className="text-danger">{counts.learning} learning</span>
+          {" · "}
+          <span className="text-success">{counts.review} review</span>
+        </p>
+      </div>
     </div>
     <button
       type="button"
@@ -116,10 +130,10 @@ const DueCardsReminderStrip = ({
   </div>
 );
 
-function vibrate(rating: Rating | "flip") {
+function vibrate(rating: ReviewRating | "flip") {
   try {
     if (typeof navigator !== "undefined" && navigator.vibrate) {
-      const ms = rating === "easy" ? 5 : rating === "good" ? 10 : rating === "again" ? 15 : 8;
+      const ms = rating === "easy" ? 5 : rating === "good" ? 10 : rating === "hard" ? 12 : rating === "again" ? 15 : 8;
       navigator.vibrate(ms);
     }
   } catch {
@@ -131,7 +145,8 @@ const Flashcards = () => {
   const { toast } = useToast();
   const location = useLocation();
   const navigate = useNavigate();
-  const { allCards, dueCards, reviewCard, deleteCard, stats } = useFlashcardDeck();
+  const { allCards, dueCards, reviewCard, deleteCard, stats, settings, today } = useFlashcardDeck();
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   // ── Split-pane state ──────────────────────────────────────────────────
   const [rightPhase, setRightPhase] = useState<RightPhase>("idle");
@@ -145,14 +160,11 @@ const Flashcards = () => {
   const [explainOpen, setExplainOpen] = useState(false);
   const [explainScope, setExplainScope] = useState<"card" | "topic">("card");
 
-  // ── Review session state (lifted so the left pane can mirror it) ─────
-  const [session, setSession] = useState<{ cards: DeckCard[]; topic: string } | null>(null);
-  const [index, setIndex] = useState(0);
-  const [flipped, setFlipped] = useState(false);
-  const [known, setKnown] = useState(0);
-  const [unsure, setUnsure] = useState(0);
-  const [done, setDone] = useState(false);
+  // ── Review session (shared with Library's StudyMode) ─────────────────
+  const s = useStudySession({ liveCards: allCards, reviewCard, settings });
   const [slidePhase, setSlidePhase] = useState<"idle" | "exit">("idle");
+  const session = s.active ? { topic: s.topic ?? "", cards: s.sessionCards } : null;
+  const current = s.current;
 
   // Deck-level retrieval metadata (sources) for the card currently on screen,
   // not for the session as a whole: `session.topic` is "Today's review" or
@@ -161,9 +173,7 @@ const Flashcards = () => {
   // what StudyMode does, and react-query caches by topic so moving between
   // cards of one deck doesn't refetch. The per-card grounded/ungrounded counts
   // below come straight from session.cards and don't need this fetch.
-  const { data: sessionGroundingMeta } = useDeckGrounding(
-    session?.cards[index]?.topic ?? null
-  );
+  const { data: sessionGroundingMeta } = useDeckGrounding(current?.topic ?? null);
   const sessionGroundedCount = session ? session.cards.filter((c) => c.grounded).length : 0;
   const sessionUngroundedCount = session ? session.cards.length - sessionGroundedCount : 0;
 
@@ -215,57 +225,42 @@ const Flashcards = () => {
 
   // ── Session lifecycle ─────────────────────────────────────────────────
   const startSession = (cards: DeckCard[], topic: string) => {
-    if (!cards.length) {
+    if (!s.start(cards, topic)) {
       toast({ title: "No cards to review", variant: "destructive" });
       return;
     }
-    setSession({ cards: cards.slice(), topic });
-    setIndex(0);
-    setFlipped(false);
-    setKnown(0);
-    setUnsure(0);
-    setDone(false);
     setSlidePhase("idle");
     setRightPhase("reviewing");
     setConfigDrawerOpen(false);
   };
 
   const endSession = () => {
-    setSession(null);
+    s.end();
     setRightPhase("idle");
-    setIndex(0);
-    setFlipped(false);
-    setKnown(0);
-    setUnsure(0);
-    setDone(false);
     setConfigDrawerOpen(false);
   };
 
   const handleStartDue = () => startSession(dueCards, "Today's review");
+  // Studying cards that aren't due is an early review. FSRS accounts for the
+  // short elapsed time, so these ratings still update the schedule honestly.
   const handleReviewAny = () => startSession(allCards, "All cards");
   const handleStudyDeck = (topic: string) =>
     startSession(allCards.filter((c) => c.topic === topic), topic);
 
-  const prevCard = () => {
-    if (index > 0) {
-      setIndex(index - 1);
-      setFlipped(false);
-      setSlidePhase("idle");
-    }
-  };
-
-  const nextCard = () => {
-    if (session && index < session.cards.length - 1) {
-      setIndex(index + 1);
-      setFlipped(false);
-      setSlidePhase("idle");
-    }
-  };
-
   const handleDeleteDeck = (topic: string) => {
     const toDelete = allCards.filter((c) => c.topic === topic);
-    toDelete.forEach((c) => deleteCard(c.id));
-    toast({ title: `Deleted ${toDelete.length} cards from "${topic}"` });
+    Promise.all(toDelete.map((c) => deleteCard(c.id)))
+      .then(() => toast({ title: `Deleted ${toDelete.length} cards from "${topic}"` }))
+      .catch(() => toast({ title: "Couldn't delete every card", variant: "destructive" }));
+  };
+
+  const handleDeleteCurrent = () => {
+    if (!current) return;
+    const id = current.id;
+    s.drop(id);
+    deleteCard(id)
+      .then(() => toast({ title: "Card deleted" }))
+      .catch(() => toast({ title: "Couldn't delete that card", variant: "destructive" }));
   };
 
   // ── Generation → review hand-off ─────────────────────────────────────
@@ -283,7 +278,10 @@ const Flashcards = () => {
 
   const handleGenerated = (cards: GeneratedCard[], topic: string) => {
     const now = Date.now();
+    // Placeholders only: the session looks each card up in the saved deck first,
+    // so a regenerated card that already has a schedule keeps it.
     const sessionCards: DeckCard[] = cards.map((c) => ({
+      ...newSrsFields(now),
       id: makeCardId(c.question, c.answer),
       question: c.question,
       answer: c.answer,
@@ -292,10 +290,7 @@ const Flashcards = () => {
       topic: c.topic || topic,
       topicEmoji: c.topicEmoji,
       createdAt: now,
-      interval: 0,
-      dueAt: now,
-      lastReviewed: null,
-      reviewCount: 0,
+      isLeech: false,
     }));
     if (!sessionCards.length) {
       setRightPhase("idle");
@@ -304,48 +299,40 @@ const Flashcards = () => {
     startSession(sessionCards, topic);
   };
 
-  // ── Review interactions (spaced repetition logic unchanged) ──────────
-  const current = session?.cards[index];
-  const total = session?.cards.length ?? 0;
-  const reviewed = known + unsure;
+  // ── Review interactions ──────────────────────────────────────────────
+  const { total, reviewed, tally, flipped } = s;
   const progressPct = total === 0 ? 0 : (reviewed / total) * 100;
+  const done = s.active && s.status === "done";
+  const waiting = s.active && s.status === "wait";
 
-  const handleFlip = () => {
+  const handleFlip = useCallback(() => {
     vibrate("flip");
-    setFlipped((f) => !f);
-  };
+    s.flip();
+  }, [s]);
 
-  const handleRate = (rating: Rating) => {
-    if (!session || !current || slidePhase !== "idle") return;
-    vibrate(rating);
-    reviewCard(current.id, rating); // existing spaced-repetition logic
-    if (rating === "again") setUnsure((u) => u + 1);
-    else setKnown((k) => k + 1);
-    if (index + 1 >= session.cards.length) {
-      setDone(true);
-      return;
-    }
-    // Slide current card out left (150ms), then bring the next in from the right
-    setSlidePhase("exit");
-    window.setTimeout(() => {
-      setFlipped(false);
-      setIndex((i) => i + 1);
-      setSlidePhase("idle");
-    }, 150);
-  };
+  const handleRate = useCallback(
+    (rating: ReviewRating) => {
+      if (!current || slidePhase !== "idle") return;
+      vibrate(rating);
+      // Slide current card out left (150ms), then the next comes in from the right.
+      setSlidePhase("exit");
+      window.setTimeout(() => {
+        s.rate(rating);
+        setSlidePhase("idle");
+      }, 150);
+    },
+    [current, slidePhase, s]
+  );
+
+  useRatingKeys({
+    enabled: s.active && !!current && !explainOpen && !settingsOpen,
+    flipped,
+    onFlip: handleFlip,
+    onRate: handleRate,
+  });
 
   const shuffleRemaining = () => {
-    if (!session) return;
-    setSession((prev) => {
-      if (!prev) return prev;
-      const head = prev.cards.slice(0, index + 1);
-      const tail = prev.cards.slice(index + 1);
-      for (let i = tail.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [tail[i], tail[j]] = [tail[j], tail[i]];
-      }
-      return { ...prev, cards: [...head, ...tail] };
-    });
+    s.shuffle();
     toast({ title: "Remaining cards shuffled" });
   };
 
@@ -401,7 +388,7 @@ const Flashcards = () => {
 
         <div className="flex flex-col gap-2">
           <p className="text-xs text-muted-foreground">
-            Card {Math.min(index + 1, total)} of {total}
+            {reviewed} reviewed · {s.remaining} left
           </p>
           <div className="h-1.5 w-full rounded-full overflow-hidden bg-border">
             <div
@@ -411,14 +398,17 @@ const Flashcards = () => {
           </div>
         </div>
 
-        <div className="flex flex-col gap-1">
-          <p className="text-xs font-medium text-success">
-            ✓ Known: <span className="tabular-nums">{known}</span>
-          </p>
-          <p className="text-xs font-medium text-danger">
-            ✗ Unsure: <span className="tabular-nums">{unsure}</span>
-          </p>
+        <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs font-medium tabular-nums">
+          <p className="text-danger">Again: {tally.again}</p>
+          <p className="text-warning">Hard: {tally.hard}</p>
+          <p className="text-success">Good: {tally.good}</p>
+          <p className="text-info">Easy: {tally.easy}</p>
         </div>
+        {tally.again > 0 && (
+          <p className="text-[11px] text-muted-foreground">
+            Cards you forgot come back later in this session.
+          </p>
+        )}
 
         <div className="border-t border-border" aria-hidden />
 
@@ -444,7 +434,23 @@ const Flashcards = () => {
   ) : (
     <div key="config" className="pane-crossfade space-y-4">
       {stats.due > 0 && totalDecks > 0 && (
-        <DueCardsReminderStrip dueCount={stats.due} onStartReview={handleStartDue} />
+        <DueCardsReminderStrip dueCount={stats.due} counts={stats.counts} onStartReview={handleStartDue} />
+      )}
+      {totalDecks > 0 && (
+        <button
+          type="button"
+          onClick={() => setSettingsOpen(true)}
+          className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-primary transition-colors"
+        >
+          <SlidersHorizontal className="h-3.5 w-3.5" />
+          Study settings · {Math.round(settings.desiredRetention * 100)}% retention, {settings.newPerDay} new/day
+          {shouldSuggestOptimize(today.totalReviews, settings.weightsUpdatedAt, settings.weightsReviewCount) && (
+            <span className="ml-1 inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary">
+              <Sparkles className="h-3 w-3" />
+              Ready to optimize
+            </span>
+          )}
+        </button>
       )}
       <FlashcardsGenerator
         onGeneratingChange={handleGeneratingChange}
@@ -523,11 +529,41 @@ const Flashcards = () => {
             </div>
           </div>
           <span className="text-xs font-medium text-muted-foreground tabular-nums">
-            {Math.min(index + 1, total)} / {total}
+            {reviewed} / {total}
           </span>
         </div>
 
-        {done ? (
+        {waiting ? (
+          <div className="text-center py-16 px-6 animate-fade-in">
+            <div className="w-16 h-16 rounded-full bg-primary/15 flex items-center justify-center mx-auto mb-4">
+              <Clock className="w-8 h-8 text-primary" />
+            </div>
+            <h2 className="text-2xl font-serif font-semibold text-foreground mb-2">
+              Almost there.
+            </h2>
+            <p className="text-sm text-muted-foreground mb-6">
+              {s.remaining} {s.remaining === 1 ? "card is" : "cards are"} still in learning, next due in{" "}
+              {formatInterval(Math.max(0, (s.waitUntil ?? Date.now()) - Date.now()))}. Waiting lets
+              the memory settle — or keep going now.
+            </p>
+            <div className="flex flex-wrap justify-center gap-3">
+              <button
+                type="button"
+                onClick={s.studyAhead}
+                className="h-10 px-6 rounded-xl bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors"
+              >
+                Study them now
+              </button>
+              <button
+                type="button"
+                onClick={endSession}
+                className="h-10 px-6 rounded-xl border border-border bg-card text-muted-foreground text-sm font-medium hover:border-input hover:bg-secondary transition-colors"
+              >
+                Finish for now
+              </button>
+            </div>
+          </div>
+        ) : done ? (
           <div className="text-center py-16 px-6 animate-fade-in">
             <div className="w-16 h-16 rounded-full bg-primary/15 flex items-center justify-center mx-auto mb-4">
               <Check className="w-8 h-8 text-primary" />
@@ -538,9 +574,9 @@ const Flashcards = () => {
             <h2 className="text-2xl font-serif font-semibold text-foreground mb-2">
               All cards reviewed.
             </h2>
-            <p className="text-sm text-muted-foreground mb-6">
-              {reviewed} {reviewed === 1 ? "card" : "cards"} reviewed
-              {" · "}✓ {known} known{" · "}✗ {unsure} unsure
+            <p className="text-sm text-muted-foreground mb-6 tabular-nums">
+              {reviewed} {reviewed === 1 ? "review" : "reviews"}
+              {" · "}{tally.again} again{" · "}{tally.hard} hard{" · "}{tally.good} good{" · "}{tally.easy} easy
             </p>
             
             {/* Post-session actions */}
@@ -554,8 +590,9 @@ const Flashcards = () => {
               </button>
               <button
                 type="button"
-                onClick={shuffleRemaining}
-                className="h-10 px-6 rounded-xl border border-border bg-card text-muted-foreground text-sm font-medium hover:border-input hover:bg-secondary transition-colors"
+                onClick={s.restart}
+                title="Go through these cards again. Extra reviews today barely move their schedule."
+                className="h-10 px-6 rounded-xl border border-border bg-card text-muted-foreground text-sm font-medium hover:border-input hover:bg-secondary transition-colors inline-flex items-center"
               >
                 <RotateCcw className="w-4 h-4 mr-2" />
                 Practice Again
@@ -583,44 +620,61 @@ const Flashcards = () => {
         ) : current ? (
           <>
             {/* Card actions bar */}
+            {/* Browsing back and forth without rating doesn't fit a spaced
+                repetition queue — the order is the schedule. Skip moves the
+                card to the back instead. */}
             <div className="flex items-center justify-between gap-2">
-              <button
-                type="button"
-                onClick={prevCard}
-                disabled={index === 0}
-                className="p-2 rounded-lg border border-border bg-card text-muted-foreground hover:border-input hover:bg-secondary disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                aria-label="Previous card"
-              >
-                <ArrowLeft className="w-4 h-4" />
-              </button>
-              {/* The Star and Heart buttons that used to sit here had no
-                  handlers and no column on `cards` to persist to. Removed
-                  rather than left as decoration — card starring needs a
-                  migration first. */}
+              <div className="flex items-center gap-2 min-w-0">
+                {current.isLeech && (
+                  <span
+                    title="Forgotten repeatedly. Try Explain this card, or rewrite or delete it."
+                    className="inline-flex items-center gap-1 rounded px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider border border-danger/40 bg-danger/10 text-danger"
+                  >
+                    <AlertTriangle className="w-2.5 h-2.5" />
+                    Leech
+                  </span>
+                )}
+                <span className="text-[11px] text-muted-foreground tabular-nums">
+                  {current.state === 0 ? "New card" : current.state === 2 ? `Review · ${current.lapses} lapses` : "Learning"}
+                </span>
+              </div>
               <div className="flex items-center gap-1">
                 <button
                   type="button"
                   onClick={shuffleRemaining}
                   className="p-2 rounded-lg border border-border bg-card text-muted-foreground hover:border-primary hover:text-primary transition-colors"
                   aria-label="Shuffle remaining"
+                  title="Shuffle remaining"
                 >
                   <Shuffle className="w-4 h-4" />
                 </button>
+                <button
+                  type="button"
+                  onClick={s.skip}
+                  disabled={!s.canSkip}
+                  className="p-2 rounded-lg border border-border bg-card text-muted-foreground hover:border-input hover:bg-secondary disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                  aria-label="Skip for now"
+                  title="Skip for now"
+                >
+                  <SkipForward className="w-4 h-4" />
+                </button>
+                {current.isLeech && (
+                  <button
+                    type="button"
+                    onClick={handleDeleteCurrent}
+                    className="p-2 rounded-lg border border-border bg-card text-muted-foreground hover:border-danger hover:text-danger transition-colors"
+                    aria-label="Delete this card"
+                    title="Delete this card"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                )}
               </div>
-              <button
-                type="button"
-                onClick={nextCard}
-                disabled={index === total - 1}
-                className="p-2 rounded-lg border border-border bg-card text-muted-foreground hover:border-input hover:bg-secondary disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                aria-label="Next card"
-              >
-                <ArrowRight className="w-4 h-4" />
-              </button>
             </div>
 
             {/* Card with flip — tap to flip; keyed wrapper drives slide transitions */}
             <div
-              key={current.id}
+              key={`${current.id}-${reviewed}`}
               className={slidePhase === "exit" ? "card-slide-exit-left" : "card-slide-enter-right"}
             >
               <div
@@ -664,29 +718,11 @@ const Flashcards = () => {
                     Explain this card
                   </button>
                 </div>
-                <div className="grid grid-cols-3 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => handleRate("again")}
-                    className="h-12 rounded-xl border border-danger/30 bg-danger-soft text-danger text-sm font-medium hover:border-danger/60 transition-colors"
-                  >
-                    ✗ Don't Know
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleRate("good")}
-                    className="h-12 rounded-xl border border-warning/30 bg-warning-soft text-warning text-sm font-medium hover:border-warning/60 transition-colors"
-                  >
-                    ~ Almost
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleRate("easy")}
-                    className="h-12 rounded-xl border border-success/30 bg-success-soft text-success text-sm font-medium hover:border-success/60 transition-colors"
-                  >
-                    ✓ Got It
-                  </button>
-                </div>
+                <RatingButtons
+                  previews={s.previews}
+                  onRate={handleRate}
+                  disabled={slidePhase !== "idle"}
+                />
               </div>
             )}
 
@@ -754,16 +790,21 @@ const Flashcards = () => {
           </div>
 
           {/* Illustrative only — the live controls are in the review pane. */}
-          <div className="mt-4 grid grid-cols-3 gap-2" aria-hidden="true">
-            <div className="h-10 rounded-lg border border-danger/30 bg-danger-soft flex items-center justify-center text-xs font-medium text-danger pointer-events-none select-none">
-              ✗ Don't Know
-            </div>
-            <div className="h-10 rounded-lg border border-warning/30 bg-warning-soft flex items-center justify-center text-xs font-medium text-warning pointer-events-none select-none">
-              ~ Almost
-            </div>
-            <div className="h-10 rounded-lg border border-success/30 bg-success-soft flex items-center justify-center text-xs font-medium text-success pointer-events-none select-none">
-              ✓ Got It
-            </div>
+          <div className="mt-4 grid grid-cols-4 gap-2" aria-hidden="true">
+            {[
+              ["Again", "<1m", "border-danger/30 bg-danger-soft text-danger"],
+              ["Hard", "6m", "border-warning/30 bg-warning-soft text-warning"],
+              ["Good", "10m", "border-success/30 bg-success-soft text-success"],
+              ["Easy", "8d", "border-info/30 bg-info-soft text-info"],
+            ].map(([label, ivl, cls]) => (
+              <div
+                key={label}
+                className={`h-11 rounded-lg border flex flex-col items-center justify-center text-xs font-medium pointer-events-none select-none ${cls}`}
+              >
+                {label}
+                <span className="text-[10px] font-normal opacity-80">{ivl}</span>
+              </div>
+            ))}
           </div>
 
           <p className="text-center text-[11px] text-muted-foreground mt-4">
@@ -910,6 +951,8 @@ const Flashcards = () => {
           {leftPaneContent}
         </div>
       </div>
+
+      <SrsSettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
 
       {/* ── "Explain this" panel — AI explanation for the active card ── */}
       {current && (

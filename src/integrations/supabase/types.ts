@@ -48,9 +48,16 @@ export type Database = {
           grounded: boolean
           id: string
           interval_days: number
+          is_leech: boolean
+          lapses: number
           last_reviewed_at: string | null
+          learning_steps: number
           question: string
           review_count: number
+          scheduled_days: number
+          srs_state: number | null
+          stability: number | null
+          difficulty: number | null
           tag: string | null
           topic: string
           topic_emoji: string | null
@@ -65,9 +72,16 @@ export type Database = {
           grounded?: boolean
           id?: string
           interval_days?: number
+          is_leech?: boolean
+          lapses?: number
           last_reviewed_at?: string | null
+          learning_steps?: number
           question: string
           review_count?: number
+          scheduled_days?: number
+          srs_state?: number | null
+          stability?: number | null
+          difficulty?: number | null
           tag?: string | null
           topic: string
           topic_emoji?: string | null
@@ -82,9 +96,16 @@ export type Database = {
           grounded?: boolean
           id?: string
           interval_days?: number
+          is_leech?: boolean
+          lapses?: number
           last_reviewed_at?: string | null
+          learning_steps?: number
           question?: string
           review_count?: number
+          scheduled_days?: number
+          srs_state?: number | null
+          stability?: number | null
+          difficulty?: number | null
           tag?: string | null
           topic?: string
           topic_emoji?: string | null
@@ -208,6 +229,13 @@ export type Database = {
           pro_source: string | null
           premium_used: number
           preferred_model: string
+          srs_desired_retention: number
+          srs_max_reviews_per_day: number
+          srs_new_per_day: number
+          srs_weights: Json | null
+          srs_weights_log_loss: number | null
+          srs_weights_review_count: number | null
+          srs_weights_updated_at: string | null
         }
         Insert: {
           created_at?: string
@@ -234,23 +262,50 @@ export type Database = {
       review_sessions: {
         Row: {
           card_id: string
+          difficulty_after: number | null
+          difficulty_before: number | null
+          due_after: string | null
+          duration_ms: number | null
+          elapsed_days: number | null
           id: string
           rating: string
           reviewed_at: string
+          scheduled_days: number | null
+          stability_after: number | null
+          stability_before: number | null
+          state_before: number | null
           user_id: string
         }
         Insert: {
           card_id: string
+          difficulty_after?: number | null
+          difficulty_before?: number | null
+          due_after?: string | null
+          duration_ms?: number | null
+          elapsed_days?: number | null
           id?: string
           rating: string
           reviewed_at?: string
+          scheduled_days?: number | null
+          stability_after?: number | null
+          stability_before?: number | null
+          state_before?: number | null
           user_id: string
         }
         Update: {
           card_id?: string
+          difficulty_after?: number | null
+          difficulty_before?: number | null
+          due_after?: string | null
+          duration_ms?: number | null
+          elapsed_days?: number | null
           id?: string
           rating?: string
           reviewed_at?: string
+          scheduled_days?: number | null
+          stability_after?: number | null
+          stability_before?: number | null
+          state_before?: number | null
           user_id?: string
         }
         Relationships: [
@@ -706,6 +761,36 @@ export type Database = {
     }
     Functions: {
       redeem_pro_code: { Args: { code_input: string }; Returns: Json }
+      review_flashcard: {
+        Args: {
+          p_client_id: string
+          p_rating: string
+          p_expected_reps: number
+          p_next: Json
+          p_log: Json
+        }
+        Returns: Json
+      }
+      set_flashcard_states: {
+        Args: { p_mode: string; p_states: Json }
+        Returns: Json
+      }
+      set_srs_settings: {
+        Args: {
+          p_desired_retention: number
+          p_new_per_day: number
+          p_max_reviews_per_day: number
+        }
+        Returns: Json
+      }
+      set_srs_weights: {
+        Args: { p_weights: Json | null; p_review_count: number; p_log_loss: number }
+        Returns: Json
+      }
+      get_srs_today: {
+        Args: { p_since: string }
+        Returns: Json
+      }
       start_qbank_session: {
         Args: {
           p_domains: string[] | null
