@@ -26,6 +26,8 @@ import { usePremiumHook } from "@/hooks/use-premium-hook";
 import { useModelPreference } from "@/hooks/use-model-preference";
 import { useAuth } from "@/hooks/use-auth";
 import { callMedicalNotes } from "@/lib/callMedicalNotes";
+import { parseModelUsed, type ModelUsed } from "@/lib/model-used";
+import { ModelCredit } from "@/components/PoweredByCorti";
 import { parseFlashcardsFromOutput } from "@/lib/parse-flashcards";
 import { fetchBestCitation, type CitationResult } from "@/lib/citation";
 import { saveCitationsForTopic, getCitationsForTopic } from "@/lib/citation-store";
@@ -48,8 +50,8 @@ export type GeneratedCard = ReturnType<typeof parseFlashcardsFromOutput>[number]
 interface FlashcardsGeneratorProps {
   /** Notifies the page when generation starts/stops so the right pane can show skeletons. */
   onGeneratingChange?: (generating: boolean, topic: string) => void;
-  /** Called with the freshly saved cards once generation completes. */
-  onGenerated?: (cards: GeneratedCard[], topic: string) => void;
+  /** Called with the freshly saved cards once generation completes, and the model that wrote them. */
+  onGenerated?: (cards: GeneratedCard[], topic: string, model: ModelUsed | null) => void;
 }
 
 const RECENT_FLASHCARD_TOPICS_KEY = "sb_recent_flashcard_topics_v1";
@@ -140,7 +142,11 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated }: FlashcardsGene
     isProUser: pro,
     refresh: refreshUsage,
   } = useUsageLimit();
-  const { premiumRemaining, isPremiumHookActive } = usePremiumHook();
+  const { premiumRemaining, isPremiumHookActive, refetch: refetchPremium } = usePremiumHook();
+  // Which model wrote the most recent deck, for the credit under the usage box.
+  const [lastDeckModel, setLastDeckModel] = useState<ModelUsed | null>(null);
+  // Mirrored in a ref: the save callback below closes over an older render.
+  const lastDeckModelRef = useRef<ModelUsed | null>(null);
   const {
     preferredModel,
     setPreferredModel,
@@ -230,8 +236,12 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated }: FlashcardsGene
         throw new Error(err.error || `Error: ${response.status}`);
       }
 
-      // Usage was incremented server-side; refresh the displayed count.
+      lastDeckModelRef.current = parseModelUsed(response.headers);
+      setLastDeckModel(lastDeckModelRef.current);
+
+      // Usage was incremented server-side; refresh the displayed counts.
       refreshUsage();
+      refetchPremium();
 
       const reader = response.body?.getReader();
       if (!reader) throw new Error("No response body");
@@ -400,7 +410,7 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated }: FlashcardsGene
               setGenerating(false, "");
               setLoadingMsg("");
               window.dispatchEvent(new CustomEvent("studybuddy:deck-saved"));
-              onGenerated?.(pending, activeTopicRef.current);
+              onGenerated?.(pending, activeTopicRef.current, lastDeckModelRef.current);
             })();
             return null;
           }
@@ -666,9 +676,20 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated }: FlashcardsGene
                 {remaining} / {MAX_DAILY_CARDS} cards today · Resets at midnight
               </span>
             )}
-            {isPremiumHookActive && (
+            {isPremiumHookActive ? (
               <span className="text-info font-medium text-xs block mt-1">
-                ✦ {premiumRemaining} Claude generation{premiumRemaining !== 1 ? "s" : ""} left
+                ✦ {premiumRemaining} Corti generation{premiumRemaining !== 1 ? "s" : ""} left
+              </span>
+            ) : (
+              <span className="text-muted-foreground text-xs block mt-1">
+                Free tier: GPT-OSS 20B ·{" "}
+                <button
+                  type="button"
+                  className="underline hover:text-foreground transition-colors"
+                  onClick={() => setGoProOpen(true)}
+                >
+                  Go Pro for Corti
+                </button>
               </span>
             )}
           </div>
@@ -676,17 +697,23 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated }: FlashcardsGene
         {pro && (
           <div className="rounded-lg bg-primary/10 border border-primary/30 p-3 text-center">
             <span className="text-primary font-medium text-xs">
-              ✦ Pro: {preferredModel === "claude" ? "Claude Haiku 4.5" : "GPT-OSS 20B"}
+              ✦ Pro: {preferredModel === "corti" ? "Corti S1 · best quality" : "GPT-OSS 20B · fastest"}
             </span>
             <span className="mx-2 opacity-40">·</span>
             <button
               type="button"
-              className="underline hover:text-foreground transition-colors"
-              onClick={() => setPreferredModel(preferredModel === "claude" ? "gpt-oss" : "claude")}
+              className="underline hover:text-foreground transition-colors text-xs"
+              onClick={() => setPreferredModel(preferredModel === "corti" ? "gpt-oss" : "corti")}
               disabled={modelSaving || modelLoading}
             >
-              Switch to {preferredModel === "claude" ? "GPT-OSS 20B" : "Claude Haiku 4.5"}
+              Switch to {preferredModel === "corti" ? "GPT-OSS 20B (fastest)" : "Corti S1 (best quality)"}
             </button>
+          </div>
+        )}
+        {lastDeckModel && lastDeckModel.kind !== "unknown" && (
+          <div className="flex items-center justify-center gap-2 text-xs text-muted-foreground">
+            <span>Last deck written by</span>
+            <ModelCredit used={lastDeckModel} compact />
           </div>
         )}
 

@@ -51,7 +51,20 @@ export type CortiModel =
   | "corti-s1"
   | "corti-s1-instant"
   | "corti-s1-mini"
-  | "corti-s1-mini-instant";
+  | "corti-s1-mini-instant"
+  // Listed by GET /v1/models but absent from the public docs and price list,
+  // with a 32,768-token context rather than 262,144. Present for evaluation.
+  | "corti-s1-tiny"
+  | "corti-s1-tiny-instant";
+
+export const CORTI_MODELS: readonly CortiModel[] = [
+  "corti-s1",
+  "corti-s1-instant",
+  "corti-s1-mini",
+  "corti-s1-mini-instant",
+  "corti-s1-tiny",
+  "corti-s1-tiny-instant",
+];
 
 const DEFAULT_REGION: CortiRegion = "eu";
 const DEFAULT_MODEL: CortiModel = "corti-s1-instant";
@@ -102,13 +115,8 @@ export interface CortiConfig {
 }
 
 /** Narrows an env value onto the model enum, or falls back. */
-function asCortiModel(raw: string | undefined, fallback: CortiModel): CortiModel {
-  return raw === "corti-s1" ||
-    raw === "corti-s1-instant" ||
-    raw === "corti-s1-mini" ||
-    raw === "corti-s1-mini-instant"
-    ? raw
-    : fallback;
+export function asCortiModel(raw: string | undefined, fallback: CortiModel): CortiModel {
+  return (CORTI_MODELS as readonly string[]).includes(raw ?? "") ? (raw as CortiModel) : fallback;
 }
 
 /**
@@ -234,6 +242,11 @@ export interface CortiCompletionOptions {
   maxTokens?: number;
   /** Sets response_format to {type:"json_object"}. No json_schema upstream. */
   json?: boolean;
+  /**
+   * Streaming only: asks for a final usage frame (`stream_options.include_usage`)
+   * so token accounting is available without a second request.
+   */
+  streamUsage?: boolean;
   signal?: AbortSignal;
 }
 
@@ -257,6 +270,7 @@ export async function cortiChatCompletion(
     temperature = 0.7,
     maxTokens = 16384,
     json = false,
+    streamUsage = false,
     signal,
   } = options;
 
@@ -277,6 +291,7 @@ export async function cortiChatCompletion(
       temperature,
       max_tokens: maxTokens,
       ...(json ? { response_format: { type: "json_object" } } : {}),
+      ...(stream && streamUsage ? { stream_options: { include_usage: true } } : {}),
     }),
   });
 }

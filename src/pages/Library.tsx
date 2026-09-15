@@ -23,7 +23,7 @@ type StudyFilter = { topic?: string; mode: "due" | "all-cards" | "deck" };
 
 const Library = () => {
   const { toast } = useToast();
-  const { allCards, dueCards, reviewCard, deleteCard } = useFlashcardDeck();
+  const { allCards, dueCards, reviewCard, deleteCard, settings } = useFlashcardDeck();
   const { history, deleteItem } = useStudyHistory();
 
   const [studyOpen, setStudyOpen] = useState(false);
@@ -79,8 +79,9 @@ const Library = () => {
   };
   const handleDeleteDeck = (topic: string) => {
     const toDelete = allCards.filter((c) => c.topic === topic);
-    toDelete.forEach((c) => deleteCard(c.id));
-    toast({ title: `Deleted ${toDelete.length} cards from "${topic}"` });
+    Promise.all(toDelete.map((c) => deleteCard(c.id)))
+      .then(() => toast({ title: `Deleted ${toDelete.length} cards from "${topic}"` }))
+      .catch(() => toast({ title: "Couldn't delete every card", variant: "destructive" }));
   };
 
   const studySessionCards = useMemo(() => {
@@ -101,7 +102,9 @@ const Library = () => {
       {studyOpen && (
         <StudyMode
           dueCards={studySessionCards}
+          liveCards={allCards}
           onReview={reviewCard}
+          settings={settings}
           onClose={() => setStudyOpen(false)}
         />
       )}

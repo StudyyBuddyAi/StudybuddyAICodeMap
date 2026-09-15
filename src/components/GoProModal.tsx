@@ -7,6 +7,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { MessageCircle, Mail, Sparkles, Check } from "lucide-react";
+import { PoweredByCorti } from "@/components/PoweredByCorti";
 
 interface GoProModalProps {
   open: boolean;
@@ -43,16 +44,20 @@ const GoProModal = ({ open, onOpenChange }: GoProModalProps) => {
             </p>
           </div>
           <DialogDescription className="text-sm text-muted-foreground pt-2">
-            Everything in StudyBuddy, unlocked — including access to Claude, Anthropic's
-            AI. Pro access is granted manually — reach out on WhatsApp or Email and
-            we'll activate your account within a few hours.
+            Everything in StudyBuddy, unlocked — with every sheet, deck and explanation
+            written by Corti S1, an AI model built for healthcare. Pro access is granted
+            manually — reach out on WhatsApp or Email and we'll activate your account
+            within a few hours.
           </DialogDescription>
+          <div className="flex justify-center pt-2">
+            <PoweredByCorti />
+          </div>
         </DialogHeader>
 
         <ul className="space-y-2 text-left pt-1">
           {[
             "Unlimited sheets & flashcard generations",
-            "Claude Haiku 4.5 — Anthropic's fastest model, medically tuned for USMLE",
+            "Corti S1 — AI built for healthcare, tuned for USMLE study",
             "Publication-backed sources on every generation — cited directly from PubMed",
             "Priority access to new features",
           ].map((benefit) => (

@@ -1,17 +1,10 @@
+// Study sheets, flashcard decks, explain and enhance. The handler lives in
+// _shared/medical-notes-handler.ts so a staging copy (medical-notes-next) can
+// serve the identical code under a different name.
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.8";
-import { makeEmbeddings, embedQuery, retrieveChunks, type RagChunk } from "../_shared/rag.ts";
-import { requestSourceLabels, type RawSourceLabel } from "../_shared/source-labels.ts";
-import {
-  openMemoryWindow,
-  readMemoryTurns,
-  writeUserTurn,
-  completeTurn,
-  trim500,
-  MEMORY_FOLLOWUP_INSTRUCTION,
-  type MemoryTurn,
-} from "../_shared/memory.ts";
+import { handleMedicalNotes } from "../_shared/medical-notes-handler.ts";
 
+<<<<<<< HEAD
 const ALLOWED_ORIGINS = new Set([
   "https://studyybuddyai.com",
   "https://www.studyybuddyai.com",
@@ -1106,3 +1099,6 @@ ${sheetSchemaBlock}`;
     );
   }
 });
+=======
+serve(handleMedicalNotes);
+>>>>>>> origin/main

@@ -1,8 +1,10 @@
-import { createContext, useContext, useState, useCallback, useMemo, useRef, ReactNode } from "react";
+import { createContext, useContext, useState, useCallback, useEffect, useMemo, useRef, ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import type { Json } from "@/integrations/supabase/types";
 import { useAuth } from "@/hooks/use-auth";
+import { useToast } from "@/hooks/use-toast";
 import type {
   Question,
   OptionKey,
@@ -11,6 +13,8 @@ import type {
   SessionGeneration,
   ChallengeLevel,
   ExamMode,
+  PlayMode,
+  HighlightRange,
 } from "@/lib/qbank-types";
 import {
   runQbankGeneration,
@@ -20,8 +24,31 @@ import {
   type GenerationStatus,
   type HeldBackItem,
 } from "@/lib/qbank-wave-runner";
+import {
+  buildProgressPayload,
+  elapsedMs as elapsedAt,
+  emptyAnnotations,
+  endBlockStats as computeEndBlockStats,
+  hasResponse,
+  isWaitingForNext as computeWaitingForNext,
+  moveTo,
+  nextProgressSeq,
+  pauseClock,
+  plannedTotal as computePlannedTotal,
+  resumeClock,
+  sessionFromResume,
+  summaryQuestions,
+  timeRemainingMs as computeTimeRemaining,
+  toggleFlagged,
+  type EndBlockStats,
+  type ResumeResult,
+} from "@/lib/qbank-session-state";
+import { addHighlight as mergeHighlight, removeHighlightAt } from "@/lib/qbank-highlights";
 
-const STORAGE_KEY = "sb_qbank_session";
+/** Debounce for progress saves after a change. */
+const SAVE_DEBOUNCE_MS = 1500;
+/** Heartbeat, so elapsed time is banked even while nothing else changes. */
+const SAVE_HEARTBEAT_MS = 30_000;
 
 /**
  * Identifies one generated set across every wave that writes it.
@@ -42,6 +69,7 @@ export interface SessionConfig {
   limit: number;
   system?: string;
   questionIds?: string[];
+  mode?: PlayMode;
   /**
    * Generated sessions only: how many questions the set will END with, which is
    * more than it starts with. A curated session leaves this alone and is
@@ -88,7 +116,38 @@ interface SessionSummary {
   score: number;
   total: number;
   flaggedIds: string[];
+  /** Questions the set held that were never answered. */
+  omitted?: number;
 }
+
+/**
+ * - resumed: the set is live.
+ * - completed: it was already finished; go to its summary.
+ * - closed: this tab just left it (Save & Exit, End block, Discard) and the
+ *   request was not an explicit one — see resumeSession.
+ * - failed: it could not be loaded.
+ */
+export type ResumeOutcome = "resumed" | "completed" | "closed" | "failed";
+
+export interface ResumeAttempt {
+  outcome: ResumeOutcome;
+  /** Failed only: what went wrong, fit to show the student. */
+  error?: string;
+}
+
+/**
+ * Turns a resume RPC error into something a student can act on, while keeping
+ * the server's own words for anything unexpected — "couldn't be loaded" with no
+ * reason is exactly what made the created_at drift slow to diagnose.
+ */
+const describeResumeError = (message: string | undefined): string => {
+  if (!message) return "No response from the server. Check your connection.";
+  if (message.includes("session_not_found")) return "This set doesn't exist, or it belongs to another account.";
+  if (message.includes("not_authenticated")) return "You're signed out. Sign in again to continue this set.";
+  if (/failed to fetch|network/i.test(message)) return "You appear to be offline.";
+  return message;
+};
+export type SaveState = "idle" | "saving" | "error";
 
 interface QBankContextValue {
   session: SessionState | null;
@@ -98,20 +157,26 @@ interface QBankContextValue {
   isLastQuestion: boolean;
   /** More questions are still expected for this set than have arrived. */
   isAwaitingMore: boolean;
+  /** At the end of what is written, with nothing left to do but wait. */
+  isWaitingForNext: boolean;
   generation: GenerationState | null;
   /** The generation behind the most recently finished session, if it had one. */
   lastGeneration: SessionGeneration | null;
+  /** How the most recently finished session was sat. */
+  lastMode: PlayMode;
   progress: number;
   /**
    * Generates a set and starts playing it as soon as the first question exists.
-   * Resolves once the session is live, while the rest keeps being written.
+   * Resolves with the session id once the session is live, while the rest keeps
+   * being written.
    */
   startGeneratedSession: (
     topic: string,
     target: number,
     challenge?: ChallengeLevel,
-    examMode?: ExamMode
-  ) => Promise<void>;
+    examMode?: ExamMode,
+    mode?: PlayMode
+  ) => Promise<string>;
   /** Cancels an in-flight set. Whatever landed stays playable. */
   stopGeneration: () => void;
   /**
@@ -119,8 +184,22 @@ interface QBankContextValue {
    * up. Safe to call repeatedly; a no-op for a curated or finished session.
    */
   resumeGeneration: () => void;
+  /**
+   * Loads an unfinished set from the server — on this device or any other.
+   * Pass explicit for a deliberate Resume; the player's automatic load on a
+   * ?session= URL is not, and does not reopen a set this tab just left.
+   */
+  resumeSession: (sessionId: string, opts?: { explicit?: boolean }) => Promise<ResumeAttempt>;
+  /** Saves where the student is and leaves the set open to resume later. */
+  saveAndExit: () => Promise<void>;
+  /** Deletes an unfinished set, its answers and its flags. */
+  discardSession: (sessionId: string) => Promise<void>;
+  /** Tutor mode: grade the current question. */
   submitAnswer: (key: OptionKey) => Promise<{ is_correct: boolean; correct_option: OptionKey } | undefined>;
+  /** Timed mode: record (or change) the current question's choice, ungraded. */
+  selectTimedAnswer: (key: OptionKey) => void;
   nextQuestion: () => void;
+  prevQuestion: () => void;
   endSession: () => Promise<SessionSummary | null>;
   resetSession: () => void;
   lastSummary: SessionSummary | null;
@@ -131,37 +210,43 @@ interface QBankContextValue {
   displayAnswer: SessionAnswer | null;
   isReviewing: boolean;
   loadSummary: (data: SessionSummary) => void;
-  restoreSession: () => boolean;
-  snapshotTimer: () => void;
-  elapsedMs: number;
+  getElapsedMs: () => number;
+  /** Null in tutor mode. */
+  getTimeRemainingMs: () => number | null;
   flaggedIds: Set<string>;
   toggleFlag: (questionId: string) => Promise<void>;
   isFlagLoading: boolean;
+  toggleStrike: (questionId: string, key: OptionKey) => void;
+  addHighlight: (questionId: string, range: HighlightRange, textLength: number) => void;
+  removeHighlight: (questionId: string, offset: number) => void;
   skipQuestion: () => void;
   goToQuestion: (index: number) => void;
   unansweredCount: number;
+  endBlockStats: EndBlockStats | null;
+  saveState: SaveState;
 }
 
 const QBankContext = createContext<QBankContextValue | null>(null);
 
 export const QBankProvider = ({ children }: { children: ReactNode }) => {
-  const { user } = useAuth();
+  const { user, session: authSession } = useAuth();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
+  const { toast } = useToast();
   const [session, setSession] = useState<SessionState | null>(null);
   const [lastSummary, setLastSummary] = useState<SessionSummary | null>(null);
   const [reviewIndex, setReviewIndex] = useState<number | null>(null);
   const [generation, setGeneration] = useState<GenerationState | null>(null);
+  const [saveState, setSaveState] = useState<SaveState>("idle");
   /**
    * The generation behind the session that just finished.
    *
    * The session is torn down on finish, and with it the topic and size the set
    * was written to — which is exactly what the summary needs to offer another
-   * set on the same topic. Without it "Try Again" silently falls back to a
-   * random curated session, which is not what a student who just generated
-   * twenty questions on the brachial plexus is asking for.
+   * set on the same topic.
    */
   const [lastGeneration, setLastGeneration] = useState<SessionGeneration | null>(null);
+  const [lastMode, setLastMode] = useState<PlayMode>("tutor");
 
   // The generation callbacks are long-lived and fire from a stream, long after
   // the render that created them. They read these rather than closed-over state,
@@ -178,6 +263,21 @@ export const QBankProvider = ({ children }: { children: ReactNode }) => {
   const heldBackRef = useRef(0);
   const heldBackItemsRef = useRef<HeldBackItem[]>([]);
 
+  // Progress saving. The sequence is shared by every save from this tab, so the
+  // server can drop one that arrives after a newer one.
+  const progressSeqRef = useRef(0);
+  const saveChainRef = useRef<Promise<void>>(Promise.resolve());
+  const saveTimerRef = useRef<number | null>(null);
+  const accessTokenRef = useRef<string | null>(null);
+  accessTokenRef.current = authSession?.access_token ?? null;
+  // Timed selections in flight, per question, so they are written in the order
+  // they were made and endSession can wait for the last of them.
+  const timedWritesRef = useRef<Map<string, Promise<void>>>(new Map());
+  // Sets this tab has just left. The route transition keeps the player mounted
+  // for a beat after Save & Exit or End block, still reading ?session=<id>, and
+  // without this it would load the set straight back.
+  const closedIdsRef = useRef<Set<string>>(new Set());
+
   const flaggedIds: Set<string> = useMemo(
     () => new Set(session?.flaggedIds ?? []),
     [session?.flaggedIds]
@@ -185,12 +285,20 @@ export const QBankProvider = ({ children }: { children: ReactNode }) => {
 
   const isFlagLoading = false;
 
-  const saveSessionToStorage = useCallback((s: SessionState) => {
-    const firstUnanswered = s.questions.findIndex(
-      (q) => !s.answers.some((a) => a.question_id === q.id)
-    );
-    const persistIndex = firstUnanswered === -1 ? s.currentIndex : firstUnanswered;
+  // ── Progress saving ───────────────────────────────────────────────────────
+  //
+  // The server holds the only copy of an unfinished set's progress. Answers and
+  // claimed questions go through their own RPCs as they happen; this snapshot
+  // carries everything else — position, skipped, clock, the generation's resume
+  // point, strike-outs, highlights and flags.
+  //
+  // Flags are in the snapshot on purpose. As one request per toggle they raced:
+  // flag-then-unflag could land reversed, overlapping flags collided on the
+  // unique constraint, and a flag in flight at Save & Exit or a refresh was
+  // lost. The snapshot is serialised here and ordered by seq on the server, so
+  // whatever the student sees last is what the server keeps.
 
+<<<<<<< HEAD
     // The answer key and explanations were already graded server-side; what
     // gets cached on disk may carry selected answers and skipped/flagged ids,
     // but never the correct_option / explanation / teaching_point themselves.
@@ -211,70 +319,32 @@ export const QBankProvider = ({ children }: { children: ReactNode }) => {
       generation: s.generation,
       savedAt: Date.now(),
     };
+=======
+  /** Resolves once a failed save has been retried. */
+  const retryTimerRef = useRef<number | null>(null);
+>>>>>>> origin/main
 
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
-    } catch {
-      // localStorage full or unavailable — fail silently
-    }
-  }, []);
+  const runSave = useCallback(async (): Promise<boolean> => {
+    const s = sessionRef.current;
+    if (!s?.sessionId) return true;
 
-  const clearSessionStorage = useCallback(() => {
-    try {
-      localStorage.removeItem(STORAGE_KEY);
-    } catch {
-      // fail silently
-    }
-  }, []);
+    // At most one retry for a stale seq: another device saved with a later
+    // clock. Re-sending above its seq makes this tab's current state the latest.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const now = Date.now();
+      const seq = nextProgressSeq(progressSeqRef.current, now);
+      progressSeqRef.current = seq;
+      const payload = buildProgressPayload(sessionRef.current ?? s, now);
 
-  const restoreSession = useCallback((): boolean => {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw) return false;
-
-      const parsed = JSON.parse(raw);
-
-      const TWENTY_FOUR_HOURS = 24 * 60 * 60 * 1000;
-      if (!parsed.savedAt || Date.now() - parsed.savedAt > TWENTY_FOUR_HOURS) {
-        localStorage.removeItem(STORAGE_KEY);
-        return false;
-      }
-
-      if (
-        typeof parsed.sessionId !== "string" ||
-        !Array.isArray(parsed.questions) ||
-        parsed.questions.length === 0 ||
-        typeof parsed.currentIndex !== "number" ||
-        !Array.isArray(parsed.answers) ||
-        typeof parsed.startedAt !== "number"
-      ) {
-        // Missing sessionId => stale pre-server-grading cache; can't resume (the
-        // server session it maps to doesn't exist). Discard.
-        localStorage.removeItem(STORAGE_KEY);
-        return false;
-      }
-
-      setReviewIndex(null);
-      setSession({
-        sessionId: parsed.sessionId,
-        questions: parsed.questions,
-        currentIndex: parsed.currentIndex,
-        answers: parsed.answers,
-        startedAt: parsed.startedAt,
-        questionStartedAt: Date.now(),
-        accumulatedMs: typeof parsed.accumulatedMs === "number" ? parsed.accumulatedMs : 0,
-        resumedAt: Date.now(),
-        skippedIds: Array.isArray(parsed.skippedIds) ? parsed.skippedIds : [],
-        flaggedIds: Array.isArray(parsed.flaggedIds) ? parsed.flaggedIds : [],
-        // A cache written before generated sets existed has neither field. It
-        // is a complete curated session, so the count it has is the count it
-        // expects, and it has no generation to resume.
-        expectedTotal:
-          typeof parsed.expectedTotal === "number"
-            ? Math.max(parsed.expectedTotal, parsed.questions.length)
-            : parsed.questions.length,
-        generation: parsed.generation ?? null,
+      setSaveState("saving");
+      const { data, error } = await supabase.rpc("save_qbank_progress", {
+        p_session: s.sessionId,
+        p_seq: seq,
+        ...payload,
+        p_generation: payload.p_generation as unknown as Json,
+        p_annotations: payload.p_annotations as unknown as Json,
       });
+<<<<<<< HEAD
       sessionIdRef.current = parsed.sessionId;
 
       // Answer-key fields never live in localStorage; once a session resumes,
@@ -316,15 +386,151 @@ export const QBankProvider = ({ children }: { children: ReactNode }) => {
         })();
       }
 
+=======
+      if (error) {
+        console.error("save_qbank_progress failed:", error);
+        setSaveState("error");
+        return false;
+      }
+      const result = data as unknown as { ok?: boolean; reason?: string; seq?: number } | null;
+      if (result?.ok === false && result.reason === "stale" && typeof result.seq === "number") {
+        progressSeqRef.current = Math.max(progressSeqRef.current, result.seq);
+        continue;
+      }
+      setSaveState("idle");
+>>>>>>> origin/main
       return true;
+    }
+    setSaveState("idle");
+    return true;
+  }, []);
+
+  /** Saves now, after any save already under way. A failed save retries itself. */
+  const flushProgress = useCallback((): Promise<void> => {
+    if (saveTimerRef.current !== null) {
+      window.clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
+    if (retryTimerRef.current !== null) {
+      window.clearTimeout(retryTimerRef.current);
+      retryTimerRef.current = null;
+    }
+    const next = saveChainRef.current.then(runSave, runSave).then((ok) => {
+      // An unsaved flag or highlight must not quietly stay unsaved.
+      if (!ok && sessionRef.current?.sessionId && retryTimerRef.current === null) {
+        retryTimerRef.current = window.setTimeout(() => {
+          retryTimerRef.current = null;
+          void flushProgress();
+        }, 3000);
+      }
+    });
+    saveChainRef.current = next.catch(() => undefined);
+    return next;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [runSave]);
+
+  const scheduleSave = useCallback(() => {
+    if (saveTimerRef.current !== null) window.clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = window.setTimeout(() => {
+      saveTimerRef.current = null;
+      void flushProgress();
+    }, SAVE_DEBOUNCE_MS);
+  }, [flushProgress]);
+
+  /**
+   * The save for a page that is going away. A normal request can be cancelled
+   * as the page unloads; a keepalive fetch outlives it. Needs the token in hand
+   * synchronously, which is why it is mirrored into a ref.
+   */
+  const keepaliveSave = useCallback(() => {
+    const s = sessionRef.current;
+    const token = accessTokenRef.current;
+    const url = import.meta.env.VITE_SUPABASE_URL;
+    const key = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+    if (!s?.sessionId || !token || !url || !key) return;
+    const now = Date.now();
+    const seq = nextProgressSeq(progressSeqRef.current, now);
+    progressSeqRef.current = seq;
+    try {
+      void fetch(`${url}/rest/v1/rpc/save_qbank_progress`, {
+        method: "POST",
+        keepalive: true,
+        headers: {
+          "Content-Type": "application/json",
+          apikey: key,
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ p_session: s.sessionId, p_seq: seq, ...buildProgressPayload(s, now) }),
+      });
     } catch {
-      try { localStorage.removeItem(STORAGE_KEY); } catch { /* ignore */ }
-      return false;
+      // Best effort by definition: the page is already leaving.
     }
   }, []);
 
-  const startSession = useCallback(async (config?: SessionConfig) => {
+  const sessionKey = session?.sessionId ?? null;
+
+  // Debounced save on anything the snapshot carries, except the clock, which
+  // the heartbeat covers.
+  useEffect(() => {
+    if (!session?.sessionId) return;
+    scheduleSave();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    session?.sessionId,
+    session?.currentIndex,
+    session?.skippedIds,
+    session?.expectedTotal,
+    session?.generation,
+    session?.annotations,
+  ]);
+
+  // A flag saves straight away rather than on the debounce: it is a deliberate
+  // mark the student expects to see on the next resume, even one seconds away.
+  const flagKey = session?.flaggedIds;
+  const flagSessionRef = useRef<{ id: string | null; flags: string[] | undefined }>({ id: null, flags: undefined });
+  useEffect(() => {
+    const prev = flagSessionRef.current;
+    flagSessionRef.current = { id: sessionKey, flags: flagKey };
+    // Only a change within the same set — not the set being loaded.
+    if (!sessionKey || prev.id !== sessionKey || prev.flags === flagKey) return;
+    void flushProgress();
+  }, [sessionKey, flagKey, flushProgress]);
+
+  useEffect(() => {
+    if (!sessionKey) return;
+    const id = window.setInterval(() => {
+      if (document.visibilityState === "visible") void flushProgress();
+    }, SAVE_HEARTBEAT_MS);
+    const onHidden = () => {
+      if (document.visibilityState === "hidden") keepaliveSave();
+    };
+    window.addEventListener("pagehide", keepaliveSave);
+    document.addEventListener("visibilitychange", onHidden);
+    return () => {
+      window.clearInterval(id);
+      window.removeEventListener("pagehide", keepaliveSave);
+      document.removeEventListener("visibilitychange", onHidden);
+    };
+  }, [sessionKey, flushProgress, keepaliveSave]);
+
+  // The clock stops while the student waits on a question that has not been
+  // written yet, and starts again when it lands.
+  const waiting = session ? computeWaitingForNext(session) : false;
+  useEffect(() => {
+    if (!session) return;
+    setSession((prev) => {
+      if (!prev) return prev;
+      const now = Date.now();
+      if (waiting && prev.clockRunning) return pauseClock(prev, now);
+      if (!waiting && !prev.clockRunning) return resumeClock(prev, now);
+      return prev;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [waiting, sessionKey]);
+
+  const startSession = useCallback(async (config?: SessionConfig): Promise<string> => {
     setReviewIndex(null);
+    const mode: PlayMode = config?.mode ?? "tutor";
     const { data, error } = await supabase.rpc("start_qbank_session", {
       p_domains:
         config?.domains && config.domains.length > 0 ? config.domains : null,
@@ -334,14 +540,19 @@ export const QBankProvider = ({ children }: { children: ReactNode }) => {
         config?.questionIds && config.questionIds.length > 0
           ? config.questionIds
           : null,
+      p_mode: mode,
     });
     if (error) throw error;
 
-    const result = data as unknown as { session_id: string; questions: Question[] } | null;
+    const result = data as unknown as { session_id: string; mode?: string; questions: Question[] } | null;
     const questions = (result?.questions ?? []) as Question[];
     const now = Date.now();
     const newSession: SessionState = {
       sessionId: result?.session_id ?? null,
+      mode: result?.mode === "timed" ? "timed" : mode,
+      selections: {},
+      annotations: emptyAnnotations(),
+      progressSeq: 0,
       questions,
       currentIndex: 0,
       answers: [],
@@ -349,6 +560,7 @@ export const QBankProvider = ({ children }: { children: ReactNode }) => {
       questionStartedAt: now,
       accumulatedMs: 0,
       resumedAt: now,
+      clockRunning: true,
       skippedIds: [],
       flaggedIds: [],
       // A curated session is whole from the start, so it expects exactly what it
@@ -356,14 +568,15 @@ export const QBankProvider = ({ children }: { children: ReactNode }) => {
       expectedTotal: Math.max(questions.length, config?.expectedTotal ?? questions.length),
       generation: config?.generation ?? null,
     };
+    progressSeqRef.current = 0;
     sessionIdRef.current = newSession.sessionId;
     setSession(newSession);
-    saveSessionToStorage(newSession);
-  }, [saveSessionToStorage]);
+    return newSession.sessionId ?? "";
+  }, []);
 
   const submitAnswer = useCallback(
     async (selectedOption: OptionKey) => {
-      if (!session || !session.sessionId) return undefined;
+      if (!session || !session.sessionId || session.mode === "timed") return undefined;
       const question = session.questions[session.currentIndex];
       const time_taken_ms = Date.now() - session.questionStartedAt;
 
@@ -394,56 +607,95 @@ export const QBankProvider = ({ children }: { children: ReactNode }) => {
         time_taken_ms,
       };
 
-      // Merge the graded fields onto the cached question so the explanation
-      // panel (which reads displayQuestion.explanation / .correct_option) can
-      // render, and so a resumed/reviewed session shows the answered state.
-      const updatedQuestions = session.questions.map((q) =>
-        q.id === question.id
-          ? {
-              ...q,
-              correct_option: graded.correct_option,
-              explanation: graded.explanation,
-              teaching_point: graded.teaching_point,
-              distractor_explanations: graded.distractor_explanations ?? undefined,
-            }
-          : q
-      );
-
-      const updatedSession: SessionState = {
-        ...session,
-        questions: updatedQuestions,
-        answers: [...session.answers, answer],
-      };
-      setSession(updatedSession);
-      saveSessionToStorage(updatedSession);
+      // Merged through an updater: waves can land while the request is out, and
+      // writing back the render-time session would drop them.
+      setSession((prev) => {
+        if (!prev || prev.sessionId !== session.sessionId) return prev;
+        return {
+          ...prev,
+          questions: prev.questions.map((q) =>
+            q.id === question.id
+              ? {
+                  ...q,
+                  correct_option: graded.correct_option,
+                  explanation: graded.explanation,
+                  teaching_point: graded.teaching_point,
+                  distractor_explanations: graded.distractor_explanations ?? undefined,
+                }
+              : q
+          ),
+          answers: prev.answers.some((a) => a.question_id === question.id)
+            ? prev.answers
+            : [...prev.answers, answer],
+          skippedIds: prev.skippedIds.filter((id) => id !== question.id),
+        };
+      });
 
       return { is_correct: graded.is_correct, correct_option: graded.correct_option };
     },
-    [session, saveSessionToStorage]
+    [session]
   );
+
+  const selectTimedAnswer = useCallback(
+    (key: OptionKey) => {
+      const s = sessionRef.current;
+      if (!s?.sessionId || s.mode !== "timed") return;
+      const question = s.questions[s.currentIndex];
+      if (!question) return;
+      const sessionId = s.sessionId;
+      const timeMs = Date.now() - s.questionStartedAt;
+
+      setSession((prev) =>
+        prev && prev.sessionId === sessionId
+          ? {
+              ...prev,
+              selections: { ...prev.selections, [question.id]: key },
+              skippedIds: prev.skippedIds.filter((id) => id !== question.id),
+            }
+          : prev
+      );
+
+      const previous = timedWritesRef.current.get(question.id) ?? Promise.resolve();
+      const write = previous.then(async () => {
+        const { error } = await supabase.rpc("record_timed_answer", {
+          p_session: sessionId,
+          p_question: question.id,
+          p_selected: key,
+          p_time_ms: timeMs,
+        });
+        if (error) {
+          console.error("record_timed_answer failed:", error);
+          toast({
+            title: "Your answer was not saved",
+            description: "Check your connection and choose it again.",
+            variant: "destructive",
+          });
+        }
+      });
+      timedWritesRef.current.set(question.id, write);
+      void write.finally(() => {
+        if (timedWritesRef.current.get(question.id) === write) timedWritesRef.current.delete(question.id);
+      });
+    },
+    [toast]
+  );
+
+  const goToQuestion = useCallback((index: number) => {
+    setReviewIndex(null);
+    setSession((prev) => (prev ? moveTo(prev, index, Date.now()) : prev));
+  }, []);
 
   const nextQuestion = useCallback(() => {
     setReviewIndex(null);
-    setSession((prev) => {
-      if (!prev) return null;
-      // Clamped, because the end of the list is no longer a fixed thing. A
-      // generated set grows underneath the player, and an advance that raced a
-      // wave landing would otherwise leave currentIndex pointing past the array.
-      if (prev.currentIndex >= prev.questions.length - 1) return prev;
-      return { ...prev, currentIndex: prev.currentIndex + 1, questionStartedAt: Date.now() };
-    });
-    if (session) {
-      // Same clamp as above. This writes from the render-time session rather
-      // than the updater's, so without it a storage snapshot could name an
-      // index the question list does not have.
-      const nextIndex = Math.min(session.currentIndex + 1, session.questions.length - 1);
-      saveSessionToStorage({
-        ...session,
-        currentIndex: nextIndex,
-        questionStartedAt: Date.now(),
-      });
-    }
-  }, [session, saveSessionToStorage]);
+    // Clamped by moveTo: a generated set grows underneath the player, and an
+    // advance that raced a wave landing must not point past the array.
+    setSession((prev) => (prev ? moveTo(prev, prev.currentIndex + 1, Date.now()) : prev));
+  }, []);
+
+  const prevQuestion = useCallback(() => {
+    setReviewIndex(null);
+    setSession((prev) => (prev ? moveTo(prev, prev.currentIndex - 1, Date.now()) : prev));
+  }, []);
 
   // ── On-demand generation ──────────────────────────────────────────────────
   //
@@ -495,13 +747,13 @@ export const QBankProvider = ({ children }: { children: ReactNode }) => {
           if (added.length === 0) continue;
 
           setSession((prev) => {
-            if (!prev) return prev;
+            if (!prev || prev.sessionId !== sessionId) return prev;
             const seen = new Set(prev.questions.map((q) => q.id));
             const fresh = added.filter((q) => !seen.has(q.id));
             if (fresh.length === 0) return prev;
 
             const questions = [...prev.questions, ...fresh];
-            const next: SessionState = {
+            return {
               ...prev,
               questions,
               // A set can overshoot slightly when a wave's questions were
@@ -510,15 +762,13 @@ export const QBankProvider = ({ children }: { children: ReactNode }) => {
               // pretending they are not there.
               expectedTotal: Math.max(prev.expectedTotal, questions.length),
             };
-            saveSessionToStorage(next);
-            return next;
           });
         } while (claimRef.current.dirty);
       } finally {
         claimRef.current.running = false;
       }
     },
-    [saveSessionToStorage]
+    []
   );
 
   const stopGeneration = useCallback(() => {
@@ -555,6 +805,10 @@ export const QBankProvider = ({ children }: { children: ReactNode }) => {
       genRunningRef.current = true;
       const heldBackBase = heldBackRef.current;
       const heldBackItemsBase = heldBackItemsRef.current;
+      // The session this run writes for. A run outliving its session — the
+      // student saved and exited, or started another set — must not write its
+      // progress onto whatever session is current by then.
+      let ownSessionId: string | null = sessionIdRef.current;
 
       const meta: SessionGeneration = {
         generationId: cfg.generationId,
@@ -606,8 +860,12 @@ export const QBankProvider = ({ children }: { children: ReactNode }) => {
           // start_qbank_session to open the session — so it would be the one
           // question in the set that skipped the quality filter entirely.
           if (!event.id || event.blocked || event.agreed === false) return;
-          if (!sessionIdRef.current) await cfg.createSession?.(event.id, { ...meta });
-          else await claimGenerated(sessionIdRef.current, cfg.generationId);
+          if (!ownSessionId) {
+            await cfg.createSession?.(event.id, { ...meta });
+            ownSessionId = sessionIdRef.current;
+          } else {
+            await claimGenerated(ownSessionId, cfg.generationId);
+          }
         },
         onProgress: (progress) => {
           meta.system = progress.system ?? meta.system;
@@ -624,13 +882,12 @@ export const QBankProvider = ({ children }: { children: ReactNode }) => {
                 }
               : prev
           );
-          // Persisted after every wave, so a refresh resumes at the right index
-          // with the duplication guard intact.
+          // Recorded after every wave; the progress save carries it to the
+          // server, so a resume continues at the right index with the
+          // duplication guard intact.
           setSession((prev) => {
-            if (!prev?.generation) return prev;
-            const next: SessionState = { ...prev, generation: { ...meta } };
-            saveSessionToStorage(next);
-            return next;
+            if (!prev?.generation || prev.sessionId !== ownSessionId) return prev;
+            return { ...prev, generation: { ...meta } };
           });
         },
       });
@@ -639,8 +896,8 @@ export const QBankProvider = ({ children }: { children: ReactNode }) => {
         // One last reconcile before the set is declared finished. A question can
         // be committed in the moment the connection drops, and this is what
         // stops that question being paid for and never seen.
-        if (sessionIdRef.current) {
-          await claimGenerated(sessionIdRef.current, cfg.generationId);
+        if (ownSessionId) {
+          await claimGenerated(ownSessionId, cfg.generationId);
         }
 
         if (genAbortRef.current === controller) {
@@ -668,17 +925,15 @@ export const QBankProvider = ({ children }: { children: ReactNode }) => {
         // short, which is the difference between a short session and a stuck one.
         if (outcome.status !== "aborted") {
           setSession((prev) => {
-            if (!prev) return prev;
-            const next: SessionState = { ...prev, expectedTotal: prev.questions.length };
-            saveSessionToStorage(next);
-            return next;
+            if (!prev || prev.sessionId !== ownSessionId) return prev;
+            return { ...prev, expectedTotal: prev.questions.length };
           });
         }
 
         return outcome;
       });
     },
-    [claimGenerated, saveSessionToStorage]
+    [claimGenerated]
   );
 
   const startGeneratedSession = useCallback(
@@ -686,8 +941,9 @@ export const QBankProvider = ({ children }: { children: ReactNode }) => {
       topic: string,
       target: number,
       challenge: ChallengeLevel = "balanced",
-      examMode: ExamMode = "step1"
-    ) => {
+      examMode: ExamMode = "step1",
+      mode: PlayMode = "tutor"
+    ): Promise<string> => {
       stopGeneration();
       sessionIdRef.current = null;
       heldBackRef.current = 0;
@@ -700,8 +956,8 @@ export const QBankProvider = ({ children }: { children: ReactNode }) => {
       );
       const generationId = newGenerationId();
 
-      let resolveFirst: (() => void) | null = null;
-      const firstQuestion = new Promise<void>((resolve) => {
+      let resolveFirst: ((id: string) => void) | null = null;
+      const firstQuestion = new Promise<string>((resolve) => {
         resolveFirst = resolve;
       });
 
@@ -717,15 +973,16 @@ export const QBankProvider = ({ children }: { children: ReactNode }) => {
         challenge,
         examMode,
         createSession: async (questionId, meta) => {
-          await startSession({
+          const id = await startSession({
             domains: [],
             limit: 1,
             questionIds: [questionId],
             system: meta.systemName ?? undefined,
             expectedTotal: setTarget,
             generation: meta,
+            mode,
           });
-          resolveFirst?.();
+          resolveFirst?.(id);
           resolveFirst = null;
         },
       });
@@ -735,7 +992,7 @@ export const QBankProvider = ({ children }: { children: ReactNode }) => {
 
       // Resolves as soon as the set is playable. The remaining waves keep
       // running against the provider, which outlives the page that called this.
-      await Promise.race([
+      return Promise.race([
         firstQuestion,
         done.then((outcome) => {
           if (!sessionIdRef.current) {
@@ -743,6 +1000,7 @@ export const QBankProvider = ({ children }: { children: ReactNode }) => {
               outcome.error ?? "No questions could be generated for that topic."
             );
           }
+          return sessionIdRef.current;
         }),
       ]);
     },
@@ -755,26 +1013,24 @@ export const QBankProvider = ({ children }: { children: ReactNode }) => {
     if (genRunningRef.current) return;
 
     const meta = current.generation;
-    sessionIdRef.current = current.sessionId;
+    const sessionId = current.sessionId;
+    sessionIdRef.current = sessionId;
     genRunningRef.current = true;
 
     // Reconcile first, always. The set may already be complete — the questions
     // were written, the tab was closed before the client heard about them — in
     // which case there is nothing left to generate and paying for another wave
     // would be pure waste.
-    void claimGenerated(current.sessionId, meta.generationId).then(() => {
+    void claimGenerated(sessionId, meta.generationId).then(() => {
       genRunningRef.current = false;
       const after = sessionRef.current;
-      if (!after?.generation) return;
+      if (!after?.generation || after.sessionId !== sessionId) return;
 
       const remaining = meta.target - after.questions.length;
       if (remaining <= 0) {
-        setSession((prev) => {
-          if (!prev) return prev;
-          const next: SessionState = { ...prev, expectedTotal: prev.questions.length };
-          saveSessionToStorage(next);
-          return next;
-        });
+        setSession((prev) =>
+          prev && prev.sessionId === sessionId ? { ...prev, expectedTotal: prev.questions.length } : prev
+        );
         return;
       }
 
@@ -799,187 +1055,231 @@ export const QBankProvider = ({ children }: { children: ReactNode }) => {
       .catch(() => {
         genRunningRef.current = false;
       });
-  }, [beginGeneration, claimGenerated, saveSessionToStorage]);
+  }, [beginGeneration, claimGenerated]);
+
+  // ── Leaving and coming back ───────────────────────────────────────────────
+
+  const resumeSession = useCallback(
+    async (sessionId: string, opts?: { explicit?: boolean }): Promise<ResumeAttempt> => {
+      if (sessionRef.current?.sessionId === sessionId) return { outcome: "resumed" };
+      if (closedIdsRef.current.has(sessionId)) {
+        if (!opts?.explicit) return { outcome: "closed" };
+        closedIdsRef.current.delete(sessionId);
+      }
+
+      let data: unknown = null;
+      let errorMessage: string | undefined;
+      try {
+        const res = await supabase.rpc("resume_qbank_session", { p_session: sessionId });
+        data = res.data;
+        errorMessage = res.error?.message;
+        if (res.error) console.error("resume_qbank_session failed:", res.error);
+      } catch (err) {
+        errorMessage = err instanceof Error ? err.message : String(err);
+        console.error("resume_qbank_session threw:", err);
+      }
+      if (errorMessage || !data) {
+        if (errorMessage?.includes("session_not_active")) return { outcome: "completed" };
+        return { outcome: "failed", error: describeResumeError(errorMessage) };
+      }
+
+      // Switching sets: bank the one being left before it is replaced.
+      if (sessionRef.current?.sessionId) {
+        await Promise.allSettled([...timedWritesRef.current.values()]);
+        await flushProgress();
+        closedIdsRef.current.add(sessionRef.current.sessionId);
+      }
+      stopGeneration();
+      heldBackRef.current = 0;
+      heldBackItemsRef.current = [];
+      setGeneration(null);
+      setReviewIndex(null);
+
+      const restored = sessionFromResume(data as unknown as ResumeResult, Date.now());
+      progressSeqRef.current = restored.progressSeq;
+      sessionIdRef.current = restored.sessionId;
+      setSession(restored);
+      queryClient.invalidateQueries({ queryKey: ["qbank-unfinished"] });
+      return { outcome: "resumed" };
+    },
+    [flushProgress, queryClient, stopGeneration]
+  );
+
+  const saveAndExit = useCallback(async () => {
+    const s = sessionRef.current;
+    if (!s) {
+      navigate("/qbank");
+      return;
+    }
+    const stillWriting = genRunningRef.current || s.questions.length < s.expectedTotal;
+
+    // Bank the clock into the ref the save reads, rather than waiting for a
+    // render: the save below must carry every second the student spent.
+    sessionRef.current = pauseClock(s, Date.now());
+    stopGeneration();
+    await Promise.allSettled([...timedWritesRef.current.values()]);
+    await flushProgress();
+
+    if (s.sessionId) closedIdsRef.current.add(s.sessionId);
+    setSession(null);
+    setGeneration(null);
+    setReviewIndex(null);
+    sessionIdRef.current = null;
+    queryClient.invalidateQueries({ queryKey: ["qbank-unfinished"] });
+    navigate("/qbank");
+    toast({
+      title: "Saved — resume any time",
+      description: stillWriting
+        ? "The rest of the set will keep being written when you come back."
+        : "Pick it up from Unfinished sets, on any device.",
+    });
+  }, [flushProgress, navigate, queryClient, stopGeneration, toast]);
+
+  const discardSession = useCallback(
+    async (sessionId: string) => {
+      closedIdsRef.current.add(sessionId);
+      if (sessionRef.current?.sessionId === sessionId) {
+        stopGeneration();
+        setSession(null);
+        setGeneration(null);
+        sessionIdRef.current = null;
+      }
+      // Attempts first, as the history delete does. Flags and timed selections
+      // go with the session row (on delete cascade).
+      const { error: attemptsError } = await supabase.from("user_attempts").delete().eq("session_id", sessionId);
+      if (attemptsError) throw attemptsError;
+      const { error } = await supabase.from("qbank_sessions").delete().eq("id", sessionId);
+      if (error) throw error;
+      queryClient.invalidateQueries({ queryKey: ["qbank-unfinished"] });
+      queryClient.invalidateQueries({ queryKey: ["qbank-sessions"] });
+    },
+    [queryClient, stopGeneration]
+  );
 
   const endSession = useCallback(async () => {
-    if (!session) return null;
+    const s = sessionRef.current;
+    if (!s) return null;
 
     // The set stops growing the moment the student finishes with it. claim would
     // refuse a completed session anyway, but stopping here also stops us writing
     // questions nobody is going to sit.
     stopGeneration();
-    setLastGeneration(session.generation ?? null);
+    setLastGeneration(s.generation ?? null);
+    setLastMode(s.mode);
+    if (saveTimerRef.current !== null) {
+      window.clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
 
     const endedAt = Date.now();
-    const score = session.answers.filter((a) => a.is_correct).length;
-    const total = session.answers.length;
-    const totalTime = session.accumulatedMs + (endedAt - session.resumedAt);
+    const sessionId = s.sessionId;
+    if (sessionId) closedIdsRef.current.add(sessionId);
+    const totalTime = elapsedAt(s, endedAt);
 
-    const sessionId = session.sessionId;
+    // A timed choice made a moment ago may still be on its way. Grading must
+    // see it. The last snapshot carries flags the summary will read.
+    await Promise.allSettled([...timedWritesRef.current.values()]);
+    await flushProgress();
 
-    // Attempts were already recorded per-answer by submit_answer. Finalize the
-    // session server-side (status + real score/total/time) and record flags.
+    // Answers were recorded as they were given (tutor) or are graded now from
+    // the recorded selections (timed). Finalize server-side.
     if (sessionId) {
       try {
         const { error: endError } = await supabase.rpc("end_qbank_session", {
           p_session: sessionId,
         });
-        if (endError) {
-          console.error("end_qbank_session failed:", endError);
-        } else {
-          queryClient.invalidateQueries({ queryKey: ["qbank-sessions"] });
-
-          if (session.flaggedIds.length > 0 && user?.id) {
-            const flagRows = session.flaggedIds.map((questionId) => ({
-              user_id: user.id,
-              question_id: questionId,
-              session_id: sessionId,
-            }));
-            await supabase.from("flagged_questions").insert(flagRows);
-          }
-        }
+        if (endError) console.error("end_qbank_session failed:", endError);
       } catch (err) {
         console.error("Failed to finalize session:", err);
       }
+      queryClient.invalidateQueries({ queryKey: ["qbank-sessions"] });
+      queryClient.invalidateQueries({ queryKey: ["qbank-unfinished"] });
     }
 
-    const summary: SessionSummary = {
-      questions: session.questions.slice(0, total),
-      answers: session.answers,
-      totalTime,
-      score,
-      total,
-      flaggedIds: session.flaggedIds,
-    };
+    // Tutor mode can summarise from memory. A timed set has no grades on the
+    // client at all — the summary reads them from the server.
+    const summary: SessionSummary | null =
+      s.mode === "tutor"
+        ? {
+            questions: summaryQuestions(s),
+            answers: s.answers,
+            totalTime,
+            score: s.answers.filter((a) => a.is_correct).length,
+            total: s.answers.length,
+            flaggedIds: s.flaggedIds,
+            omitted: s.questions.length - s.answers.length,
+          }
+        : null;
 
     setLastSummary(summary);
-    clearSessionStorage();
     setSession(null);
     setReviewIndex(null);
+    sessionIdRef.current = null;
 
-    if (sessionId) {
-      navigate(`/qbank/summary?session=${sessionId}`);
-    } else {
-      navigate("/qbank/summary");
-    }
+    navigate(sessionId ? `/qbank/summary?session=${sessionId}` : "/qbank/summary");
 
     return summary;
-  }, [session, user, navigate, clearSessionStorage, queryClient, stopGeneration]);
+  }, [flushProgress, navigate, queryClient, stopGeneration]);
 
   const resetSession = useCallback(() => {
     stopGeneration();
-    clearSessionStorage();
     sessionIdRef.current = null;
     setGeneration(null);
     setSession(null);
-  }, [clearSessionStorage, stopGeneration]);
+  }, [stopGeneration]);
 
+  // ── Flags and marks ───────────────────────────────────────────────────────
+
+  /**
+   * Flags or unflags a question.
+   *
+   * Decided inside the state updater, from the state as it is at that moment —
+   * not from the last render, which a second tap can beat. Saving follows from
+   * the change (see the flag effect), through the ordered progress snapshot.
+   */
   const toggleFlag = useCallback(async (questionId: string) => {
+    setSession((prev) => (prev ? { ...prev, flaggedIds: toggleFlagged(prev.flaggedIds, questionId) } : prev));
+  }, []);
+
+  const toggleStrike = useCallback((questionId: string, key: OptionKey) => {
     setSession((prev) => {
       if (!prev) return prev;
-      const alreadyFlagged = prev.flaggedIds.includes(questionId);
-      const updated: SessionState = {
-        ...prev,
-        flaggedIds: alreadyFlagged
-          ? prev.flaggedIds.filter((id) => id !== questionId)
-          : [...prev.flaggedIds, questionId],
-      };
-
-      const firstUnanswered = updated.questions.findIndex(
-        (q) => !updated.answers.some((a) => a.question_id === q.id)
-      );
-      const persistIndex = firstUnanswered === -1 ? updated.currentIndex : firstUnanswered;
-
-      try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify({
-          sessionId: updated.sessionId,
-          questions: updated.questions,
-          currentIndex: persistIndex,
-          answers: updated.answers,
-          startedAt: updated.startedAt,
-          accumulatedMs: updated.accumulatedMs + (Date.now() - updated.resumedAt),
-          skippedIds: updated.skippedIds,
-          flaggedIds: updated.flaggedIds,
-          savedAt: Date.now(),
-        }));
-      } catch { /* fail silently */ }
-
-      return updated;
+      const current = prev.annotations.struck[questionId] ?? [];
+      const next = current.includes(key) ? current.filter((k) => k !== key) : [...current, key];
+      const struck = { ...prev.annotations.struck };
+      if (next.length > 0) struck[questionId] = next;
+      else delete struck[questionId];
+      return { ...prev, annotations: { ...prev.annotations, struck } };
     });
   }, []);
 
-  const skipQuestion = useCallback(() => {
+  const addHighlight = useCallback((questionId: string, range: HighlightRange, textLength: number) => {
     setSession((prev) => {
       if (!prev) return prev;
-      const currentQ = prev.questions[prev.currentIndex];
-      if (!currentQ) return prev;
-      if (prev.currentIndex >= prev.questions.length - 1) return prev;
-
-      const updated: SessionState = {
+      const merged = mergeHighlight(prev.annotations.highlights[questionId] ?? [], range, textLength);
+      return {
         ...prev,
-        currentIndex: prev.currentIndex + 1,
-        questionStartedAt: Date.now(),
-        skippedIds: prev.skippedIds.includes(currentQ.id)
-          ? prev.skippedIds
-          : [...prev.skippedIds, currentQ.id],
+        annotations: {
+          ...prev.annotations,
+          highlights: { ...prev.annotations.highlights, [questionId]: merged },
+        },
       };
-
-      saveSessionToStorage(updated);
-      return updated;
-    });
-  }, [saveSessionToStorage]);
-
-  const goToQuestion = useCallback((index: number) => {
-    setReviewIndex(null);
-    setSession((prev) => {
-      if (!prev) return prev;
-      if (index < 0 || index >= prev.questions.length) return prev;
-      if (index === prev.currentIndex) return prev;
-
-      const updated: SessionState = {
-        ...prev,
-        currentIndex: index,
-        questionStartedAt: Date.now(),
-      };
-
-      saveSessionToStorage(updated);
-      return updated;
-    });
-  }, [saveSessionToStorage]);
-
-  const snapshotTimer = useCallback(() => {
-    setSession((prev) => {
-      if (!prev) return prev;
-      const now = Date.now();
-      const banked = prev.accumulatedMs + (now - prev.resumedAt);
-      const updated: SessionState = {
-        ...prev,
-        accumulatedMs: banked,
-        resumedAt: now,
-      };
-
-      const firstUnanswered = updated.questions.findIndex(
-        (q) => !updated.answers.some((a) => a.question_id === q.id)
-      );
-      const persistIndex = firstUnanswered === -1 ? updated.currentIndex : firstUnanswered;
-
-      try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify({
-          sessionId: updated.sessionId,
-          questions: updated.questions,
-          currentIndex: persistIndex,
-          answers: updated.answers,
-          startedAt: updated.startedAt,
-          accumulatedMs: banked,
-          skippedIds: updated.skippedIds,
-          flaggedIds: updated.flaggedIds,
-          savedAt: now,
-        }));
-      } catch { /* fail silently */ }
-
-      return updated;
     });
   }, []);
+
+  const removeHighlight = useCallback((questionId: string, offset: number) => {
+    setSession((prev) => {
+      if (!prev) return prev;
+      const remaining = removeHighlightAt(prev.annotations.highlights[questionId] ?? [], offset);
+      const highlights = { ...prev.annotations.highlights };
+      if (remaining.length > 0) highlights[questionId] = remaining;
+      else delete highlights[questionId];
+      return { ...prev, annotations: { ...prev.annotations, highlights } };
+    });
+  }, []);
+
+  /** "Skip for now": move on, leaving this question marked as skipped. */
+  const skipQuestion = nextQuestion;
 
   const enterSummaryReview = useCallback((index: number) => {
     setReviewIndex(index);
@@ -989,15 +1289,23 @@ export const QBankProvider = ({ children }: { children: ReactNode }) => {
     setLastSummary(data);
   }, []);
 
-  const elapsedMs = session ? session.accumulatedMs + (Date.now() - session.resumedAt) : 0;
+  const getElapsedMs = useCallback(() => {
+    const s = sessionRef.current;
+    return s ? elapsedAt(s, Date.now()) : 0;
+  }, []);
+
+  const getTimeRemainingMs = useCallback(() => {
+    const s = sessionRef.current;
+    return s ? computeTimeRemaining(s, Date.now()) : null;
+  }, []);
 
   const unansweredCount = session
-    ? session.questions.filter(
-        (q) => !session.answers.find((a) => a.question_id === q.id)
-      ).length
+    ? session.questions.filter((q) => !hasResponse(session, q.id)).length
     : 0;
 
-  const currentQuestion = session ? session.questions[session.currentIndex] : null;
+  const endBlockStats = useMemo(() => (session ? computeEndBlockStats(session) : null), [session]);
+
+  const currentQuestion = session ? session.questions[session.currentIndex] ?? null : null;
 
   /**
    * The set is still owed questions. True only while a generated set is being
@@ -1009,10 +1317,9 @@ export const QBankProvider = ({ children }: { children: ReactNode }) => {
   /**
    * "Last" means nothing further is coming, not merely "last one loaded".
    *
-   * The player hangs Finish, the unanswered-questions warning and the hiding of
-   * Next off this. A generated set hands over question one while question two is
-   * still being written, so the naive reading would offer to end a twenty
-   * question session on question one.
+   * A generated set hands over question one while question two is still being
+   * written, so the naive reading would offer to end a twenty question session
+   * on question one.
    */
   const isLastQuestion = session
     ? session.currentIndex === session.questions.length - 1 && !isAwaitingMore
@@ -1020,31 +1327,19 @@ export const QBankProvider = ({ children }: { children: ReactNode }) => {
 
   // What the set will end with, so the counter reads "Q1 of 20" from the start
   // rather than climbing "of 1", "of 2" as questions land.
-  const plannedTotal = session
-    ? Math.max(session.questions.length, session.expectedTotal)
-    : 0;
+  const plannedTotal = session ? computePlannedTotal(session) : 0;
   const progress = session && plannedTotal > 0 ? session.currentIndex / plannedTotal : 0;
 
+  // Review is the read-only walk through a finished set from its summary. In a
+  // live set every question is simply navigated to.
   const isReviewing = reviewIndex !== null;
 
   const displayQuestion: Question | null = isReviewing
-    ? (
-        session?.questions[reviewIndex!] ??
-        lastSummary?.questions[reviewIndex!] ??
-        null
-      )
+    ? lastSummary?.questions[reviewIndex!] ?? null
     : currentQuestion;
 
   const displayAnswer: SessionAnswer | null = isReviewing
-    ? (
-        session?.answers.find(
-          (a) => a.question_id === session?.questions[reviewIndex!]?.id
-        ) ??
-        lastSummary?.answers.find(
-          (a) => a.question_id === lastSummary?.questions[reviewIndex!]?.id
-        ) ??
-        null
-      )
+    ? lastSummary?.answers.find((a) => a.question_id === lastSummary?.questions[reviewIndex!]?.id) ?? null
     : null;
 
   return (
@@ -1056,14 +1351,21 @@ export const QBankProvider = ({ children }: { children: ReactNode }) => {
         totalQuestions: plannedTotal,
         isLastQuestion,
         isAwaitingMore,
+        isWaitingForNext: waiting,
         generation,
         lastGeneration,
+        lastMode,
         progress,
         startGeneratedSession,
         stopGeneration,
         resumeGeneration,
+        resumeSession,
+        saveAndExit,
+        discardSession,
         submitAnswer,
+        selectTimedAnswer,
         nextQuestion,
+        prevQuestion,
         endSession,
         resetSession,
         lastSummary,
@@ -1074,15 +1376,19 @@ export const QBankProvider = ({ children }: { children: ReactNode }) => {
         displayAnswer,
         isReviewing,
         loadSummary,
-        restoreSession,
-        snapshotTimer,
-        elapsedMs,
+        getElapsedMs,
+        getTimeRemainingMs,
         flaggedIds,
         toggleFlag,
         isFlagLoading,
+        toggleStrike,
+        addHighlight,
+        removeHighlight,
         skipQuestion,
         goToQuestion,
         unansweredCount,
+        endBlockStats,
+        saveState,
       }}
     >
       {children}
