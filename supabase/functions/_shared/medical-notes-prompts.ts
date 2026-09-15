@@ -292,9 +292,12 @@ SOURCE COVERAGE — report honestly, after writing the rest of the sheet:
 - When in doubt, choose the weaker level. Over-claiming source backing is the worst possible error here —
   worse than under-claiming it.
 
-VISUAL — choose exactly one kind, after writing the sections above:
-- "flowchart": the default for a diagnostic algorithm, treatment ladder or decision pathway (most
-  clinicalApproach content). 3-12 nodes. Node labels come from your own sheet text. "decision" nodes
+VISUAL — choose exactly one kind, after writing the sections above. First name the topic's core
+teaching point: a physical STRUCTURE (anatomy, histology, a cross-section) → "image"; a PROCESS or
+DECISION → "flowchart"; genuinely comparable NUMBERS → "chart"; nothing a picture would add → "none".
+A flowchart that only lists anatomical parts in a row is never a substitute for an image.
+- "flowchart": for a diagnostic algorithm, treatment ladder or decision pathway (most
+  clinicalApproach content), or a causal mechanism with real branches. 3-12 nodes. Node labels come from your own sheet text. "decision" nodes
   are questions; label their outgoing edges (Yes / No, or the finding). Use "LR" only for a short linear sequence.
 - "chart": ONLY for numbers that are genuinely comparable and already stated in your sheet (e.g. lab
   values across conditions, staging thresholds, dose steps). 2-12 xLabels; every series has exactly
