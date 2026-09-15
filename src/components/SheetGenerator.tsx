@@ -44,6 +44,7 @@ import { PoweredByCorti } from "@/components/PoweredByCorti";
 import { useFlashcardDeck } from "@/hooks/use-flashcard-deck";
 import { parseFlashcardsFromOutput } from "@/lib/parse-flashcards";
 import { parsePartialSheet, parseSheetOutput } from "@/lib/parse-partial-sheet";
+import { canPlanVisual, planSheetVisual } from "@/lib/plan-sheet-visual";
 import {
   type GeneratedSheet,
   type SheetSource,
@@ -420,6 +421,11 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
   // Identifies the sheet on screen, so the section navigator resets its active
   // item per sheet rather than when `topic` happens to arrive mid-stream.
   const [generationId, setGenerationId] = useState(0);
+  // The sheet's visual is planned by a separate call once the stream ends
+  // (sheet-visual), so it is the same kind of visual whichever model wrote the
+  // sheet. The run counter discards a plan that lands after a newer sheet.
+  const [visualPlanning, setVisualPlanning] = useState(false);
+  const visualRunRef = useRef(0);
   // A prefilled topic (e.g. a Roadmap chip) must land in a visible textarea —
   // otherwise the picker renders and silently overwrites it on the next click.
   const [citationState, setCitationState] = useState<CitationState>("idle");
@@ -526,6 +532,8 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
     // toggle is flipped afterwards.
     const groundingRequested = useGrounding;
     setGenerationId((id) => id + 1);
+    visualRunRef.current += 1;
+    setVisualPlanning(false);
     setCitationState("idle");
     setCitations([]);
 
@@ -674,6 +682,7 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
         setSheet(groundedSheet);
         setLegacyOutput("");
         setSheetIncomplete(result.status === "partial");
+        planVisualFor(groundedSheet, activeNotes);
       } else if (revealedCount === 0) {
         // Not a JSON sheet at all — hand it to the legacy text renderer.
         setSheet(null);
@@ -719,6 +728,18 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
         variant: "destructive",
       });
     }
+  };
+
+  // Not awaited: the citation lookup after the stream runs alongside it.
+  const planVisualFor = (planned: GeneratedSheet, fallbackTopic: string) => {
+    if (!canPlanVisual(planned)) return;
+    const run = ++visualRunRef.current;
+    setVisualPlanning(true);
+    void planSheetVisual(planned, fallbackTopic).then((visual) => {
+      if (visualRunRef.current !== run) return;
+      setVisualPlanning(false);
+      if (visual) setSheet((prev) => (prev ? { ...prev, visual } : prev));
+    });
   };
 
   useEffect(() => {
@@ -824,6 +845,9 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
     setDeckSaved(false);
     setSheetIncomplete(false);
     setGenerationId((id) => id + 1);
+    // A saved sheet keeps whatever visual it was saved with; it is not re-planned.
+    visualRunRef.current += 1;
+    setVisualPlanning(false);
     setModelUsed(undefined);
     setCitationState("idle");
     setCitations([]);
@@ -1397,6 +1421,7 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
           citationIsLoggedIn={isLoggedIn}
           isStreaming={loading}
           streamedKeys={streamedKeys}
+          visualPlanning={visualPlanning}
         />
       )}
 

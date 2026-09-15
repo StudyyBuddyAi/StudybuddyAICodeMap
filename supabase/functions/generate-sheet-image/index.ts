@@ -1,12 +1,12 @@
 /**
  * generate-sheet-image — the opt-in image for a study sheet's `image` visual.
  *
- * Request:  POST { topic, subject }   (Authorization: Bearer <user JWT>)
+ * Request:  POST { topic, view }   view: gross | histology | cross-section | schematic   (Authorization: Bearer <user JWT>)
  * Response: 200 { url, provider, generatedAt, cached }
  *           401 invalid_token · 400 invalid_request · 429 quota_exceeded · 502 image_unavailable
  *
- * The image prompt is built HERE from topic + subject only — never taken from
- * the client. Those two strings are also the cache key, and images are shared
+ * The image prompt is built HERE from topic + view only — never taken from
+ * the client. Those two values are also the cache key, and images are shared
  * across students, so a client-supplied prompt would let one user plant any
  * picture under a key other students hit. This way an image cached under a
  * key can only ever be a drawing of that key.
@@ -17,7 +17,7 @@
  */
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.8";
-import { sheetImageCacheKey, sheetImageStoragePath } from "../_shared/sheet-image-key.ts";
+import { isImageView, sheetImageCacheKey, sheetImageStoragePath } from "../_shared/sheet-image-key.ts";
 import {
   buildImagePrompt,
   cleanField,
@@ -25,7 +25,6 @@ import {
   MAX_IMAGE_BYTES,
   SHEET_IMAGE_MODEL,
   sniffImageFormat,
-  SUBJECT_MAX,
   TOPIC_MAX,
 } from "../_shared/sheet-image-generate.ts";
 
@@ -72,10 +71,10 @@ serve(async (req: Request): Promise<Response> => {
     return json({ error: "invalid_request" }, 400);
   }
   const topic = cleanField(body.topic, TOPIC_MAX);
-  const subject = cleanField(body.subject, SUBJECT_MAX);
-  if (!topic || !subject) return json({ error: "invalid_request" }, 400);
+  const view = body.view;
+  if (!topic || !isImageView(view)) return json({ error: "invalid_request" }, 400);
 
-  const cacheKey = await sheetImageCacheKey(topic, subject);
+  const cacheKey = await sheetImageCacheKey(topic, view);
   const publicUrl = (path: string) => admin.storage.from(BUCKET).getPublicUrl(path).data.publicUrl;
 
   // ── Cache: free for everyone, no quota ──────────────────────────────────
@@ -136,7 +135,7 @@ serve(async (req: Request): Promise<Response> => {
   };
 
   // ── Generate → store → index ────────────────────────────────────────────
-  const prompt = buildImagePrompt(topic, subject);
+  const prompt = buildImagePrompt(topic, view);
   try {
     const { bytes, via } = await generateImage(OPENROUTER_API_KEY, prompt, log);
     if (bytes.length > MAX_IMAGE_BYTES) throw new Error(`image_too_large_${bytes.length}`);
@@ -161,7 +160,7 @@ serve(async (req: Request): Promise<Response> => {
         cache_key: cacheKey,
         storage_path: storagePath,
         topic,
-        subject,
+        image_view: view,
         prompt,
         model: SHEET_IMAGE_MODEL,
         created_by: user.id,

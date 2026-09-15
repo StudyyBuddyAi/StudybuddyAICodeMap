@@ -19,6 +19,7 @@ import {
   Sparkles,
   RotateCcw,
   X,
+  Loader2,
 } from "lucide-react";
 import CopyButton from "@/components/CopyButton";
 import FlashcardsSection from "@/components/FlashcardsSection";
@@ -27,6 +28,7 @@ import SectionSkeleton from "@/components/SectionSkeleton";
 import CitationBadgeList from "@/components/CitationBadgeList";
 import SheetVisual from "@/components/sheet-visual/SheetVisual";
 import type { SheetImageRequester } from "@/lib/generate-sheet-image";
+import { parseSheetVisual } from "@/lib/parse-sheet-visual";
 import { ModelCredit } from "@/components/PoweredByCorti";
 import { startTopProgress, finishTopProgress } from "@/components/TopProgressBar";
 import { parseModelUsed, type ModelUsed } from "@/lib/model-used";
@@ -188,6 +190,8 @@ interface OutputSectionProps {
   streamedKeys?: string[];
   /** Overrides the image edge function call — used by the dev preview page. */
   requestVisualImage?: SheetImageRequester;
+  /** True while sheet-visual is planning this sheet's visual (after the stream). */
+  visualPlanning?: boolean;
 }
 
 // ─── Legacy renderer helpers (kept for old text-blob sheets) ───────────────
@@ -992,6 +996,7 @@ const OutputSection = ({
   isStreaming = false,
   streamedKeys,
   requestVisualImage,
+  visualPlanning = false,
 }: OutputSectionProps) => {
   const navigate = useNavigate();
   const ref = useRef<HTMLDivElement>(null);
@@ -1366,11 +1371,11 @@ const OutputSection = ({
     ? JSON_SECTION_ORDER.find((key) => !isReady(key))
     : undefined;
 
-  // The visual is its own top-level key, written after the sections. It shows
-  // only once that key has closed AND the section it illustrates is on screen —
-  // a half-streamed node list would draw a different diagram a moment later.
-  const visual = sheet.visual;
-  const visualReady = !!visual && (!isStreaming || !!streamedKeys?.includes("visual"));
+  // The visual is planned after the sheet finishes (sheet-visual), so it never
+  // arrives mid-stream. Re-validated on every render: a saved sheet's JSON is
+  // trusted no more than a fresh response, and older shapes are dropped.
+  const visual = parseSheetVisual(sheet.visual);
+  const visualReady = !!visual && !isStreaming;
 
   // Group active enhancements by anchor so they can be injected inline.
   // Open ones render as inline blocks; collapsed ones render as golden
@@ -1451,9 +1456,22 @@ const OutputSection = ({
           input={inputText || ""}
           output={output}
           modeInfo={modeInfo}
-          disabled={isStreaming}
+          // Held until the visual is planned, so a saved sheet always includes it.
+          disabled={isStreaming || visualPlanning}
         />
       </div>
+
+      {visualPlanning && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="animate-fade-in flex items-center gap-2"
+          style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--fg-muted)", letterSpacing: "0.02em" }}
+        >
+          <Loader2 className="h-3 w-3 animate-spin" style={{ color: "var(--accent)" }} />
+          Adding a visual to this sheet…
+        </div>
+      )}
 
       {JSON_SECTION_ORDER.map((key, idx) => {
         const config = JSON_SECTION_CONFIG[key];

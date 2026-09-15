@@ -83,6 +83,7 @@ const SheetVisual = ({ visual, topic, visualImage, onImageResolved, isPro, reque
       {visual.kind === "image" ? (
         <ImageVisual
           topic={topic}
+          view={visual.imageView}
           subject={visual.imageSubject}
           alt={visual.imageAlt}
           visualImage={visualImage}

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { ImageIcon, Loader2, RotateCcw } from "lucide-react";
-import type { VisualImageResult } from "@/types/generated-sheet";
+import type { ImageView, VisualImageResult } from "@/types/generated-sheet";
 import {
   isTrustedVisualImageUrl,
   requestSheetImage,
@@ -10,6 +10,9 @@ import {
 
 export interface ImageVisualProps {
   topic: string;
+  /** Sent with the topic — the image request and its cache key. */
+  view: ImageView;
+  /** Display only. */
   subject: string;
   alt: string;
   visualImage?: VisualImageResult;
@@ -54,6 +57,7 @@ const PANEL_STYLE: React.CSSProperties = {
  */
 const ImageVisual = ({
   topic,
+  view,
   subject,
   alt,
   visualImage,
@@ -79,7 +83,7 @@ const ImageVisual = ({
     setImgFailed(false);
     setStatus({ kind: "loading", startedAt: Date.now() });
     try {
-      const result = await requestImage({ topic, subject });
+      const result = await requestImage({ topic, view });
       setStatus({ kind: "done", result });
       onResolved?.(result);
     } catch (err) {

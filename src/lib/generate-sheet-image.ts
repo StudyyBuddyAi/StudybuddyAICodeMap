@@ -1,5 +1,5 @@
 import { supabase } from "@/integrations/supabase/client";
-import type { VisualImageResult } from "@/types/generated-sheet";
+import type { ImageView, VisualImageResult } from "@/types/generated-sheet";
 
 // VITE_LOCAL_FUNCTIONS=1: the dev server's stand-in, which stores images under
 // .local/ and serves them itself (scripts/local-functions/vite-plugin.ts).
@@ -21,9 +21,9 @@ export class SheetImageError extends Error {
 }
 
 export interface SheetImageRequest {
-  /** Sheet topic — with `subject`, the whole request and the shared cache key. */
+  /** Sheet topic — with `view`, the whole request and the shared cache key. */
   topic: string;
-  subject: string;
+  view: ImageView;
 }
 
 export type SheetImageRequester = (req: SheetImageRequest) => Promise<VisualImageResult>;
@@ -33,7 +33,7 @@ export type SheetImageRequester = (req: SheetImageRequest) => Promise<VisualImag
  * image (possibly a cached one another student already generated); rejects with
  * a SheetImageError the UI can phrase without breaking the sheet.
  */
-export const requestSheetImage: SheetImageRequester = async ({ topic, subject }) => {
+export const requestSheetImage: SheetImageRequester = async ({ topic, view }) => {
   const {
     data: { session },
   } = await supabase.auth.getSession();
@@ -46,7 +46,7 @@ export const requestSheetImage: SheetImageRequester = async ({ topic, subject })
         "Content-Type": "application/json",
         Authorization: `Bearer ${session?.access_token ?? ""}`,
       },
-      body: JSON.stringify({ topic: topic.slice(0, 120), subject }),
+      body: JSON.stringify({ topic: topic.slice(0, 120), view }),
     });
   } catch {
     throw new SheetImageError("unavailable");

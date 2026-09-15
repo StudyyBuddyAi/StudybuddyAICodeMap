@@ -70,9 +70,14 @@ export interface SourceCoverage {
 }
 
 // ── Visual aid ─────────────────────────────────────────────────────────────
-// One optional visual per sheet, chosen by the sheet-writing model. Flowcharts
-// and charts are rendered straight from this data; an image is only a plan
-// (a prompt) until the student asks for it — see supabase/functions/generate-sheet-image.
+// One optional visual per sheet, planned after the sheet is written by the
+// sheet-visual edge function (supabase/functions/_shared/sheet-visual-plan.ts)
+// — never by the model that wrote the sheet. Flowcharts and charts render
+// straight from this data; an image is only a plan until the student asks for
+// it — see supabase/functions/generate-sheet-image.
+
+/** Mirrors IMAGE_VIEWS in supabase/functions/_shared/sheet-image-key.ts. */
+export type ImageView = "gross" | "histology" | "cross-section" | "schematic";
 
 /** Sections a visual may sit under. Flashcards and the reference note never get one. */
 export type VisualPlacement = Exclude<SheetSectionKey, "flashcards">;
@@ -127,10 +132,10 @@ export type VisualSpec =
   | (VisualSpecBase & { kind: "chart"; chart: VisualChartSpec })
   | (VisualSpecBase & {
       kind: "image";
-      /** What to draw: the structure and the view ("coronal section of the kidney").
-       *  With the sheet topic this is both the whole image request and its cache
-       *  key — the server builds the prompt from these alone, so an image cached
-       *  under a key can only ever be a drawing of that key. */
+      /** How it's drawn. With the sheet topic this is the whole image request and
+       *  its cache key — the server builds the prompt from these alone. */
+      imageView: ImageView;
+      /** Display only ("brachial plexus — schematic"); never sent to the image model. */
       imageSubject: string;
       /** Alt text, and the caption fallback. */
       imageAlt: string;

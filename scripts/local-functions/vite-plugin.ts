@@ -27,6 +27,11 @@
  *   CORTI_*              already in .env
  *   LOCAL_NOTES_WRITER   gpt-oss | haiku | corti — forces one writer for every
  *                        request; unset = production routing
+ *
+ * Per request, an `x-local-writer` header does the same for one call — used by
+ * scripts/notes-eval/visual-stability.ts to compare writers without a restart.
+ *
+ * POST /__local-fns/sheet-visual runs the real planner (_shared/sheet-visual-plan.ts).
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -83,10 +88,11 @@ interface Route {
  * is routed as free.
  */
 async function routeWriter(env: Env, req: IncomingMessage, body: Record<string, unknown>): Promise<Route | null> {
-  const forced = env.LOCAL_NOTES_WRITER as Writer | undefined;
+  const header = req.headers["x-local-writer"];
+  const forced = ((typeof header === "string" ? header : "") || env.LOCAL_NOTES_WRITER) as Writer | undefined;
   if (forced === "corti" || forced === "gpt-oss" || forced === "haiku") {
     const available = forced === "corti" ? hasCorti(env) : hasOpenRouter(env);
-    return available ? { writer: forced, isPremium: forced === "corti", reason: "LOCAL_NOTES_WRITER" } : null;
+    return available ? { writer: forced, isPremium: forced === "corti", reason: header ? "x-local-writer" : "LOCAL_NOTES_WRITER" } : null;
   }
 
   const token = (req.headers.authorization ?? "").replace(/^Bearer\s+/i, "").trim();
@@ -161,22 +167,6 @@ function sendJson(res: ServerResponse, status: number, body: unknown) {
   res.statusCode = status;
   res.setHeader("Content-Type", "application/json");
   res.end(JSON.stringify(body));
-}
-
-/** Pulls the visual out of the finished response, for the terminal summary only. */
-function describeVisual(text: string): string {
-  try {
-    const start = text.indexOf("{");
-    const parsed = JSON.parse(text.slice(start, text.lastIndexOf("}") + 1));
-    const v = parsed?.visual;
-    if (!v || typeof v !== "object") return "visual: (missing)";
-    if (v.kind === "flowchart") return `visual: flowchart, ${v.flowchart?.nodes?.length ?? 0} nodes → ${v.placement}`;
-    if (v.kind === "chart") return `visual: ${v.chart?.chartType ?? "?"} chart, ${v.chart?.series?.length ?? 0} series → ${v.placement}`;
-    if (v.kind === "image") return `visual: image "${v.imageSubject}" → ${v.placement}`;
-    return `visual: ${v.kind}`;
-  } catch {
-    return "visual: (response was not plain JSON — the app's repair parser may still read it)";
-  }
 }
 
 async function handleMedicalNotes(server: ViteDevServer, env: Env, req: IncomingMessage, res: ServerResponse) {
@@ -333,7 +323,7 @@ async function handleMedicalNotes(server: ViteDevServer, env: Env, req: Incoming
   }
   res.write("data: [DONE]\n\n");
   res.end();
-  say(`medical-notes ${mode} done in ${((Date.now() - startedAt) / 1000).toFixed(1)}s${mode === "sheet" ? ` · ${describeVisual(assistantText)}` : ""}`);
+  say(`medical-notes ${mode} done in ${((Date.now() - startedAt) / 1000).toFixed(1)}s · ${assistantText.length} chars`);
 }
 
 async function handleSheetImage(server: ViteDevServer, env: Env, root: string, req: IncomingMessage, res: ServerResponse) {
@@ -342,10 +332,10 @@ async function handleSheetImage(server: ViteDevServer, env: Env, root: string, r
   const keys = await server.ssrLoadModule(`${SHARED}/sheet-image-key.ts`);
 
   const topic = gen.cleanField(body.topic, gen.TOPIC_MAX);
-  const subject = gen.cleanField(body.subject, gen.SUBJECT_MAX);
-  if (!topic || !subject) return sendJson(res, 400, { error: "invalid_request" });
+  const view = body.view;
+  if (!topic || !keys.isImageView(view)) return sendJson(res, 400, { error: "invalid_request" });
 
-  const cacheKey: string = await keys.sheetImageCacheKey(topic, subject);
+  const cacheKey: string = await keys.sheetImageCacheKey(topic, view);
   const dir = path.join(root, ".local", "sheet-visuals");
   const urlFor = (rel: string) => `${PREFIX}/sheet-visuals/${rel}`;
 
@@ -353,7 +343,7 @@ async function handleSheetImage(server: ViteDevServer, env: Env, root: string, r
     const rel: string = keys.sheetImageStoragePath(cacheKey, ext);
     const file = path.join(dir, rel);
     if (fs.existsSync(file)) {
-      say(`image cache hit · "${subject}" (${topic})`);
+      say(`image cache hit · ${view} (${topic})`);
       return sendJson(res, 200, {
         url: urlFor(rel),
         provider: `openrouter/${gen.SHEET_IMAGE_MODEL}`,
@@ -368,9 +358,9 @@ async function handleSheetImage(server: ViteDevServer, env: Env, root: string, r
     return sendJson(res, 502, { error: "image_unavailable" });
   }
 
-  const prompt: string = gen.buildImagePrompt(topic, subject);
+  const prompt: string = gen.buildImagePrompt(topic, view);
   const startedAt = Date.now();
-  say(`image generating · "${subject}" (${topic}) · ${gen.SHEET_IMAGE_MODEL}`);
+  say(`image generating · ${view} (${topic}) · ${gen.SHEET_IMAGE_MODEL}`);
   try {
     const { bytes, via } = await gen.generateImage(env.OPENROUTER_API_KEY, prompt, (event: string, fields?: Record<string, unknown>) =>
       say(`image ${event} ${JSON.stringify(fields ?? {})}`)
@@ -384,7 +374,7 @@ async function handleSheetImage(server: ViteDevServer, env: Env, root: string, r
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.writeFileSync(file, bytes);
     // Stands in for the sheet_visual_images row.
-    fs.writeFileSync(`${file}.json`, JSON.stringify({ cacheKey, topic, subject, prompt, model: gen.SHEET_IMAGE_MODEL, via }, null, 2));
+    fs.writeFileSync(`${file}.json`, JSON.stringify({ cacheKey, topic, view, prompt, model: gen.SHEET_IMAGE_MODEL, via }, null, 2));
 
     say(`image done in ${((Date.now() - startedAt) / 1000).toFixed(1)}s via ${via} endpoint · ${(bytes.length / 1024).toFixed(0)} KB · ${path.relative(root, file)}`);
     return sendJson(res, 200, {
@@ -396,6 +386,26 @@ async function handleSheetImage(server: ViteDevServer, env: Env, root: string, r
   } catch (err) {
     say(`image FAILED after ${((Date.now() - startedAt) / 1000).toFixed(1)}s — ${err instanceof Error ? err.message : String(err)}`);
     return sendJson(res, 502, { error: "image_unavailable" });
+  }
+}
+
+async function handleSheetVisual(server: ViteDevServer, env: Env, req: IncomingMessage, res: ServerResponse) {
+  const plan = await server.ssrLoadModule(`${SHARED}/sheet-visual-plan.ts`);
+  const input = plan.cleanPlanInput(await readJson(req));
+  if (!input) return sendJson(res, 400, { error: "invalid_request" });
+  if (!hasOpenRouter(env)) {
+    say("sheet-visual: add OPENROUTER_API_KEY to .env.local to plan visuals.");
+    return sendJson(res, 502, { error: "planner_unavailable" });
+  }
+  const startedAt = Date.now();
+  try {
+    const result = plan.finalizeVisualPlan(await plan.requestVisualPlan(env.OPENROUTER_API_KEY, input), input);
+    const kind = result.visual ? `${result.visual.kind} → ${result.visual.placement}` : "none";
+    say(`sheet-visual "${input.topic}" · ${result.teachingPoint} → ${kind} (${result.reason}) · ${((Date.now() - startedAt) / 1000).toFixed(1)}s`);
+    return sendJson(res, 200, result);
+  } catch (err) {
+    say(`sheet-visual FAILED after ${((Date.now() - startedAt) / 1000).toFixed(1)}s — ${err instanceof Error ? err.message : String(err)}`);
+    return sendJson(res, 502, { error: "planner_unavailable" });
   }
 }
 
@@ -443,6 +453,7 @@ export function localFunctions(): Plugin {
         }
         try {
           if (req.method === "POST" && pathname === "/medical-notes") return await handleMedicalNotes(server, env, req, res);
+          if (req.method === "POST" && pathname === "/sheet-visual") return await handleSheetVisual(server, env, req, res);
           if (req.method === "POST" && pathname === "/generate-sheet-image") return await handleSheetImage(server, env, root, req, res);
           if (req.method === "GET" && pathname.startsWith("/sheet-visuals/")) {
             return serveImage(root, pathname.slice("/sheet-visuals/".length), res);

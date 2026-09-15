@@ -7,14 +7,14 @@
  * generation locally exercises exactly what production sends.
  */
 
+import type { ImageView } from "./sheet-image-key.ts";
+
 const OPENROUTER_IMAGES_URL = "https://openrouter.ai/api/v1/images";
 const OPENROUTER_CHAT_URL = "https://openrouter.ai/api/v1/chat/completions";
 /** "Nano Banana 2". Closest to expert references in published anatomical-fidelity comparisons; still imperfect. */
 export const SHEET_IMAGE_MODEL = "google/gemini-3.1-flash-image";
 
 export const TOPIC_MAX = 120;
-/** Mirrors VISUAL_LIMITS.imageSubjectMax in src/lib/parse-sheet-visual.ts. */
-export const SUBJECT_MAX = 100;
 export const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 const GENERATION_TIMEOUT_MS = 90_000;
 
@@ -35,14 +35,23 @@ export function cleanField(v: unknown, max: number): string | null {
   return text && text.length <= max ? text : null;
 }
 
-export function buildImagePrompt(topic: string, subject: string): string {
+const VIEW_BRIEF: Record<ImageView, string> = {
+  gross: "a gross anatomy illustration in the standard textbook orientation",
+  histology: "a histology illustration as seen under a light microscope, in H&E-style pinks and purples",
+  "cross-section": "a labeled cross-section in the standard textbook plane",
+  schematic: "a clean schematic diagram that shows how the parts connect and branch",
+};
+
+/** Built from the cache key's own parts only — see sheet-image-key.ts. */
+export function buildImagePrompt(topic: string, view: ImageView): string {
   return `Create an accurate, labeled medical textbook illustration.
 
-Subject: ${subject}
-Context: a study sheet on ${topic}
+Subject: the key structures of ${topic}
+Drawn as: ${VIEW_BRIEF[view]}
 
 Requirements:
-- Draw the anatomically correct structures that define the subject, in the view it names; if no view is named, use the standard textbook view.
+- Draw the anatomically correct structures a medical student studies for this topic.
+- Include each structure exactly once; never repeat a label.
 - Label the key structures a medical student is examined on, using thin leader lines and short, correctly spelled English labels in a clean sans-serif font.
 - Flat scientific illustration style on a plain white background, restrained colors, accurate proportions and spatial relationships.
 - No title text, no decorative elements, no photographs, no watermark, no faces, no gore.`;

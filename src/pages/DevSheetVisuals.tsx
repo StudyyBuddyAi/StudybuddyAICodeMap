@@ -104,7 +104,8 @@ const IMAGE_FIXTURE: VisualSpec = {
   kind: "image",
   title: "Heart chambers and valves",
   placement: "overview",
-  imageSubject: "coronal section of the heart showing chambers and valves",
+  imageView: "cross-section",
+  imageSubject: "heart chambers and valves — cross-section",
   imageAlt: "Coronal section of the heart with the four chambers and four valves labeled.",
 };
 
@@ -112,11 +113,11 @@ type MockOutcome = "success" | "quota" | "failure";
 
 /** Stands in for the edge function: a placeholder drawing after a realistic delay. */
 function mockRequester(outcome: MockOutcome): SheetImageRequester {
-  return async ({ subject }) => {
+  return async ({ topic, view }) => {
     await new Promise((r) => setTimeout(r, 3000));
     if (outcome === "quota") throw new SheetImageError("quota_exceeded", 3);
     if (outcome === "failure") throw new SheetImageError("unavailable");
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="800" height="600"><rect width="800" height="600" fill="#fff"/><rect x="40" y="40" width="720" height="520" fill="none" stroke="#CBC3AE" stroke-dasharray="8 6"/><text x="400" y="290" font-family="sans-serif" font-size="22" text-anchor="middle" fill="#545042">Mock image — edge function not called</text><text x="400" y="325" font-family="sans-serif" font-size="16" text-anchor="middle" fill="#7C7461">${subject.replace(/[<&>]/g, "")}</text></svg>`;
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="800" height="600"><rect width="800" height="600" fill="#fff"/><rect x="40" y="40" width="720" height="520" fill="none" stroke="#CBC3AE" stroke-dasharray="8 6"/><text x="400" y="290" font-family="sans-serif" font-size="22" text-anchor="middle" fill="#545042">Mock image — edge function not called</text><text x="400" y="325" font-family="sans-serif" font-size="16" text-anchor="middle" fill="#7C7461">${`${topic} · ${view}`.replace(/[<&>]/g, "")}</text></svg>`;
     return {
       // Not base64: btoa() throws on the non-Latin-1 characters in the text.
       url: `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`,
@@ -126,7 +127,7 @@ function mockRequester(outcome: MockOutcome): SheetImageRequester {
   };
 }
 
-/** The key order the model writes in — `visual` closes when `sourceCoverage` starts. */
+/** The key order the model writes in. The visual is planned after the stream, so it appears once all of these close. */
 const STREAM_ORDER = [
   "topicEmoji",
   "topic",
@@ -137,7 +138,6 @@ const STREAM_ORDER = [
   "examTraps",
   "flashcards",
   "referenceNote",
-  "visual",
 ];
 
 const DevSheetVisuals = () => {

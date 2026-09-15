@@ -36,12 +36,12 @@ values (
 on conflict (id) do nothing;
 
 create table if not exists public.sheet_visual_images (
-  -- sha256 of version + normalized topic + normalized subject
+  -- sha256 of version + normalized topic + image_view
   -- (supabase/functions/_shared/sheet-image-key.ts)
   cache_key text primary key,
   storage_path text not null,
   topic text not null,
-  subject text not null,
+  image_view text not null check (image_view in ('gross', 'histology', 'cross-section', 'schematic')),
   prompt text not null,
   model text not null,
   created_by uuid references auth.users (id) on delete set null,

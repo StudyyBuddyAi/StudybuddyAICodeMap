@@ -1,4 +1,5 @@
 import type {
+  ImageView,
   FlowchartEdge,
   FlowchartNode,
   FlowchartNodeShape,
@@ -10,7 +11,8 @@ import type {
 } from "@/types/generated-sheet";
 
 /**
- * Validating the model's `visual` plan.
+ * Validating a sheet's `visual` — the sheet-visual response, and any visual
+ * read back from a saved sheet (stored JSON is never trusted as-is).
  *
  * Fails closed: anything that doesn't describe a renderable visual is dropped
  * whole (returns undefined) rather than handed to the renderer half-formed.
@@ -28,7 +30,6 @@ export const VISUAL_LIMITS = {
   xLabelsMin: 2,
   xLabelsMax: 12,
   seriesMax: 4,
-  /** Mirrored in supabase/functions/generate-sheet-image — the server rejects longer. */
   imageSubjectMax: 100,
 } as const;
 
@@ -46,6 +47,8 @@ const DEFAULT_PLACEMENT: Record<VisualSpec["kind"], VisualPlacement> = {
   chart: "keyPoints",
   image: "overview",
 };
+
+const IMAGE_VIEWS: readonly ImageView[] = ["gross", "histology", "cross-section", "schematic"];
 
 const SHAPES: readonly FlowchartNodeShape[] = ["start", "step", "decision", "end"];
 
@@ -151,10 +154,12 @@ export function parseSheetVisual(v: unknown): VisualSpec | undefined {
     return chart ? { kind, title, placement, chart } : undefined;
   }
 
-  // No fallback to the title: the subject is the image request itself, and a
-  // caption is not a precise enough description to draw from.
-  const imageSubject = cleanText(v.imageSubject, VISUAL_LIMITS.imageSubjectMax);
+  // The view is half of the image request, so without a known one there is
+  // nothing to ask for. Visuals saved before views existed are dropped here.
+  if (!IMAGE_VIEWS.includes(v.imageView as ImageView)) return undefined;
+  const imageView = v.imageView as ImageView;
+  const imageSubject = cleanText(v.imageSubject, VISUAL_LIMITS.imageSubjectMax) || title;
   if (!imageSubject) return undefined;
   const imageAlt = cleanText(v.imageAlt, 200) || imageSubject;
-  return { kind, title: title || imageSubject, placement, imageSubject, imageAlt };
+  return { kind, title: title || imageSubject, placement, imageView, imageSubject, imageAlt };
 }
