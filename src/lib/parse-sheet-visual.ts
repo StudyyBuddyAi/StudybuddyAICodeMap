@@ -28,8 +28,8 @@ export const VISUAL_LIMITS = {
   xLabelsMin: 2,
   xLabelsMax: 12,
   seriesMax: 4,
-  imagePromptMax: 1200,
-  imageSubjectMax: 80,
+  /** Mirrored in supabase/functions/generate-sheet-image — the server rejects longer. */
+  imageSubjectMax: 100,
 } as const;
 
 const PLACEMENTS: readonly VisualPlacement[] = [
@@ -151,10 +151,10 @@ export function parseSheetVisual(v: unknown): VisualSpec | undefined {
     return chart ? { kind, title, placement, chart } : undefined;
   }
 
-  const imagePrompt = typeof v.imagePrompt === "string" ? v.imagePrompt.trim() : "";
-  if (!imagePrompt || imagePrompt.length > VISUAL_LIMITS.imagePromptMax) return undefined;
-  const imageAlt = cleanText(v.imageAlt, 200) || title;
-  const imageSubject = cleanText(v.imageSubject, VISUAL_LIMITS.imageSubjectMax) || title;
-  if (!imageAlt || !imageSubject) return undefined;
-  return { kind, title: title || imageAlt, placement, imagePrompt, imageAlt, imageSubject };
+  // No fallback to the title: the subject is the image request itself, and a
+  // caption is not a precise enough description to draw from.
+  const imageSubject = cleanText(v.imageSubject, VISUAL_LIMITS.imageSubjectMax);
+  if (!imageSubject) return undefined;
+  const imageAlt = cleanText(v.imageAlt, 200) || imageSubject;
+  return { kind, title: title || imageSubject, placement, imageSubject, imageAlt };
 }

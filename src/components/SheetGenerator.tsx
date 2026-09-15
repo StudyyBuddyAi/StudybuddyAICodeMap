@@ -745,6 +745,23 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
       window.removeEventListener("studybuddy:enhancement-saved", handleEnhancementSaved);
   }, []);
 
+  // A generated illustration joins the sheet so Save persists it. Matched on
+  // the subject: an image that lands after a different sheet replaced this one
+  // must not attach itself to the new sheet.
+  useEffect(() => {
+    function handleVisualImageSaved(e: Event) {
+      const { result, subject } = (e as CustomEvent).detail ?? {};
+      if (!result || !subject) return;
+      setSheet((prev) => {
+        if (prev?.visual?.kind !== "image" || prev.visual.imageSubject !== subject) return prev;
+        return { ...prev, visualImage: result };
+      });
+    }
+    window.addEventListener("studybuddy:visual-image-saved", handleVisualImageSaved);
+    return () =>
+      window.removeEventListener("studybuddy:visual-image-saved", handleVisualImageSaved);
+  }, []);
+
   // Persona buttons are the generation trigger — there is no separate submit.
   const generateWithPersona = (p: Persona) => {
     setPersona(p);

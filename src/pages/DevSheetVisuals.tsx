@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import DashboardLayout from "@/components/dashboard/DashboardLayout";
 import OutputSection from "@/components/OutputSection";
 import type { GeneratedSheet, VisualSpec } from "@/types/generated-sheet";
+import { SheetImageError, type SheetImageRequester } from "@/lib/generate-sheet-image";
 
 /**
  * DEV ONLY — /dev/sheet-visuals. Never routed in a production build (see App.tsx).
@@ -99,6 +100,32 @@ const FIXTURES: Record<string, VisualSpec> = {
   },
 };
 
+const IMAGE_FIXTURE: VisualSpec = {
+  kind: "image",
+  title: "Heart chambers and valves",
+  placement: "overview",
+  imageSubject: "coronal section of the heart showing chambers and valves",
+  imageAlt: "Coronal section of the heart with the four chambers and four valves labeled.",
+};
+
+type MockOutcome = "success" | "quota" | "failure";
+
+/** Stands in for the edge function: a placeholder drawing after a realistic delay. */
+function mockRequester(outcome: MockOutcome): SheetImageRequester {
+  return async ({ subject }) => {
+    await new Promise((r) => setTimeout(r, 3000));
+    if (outcome === "quota") throw new SheetImageError("quota_exceeded", 3);
+    if (outcome === "failure") throw new SheetImageError("unavailable");
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="800" height="600"><rect width="800" height="600" fill="#fff"/><rect x="40" y="40" width="720" height="520" fill="none" stroke="#CBC3AE" stroke-dasharray="8 6"/><text x="400" y="290" font-family="sans-serif" font-size="22" text-anchor="middle" fill="#545042">Mock image — edge function not called</text><text x="400" y="325" font-family="sans-serif" font-size="16" text-anchor="middle" fill="#7C7461">${subject.replace(/[<&>]/g, "")}</text></svg>`;
+    return {
+      // Not base64: btoa() throws on the non-Latin-1 characters in the text.
+      url: `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`,
+      provider: "mock",
+      generatedAt: new Date().toISOString(),
+    };
+  };
+}
+
 /** The key order the model writes in — `visual` closes when `sourceCoverage` starts. */
 const STREAM_ORDER = [
   "topicEmoji",
@@ -116,9 +143,13 @@ const STREAM_ORDER = [
 const DevSheetVisuals = () => {
   const [fixture, setFixture] = useState<string>("flowchart");
   const [streamedKeys, setStreamedKeys] = useState<string[] | null>(null);
+  const [imageOutcome, setImageOutcome] = useState<MockOutcome>("success");
   const timer = useRef<number | null>(null);
 
-  const sheet: GeneratedSheet = { ...BASE_SHEET, visual: FIXTURES[fixture] };
+  const sheet: GeneratedSheet = {
+    ...BASE_SHEET,
+    visual: fixture === "image" ? IMAGE_FIXTURE : FIXTURES[fixture],
+  };
 
   const simulateStream = () => {
     if (timer.current) window.clearInterval(timer.current);
@@ -148,7 +179,7 @@ const DevSheetVisuals = () => {
             Dev preview · sheet visuals
           </p>
           <div className="flex flex-wrap gap-2">
-            {Object.keys(FIXTURES).map((name) => (
+            {[...Object.keys(FIXTURES), "image"].map((name) => (
               <button
                 key={name}
                 type="button"
@@ -160,6 +191,18 @@ const DevSheetVisuals = () => {
                 {name}
               </button>
             ))}
+            {fixture === "image" && (
+              <select
+                aria-label="Mock image outcome"
+                value={imageOutcome}
+                onChange={(e) => setImageOutcome(e.target.value as MockOutcome)}
+                className="rounded-md border border-border bg-transparent px-2 py-1.5 text-xs text-muted-foreground"
+              >
+                <option value="success">mock: success</option>
+                <option value="quota">mock: quota exceeded</option>
+                <option value="failure">mock: failure</option>
+              </select>
+            )}
             <button
               type="button"
               onClick={simulateStream}
@@ -171,8 +214,9 @@ const DevSheetVisuals = () => {
         </div>
 
         <OutputSection
-          key={fixture}
+          key={`${fixture}:${imageOutcome}`}
           output={JSON.stringify(sheet)}
+          requestVisualImage={mockRequester(imageOutcome)}
           inputText={sheet.topic}
           modeInfo={{ examMode: "General", difficulty: "Basic", focus: "Quick Revision", length: "Concise" }}
           isStreaming={streamedKeys !== null}

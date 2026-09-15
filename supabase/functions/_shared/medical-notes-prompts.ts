@@ -275,8 +275,7 @@ OUTPUT — return exactly this JSON shape:
       "series": [{ "name": "<series name>", "values": [0, 0] }],
       "yLabel": "<unit, e.g. mg/dL>"
     },
-    "imageSubject": "<2-5 word canonical name of what is drawn, e.g. nephron cross-section>",
-    "imagePrompt": "<precise, factual description for an image generator>",
+    "imageSubject": "<the structure and the view, 3-10 words, e.g. coronal section of the kidney>",
     "imageAlt": "<one-sentence alt text>"
   },
   "sourceCoverage": {
@@ -301,12 +300,12 @@ VISUAL — choose exactly one kind, after writing the sections above:
   values across conditions, staging thresholds, dose steps). 2-12 xLabels; every series has exactly
   one number per xLabel. Never invent or estimate numbers to fill a chart.
 - "image": ONLY when the core teaching point is a physical structure a flowchart cannot show (gross
-  anatomy, histology, a labeled cross-section). imagePrompt must name the structures, their spatial
-  relationships, the view (e.g. coronal section, anterior view) and the labels to show — a precise
-  textbook-illustration brief, no mood or style words.
+  anatomy, histology, a labeled cross-section). imageSubject names exactly one standard textbook
+  structure and its view (e.g. "coronal section of the kidney", "brachial plexus anterior view",
+  "histology of a renal glomerulus") — plain words, no style or mood words.
 - "none": when no visual adds real value over the text. This is a normal, frequent answer — do not force a visual.
 - Include ONLY the field for the chosen kind: "flowchart" for flowchart, "chart" for chart, and
-  "imageSubject" + "imagePrompt" + "imageAlt" for image. For "none", write just { "kind": "none" }.
+  "imageSubject" + "imageAlt" for image. For "none", write just { "kind": "none" }.
 - placement is the section the visual illustrates.
 
 LENGTH GATE — apply strictly based on the Length setting "${len}":

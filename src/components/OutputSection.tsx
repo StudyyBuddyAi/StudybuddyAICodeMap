@@ -26,6 +26,7 @@ import SaveButton from "@/components/SaveButton";
 import SectionSkeleton from "@/components/SectionSkeleton";
 import CitationBadgeList from "@/components/CitationBadgeList";
 import SheetVisual from "@/components/sheet-visual/SheetVisual";
+import type { SheetImageRequester } from "@/lib/generate-sheet-image";
 import { ModelCredit } from "@/components/PoweredByCorti";
 import { startTopProgress, finishTopProgress } from "@/components/TopProgressBar";
 import { parseModelUsed, type ModelUsed } from "@/lib/model-used";
@@ -33,6 +34,7 @@ import type { CitationResult } from "@/lib/citation";
 import {
   type GeneratedSheet,
   type EnhancementResult,
+  type VisualImageResult,
   parseStoredSheet,
   isJsonSheet,
 } from "@/types/generated-sheet";
@@ -184,6 +186,8 @@ interface OutputSectionProps {
   isStreaming?: boolean;
   /** Sections safe to render mid-stream. Ignored unless `isStreaming`. */
   streamedKeys?: string[];
+  /** Overrides the image edge function call — used by the dev preview page. */
+  requestVisualImage?: SheetImageRequester;
 }
 
 // ─── Legacy renderer helpers (kept for old text-blob sheets) ───────────────
@@ -987,6 +991,7 @@ const OutputSection = ({
   sheetId,
   isStreaming = false,
   streamedKeys,
+  requestVisualImage,
 }: OutputSectionProps) => {
   const navigate = useNavigate();
   const ref = useRef<HTMLDivElement>(null);
@@ -1167,6 +1172,20 @@ const OutputSection = ({
       window.dispatchEvent(
         new CustomEvent("studybuddy:enhancement-saved", {
           detail: { key, result },
+        })
+      );
+    },
+    []
+  );
+
+  // Same route as enhancements: the generator owns the sheet, so the image is
+  // merged there and rides along in `output` when the student saves. Carries
+  // the subject so a result that lands after a new sheet started is ignored.
+  const handleVisualImageResolved = useCallback(
+    (result: VisualImageResult, subject: string) => {
+      window.dispatchEvent(
+        new CustomEvent("studybuddy:visual-image-saved", {
+          detail: { result, subject },
         })
       );
     },
@@ -1575,7 +1594,16 @@ const OutputSection = ({
                 )
               )}
               {ready && renderInline(`${key}:end`)}
-              {ready && visualReady && visual.placement === key && <SheetVisual visual={visual} />}
+              {ready && visualReady && visual.placement === key && (
+                <SheetVisual
+                  visual={visual}
+                  topic={sheet.topic ?? inputText ?? ""}
+                  visualImage={sheet.visualImage}
+                  onImageResolved={handleVisualImageResolved}
+                  isPro={isPro}
+                  requestImage={requestVisualImage}
+                />
+              )}
             </div>
           </div>
         );

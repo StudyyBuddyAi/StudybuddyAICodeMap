@@ -127,13 +127,13 @@ export type VisualSpec =
   | (VisualSpecBase & { kind: "chart"; chart: VisualChartSpec })
   | (VisualSpecBase & {
       kind: "image";
-      /** Precise description sent to the image model. */
-      imagePrompt: string;
+      /** What to draw: the structure and the view ("coronal section of the kidney").
+       *  With the sheet topic this is both the whole image request and its cache
+       *  key — the server builds the prompt from these alone, so an image cached
+       *  under a key can only ever be a drawing of that key. */
+      imageSubject: string;
       /** Alt text, and the caption fallback. */
       imageAlt: string;
-      /** Short canonical name of what is drawn ("nephron cross-section") — the
-       *  image cache is keyed on topic + subject, so students share one image. */
-      imageSubject: string;
     });
 
 export type VisualKind = VisualSpec["kind"];
