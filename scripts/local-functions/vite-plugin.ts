@@ -10,15 +10,23 @@
  *   - the sheet/cards/explain/enhance prompts, including the `visual` schema
  *   - the image prompt, the OpenRouter image call and response parsing
  *   - the image cache key
- * What is SKIPPED: JWT checks, retrieval/grounding, memory, quotas, the Corti →
- * Haiku fallback, and Supabase Storage (images are written to .local/, which
- * *.local in .gitignore already covers).
+ * Writer routing mirrors medical-notes-handler.ts: Pro → Corti (unless they
+ * chose "fastest"); free/anon → Corti for their first premium generations, then
+ * GPT-OSS; enhance on the free tier → GPT-OSS; Corti unavailable → Haiku with
+ * X-Model-Fallback. The profile is read with the caller's own session token,
+ * the same read the client makes. consume_premium_hook is service-role only, so
+ * premium generations are counted in memory for this server's lifetime instead
+ * of in the database.
+ *
+ * What is SKIPPED: JWT verification, retrieval/grounding, memory, daily quotas,
+ * and Supabase Storage (images are written to .local/, which *.local in
+ * .gitignore already covers).
  *
  * Env (read server-side only — never exposed to the browser):
  *   OPENROUTER_API_KEY   needed for gpt-oss / haiku sheets and for every image
- *   CORTI_*              already in .env; enough for LOCAL_NOTES_WRITER=corti
- *   LOCAL_NOTES_WRITER   gpt-oss | haiku | corti  (default: gpt-oss with an
- *                        OpenRouter key, otherwise corti)
+ *   CORTI_*              already in .env
+ *   LOCAL_NOTES_WRITER   gpt-oss | haiku | corti — forces one writer for every
+ *                        request; unset = production routing
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -38,13 +46,97 @@ const WRITER_MODEL: Record<Writer, string> = {
   corti: "corti-s1-instant",
 };
 
-function pickWriter(env: Env): Writer | null {
-  const requested = env.LOCAL_NOTES_WRITER as Writer | undefined;
-  const hasOpenRouter = !!env.OPENROUTER_API_KEY;
-  const hasCorti = !!env.CORTI_CLIENT_ID && !!env.CORTI_CLIENT_SECRET;
-  if (requested === "corti") return hasCorti ? "corti" : null;
-  if (requested === "gpt-oss" || requested === "haiku") return hasOpenRouter ? requested : null;
-  return hasOpenRouter ? "gpt-oss" : hasCorti ? "corti" : null;
+// Same limits as medical-notes-handler.ts / use-premium-hook.ts.
+const ANON_PREMIUM_LIMIT = 1;
+const FREE_PREMIUM_LIMIT = 3;
+
+/** Premium generations granted by this dev server, per user — stands in for consume_premium_hook. */
+const localPremiumUsed = new Map<string, number>();
+
+const hasCorti = (env: Env) => !!env.CORTI_CLIENT_ID && !!env.CORTI_CLIENT_SECRET;
+const hasOpenRouter = (env: Env) => !!env.OPENROUTER_API_KEY;
+
+function decodeJwtPayload(token: string): Record<string, unknown> {
+  try {
+    return JSON.parse(Buffer.from(token.split(".")[1] ?? "", "base64url").toString("utf8"));
+  } catch {
+    return {};
+  }
+}
+
+interface RoutingProfile {
+  is_pro?: boolean;
+  pro_expires_at?: string | null;
+  preferred_model?: string | null;
+  premium_used?: number;
+}
+
+interface Route {
+  writer: Writer;
+  isPremium: boolean;
+  reason: string;
+}
+
+/**
+ * The production tier decision. The profile read goes through RLS with the
+ * caller's token, so a token that isn't really theirs simply finds no row and
+ * is routed as free.
+ */
+async function routeWriter(env: Env, req: IncomingMessage, body: Record<string, unknown>): Promise<Route | null> {
+  const forced = env.LOCAL_NOTES_WRITER as Writer | undefined;
+  if (forced === "corti" || forced === "gpt-oss" || forced === "haiku") {
+    const available = forced === "corti" ? hasCorti(env) : hasOpenRouter(env);
+    return available ? { writer: forced, isPremium: forced === "corti", reason: "LOCAL_NOTES_WRITER" } : null;
+  }
+
+  const token = (req.headers.authorization ?? "").replace(/^Bearer\s+/i, "").trim();
+  const claims = decodeJwtPayload(token);
+  const userId = typeof claims.sub === "string" ? claims.sub : null;
+  const isAnonymous = claims.is_anonymous === true;
+
+  let profile: RoutingProfile | null = null;
+  if (userId && env.VITE_SUPABASE_URL && env.VITE_SUPABASE_PUBLISHABLE_KEY) {
+    try {
+      const r = await fetch(
+        `${env.VITE_SUPABASE_URL}/rest/v1/profiles?id=eq.${userId}&select=is_pro,pro_expires_at,preferred_model,premium_used`,
+        { headers: { apikey: env.VITE_SUPABASE_PUBLISHABLE_KEY, Authorization: `Bearer ${token}` } }
+      );
+      if (r.ok) profile = ((await r.json()) as RoutingProfile[])[0] ?? null;
+      else say(`profile read failed (${r.status}) — routing as free`);
+    } catch (err) {
+      say(`profile read failed — ${err instanceof Error ? err.message : String(err)} — routing as free`);
+    }
+  }
+
+  const isPro =
+    profile?.is_pro === true &&
+    (profile.pro_expires_at == null || new Date(profile.pro_expires_at) > new Date());
+
+  let route: Route;
+  if (isPro) {
+    route =
+      profile?.preferred_model === "gpt-oss"
+        ? { writer: "gpt-oss", isPremium: false, reason: "Pro, chose fastest" }
+        : { writer: "corti", isPremium: true, reason: "Pro" };
+  } else if (body.enhanceMode) {
+    route = { writer: "gpt-oss", isPremium: false, reason: "free tier, enhance" };
+  } else {
+    const limit = isAnonymous ? ANON_PREMIUM_LIMIT : FREE_PREMIUM_LIMIT;
+    const used = (profile?.premium_used ?? 0) + (userId ? localPremiumUsed.get(userId) ?? 0 : 0);
+    if (userId && used < limit) {
+      localPremiumUsed.set(userId, (localPremiumUsed.get(userId) ?? 0) + 1);
+      route = { writer: "corti", isPremium: true, reason: `${isAnonymous ? "anon" : "free"} premium ${used + 1}/${limit}` };
+    } else {
+      route = { writer: "gpt-oss", isPremium: false, reason: `${isAnonymous ? "anon" : "free"}, premium used ${used}/${limit}` };
+    }
+  }
+
+  // A missing credential degrades like production would, rather than failing the request.
+  if (route.writer === "corti" && !hasCorti(env)) return hasOpenRouter(env) ? { ...route, writer: "haiku", reason: `${route.reason}; no Corti creds` } : null;
+  if (route.writer !== "corti" && !hasOpenRouter(env)) {
+    return hasCorti(env) ? { writer: "corti", isPremium: true, reason: `${route.reason}; no OpenRouter key` } : null;
+  }
+  return route;
 }
 
 const tag = "\x1b[36m[local-fns]\x1b[0m";
@@ -89,10 +181,10 @@ function describeVisual(text: string): string {
 
 async function handleMedicalNotes(server: ViteDevServer, env: Env, req: IncomingMessage, res: ServerResponse) {
   const body = await readJson(req);
-  const writer = pickWriter(env);
-  if (!writer) {
-    say("medical-notes: no writer available — add OPENROUTER_API_KEY to .env.local (or set LOCAL_NOTES_WRITER=corti).");
-    return sendJson(res, 500, { error: "Local functions: add OPENROUTER_API_KEY to .env.local, or set LOCAL_NOTES_WRITER=corti" });
+  const route = await routeWriter(env, req, body);
+  if (!route) {
+    say("medical-notes: no writer available — add OPENROUTER_API_KEY to .env.local, or Corti creds to .env.");
+    return sendJson(res, 500, { error: "Local functions: no writer configured (OPENROUTER_API_KEY / CORTI_*)" });
   }
 
   const promptsTuned = await server.ssrLoadModule(`${SHARED}/medical-notes-prompts-corti.ts`);
@@ -100,87 +192,113 @@ async function handleMedicalNotes(server: ViteDevServer, env: Env, req: Incoming
   const input = { ...body, groundingAttempted: false, ragChunks: [], hasMemory: false };
   // Same selection as medical-notes-handler.ts: tuned prompts for the primary
   // writers, the originals for the Haiku fallback.
-  const { systemPrompt, userContent } =
-    writer === "haiku"
-      ? promptsOriginal.buildNotesPrompts({ ...input, family: "haiku" })
-      : promptsTuned.buildCortiNotesPrompts({ ...input, family: writer === "corti" ? "haiku" : "gptOss" });
-  const messages = [
-    { role: "system", content: systemPrompt },
-    { role: "user", content: userContent },
-  ];
+  const messagesFor = (writer: Writer) => {
+    const { systemPrompt, userContent } =
+      writer === "haiku"
+        ? promptsOriginal.buildNotesPrompts({ ...input, family: "haiku" })
+        : promptsTuned.buildCortiNotesPrompts({ ...input, family: writer === "corti" ? "haiku" : "gptOss" });
+    return [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: userContent },
+    ];
+  };
 
   const controller = new AbortController();
   res.on("close", () => controller.abort());
   const startedAt = Date.now();
   const mode = body.cardsOnly ? "cards" : body.explainMode ? "explain" : body.enhanceMode ? `enhance:${body.enhanceMode}` : "sheet";
-  say(`medical-notes ${mode} · ${writer} · "${String(body.notes ?? "").slice(0, 60)}"`);
+  say(`medical-notes ${mode} · ${route.writer} (${route.reason}) · "${String(body.notes ?? "").slice(0, 60)}"`);
 
-  let upstream: Response;
-  let modelUsed: string;
-  try {
-    if (writer === "corti") {
-      const corti = await server.ssrLoadModule(`${SHARED}/corti.ts`);
-      // corti.ts reads credentials through Deno.env; shim it just for this synchronous read.
-      const g = globalThis as { Deno?: unknown };
-      const hadDeno = "Deno" in g;
-      if (!hadDeno) g.Deno = { env: { get: (k: string) => env[k] } };
-      let config;
-      try {
-        config = corti.cortiConfigFromEnv();
-      } finally {
-        if (!hadDeno) delete g.Deno;
-      }
-      modelUsed = `corti/${WRITER_MODEL.corti}`;
-      upstream = await corti.cortiChatCompletion(config, {
-        model: WRITER_MODEL.corti,
-        messages,
+  // Mirrors openRouterStream in medical-notes-handler.ts.
+  const openRouter = (writer: "gpt-oss" | "haiku") => {
+    const model = WRITER_MODEL[writer];
+    return fetch(OPENROUTER_CHAT_URL, {
+      method: "POST",
+      signal: controller.signal,
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${env.OPENROUTER_API_KEY}`,
+        "HTTP-Referer": "https://studybuddy.app",
+        "X-Title": "StudyBuddy (local)",
+      },
+      body: JSON.stringify({
+        model,
         stream: true,
-        temperature: 0.3,
-        maxTokens: 8192,
-        signal: controller.signal,
-      });
-    } else {
-      const model = WRITER_MODEL[writer];
-      modelUsed = `openrouter/${model}`;
-      // Mirrors openRouterStream in medical-notes-handler.ts.
-      upstream = await fetch(OPENROUTER_CHAT_URL, {
-        method: "POST",
-        signal: controller.signal,
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${env.OPENROUTER_API_KEY}`,
-          "HTTP-Referer": "https://studybuddy.app",
-          "X-Title": "StudyBuddy (local)",
-        },
-        body: JSON.stringify({
-          model,
+        temperature: 0.7,
+        max_tokens: 8192,
+        messages: messagesFor(writer),
+        provider: model.startsWith("openai/gpt-oss")
+          ? { order: ["Cerebras", "Groq"], allow_fallbacks: true }
+          : { order: ["Anthropic"], allow_fallbacks: true },
+      }),
+    });
+  };
+
+  let upstream: Response | null = null;
+  let modelUsed = "";
+  let fallback = false;
+  try {
+    if (route.writer === "corti") {
+      let failure: string | null = null;
+      try {
+        const corti = await server.ssrLoadModule(`${SHARED}/corti.ts`);
+        // corti.ts reads credentials through Deno.env; shim it just for this synchronous read.
+        const g = globalThis as { Deno?: unknown };
+        const hadDeno = "Deno" in g;
+        if (!hadDeno) g.Deno = { env: { get: (k: string) => env[k] } };
+        let config;
+        try {
+          config = corti.cortiConfigFromEnv();
+        } finally {
+          if (!hadDeno) delete g.Deno;
+        }
+        const r: Response = await corti.cortiChatCompletion(config, {
+          model: WRITER_MODEL.corti,
+          messages: messagesFor("corti"),
           stream: true,
-          temperature: 0.7,
-          max_tokens: 8192,
-          messages,
-          provider: model.startsWith("openai/gpt-oss")
-            ? { order: ["Cerebras", "Groq"], allow_fallbacks: true }
-            : { order: ["Anthropic"], allow_fallbacks: true },
-        }),
-      });
+          temperature: 0.3,
+          maxTokens: 8192,
+          signal: controller.signal,
+        });
+        if (r.ok && r.body) {
+          upstream = r;
+          modelUsed = `corti/${WRITER_MODEL.corti}`;
+        } else {
+          failure = `corti_${r.status}: ${(await r.text().catch(() => "")).slice(0, 200)}`;
+        }
+      } catch (err) {
+        if (controller.signal.aborted) throw err;
+        failure = err instanceof Error ? err.message : String(err);
+      }
+      if (failure !== null) {
+        if (!hasOpenRouter(env)) throw new Error(`Corti unavailable and no OpenRouter key — ${failure}`);
+        say(`corti unavailable (${failure}) → falling back to Haiku, as production does`);
+        fallback = true;
+        modelUsed = `openrouter/${WRITER_MODEL.haiku}`;
+        upstream = await openRouter("haiku");
+      }
+    } else {
+      modelUsed = `openrouter/${WRITER_MODEL[route.writer]}`;
+      upstream = await openRouter(route.writer);
     }
   } catch (err) {
     say(`medical-notes: upstream request failed — ${err instanceof Error ? err.message : String(err)}`);
     return sendJson(res, 500, { error: "AI service error (local)" });
   }
 
-  if (!upstream.ok || !upstream.body) {
-    const text = await upstream.text().catch(() => "");
-    say(`medical-notes: upstream ${upstream.status} — ${text.slice(0, 300)}`);
-    return sendJson(res, upstream.status === 429 ? 429 : 500, { error: `AI service error (local, ${upstream.status})` });
+  if (!upstream || !upstream.ok || !upstream.body) {
+    const text = upstream ? await upstream.text().catch(() => "") : "";
+    say(`medical-notes: upstream ${upstream?.status} — ${text.slice(0, 300)}`);
+    return sendJson(res, upstream?.status === 429 ? 429 : 500, { error: `AI service error (local, ${upstream?.status})` });
   }
 
   res.statusCode = 200;
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
   res.setHeader("X-Model-Used", modelUsed);
-  res.setHeader("X-Is-Premium", writer === "corti" ? "true" : "false");
+  res.setHeader("X-Is-Premium", route.isPremium ? "true" : "false");
   res.setHeader("X-Retrieved-Chunks", "0");
+  if (fallback) res.setHeader("X-Model-Fallback", "corti_unavailable");
   res.flushHeaders?.();
 
   // Re-framed exactly as the edge function does: only delta.content reaches the client.
@@ -306,11 +424,11 @@ export function localFunctions(): Plugin {
     configureServer(server) {
       if (env.VITE_LOCAL_FUNCTIONS !== "1") return;
       const root = server.config.root;
-      const writer = pickWriter(env);
+      const forced = env.LOCAL_NOTES_WRITER;
       say(
-        `enabled · sheets: ${writer ?? "NONE (add OPENROUTER_API_KEY or LOCAL_NOTES_WRITER=corti)"} · images: ${
-          env.OPENROUTER_API_KEY ? "openrouter" : "DISABLED (no OPENROUTER_API_KEY)"
-        }`
+        `enabled · sheets: ${forced ? `forced ${forced} (LOCAL_NOTES_WRITER)` : "production routing (Pro/premium → Corti, else GPT-OSS)"} · corti: ${
+          hasCorti(env) ? "ok" : "no creds"
+        } · openrouter: ${hasOpenRouter(env) ? "ok" : "no key (images disabled)"}`
       );
 
       server.middlewares.use(async (req, res, next) => {
