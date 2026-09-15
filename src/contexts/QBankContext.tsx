@@ -298,31 +298,8 @@ export const QBankProvider = ({ children }: { children: ReactNode }) => {
   // lost. The snapshot is serialised here and ordered by seq on the server, so
   // whatever the student sees last is what the server keeps.
 
-<<<<<<< HEAD
-    // The answer key and explanations were already graded server-side; what
-    // gets cached on disk may carry selected answers and skipped/flagged ids,
-    // but never the correct_option / explanation / teaching_point themselves.
-    const questions = s.questions.map(({ correct_option, explanation, teaching_point, ...safe }) => safe);
-
-    const payload = {
-      sessionId: s.sessionId,
-      questions,
-      currentIndex: persistIndex,
-      answers: s.answers,
-      startedAt: s.startedAt,
-      accumulatedMs: s.accumulatedMs + (Date.now() - s.resumedAt),
-      skippedIds: s.skippedIds,
-      flaggedIds: s.flaggedIds,
-      // Carried so a reload can tell an unfinished set from a finished one and
-      // pick the generation back up where it stopped.
-      expectedTotal: s.expectedTotal,
-      generation: s.generation,
-      savedAt: Date.now(),
-    };
-=======
   /** Resolves once a failed save has been retried. */
   const retryTimerRef = useRef<number | null>(null);
->>>>>>> origin/main
 
   const runSave = useCallback(async (): Promise<boolean> => {
     const s = sessionRef.current;
@@ -344,49 +321,6 @@ export const QBankProvider = ({ children }: { children: ReactNode }) => {
         p_generation: payload.p_generation as unknown as Json,
         p_annotations: payload.p_annotations as unknown as Json,
       });
-<<<<<<< HEAD
-      sessionIdRef.current = parsed.sessionId;
-
-      // Answer-key fields never live in localStorage; once a session resumes,
-      // re-attach them for already-answered questions from the review RPC so
-      // the graded state a student sees after resuming is intact.
-      if (parsed.sessionId && Array.isArray(parsed.answers) && parsed.answers.length > 0) {
-        (async () => {
-          try {
-            const { data } = await supabase.rpc("get_session_review", {
-              p_session: parsed.sessionId,
-            });
-            if (!data) return;
-            const attempts = (data as { attempts?: Array<{ question_id?: string; question?: { correct_option?: string; explanation?: string; teaching_point?: string } | null }> }).attempts ?? [];
-            const graded = new Map(
-              attempts
-                .filter((a) => a.question_id && a.question)
-                .map((a) => [a.question_id as string, a.question as NonNullable<typeof a.question>])
-            );
-            if (graded.size === 0) return;
-            setSession((prev) => {
-              if (!prev || prev.sessionId !== parsed.sessionId) return prev;
-              return {
-                ...prev,
-                questions: prev.questions.map((q) => {
-                  const g = graded.get(q.id);
-                  if (!g) return q;
-                  return {
-                    ...q,
-                    correct_option: (g.correct_option as OptionKey) ?? q.correct_option,
-                    explanation: g.explanation ?? q.explanation,
-                    teaching_point: g.teaching_point ?? q.teaching_point,
-                  };
-                }),
-              };
-            });
-          } catch {
-            // Resuming without the graded fields is far better than failing it.
-          }
-        })();
-      }
-
-=======
       if (error) {
         console.error("save_qbank_progress failed:", error);
         setSaveState("error");
@@ -398,7 +332,6 @@ export const QBankProvider = ({ children }: { children: ReactNode }) => {
         continue;
       }
       setSaveState("idle");
->>>>>>> origin/main
       return true;
     }
     setSaveState("idle");

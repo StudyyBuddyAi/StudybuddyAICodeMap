@@ -163,7 +163,7 @@ type StepState = "pending" | "active" | "done";
  */
 const QBank = () => {
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, isAnonymous } = useAuth();
   const {
     startGeneratedSession,
     generation,
@@ -205,10 +205,6 @@ const QBank = () => {
     return () => window.clearInterval(id);
   }, [isStarting]);
 
-<<<<<<< HEAD
-  useEffect(() => {
-    if (!user) return;
-=======
   // Every set left unfinished, on any device — the server is the only copy.
   const { data: unfinished } = useQuery({
     queryKey: ["qbank-unfinished", user?.id],
@@ -219,65 +215,11 @@ const QBank = () => {
       return (data ?? []) as UnfinishedRow[];
     },
   });
->>>>>>> origin/main
 
   const handleResume = async (id: string) => {
     if (resumingId) return;
     setResumingId(id);
     try {
-<<<<<<< HEAD
-      const raw = localStorage.getItem("sb_qbank_session");
-      if (!raw) return;
-      const parsed = JSON.parse(raw);
-      const TWENTY_FOUR_HOURS = 24 * 60 * 60 * 1000;
-      if (
-        parsed.savedAt &&
-        Date.now() - parsed.savedAt < TWENTY_FOUR_HOURS &&
-        Array.isArray(parsed.questions) &&
-        parsed.questions.length > 0 &&
-        typeof parsed.currentIndex === "number" &&
-        Array.isArray(parsed.answers)
-      ) {
-        setHasSavedSession(true);
-      }
-    } catch {
-      // ignore
-    }
-  }, [user]);
-
-  const savedSessionMeta = (() => {
-    if (!hasSavedSession) return null;
-    try {
-      const raw = localStorage.getItem("sb_qbank_session");
-      if (!raw) return null;
-      const parsed = JSON.parse(raw);
-
-      const loaded = Array.isArray(parsed.questions) ? parsed.questions.length : 0;
-      // A generated set is saved while it is still being written, so the
-      // questions it currently holds are not the size of the session. Counting
-      // progress against them would show a set of twenty as "2/2 answered" with
-      // a full bar, which is exactly backwards.
-      const expected =
-        typeof parsed.expectedTotal === "number" ? Math.max(parsed.expectedTotal, loaded) : loaded;
-
-      return {
-        answered: Array.isArray(parsed.answers) ? parsed.answers.length : 0,
-        loaded,
-        total: expected,
-        stillWriting: !!parsed.generation && loaded < expected,
-        topic: typeof parsed.generation?.topic === "string" ? parsed.generation.topic : null,
-        system: parsed.questions?.[0]?.subject ?? "your last set",
-      };
-    } catch {
-      return null;
-    }
-  })();
-
-  const handleResume = () => {
-    const restored = restoreSession();
-    if (restored) {
-      navigate("/qbank/session");
-=======
       const { outcome, error: resumeError } = await resumeSession(id, { explicit: true });
       if (outcome === "resumed") navigate(`/qbank/session?session=${id}`);
       else if (outcome === "completed") navigate(`/qbank/summary?session=${id}`);
@@ -289,7 +231,6 @@ const QBank = () => {
         });
     } finally {
       setResumingId(null);
->>>>>>> origin/main
     }
   };
 

@@ -34,12 +34,27 @@ import { buildNotesPrompts, type NotesPromptInput } from "./medical-notes-prompt
 import { buildCortiNotesPrompts } from "./medical-notes-prompts-corti.ts";
 import { asCortiModel, cortiChatCompletion, cortiConfigFromEnv, type CortiModel } from "./corti.ts";
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
+const ALLOWED_ORIGINS = new Set([
+  "https://studyybuddyai.com",
+  "https://www.studyybuddyai.com",
+  "http://localhost:8080",
+]);
+
+const BASE_CORS_HEADERS: Record<string, string> = {
   "Access-Control-Allow-Headers":
     "authorization, x-client-info, apikey, content-type, x-simulate-corti-outage, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
   "Access-Control-Expose-Headers": "x-model-used, x-model-fallback, x-is-premium, x-retrieved-chunks",
 };
+
+// Origin-aware CORS. Only allowlisted origins get Access-Control-Allow-Origin;
+// anything else gets no CORS headers (browser denies the cross-origin call).
+function buildCorsHeaders(req: Request): Record<string, string> {
+  const origin = req.headers.get("Origin");
+  if (!origin || !ALLOWED_ORIGINS.has(origin)) {
+    return { ...BASE_CORS_HEADERS };
+  }
+  return { ...BASE_CORS_HEADERS, "Access-Control-Allow-Origin": origin };
+}
 
 // Structured, machine-parseable logs (visible in Supabase edge-fn logs).
 // Metadata only — never log notes/topic content, tokens, or keys.
@@ -47,10 +62,10 @@ const log = (event: string, fields: Record<string, unknown> = {}) => {
   console.log(JSON.stringify({ fn: "medical-notes", event, ...fields }));
 };
 
-const json = (body: unknown, status: number) =>
+const json = (req: Request, body: unknown, status: number) =>
   new Response(JSON.stringify(body), {
     status,
-    headers: { ...corsHeaders, "Content-Type": "application/json" },
+    headers: { ...buildCorsHeaders(req), "Content-Type": "application/json" },
   });
 
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
@@ -62,6 +77,28 @@ const SOURCE_LABEL_MODEL = "openai/gpt-oss-20b";
 const ANON_PREMIUM_LIMIT = 1;
 const FREE_PREMIUM_LIMIT = 3;
 const DAILY_CAP = 5;
+
+const MAX_BODY_BYTES = 102_400; // 100 KB — consistent with rag-generate
+const MAX_NOTES_LENGTH = 20_000; // chars; generous for real notes, blocks abuse
+
+// Best-effort per-instance burst limiter. Deno isolates are ephemeral (a
+// module-level Map does not survive cold starts and is not shared across
+// instances), so this only flattens bursts — it is NOT a distributed limit.
+// The daily usage_records quota is the authoritative control.
+const BURST_LIMIT_PER_MINUTE = 10;
+const burstBuckets = new Map<string, number[]>();
+
+function checkBurstLimit(userId: string, nowMs: number): boolean {
+  const cutoff = nowMs - 60_000;
+  const recent = (burstBuckets.get(userId) ?? []).filter((t) => t > cutoff);
+  if (recent.length >= BURST_LIMIT_PER_MINUTE) {
+    burstBuckets.set(userId, recent);
+    return false;
+  }
+  recent.push(nowMs);
+  burstBuckets.set(userId, recent);
+  return true;
+}
 
 /**
  * How long to wait for Corti's response headers before treating it as
@@ -197,7 +234,7 @@ async function cortiStream(
 
 export async function handleMedicalNotes(req: Request): Promise<Response> {
   if (req.method === "OPTIONS") {
-    return new Response(null, { headers: corsHeaders });
+    return new Response(null, { headers: buildCorsHeaders(req) });
   }
 
   const startedAt = Date.now();
@@ -206,24 +243,63 @@ export async function handleMedicalNotes(req: Request): Promise<Response> {
     // ── JWT verification ───────────────────────────────────────────────────
     const authHeader = req.headers.get("Authorization") ?? "";
     const token = authHeader.replace(/^Bearer\s+/i, "").trim();
-    if (!token) return json({ error: "invalid_token" }, 401);
+    if (!token) return json(req, { error: "invalid_token" }, 401);
 
     const authClient = createClient(
       Deno.env.get("SUPABASE_URL")!,
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
     );
     const { data: { user }, error: authError } = await authClient.auth.getUser(token);
-    if (authError || !user) return json({ error: "invalid_token" }, 401);
+    if (authError || !user) return json(req, { error: "invalid_token" }, 401);
+
+    // ── Burst rate limit (best-effort, per-instance) ────────────────────────
+    if (!checkBurstLimit(user.id, Date.now())) {
+      return new Response(JSON.stringify({ error: "rate_limited" }), {
+        status: 429,
+        headers: { ...buildCorsHeaders(req), "Content-Type": "application/json", "Retry-After": "60" },
+      });
+    }
     const authMs = since(startedAt);
+
+    // ── Request body size guard ────────────────────────────────────────────
+    // Reject oversized requests before any expensive work. Prefer the declared
+    // Content-Length header when present; always enforce on the actual bytes read.
+    const declaredLength = Number(req.headers.get("Content-Length"));
+    if (Number.isFinite(declaredLength) && declaredLength > MAX_BODY_BYTES) {
+      log("body_too_large", { declaredLength, userId: user.id });
+      return json(req, { error: { code: "INVALID_INPUT", message: "Request body too large" } }, 400);
+    }
+
+    const rawBytes = await req.arrayBuffer();
+    if (rawBytes.byteLength > MAX_BODY_BYTES) {
+      log("body_too_large", { actualBytes: rawBytes.byteLength, userId: user.id });
+      return json(req, { error: { code: "INVALID_INPUT", message: "Request body too large" } }, 400);
+    }
+
+    // Safe JSON parse — never expose parse errors to the caller.
+    let body: Record<string, unknown>;
+    try {
+      body = JSON.parse(new TextDecoder().decode(rawBytes));
+      if (typeof body !== "object" || body === null || Array.isArray(body)) {
+        throw new TypeError("body must be a JSON object");
+      }
+    } catch {
+      log("invalid_json", { userId: user.id });
+      return json(req, { error: { code: "INVALID_INPUT", message: "Request body must be valid JSON" } }, 400);
+    }
+    const { notes, cardsOnly, explainMode, enhanceMode, useGrounding, topK, threshold, useMemory } = body;
 
     // Entitlement fields in the body (userId / isAnonymous / isPro /
     // preferredModel) are ignored: identity and entitlement come from the
     // verified JWT and the profiles row only.
-    const body = await req.json();
-    const { notes, cardsOnly, explainMode, enhanceMode, useGrounding, topK, threshold, useMemory } = body;
 
     if (!notes || typeof notes !== "string" || !notes.trim()) {
-      return json({ error: "Notes are required" }, 400);
+      return json(req, { error: "Notes are required" }, 400);
+    }
+
+    if (notes.length > MAX_NOTES_LENGTH) {
+      log("notes_too_long", { notesLength: notes.length, userId: user.id });
+      return json(req, { error: { code: "INVALID_INPUT", message: "Notes too long" } }, 400);
     }
 
     const OPENROUTER_API_KEY = Deno.env.get("OPENROUTER_API_KEY");
@@ -312,8 +388,8 @@ export async function handleMedicalNotes(req: Request): Promise<Response> {
 
     const [retrieval, memory, routing] = await Promise.all([retrievalPromise, memoryPromise, routingPromise]);
 
-    if (routing.quota === "error") return json({ error: "quota_check_failed" }, 500);
-    if (routing.quota === "exceeded") return json({ error: "quota_exceeded" }, 429);
+    if (routing.quota === "error") return json(req, { error: "quota_check_failed" }, 500);
+    if (routing.quota === "exceeded") return json(req, { error: "quota_exceeded" }, 429);
     const quotaConsumed = routing.quota === "ok";
     const refund = async () => {
       if (!quotaConsumed) return;
@@ -445,9 +521,9 @@ export async function handleMedicalNotes(req: Request): Promise<Response> {
       const status = response?.status ?? 0;
       log("upstream_error", { model: modelUsed, status, body: t.slice(0, 300) });
       if (status === 429) {
-        return json({ error: "Rate limit exceeded. Please try again in a moment." }, 429);
+        return json(req, { error: "Rate limit exceeded. Please try again in a moment." }, 429);
       }
-      return json({ error: "AI service error" }, status === 400 ? 400 : 500);
+      return json(req, { error: "AI service error" }, status === 400 ? 400 : 500);
     }
     const upstreamBody = response.body;
 
@@ -546,7 +622,7 @@ export async function handleMedicalNotes(req: Request): Promise<Response> {
     });
 
     const headers: Record<string, string> = {
-      ...corsHeaders,
+      ...buildCorsHeaders(req),
       "Content-Type": "text/event-stream",
       "X-Model-Used": modelUsed,
       "X-Is-Premium": routing.isPremium ? "true" : "false",
@@ -558,6 +634,7 @@ export async function handleMedicalNotes(req: Request): Promise<Response> {
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
     log("error", { error: message, elapsedMs: since(startedAt) });
-    return json({ error: message }, 500);
+    // Do NOT expose internal error details to the caller.
+    return json(req, { error: { code: "INTERNAL_ERROR", message: "Internal server error" } }, 500);
   }
 }

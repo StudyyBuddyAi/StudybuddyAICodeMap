@@ -432,11 +432,8 @@ export const ExplainPanel = ({ open, scope, card, onClose }: ExplainPanelProps) 
   const [loading, setLoading] = useState(false);
   const [started, setStarted] = useState(false);
   const [goProOpen, setGoProOpen] = useState(false);
-<<<<<<< HEAD
   const [authModalOpen, setAuthModalOpen] = useState(false);
-=======
   const [modelUsed, setModelUsed] = useState<ModelUsed | null>(null);
->>>>>>> origin/main
 
   useEffect(() => {
     setStarted(false);
