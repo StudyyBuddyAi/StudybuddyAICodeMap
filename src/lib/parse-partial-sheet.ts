@@ -1,6 +1,7 @@
 import { stripFences } from "./sanitize-json";
 import { repairLlmJson } from "./repair-llm-json";
 import { parseSourceCoverage } from "./grounding";
+import { parseSheetVisual } from "./parse-sheet-visual";
 import type { Flashcard, GeneratedSheet } from "@/types/generated-sheet";
 
 /**
@@ -157,6 +158,10 @@ function normalize(raw: Record<string, unknown>): GeneratedSheet {
     // sheet from known fields only, so without this the field would be
     // silently dropped before the caller could reconcile it against retrieval.
     sourceCoverage: parseSourceCoverage(raw.sourceCoverage) ?? undefined,
+    // Validated whole or dropped. `visualImage` is deliberately NOT read here:
+    // it is only ever set client-side from our own edge function, never taken
+    // from model output (it would put a model-chosen URL into an <img>).
+    visual: parseSheetVisual(raw.visual),
   };
 }
 

@@ -69,6 +69,83 @@ export interface SourceCoverage {
   uncovered: SheetSectionKey[];
 }
 
+// ── Visual aid ─────────────────────────────────────────────────────────────
+// One optional visual per sheet, chosen by the sheet-writing model. Flowcharts
+// and charts are rendered straight from this data; an image is only a plan
+// (a prompt) until the student asks for it — see supabase/functions/generate-sheet-image.
+
+/** Sections a visual may sit under. Flashcards and the reference note never get one. */
+export type VisualPlacement = Exclude<SheetSectionKey, "flashcards">;
+
+export type FlowchartNodeShape = "start" | "step" | "decision" | "end";
+
+export interface FlowchartNode {
+  /** The model's own id — only used to resolve edges, never rendered or put into mermaid syntax. */
+  id: string;
+  label: string;
+  shape: FlowchartNodeShape;
+}
+
+export interface FlowchartEdge {
+  from: string;
+  to: string;
+  label?: string;
+}
+
+/**
+ * Nodes and edges rather than mermaid source: the model fills in labels, and
+ * the syntax is built (and escaped) client-side in src/lib/sheet-visual-mermaid.ts,
+ * so a stray bracket or quote in a label can't break the diagram.
+ */
+export interface VisualFlowchartSpec {
+  direction: "TD" | "LR";
+  nodes: FlowchartNode[];
+  edges: FlowchartEdge[];
+}
+
+export interface VisualChartSeries {
+  name: string;
+  values: number[];
+}
+
+export interface VisualChartSpec {
+  chartType: "line" | "bar";
+  xLabels: string[];
+  series: VisualChartSeries[];
+  yLabel?: string;
+}
+
+export interface VisualSpecBase {
+  /** Short caption shown above the rendered visual. */
+  title: string;
+  /** Which section this augments — rendered at the end of that section's card. */
+  placement: VisualPlacement;
+}
+
+export type VisualSpec =
+  | (VisualSpecBase & { kind: "flowchart"; flowchart: VisualFlowchartSpec })
+  | (VisualSpecBase & { kind: "chart"; chart: VisualChartSpec })
+  | (VisualSpecBase & {
+      kind: "image";
+      /** Precise description sent to the image model. */
+      imagePrompt: string;
+      /** Alt text, and the caption fallback. */
+      imageAlt: string;
+      /** Short canonical name of what is drawn ("nephron cross-section") — the
+       *  image cache is keyed on topic + subject, so students share one image. */
+      imageSubject: string;
+    });
+
+export type VisualKind = VisualSpec["kind"];
+
+/** Set once a requested image exists — kept apart from the model's `visual`
+ *  plan so a pending or failed image never alters the plan itself. */
+export interface VisualImageResult {
+  url: string;
+  provider: string; // e.g. "openrouter/google/gemini-3.1-flash-image"
+  generatedAt: string; // ISO timestamp
+}
+
 export interface GeneratedSheet {
   topic?: string; // normalized topic name, e.g. "Heart Failure"
   overview: string;
@@ -94,6 +171,10 @@ export interface GeneratedSheet {
   // sheet can still distinguish "nothing retrieved" from "retrieved but the
   // model judged it not relevant" (both reconcile to groundingLevel "none").
   retrievedChunks?: number;
+  /** Absent when the model chose no visual, and on sheets saved before visuals existed. */
+  visual?: VisualSpec;
+  /** Present only after the student generated the image for an `image` visual. */
+  visualImage?: VisualImageResult;
 }
 
 // Lightweight type used when loading a saved sheet from study_history.

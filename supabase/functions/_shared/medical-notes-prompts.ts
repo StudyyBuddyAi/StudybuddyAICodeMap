@@ -256,6 +256,29 @@ OUTPUT — return exactly this JSON shape:
     }
   ],
   "referenceNote": "${referenceNote}",
+  "visual": {
+    "kind": "flowchart | chart | image | none",
+    "title": "<short caption, max 8 words>",
+    "placement": "overview | clinicalApproach | keyPoints | examTraps | memoryHooks",
+    "flowchart": {
+      "direction": "TD",
+      "nodes": [
+        { "id": "n1", "label": "<max 6 words>", "shape": "start | step | decision | end" }
+      ],
+      "edges": [
+        { "from": "n1", "to": "n2", "label": "<optional, e.g. Yes / No, max 3 words>" }
+      ]
+    },
+    "chart": {
+      "chartType": "bar | line",
+      "xLabels": ["<category 1>", "<category 2>"],
+      "series": [{ "name": "<series name>", "values": [0, 0] }],
+      "yLabel": "<unit, e.g. mg/dL>"
+    },
+    "imageSubject": "<2-5 word canonical name of what is drawn, e.g. nephron cross-section>",
+    "imagePrompt": "<precise, factual description for an image generator>",
+    "imageAlt": "<one-sentence alt text>"
+  },
   "sourceCoverage": {
     "level": "full | partial | none",
     "uncovered": ["<zero or more of: overview, clinicalApproach, keyPoints, examTraps, memoryHooks, flashcards>"]
@@ -269,6 +292,22 @@ SOURCE COVERAGE — report honestly, after writing the rest of the sheet:
 - "none": the Context was empty or irrelevant to this topic. List every section in "uncovered".
 - When in doubt, choose the weaker level. Over-claiming source backing is the worst possible error here —
   worse than under-claiming it.
+
+VISUAL — choose exactly one kind, after writing the sections above:
+- "flowchart": the default for a diagnostic algorithm, treatment ladder or decision pathway (most
+  clinicalApproach content). 3-12 nodes. Node labels come from your own sheet text. "decision" nodes
+  are questions; label their outgoing edges (Yes / No, or the finding). Use "LR" only for a short linear sequence.
+- "chart": ONLY for numbers that are genuinely comparable and already stated in your sheet (e.g. lab
+  values across conditions, staging thresholds, dose steps). 2-12 xLabels; every series has exactly
+  one number per xLabel. Never invent or estimate numbers to fill a chart.
+- "image": ONLY when the core teaching point is a physical structure a flowchart cannot show (gross
+  anatomy, histology, a labeled cross-section). imagePrompt must name the structures, their spatial
+  relationships, the view (e.g. coronal section, anterior view) and the labels to show — a precise
+  textbook-illustration brief, no mood or style words.
+- "none": when no visual adds real value over the text. This is a normal, frequent answer — do not force a visual.
+- Include ONLY the field for the chosen kind: "flowchart" for flowchart, "chart" for chart, and
+  "imageSubject" + "imagePrompt" + "imageAlt" for image. For "none", write just { "kind": "none" }.
+- placement is the section the visual illustrates.
 
 LENGTH GATE — apply strictly based on the Length setting "${len}":
 

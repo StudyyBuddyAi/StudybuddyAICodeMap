@@ -89,7 +89,8 @@ FINAL CHECK — verify each point before you write the closing }:
 - clinicalApproach contains ${gate.clinical}.
 - Write for the audience and exam the request names. A retrieved passage from a pediatrics or adult textbook does not narrow the audience.
 - sourceCoverage must agree with itself: "full" means "uncovered" is empty; "none" lists every section; "partial" lists at least one section but not all of them.
-- referenceNote is a finished sentence — never the instruction text in angle brackets.`;
+- referenceNote is a finished sentence — never the instruction text in angle brackets.
+- visual has exactly one kind and only that kind's field(s); "none" is fine when no visual adds value, and a chart never contains a number your sheet does not state.`;
 }
 
 export function buildCortiNotesPrompts(input: NotesPromptInput): { systemPrompt: string; userContent: string } {
