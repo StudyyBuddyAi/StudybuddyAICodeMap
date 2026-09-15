@@ -25,8 +25,8 @@ export interface NotesPromptInput {
   examMode?: string;
   persona?: string;
   cardsOnly?: boolean;
-  // deno-lint-ignore no-explicit-any -- parseInt'd verbatim, as the original's req.json() value was
-  cardCount?: any;
+  // Raw req.json() value; parsed with parseInt below.
+  cardCount?: unknown;
   focusCard?: unknown;
   explainMode?: boolean;
   enhanceMode?: string;
@@ -478,7 +478,7 @@ ${sheetSchemaBlock}`;
     } else if (explainMode) {
       systemPrompt = isHaiku ? haikuExplainPrompt : gptOssExplainPrompt;
     } else if (cardsOnly) {
-      const count = Math.min(Math.max(parseInt(cardCount) || 12, 5), 20);
+      const count = Math.min(Math.max(parseInt(String(cardCount)) || 12, 5), 20);
       systemPrompt = isHaiku ? haikuCardsPrompt(count) : gptOssCardsPrompt(count);
     } else {
       systemPrompt = isHaiku ? haikuSheetPrompt : gptOssSheetPrompt;

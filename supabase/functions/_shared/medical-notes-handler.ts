@@ -19,7 +19,7 @@
  * memory, profile, premium hook, quota — runs concurrently where the steps are
  * independent, and each stage's duration is logged.
  */
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.8";
+import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.39.8";
 import { makeEmbeddings, embedQuery, retrieveChunks, type RagChunk } from "./rag.ts";
 import { requestSourceLabels, type RawSourceLabel } from "./source-labels.ts";
 import {
@@ -114,8 +114,7 @@ const since = (t: number) => Date.now() - t;
  * that retrieve normally one at a time, which a single retry absorbs.
  */
 async function retrieveWithRetry(
-  // deno-lint-ignore no-explicit-any
-  authClient: any,
+  authClient: SupabaseClient,
   openRouterApiKey: string,
   query: string,
   topK: number,

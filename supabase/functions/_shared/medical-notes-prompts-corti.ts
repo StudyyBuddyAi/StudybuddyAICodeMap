@@ -108,7 +108,7 @@ export function buildCortiNotesPrompts(input: NotesPromptInput): { systemPrompt:
     // "truncate the sheet" — contradicting the plain-text card format.
     systemPrompt = systemPrompt
       .replace(
-        /- Fill every field of the JSON output below from standard medical knowledge even where this Context\n  is silent\. Never leave a field empty, never truncate the sheet, and never refuse to answer — report\n  any gap honestly in "sourceCoverage" instead \(see the OUTPUT section below\)\./,
+        /- Fill every field of the JSON output below from standard medical knowledge even where this Context\n {2}is silent\. Never leave a field empty, never truncate the sheet, and never refuse to answer — report\n {2}any gap honestly in "sourceCoverage" instead \(see the OUTPUT section below\)\./,
         "- Where the Context is silent, still write the full deck from standard medical knowledge and tag those cards [General]. Never refuse."
       )
       .replace(
