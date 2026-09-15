@@ -1,0 +1,186 @@
+import { useEffect, useRef, useState } from "react";
+import DashboardLayout from "@/components/dashboard/DashboardLayout";
+import OutputSection from "@/components/OutputSection";
+import type { GeneratedSheet, VisualSpec } from "@/types/generated-sheet";
+
+/**
+ * DEV ONLY — /dev/sheet-visuals. Never routed in a production build (see App.tsx).
+ *
+ * Renders the real OutputSection with fixture sheets, one per visual kind, so
+ * the visuals can be reviewed without a deployed edge function. Fixtures go
+ * through the same `visual` shape the parser produces.
+ */
+
+const BASE_SHEET: GeneratedSheet = {
+  topicEmoji: "🫀",
+  topic: "Heart Failure with Reduced Ejection Fraction",
+  overview:
+    "Mechanism: **Impaired systolic contraction** lowers stroke volume.\nPathophysiology: Low output → **RAAS and sympathetic activation** → sodium retention and remodeling → further decline in ejection fraction.\nKey associations:\n1. **S3 gallop** → rapid filling of a dilated ventricle\n2. **Raised JVP** → venous congestion from volume overload\n3. **Orthopnea** → redistribution of fluid when supine",
+  memoryHooks: [
+    "HFrEF pillars: ARNI, BB, MRA, SGLT2i — 'All Big Men Sleep'",
+    "S3 = 'Slosh-ing in' to a baggy ventricle",
+    "Loop diuretics fix symptoms, not survival",
+  ],
+  clinicalApproach:
+    "Diagnosis: **Echocardiogram** → LVEF ≤ 40%. BNP supports the diagnosis.\nManagement:\nFirst-line → **ARNI or ACE inhibitor + beta-blocker + MRA + SGLT2 inhibitor**, loop diuretic for congestion.\nComplications: **cardiogenic shock**, **ventricular arrhythmias**.",
+  keyPoints: [
+    "If LVEF ≤ 40% → HFrEF; 41–49% → mildly reduced; ≥ 50% → preserved",
+    "If BNP is normal → heart failure is unlikely",
+    "If hyperkalemia on MRA → check renal function and reduce the dose",
+    "If NYHA III–IV despite therapy → consider device therapy",
+    "If new AF in HF → rate control and anticoagulate",
+  ],
+  examTraps: [
+    "Starting a beta-blocker during acute decompensation",
+    "Non-dihydropyridine CCBs worsen HFrEF",
+    "Digoxin improves symptoms, not mortality",
+  ],
+  flashcards: [
+    {
+      tag: "Next Step",
+      question: "A 64-year-old with LVEF 30% on an ACE inhibitor and beta-blocker remains NYHA II. What next?",
+      answer: "Add a mineralocorticoid receptor antagonist and an SGLT2 inhibitor.",
+    },
+  ],
+  referenceNote: "Fixture sheet for local preview — not medical content for study.",
+};
+
+const FIXTURES: Record<string, VisualSpec> = {
+  flowchart: {
+    kind: "flowchart",
+    title: "Chronic HFrEF treatment pathway",
+    placement: "clinicalApproach",
+    flowchart: {
+      direction: "TD",
+      nodes: [
+        { id: "a", label: "Symptoms + LVEF ≤ 40%", shape: "start" },
+        { id: "b", label: "Congested?", shape: "decision" },
+        { id: "c", label: "Loop diuretic", shape: "step" },
+        { id: "d", label: "Start ARNI/ACEi + BB + MRA + SGLT2i", shape: "step" },
+        { id: "e", label: "Still NYHA III–IV on therapy?", shape: "decision" },
+        { id: "f", label: "Consider ICD / CRT, refer", shape: "step" },
+        { id: "g", label: "Continue, titrate to target doses", shape: "end" },
+      ],
+      edges: [
+        { from: "a", to: "b" },
+        { from: "b", to: "c", label: "Yes" },
+        { from: "b", to: "d", label: "No" },
+        { from: "c", to: "d" },
+        { from: "d", to: "e" },
+        { from: "e", to: "f", label: "Yes" },
+        { from: "e", to: "g", label: "No" },
+      ],
+    },
+  },
+  "chart (bar)": {
+    kind: "chart",
+    title: "NT-proBNP rule-in cut-off by age",
+    placement: "keyPoints",
+    chart: {
+      chartType: "bar",
+      xLabels: ["< 50 y", "50–75 y", "> 75 y"],
+      series: [{ name: "NT-proBNP", values: [450, 900, 1800] }],
+      yLabel: "pg/mL",
+    },
+  },
+  "chart (line, 2 series)": {
+    kind: "chart",
+    title: "Blood pressure during titration",
+    placement: "keyPoints",
+    chart: {
+      chartType: "line",
+      xLabels: ["Week 0", "Week 2", "Week 4", "Week 8"],
+      series: [
+        { name: "Systolic", values: [138, 131, 124, 118] },
+        { name: "Diastolic", values: [86, 82, 78, 74] },
+      ],
+      yLabel: "mmHg",
+    },
+  },
+};
+
+/** The key order the model writes in — `visual` closes when `sourceCoverage` starts. */
+const STREAM_ORDER = [
+  "topicEmoji",
+  "topic",
+  "overview",
+  "memoryHooks",
+  "clinicalApproach",
+  "keyPoints",
+  "examTraps",
+  "flashcards",
+  "referenceNote",
+  "visual",
+];
+
+const DevSheetVisuals = () => {
+  const [fixture, setFixture] = useState<string>("flowchart");
+  const [streamedKeys, setStreamedKeys] = useState<string[] | null>(null);
+  const timer = useRef<number | null>(null);
+
+  const sheet: GeneratedSheet = { ...BASE_SHEET, visual: FIXTURES[fixture] };
+
+  const simulateStream = () => {
+    if (timer.current) window.clearInterval(timer.current);
+    let i = 0;
+    setStreamedKeys([]);
+    timer.current = window.setInterval(() => {
+      i += 1;
+      if (i > STREAM_ORDER.length) {
+        window.clearInterval(timer.current!);
+        timer.current = null;
+        setStreamedKeys(null);
+        return;
+      }
+      setStreamedKeys(STREAM_ORDER.slice(0, i));
+    }, 450);
+  };
+
+  useEffect(() => () => {
+    if (timer.current) window.clearInterval(timer.current);
+  }, []);
+
+  return (
+    <DashboardLayout wide>
+      <div className="mx-auto max-w-3xl space-y-4 py-6">
+        <div className="rounded-lg border border-dashed border-border p-4 text-sm">
+          <p className="mb-3 font-mono text-[11px] uppercase tracking-widest text-muted-foreground">
+            Dev preview · sheet visuals
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {Object.keys(FIXTURES).map((name) => (
+              <button
+                key={name}
+                type="button"
+                onClick={() => setFixture(name)}
+                className={`rounded-md border px-3 py-1.5 text-xs ${
+                  fixture === name ? "border-primary text-primary" : "border-border text-muted-foreground"
+                }`}
+              >
+                {name}
+              </button>
+            ))}
+            <button
+              type="button"
+              onClick={simulateStream}
+              className="ml-auto rounded-md border border-border px-3 py-1.5 text-xs text-muted-foreground"
+            >
+              Simulate streaming
+            </button>
+          </div>
+        </div>
+
+        <OutputSection
+          key={fixture}
+          output={JSON.stringify(sheet)}
+          inputText={sheet.topic}
+          modeInfo={{ examMode: "General", difficulty: "Basic", focus: "Quick Revision", length: "Concise" }}
+          isStreaming={streamedKeys !== null}
+          streamedKeys={streamedKeys ?? undefined}
+        />
+      </div>
+    </DashboardLayout>
+  );
+};
+
+export default DevSheetVisuals;

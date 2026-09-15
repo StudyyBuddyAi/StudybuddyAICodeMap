@@ -25,6 +25,7 @@ import FlashcardsSection from "@/components/FlashcardsSection";
 import SaveButton from "@/components/SaveButton";
 import SectionSkeleton from "@/components/SectionSkeleton";
 import CitationBadgeList from "@/components/CitationBadgeList";
+import SheetVisual from "@/components/sheet-visual/SheetVisual";
 import { ModelCredit } from "@/components/PoweredByCorti";
 import { startTopProgress, finishTopProgress } from "@/components/TopProgressBar";
 import { parseModelUsed, type ModelUsed } from "@/lib/model-used";
@@ -1346,6 +1347,12 @@ const OutputSection = ({
     ? JSON_SECTION_ORDER.find((key) => !isReady(key))
     : undefined;
 
+  // The visual is its own top-level key, written after the sections. It shows
+  // only once that key has closed AND the section it illustrates is on screen —
+  // a half-streamed node list would draw a different diagram a moment later.
+  const visual = sheet.visual;
+  const visualReady = !!visual && (!isStreaming || !!streamedKeys?.includes("visual"));
+
   // Group active enhancements by anchor so they can be injected inline.
   // Open ones render as inline blocks; collapsed ones render as golden
   // highlights wrapped around their source text.
@@ -1568,6 +1575,7 @@ const OutputSection = ({
                 )
               )}
               {ready && renderInline(`${key}:end`)}
+              {ready && visualReady && visual.placement === key && <SheetVisual visual={visual} />}
             </div>
           </div>
         );

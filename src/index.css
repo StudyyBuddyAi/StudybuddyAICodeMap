@@ -817,3 +817,23 @@
     }
   }
 }
+
+/* Chart series for sheet visuals (src/components/sheet-visual/). Categorical,
+   assigned in this order and never cycled. Each mode's four steps were run
+   through the dataviz palette validator against its own surface (light #F7F4EC,
+   dark #171C24): lightness band, chroma floor, CVD separation, normal-vision
+   floor and 3:1 contrast all pass. Re-validate before changing any of them. */
+:root {
+  --viz-1: #00908c;
+  --viz-2: #d95926;
+  --viz-3: #2a78d6;
+  --viz-4: #b07800;
+}
+
+.dark,
+[data-theme="dark"] {
+  --viz-1: #2ba5a5;
+  --viz-2: #d95926;
+  --viz-3: #3987e5;
+  --viz-4: #c98500;
+}
