@@ -147,8 +147,8 @@ function Dashboard() {
           <section className="dashboard-pro-banner" aria-label="StudyBuddy Pro offer" data-testid="banner-go-pro">
             <div className="dashboard-pro-icon"><Sparkles size={17} className="text-white"/></div>
             <div className="dashboard-pro-copy">
-              <strong>Unlock Claude + unlimited generations</strong>
-              <span>Go Pro for Anthropic's AI and no limits.</span>
+              <strong>Unlock Corti + unlimited generations</strong>
+              <span>Go Pro for AI built for healthcare, and no limits.</span>
             </div>
             <button type="button" className="dashboard-pro-button text-white" onClick={() => window.location.href = "mailto:osama200az@gmail.com"} data-testid="button-go-pro">Go Pro</button>
             <span className="dashboard-pro-dismiss" aria-hidden="true">×</span>

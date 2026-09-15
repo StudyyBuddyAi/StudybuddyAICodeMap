@@ -4,7 +4,15 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
 import { toast } from "@/hooks/use-toast";
 
-export type ModelPreference = "claude" | "gpt-oss";
+/**
+ * A Pro user's choice between the premium model (Corti — best quality, the
+ * default) and GPT-OSS (fastest). Saving "corti" needs migration
+ * 20260919000000_preferred_model_corti.sql; the legacy value "claude" meant
+ * the premium tier too and is read as "corti".
+ */
+export type ModelPreference = "corti" | "gpt-oss";
+
+const toPreference = (raw: unknown): ModelPreference => (raw === "gpt-oss" ? "gpt-oss" : "corti");
 
 export function useModelPreference() {
   const { user, isAnonymous } = useAuth();
@@ -23,11 +31,11 @@ export function useModelPreference() {
         .eq("id", userId!)
         .maybeSingle();
       if (error) throw error;
-      return (data?.preferred_model as ModelPreference) ?? "gpt-oss";
+      return toPreference(data?.preferred_model);
     },
   });
 
-  const preferredModel: ModelPreference = prefQuery.data ?? "gpt-oss";
+  const preferredModel: ModelPreference = prefQuery.data ?? "corti";
 
   const setPreferredModel = async (model: ModelPreference) => {
     if (!isLoggedIn || !userId || saving) return;

@@ -6,6 +6,8 @@ import FlashcardsGenerator, { type GeneratedCard } from "@/components/Flashcards
 import DeckList from "@/components/DeckList";
 import { CardFace, ExplainPanel } from "@/components/StudyMode";
 import SheetSources from "@/components/SheetSources";
+import { ModelCredit } from "@/components/PoweredByCorti";
+import type { ModelUsed } from "@/lib/model-used";
 import RatingButtons from "@/components/flashcards/RatingButtons";
 import SrsSettingsDialog from "@/components/flashcards/SrsSettings";
 import { useFlashcardDeck, makeCardId, useDeckGrounding, type Card as DeckCard } from "@/hooks/use-flashcard-deck";
@@ -164,6 +166,8 @@ const Flashcards = () => {
   const s = useStudySession({ liveCards: allCards, reviewCard, settings });
   const [slidePhase, setSlidePhase] = useState<"idle" | "exit">("idle");
   const session = s.active ? { topic: s.topic ?? "", cards: s.sessionCards } : null;
+  // The model behind the deck just generated, credited while that deck is studied.
+  const [generatedDeck, setGeneratedDeck] = useState<{ topic: string; model: ModelUsed } | null>(null);
   const current = s.current;
 
   // Deck-level retrieval metadata (sources) for the card currently on screen,
@@ -276,7 +280,8 @@ const Flashcards = () => {
     }
   };
 
-  const handleGenerated = (cards: GeneratedCard[], topic: string) => {
+  const handleGenerated = (cards: GeneratedCard[], topic: string, model: ModelUsed | null) => {
+    setGeneratedDeck(model ? { topic, model } : null);
     const now = Date.now();
     // Placeholders only: the session looks each card up in the saved deck first,
     // so a regenerated card that already has a schedule keeps it.
@@ -363,6 +368,11 @@ const Flashcards = () => {
         <p className="text-sm font-serif font-semibold text-foreground leading-tight">
           {session.topic}
         </p>
+        {generatedDeck && generatedDeck.topic === session.topic && (
+          <div className="flex">
+            <ModelCredit used={generatedDeck.model} compact />
+          </div>
+        )}
 
         {/* Persistent grounding summary — this is the one place in Study Mode
             that states the positive count, not just a warning when something's

@@ -1,6 +1,9 @@
 import { supabase } from "@/integrations/supabase/client";
 
-const MEDICAL_NOTES_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/medical-notes`;
+// VITE_MEDICAL_NOTES_FN swaps in a same-contract variant (medical-notes-corti)
+// for a local build. Unset in every deployed environment.
+const MEDICAL_NOTES_FN = import.meta.env.VITE_MEDICAL_NOTES_FN || "medical-notes";
+const MEDICAL_NOTES_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/${MEDICAL_NOTES_FN}`;
 
 /**
  * Request body accepted by the `medical-notes` edge function. All fields are

@@ -103,6 +103,87 @@ describe("parseFlashcardsFromOutput", () => {
     expect(parseFlashcardsFromOutput(out, "Topic")).toEqual([]);
   });
 
+  // ── Format drift seen in real model output (provider comparison, Sept 2026) ──
+  describe("format drift", () => {
+    it("reads a deck that has no FLASHCARDS header and no Q: prefixes (Claude Haiku 4.5)", () => {
+      const out = [
+        "🩸",
+        "",
+        "[Mechanism][Grounded] In iron deficiency anemia, what happens to serum iron and TIBC as iron stores become depleted?",
+        "A: Serum iron falls while TIBC gradually increases.",
+        "",
+        "[Diagnosis][Grounded] A 65-year-old male presents with microcytic hypochromic anemia. What distinguishes iron deficiency from thalassemia?",
+        "A: Iron deficiency shows low serum iron and a high RDW.",
+      ].join("\n");
+      const cards = parseFlashcardsFromOutput(out, "Iron deficiency anemia");
+      expect(cards).toHaveLength(2);
+      expect(cards[0].topicEmoji).toBe("🩸");
+      expect(cards[0].tag).toBe("Mechanism");
+      expect(cards[0].grounded).toBe(true);
+      expect(cards[1].question).toMatch(/^A 65-year-old male/);
+    });
+
+    it("reads a headerless deck that keeps its Q: prefixes (Corti S1 mini)", () => {
+      const out = "💊\n\nQ: [Mechanism][Grounded] Why does the PR interval lengthen?\nA: The AV node is sensitive to beta blockade.\n";
+      const cards = parseFlashcardsFromOutput(out, "Beta blockers");
+      expect(cards).toHaveLength(1);
+      expect(cards[0].topicEmoji).toBe("💊");
+    });
+
+    it("still returns nothing for headerless prose without answer lines", () => {
+      expect(parseFlashcardsFromOutput("[Note] Iron deficiency is common.\nSee the sheet.", "Topic")).toEqual([]);
+    });
+
+    it("accepts Answer: as an answer line", () => {
+      const out = "FLASHCARDS\n\nQ: [Association][Grounded] Why not carvedilol alone in pheochromocytoma?\nAnswer: Unopposed alpha-1 agonism.\n";
+      const cards = parseFlashcardsFromOutput(out, "Pharm");
+      expect(cards).toHaveLength(1);
+      expect(cards[0].answer).toBe("Unopposed alpha-1 agonism.");
+    });
+
+    it("drops a per-card TAGS line without losing the cards after it (GPT-OSS 20B)", () => {
+      const out = [
+        "FLASHCARDS",
+        "",
+        "Q: [Mechanism][Grounded] How do beta blockers slow the SA node?",
+        "A: They lower cAMP and Ca2+ influx.",
+        "",
+        "TAGS: [Mechanism]",
+        "",
+        "Q: [Complication][Grounded] Who risks bronchospasm?",
+        "A: Patients with asthma or COPD.",
+        "",
+        "TAGS: [Complication]",
+      ].join("\n");
+      const cards = parseFlashcardsFromOutput(out, "Pharm");
+      expect(cards).toHaveLength(2);
+      expect(cards[0].answer).toBe("They lower cAMP and Ca2+ influx.");
+      expect(cards[1].answer).toBe("Patients with asthma or COPD.");
+    });
+
+    it("keeps an echoed prompt legend out of the last answer", () => {
+      const out = [
+        "FLASHCARDS",
+        "",
+        "🩺",
+        "",
+        "Q: [Next Step][Grounded] Which populations get combination antimicrobial therapy?",
+        "A: Only neutropenic sepsis and sepsis caused by Pseudomonas.",
+        "",
+        "TAGS (pick one per card): [Diagnosis] [Mechanism] [Next Step] [Complication] [Association]",
+        "",
+        "SOURCING TAG (mandatory, second bracket on every Q: line):",
+        "- [Grounded] — if this card's content comes directly from the Context above",
+        "",
+        "HARD RULES:",
+        "- Exactly 10 cards. No more, no less.",
+      ].join("\n");
+      const cards = parseFlashcardsFromOutput(out, "Sepsis");
+      expect(cards).toHaveLength(1);
+      expect(cards[0].answer).toBe("Only neutropenic sepsis and sepsis caused by Pseudomonas.");
+    });
+  });
+
   // ── Sourcing tag ([Grounded] / [General]) ────────────────────────────────
   // Where the parser meets the prompt. If the prompt's two-bracket format ever
   // drifts, these are the tests that catch it.
