@@ -15,6 +15,8 @@ import CitationBadgeList from "@/components/CitationBadgeList";
 import SheetSources from "@/components/SheetSources";
 import { startTopProgress, finishTopProgress } from "@/components/TopProgressBar";
 import { callMedicalNotes } from "@/lib/callMedicalNotes";
+import { parseModelUsed, type ModelUsed } from "@/lib/model-used";
+import { ModelCredit } from "@/components/PoweredByCorti";
 import { useMemoryPreference } from "@/hooks/use-memory-preference";
 
 interface StudyModeProps {
@@ -427,10 +429,12 @@ export const ExplainPanel = ({ open, scope, card, onClose }: ExplainPanelProps) 
   const [loading, setLoading] = useState(false);
   const [started, setStarted] = useState(false);
   const [goProOpen, setGoProOpen] = useState(false);
+  const [modelUsed, setModelUsed] = useState<ModelUsed | null>(null);
 
   useEffect(() => {
     setStarted(false);
     setOutput("");
+    setModelUsed(null);
   }, [card.id, scope]);
 
   useEffect(() => {
@@ -472,6 +476,7 @@ export const ExplainPanel = ({ open, scope, card, onClose }: ExplainPanelProps) 
           const err = await response.json().catch(() => ({}));
           throw new Error(err.error || `Error: ${response.status}`);
         }
+        setModelUsed(parseModelUsed(response.headers));
         const reader = response.body?.getReader();
         if (!reader) throw new Error("No response body");
         const decoder = new TextDecoder();
@@ -541,9 +546,12 @@ export const ExplainPanel = ({ open, scope, card, onClose }: ExplainPanelProps) 
           <ArrowLeft className="h-4 w-4 mr-1.5" />
           Back to review
         </Button>
-        <Button variant="ghost" size="icon" onClick={onClose} aria-label="Close">
-          <X className="h-5 w-5" />
-        </Button>
+        <div className="flex items-center gap-2">
+          <ModelCredit used={modelUsed} compact />
+          <Button variant="ghost" size="icon" onClick={onClose} aria-label="Close">
+            <X className="h-5 w-5" />
+          </Button>
+        </div>
       </div>
       <div className="flex-1 overflow-y-auto px-4 py-6">
         <div className="mx-auto max-w-2xl">

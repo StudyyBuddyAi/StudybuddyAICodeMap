@@ -43,8 +43,8 @@ const GoProNudgeBanner = ({ isRealUser }: { isRealUser: boolean }) => {
         <div className="flex items-center gap-2.5">
           <Sparkles className="h-4 w-4 text-primary shrink-0" />
           <p className="text-sm text-foreground">
-            <span className="font-medium">Unlock Claude + unlimited generations</span>
-            <span className="text-muted-foreground"> — Go Pro for Anthropic's AI and no limits.</span>
+            <span className="font-medium">Unlock Corti + unlimited generations</span>
+            <span className="text-muted-foreground"> — Go Pro for AI built for healthcare, and no limits.</span>
           </p>
         </div>
         <div className="flex items-center gap-2 shrink-0">
