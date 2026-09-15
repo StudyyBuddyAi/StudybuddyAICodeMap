@@ -1,3 +1,5 @@
+import type { Figure } from "./figure";
+
 export interface Flashcard {
   tag: string;        // e.g. "Next Step", "Diagnosis", "Mechanism", "Complication"
   question: string;   // full question text, tag already stripped
@@ -49,14 +51,21 @@ export interface SheetSource {
  */
 export type GroundingLevel = "full" | "partial" | "none";
 
-/** The sheet sections the model can report as uncovered by the context. */
+/**
+ * The sheet sections that can be reported as uncovered by the context.
+ *
+ * `figures` is the one entry the model never reports for itself — figures are
+ * synthesised structure rather than retrieved text, so the client marks them
+ * uncovered unconditionally. See `presentedGrounding` in src/lib/grounding.ts.
+ */
 export type SheetSectionKey =
   | "overview"
   | "clinicalApproach"
   | "keyPoints"
   | "examTraps"
   | "memoryHooks"
-  | "flashcards";
+  | "flashcards"
+  | "figures";
 
 /**
  * The model's own declaration of which sections it had to write from general
@@ -94,6 +103,9 @@ export interface GeneratedSheet {
   // sheet can still distinguish "nothing retrieved" from "retrieved but the
   // model judged it not relevant" (both reconcile to groundingLevel "none").
   retrievedChunks?: number;
+  // Generated diagrams. Absent on every sheet produced with figureMode off and
+  // on every sheet saved before the feature existed, so read it as optional.
+  figures?: Figure[];
 }
 
 // Lightweight type used when loading a saved sheet from study_history.

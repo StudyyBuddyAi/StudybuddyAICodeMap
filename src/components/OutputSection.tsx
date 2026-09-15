@@ -13,6 +13,7 @@ import {
   AlertTriangle,
   Lightbulb,
   Layers,
+  LineChart,
   Zap,
   ChevronDown,
   ChevronUp,
@@ -22,6 +23,7 @@ import {
 } from "lucide-react";
 import CopyButton from "@/components/CopyButton";
 import FlashcardsSection from "@/components/FlashcardsSection";
+import FiguresSection from "@/components/figures/FiguresSection";
 import SaveButton from "@/components/SaveButton";
 import SectionSkeleton from "@/components/SectionSkeleton";
 import CitationBadgeList from "@/components/CitationBadgeList";
@@ -254,6 +256,9 @@ const JSON_SECTION_CONFIG = {
   examTraps: { icon: AlertTriangle, label: "⚠️ Exam Traps", className: "section-examtraps", evidenceBacked: false },
   flashcards: { icon: HelpCircle, label: "❓ Flashcards", className: "section-flashcards", evidenceBacked: false },
   referenceNote: { icon: FileText, label: "📚 Reference Note", className: "section-reference", evidenceBacked: false },
+  // Never evidence-backed: a figure is synthesised structure, not retrieved
+  // text. See presentedGrounding in src/lib/grounding.ts.
+  figures: { icon: LineChart, label: "📈 Figures", className: "section-visuals", evidenceBacked: false },
 } as const;
 
 type JsonSectionKey = keyof typeof JSON_SECTION_CONFIG;
@@ -1346,6 +1351,10 @@ const OutputSection = ({
     "examTraps",
     "flashcards",
     "referenceNote",
+    // Present only when the model actually produced figures. Most sheets have
+    // none, and holding an empty slot for them would add a permanently blank
+    // section to every sheet — including sheets generated with figures off.
+    ...(sheet.figures?.length ? (["figures"] as const) : []),
   ];
 
   // Every section keeps its slot for the whole generation, so the document
@@ -1542,6 +1551,8 @@ const OutputSection = ({
                 <SectionSkeleton variant="sheet-body" />
               ) : key === "flashcards" ? (
                 <FlashcardsSection cards={sheet.flashcards ?? []} />
+              ) : key === "figures" ? (
+                <FiguresSection figures={sheet.figures ?? []} />
               ) : key === "overview" || key === "clinicalApproach" ? (
                 <div className="text-sm text-muted-foreground leading-relaxed">
                   {renderJsonText(

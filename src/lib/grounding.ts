@@ -13,6 +13,7 @@ const SECTION_KEYS: readonly SheetSectionKey[] = [
   "examTraps",
   "memoryHooks",
   "flashcards",
+  "figures",
 ];
 
 /** Human-readable labels for `SourceCoverage.uncovered`, used in GroundingNotice. */
@@ -23,6 +24,7 @@ export const SECTION_LABELS: Record<SheetSectionKey, string> = {
   examTraps: "Exam traps",
   memoryHooks: "Memory hooks",
   flashcards: "Flashcards",
+  figures: "Figures",
 };
 
 /** Fixed referenceNote string for level "none" — no variation permitted. */
@@ -60,6 +62,43 @@ export function reconcileGroundingLevel(
   if (retrievedChunks === 0) return "none";
   if (!coverage) return "partial";
   return coverage.level;
+}
+
+/**
+ * Grounding as it must be *presented* when the sheet carries figures.
+ *
+ * A figure is synthesised structure, never retrieved text, so it can never ride
+ * a "full" badge — GroundingNotice hides itself on "full", which would leave a
+ * generated diagram silently vouched for by the sheet around it.
+ *
+ * This deliberately does not mutate the sheet's stored `groundingLevel`. That
+ * value describes the prose sections and is what a saved flashcard deck
+ * inherits (SheetGenerator's save path reads it via `resolveGroundingLevel`);
+ * clamping it at the source would mislabel a fully grounded deck as partial.
+ * Presentation is clamped here, at the point of display, and nowhere else.
+ *
+ * Note this is a client-side rule by necessity: the edge function streams the
+ * model's JSON straight through without parsing it, so it has no opportunity to
+ * rewrite sourceCoverage without buffering the whole response and destroying
+ * the incremental section reveal.
+ */
+export function presentedGrounding(
+  level: GroundingLevel | null,
+  coverage: SourceCoverage | null,
+  hasFigures: boolean
+): { level: GroundingLevel | null; coverage: SourceCoverage | null } {
+  if (!hasFigures || level === null) return { level, coverage };
+
+  const presentedLevel: GroundingLevel = level === "full" ? "partial" : level;
+  const uncovered = coverage?.uncovered ?? [];
+
+  return {
+    level: presentedLevel,
+    coverage: {
+      level: presentedLevel,
+      uncovered: uncovered.includes("figures") ? uncovered : [...uncovered, "figures"],
+    },
+  };
 }
 
 /**

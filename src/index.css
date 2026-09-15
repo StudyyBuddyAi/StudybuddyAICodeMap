@@ -738,6 +738,19 @@
       page-break-inside: avoid;
     }
 
+    /* Figures draw at a fixed viewBox width, which can exceed the printable
+       area. Scoped to figure elements on purpose: every section icon is also
+       an <svg>, and forcing height:auto on those would distort them. */
+    .print-document figure svg {
+      max-width: 100%;
+      height: auto;
+    }
+
+    .print-document figure {
+      break-inside: avoid;
+      page-break-inside: avoid;
+    }
+
     @page {
       margin: 16mm;
     }

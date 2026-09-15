@@ -51,7 +51,11 @@ import {
 } from "@/types/generated-sheet";
 import GroundingNotice from "@/components/GroundingNotice";
 import SheetSources from "@/components/SheetSources";
-import { reconcileGroundingLevel, resolveGroundingLevel } from "@/lib/grounding";
+import {
+  presentedGrounding,
+  reconcileGroundingLevel,
+  resolveGroundingLevel,
+} from "@/lib/grounding";
 import { applySourceLabels } from "@/lib/source-labels";
 import { fetchBestCitation, type CitationResult } from "@/lib/citation";
 import { getCitationsForTopic } from "@/lib/citation-store";
@@ -130,6 +134,14 @@ const PillGroup = ({ label, options, value, onChange }: PillGroupProps) => (
   </div>
 );
 
+/**
+ * Diagram generation, off until a clinician has signed off on generated figures
+ * across the evaluation topics. Flipping this to "auto" is the whole feature
+ * switch: while it is "none" the system prompt is byte-identical to its
+ * pre-figures form, so no sheet can carry a figure and nothing below changes.
+ */
+const FIGURE_MODE = "none" as "none" | "auto";
+
 // ── Right-rail section navigator (lg+ only) ──────────────────────────────────
 
 const SECTION_NAV_ITEMS: { key: string; label: string }[] = [
@@ -140,6 +152,10 @@ const SECTION_NAV_ITEMS: { key: string; label: string }[] = [
   { key: "examTraps", label: "Exam Traps" },
   { key: "flashcards", label: "Flashcards" },
   { key: "referenceNote", label: "Reference Note" },
+  // Only while figures can actually be produced. The rail lists every item
+  // unfiltered during streaming, so an unconditional entry here would grey out
+  // a Figures row on every sheet and never fill it.
+  ...(FIGURE_MODE === "auto" ? [{ key: "figures", label: "Figures" }] : []),
 ];
 
 /** A section is worth listing only if it actually has content in the sheet. */
@@ -550,6 +566,7 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
         topK: groundingTopK,
         threshold: groundingThreshold,
         useMemory,
+        figureMode: FIGURE_MODE,
         userId: user?.id ?? null,
         isAnonymous: isAnonymous ?? false,
         isPro: pro,
@@ -1316,6 +1333,15 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
       </div>
   );
 
+  // Figures clamp the *presented* grounding verdict only. The sheet's stored
+  // groundingLevel describes its prose sections and is what a saved flashcard
+  // deck inherits, so it is deliberately left alone.
+  const shownGrounding = presentedGrounding(
+    sheet ? resolveGroundingLevel(sheet) : null,
+    sheet?.sourceCoverage ?? null,
+    !!sheet?.figures?.length
+  );
+
   return (
     <>
     <div className="flex flex-col gap-6 lg:flex-row lg:gap-0 lg:items-start">
@@ -1367,8 +1393,8 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
           sheets with no grounding metadata at all (legacy, or grounding off). */}
       {!loading && sheet && (
         <GroundingNotice
-          level={resolveGroundingLevel(sheet)}
-          coverage={sheet.sourceCoverage}
+          level={shownGrounding.level}
+          coverage={shownGrounding.coverage ?? undefined}
           reason={
             sheet.groundingLevel !== "none"
               ? undefined

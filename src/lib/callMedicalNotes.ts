@@ -31,6 +31,9 @@ export interface MedicalNotesParams {
   // Conversation memory control — shared across all four modes (sheet, cards,
   // explain, enhance write/read the same 10-turn window). Default true.
   useMemory?: boolean;
+  // Diagram generation (sheet mode only). Omitted or "none" leaves the system
+  // prompt byte-identical to its pre-figures form.
+  figureMode?: "none" | "auto";
   // Entitlement fields kept for backwards compatibility: the medical-notes
   // edge function now derives identity/entitlement from the verified JWT +
   // profiles and IGNORES these values. Keep the fields so existing callers

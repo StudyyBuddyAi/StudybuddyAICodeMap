@@ -1,4 +1,5 @@
 import type { GeneratedSheet } from "@/types/generated-sheet";
+import { figureToText } from "./figures";
 
 /** Section order and headings, matching how OutputSection renders the document. */
 const SECTIONS: Array<{
@@ -46,6 +47,12 @@ export function sheetToPlainText(
           .map((c) => `Q: [${c.tag}] ${c.question}\nA: ${c.answer}`)
           .join("\n\n")
     );
+  }
+
+  if (sheet.figures?.length) {
+    // Same serialiser the renderers use for their SVG <desc>, so a Share
+    // recipient and a screen-reader user receive identical content.
+    parts.push("Figures\n" + sheet.figures.map(figureToText).join("\n\n"));
   }
 
   if (sheet.referenceNote?.trim()) {

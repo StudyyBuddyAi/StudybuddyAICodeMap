@@ -162,3 +162,64 @@ describe("OutputSection streaming", () => {
     ).resolves.toBeTruthy();
   });
 });
+
+describe("OutputSection figures section", () => {
+  const FIGURE_SHEET: GeneratedSheet = {
+    ...SHEET,
+    figures: [
+      {
+        kind: "compare",
+        title: "Nephrotic vs nephritic",
+        columns: ["Nephrotic", "Nephritic"],
+        rows: [{ label: "Proteinuria", cells: [">3.5 g/day", "<3.5 g/day"] }],
+      },
+    ],
+  };
+
+  it("adds no figures section to a sheet that has none", async () => {
+    await renderSheet(<OutputSection output={JSON.stringify(SHEET)} />);
+    // The regression guard: sheets generated with figures off must render
+    // exactly as they did before the feature, with no extra empty slot.
+    expect(document.querySelector('[data-section-key="figures"]')).toBeNull();
+    expect(heading(/Figures/)).toBeNull();
+  });
+
+  it("renders a figures section when the sheet carries one", async () => {
+    await renderSheet(<OutputSection output={JSON.stringify(FIGURE_SHEET)} />);
+    expect(document.querySelector('[data-section-key="figures"]')).not.toBeNull();
+    expect(heading(/Figures/)).toBeInTheDocument();
+  });
+
+  it("renders the figure itself, not just the section shell", async () => {
+    await renderSheet(<OutputSection output={JSON.stringify(FIGURE_SHEET)} />);
+    expect(sectionText("figures")).toContain("Nephrotic vs nephritic");
+    expect(sectionText("figures")).toContain(">3.5 g/day");
+  });
+
+  it("carries the provenance caption inside the section", async () => {
+    await renderSheet(<OutputSection output={JSON.stringify(FIGURE_SHEET)} />);
+    expect(sectionText("figures")).toContain("AI-generated diagram");
+  });
+
+  it("holds figures behind a skeleton until the stream finishes", async () => {
+    // figures is the last JSON key, so it is never in streamedKeys mid-stream;
+    // the section shows a placeholder for the whole generation and fills in at
+    // the final parse. Asserted as intended behaviour, not a progressive reveal.
+    await renderSheet(
+      <OutputSection
+        output={JSON.stringify(FIGURE_SHEET)}
+        isStreaming
+        streamedKeys={["overview", "memoryHooks", "clinicalApproach", "keyPoints", "examTraps", "flashcards", "referenceNote"]}
+      />
+    );
+    expect(heading(/Figures/)).toBeInTheDocument();
+    expect(sectionText("figures")).not.toContain("Nephrotic vs nephritic");
+  });
+
+  it("leaves the original seven sections untouched", async () => {
+    await renderSheet(<OutputSection output={JSON.stringify(FIGURE_SHEET)} />);
+    for (const name of Object.values(HEADING)) {
+      expect(heading(name)).toBeInTheDocument();
+    }
+  });
+});

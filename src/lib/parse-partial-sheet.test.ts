@@ -228,3 +228,53 @@ describe("parseSheetOutput", () => {
     expect(parseSheetOutput("")).toBeNull();
   });
 });
+
+describe("figures", () => {
+  const sheetWith = (extra: string) =>
+    `{"topicEmoji":"*","topic":"T","overview":"o","memoryHooks":[],` +
+    `"clinicalApproach":"c","keyPoints":[],"examTraps":[],"flashcards":[],` +
+    `"referenceNote":"r","sourceCoverage":{"level":"full","uncovered":[]}${extra}}`;
+
+  const validFigure =
+    `,"figures":[{"kind":"compare","title":"A vs B","columns":["A","B"],` +
+    `"rows":[{"label":"x","cells":["1","2"]}]}]`;
+
+  it("keeps a valid figure through the final parse", () => {
+    const result = parseSheetOutput(sheetWith(validFigure));
+    expect(result?.sheet.figures).toHaveLength(1);
+    expect(result?.sheet.figures?.[0].kind).toBe("compare");
+  });
+
+  it("omits the field entirely when the model sent no figures", () => {
+    const result = parseSheetOutput(sheetWith(""));
+    // Absent rather than [], so a sheet generated with figures off serialises
+    // exactly as it did before the feature existed.
+    expect(result?.sheet).not.toHaveProperty("figures");
+    expect(JSON.stringify(result?.sheet)).not.toContain("figures");
+  });
+
+  it("omits the field when every figure fails validation", () => {
+    const broken = `,"figures":[{"kind":"flow","title":"Bad"}]`;
+    expect(parseSheetOutput(sheetWith(broken))?.sheet).not.toHaveProperty("figures");
+  });
+
+  it("does not reveal figures while they are still streaming", () => {
+    // figures is the last key, so it is always the one held back as in-flight.
+    const truncated = sheetWith(validFigure).slice(0, -3);
+    const partial = parsePartialSheet(truncated);
+    expect(partial?.completeKeys).not.toContain("figures");
+  });
+
+  it("reveals figures once the object closes", () => {
+    const partial = parsePartialSheet(sheetWith(validFigure));
+    expect(partial?.completeKeys).toContain("figures");
+  });
+
+  it("leaves the other sections identical whether or not figures are present", () => {
+    const withFigures = parseSheetOutput(sheetWith(validFigure))!.sheet;
+    const without = parseSheetOutput(sheetWith(""))!.sheet;
+    const { figures, ...rest } = withFigures;
+    expect(rest).toEqual(without);
+    expect(figures).toBeDefined();
+  });
+});

@@ -168,7 +168,7 @@ serve(async (req) => {
             explainMode,
             enhanceMode, itemText, sectionKey, sectionItems, enhanceTopic,
             persona,
-            useGrounding, topK, threshold, useMemory } = await req.json();
+            useGrounding, topK, threshold, useMemory, figureMode } = await req.json();
 
     if (!notes || typeof notes !== "string" || !notes.trim()) {
       return new Response(
@@ -272,6 +272,15 @@ serve(async (req) => {
     // explain/enhance modes stay ungrounded — they're single-item follow-ups,
     // not full generations.
     const groundingEligible = !enhanceMode && !explainMode;
+
+    // ── FIGURES ─────────────────────────────────────────────────────────────
+    // Sheet mode only. Cards output is a text format with no JSON contract to
+    // hold an array, and explain/enhance are single-item follow-ups — so the
+    // figures block must not be threaded through groundingContextBlock, which
+    // those modes share. Default off: with figureMode absent or "none" the
+    // prompt is byte-identical to what it was before this feature.
+    const figuresEnabled =
+      figureMode === "auto" && !cardsOnly && !explainMode && !enhanceMode;
     const useGroundingFlag = typeof useGrounding === "boolean" ? useGrounding : true;
     const groundingAttempted = groundingEligible && useGroundingFlag;
     const rawTopK = typeof topK === "number" ? topK : 8;
@@ -477,6 +486,44 @@ HARD RULES:
     // groundingContextBlock leads the shared contract so retrieved guideline
     // text is in front of the model before the output schema — and is an empty
     // string when grounding was never attempted, leaving the prompt unchanged.
+    // Both are empty strings when figures are off, so the prompt below is
+    // byte-identical to its pre-feature form unless figureMode is "auto".
+    const figuresSchemaEntry = figuresEnabled
+      ? `,
+  "figures": [
+    { "kind": "flow", "title": "<short title>",
+      "nodes": [ { "id": "a", "label": "<step>", "shape": "box | diamond | round" } ],
+      "edges": [ { "from": "a", "to": "b", "label": "<optional condition>" } ] },
+    { "kind": "curve", "title": "<short title>", "xLabel": "<axis>", "yLabel": "<axis>",
+      "series": [ { "name": "<series>", "points": [[0,0],[1,1]] } ],
+      "markers": [ { "x": 0, "label": "<annotation>" } ] },
+    { "kind": "compare", "title": "<short title>", "columns": ["<A>", "<B>"],
+      "rows": [ { "label": "<attribute>", "cells": ["<A value>", "<B value>"] } ] }
+  ]`
+      : "";
+
+    const figuresRulesBlock = figuresEnabled
+      ? `
+
+FIGURES — the "figures" key above. Only when the topic genuinely has a visual structure:
+- Emit 0-3 figures. Zero is the correct answer for most topics. Do not invent a
+  diagram just to fill the field. Omit the key entirely if none apply.
+- "flow" for algorithms and cascades: nodes are steps, edges are transitions.
+  Every edge's "from" and "to" MUST match an "id" you declared. Use shape
+  "diamond" for decision points. Maximum 8 nodes.
+  The chart must flow in ONE direction — no edge may point back to an earlier
+  step, and no step may loop to itself. Omit the figure if the process is
+  genuinely circular.
+- "curve" for relationships with axes: action potentials, dissociation curves,
+  pharmacokinetics. At least 2 points per series, maximum 2 series.
+- "compare" for two-or-more-way distinctions: differentials, drug classes.
+  Every row must have exactly one cell per column.
+- All labels are PLAIN TEXT: no markdown, no HTML, and no quote characters
+  inside a label. Keep every label under 80 characters.
+- If you are not confident a figure is clinically correct, omit it. A missing
+  figure is always better than a wrong one.`
+      : "";
+
     const sheetSchemaBlock = `${groundingContextBlock}
 
 FORMATTING RULES (non-negotiable):
@@ -519,7 +566,7 @@ OUTPUT — return exactly this JSON shape:
   "sourceCoverage": {
     "level": "full | partial | none",
     "uncovered": ["<zero or more of: overview, clinicalApproach, keyPoints, examTraps, memoryHooks, flashcards>"]
-  }
+  }${figuresSchemaEntry}
 }
 
 SOURCE COVERAGE — report honestly, after writing the rest of the sheet:
@@ -561,7 +608,7 @@ These are HARD CAPS. Do not exceed them regardless of topic complexity.
 EMOJI OPTIONS:
 🫀 cardiac, 🩸 hematology, 🧠 neuro, 🫁 pulmonary, 🦴 ortho, 🩺 general,
 💊 pharmacology, 🧬 genetics, 👁️ ophthalmology, 🤰 OB/GYN, 👶 pediatrics,
-🧫 micro, ⚗️ biochem, 🩹 trauma, 🛡️ immunology
+🧫 micro, ⚗️ biochem, 🩹 trauma, 🛡️ immunology${figuresRulesBlock}
 
 Start your response with { and end with }. Nothing else.`;
 

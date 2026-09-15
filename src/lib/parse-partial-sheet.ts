@@ -1,6 +1,7 @@
 import { stripFences } from "./sanitize-json";
 import { repairLlmJson } from "./repair-llm-json";
 import { parseSourceCoverage } from "./grounding";
+import { parseFigures } from "./figures";
 import type { Flashcard, GeneratedSheet } from "@/types/generated-sheet";
 
 /**
@@ -143,7 +144,7 @@ function asFlashcards(v: unknown): Flashcard[] {
 
 /** Fill every field so a partial object can't crash the renderer. */
 function normalize(raw: Record<string, unknown>): GeneratedSheet {
-  return {
+  const sheet: GeneratedSheet = {
     topic: typeof raw.topic === "string" ? raw.topic : undefined,
     topicEmoji: typeof raw.topicEmoji === "string" ? raw.topicEmoji : undefined,
     overview: asString(raw.overview),
@@ -158,6 +159,15 @@ function normalize(raw: Record<string, unknown>): GeneratedSheet {
     // silently dropped before the caller could reconcile it against retrieval.
     sourceCoverage: parseSourceCoverage(raw.sourceCoverage) ?? undefined,
   };
+
+  // Attached only when the model actually produced figures, so a sheet
+  // generated with the feature off serialises exactly as it did before it
+  // existed. parseFigures drops anything malformed, including the
+  // syntactically-valid-but-truncated objects repairTail can leave behind.
+  const figures = parseFigures(raw.figures);
+  if (figures.length) sheet.figures = figures;
+
+  return sheet;
 }
 
 function build(
