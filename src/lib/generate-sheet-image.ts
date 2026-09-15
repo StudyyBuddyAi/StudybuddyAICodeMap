@@ -1,8 +1,15 @@
 import { supabase } from "@/integrations/supabase/client";
 import type { VisualImageResult } from "@/types/generated-sheet";
 
-const FN_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-sheet-image`;
-const PUBLIC_BUCKET_PREFIX = `${import.meta.env.VITE_SUPABASE_URL}/storage/v1/object/public/sheet-visuals/`;
+// VITE_LOCAL_FUNCTIONS=1: the dev server's stand-in, which stores images under
+// .local/ and serves them itself (scripts/local-functions/vite-plugin.ts).
+const LOCAL_FUNCTIONS = import.meta.env.DEV && import.meta.env.VITE_LOCAL_FUNCTIONS === "1";
+const FN_URL = LOCAL_FUNCTIONS
+  ? "/__local-fns/generate-sheet-image"
+  : `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-sheet-image`;
+const PUBLIC_BUCKET_PREFIX = LOCAL_FUNCTIONS
+  ? "/__local-fns/sheet-visuals/"
+  : `${import.meta.env.VITE_SUPABASE_URL}/storage/v1/object/public/sheet-visuals/`;
 
 export type SheetImageErrorCode = "quota_exceeded" | "unavailable";
 

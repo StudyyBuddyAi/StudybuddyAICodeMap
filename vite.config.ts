@@ -1,6 +1,7 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react-swc";
 import path from "path";
+import { localFunctions } from "./scripts/local-functions/vite-plugin";
 
 export default defineConfig({
   server: {
@@ -10,7 +11,9 @@ export default defineConfig({
       overlay: false,
     },
   },
-  plugins: [react()],
+  // localFunctions is dev-only and inert unless VITE_LOCAL_FUNCTIONS=1 — see
+  // scripts/local-functions/vite-plugin.ts.
+  plugins: [react(), localFunctions()],
   optimizeDeps: {
     // Dependencies reached only through lazily loaded pages are discovered on
     // first visit, and Vite reloads the page to re-optimise. The QBank player

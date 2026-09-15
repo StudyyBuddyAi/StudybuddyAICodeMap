@@ -3,7 +3,13 @@ import { supabase } from "@/integrations/supabase/client";
 // VITE_MEDICAL_NOTES_FN swaps in a same-contract variant (medical-notes-corti)
 // for a local build. Unset in every deployed environment.
 const MEDICAL_NOTES_FN = import.meta.env.VITE_MEDICAL_NOTES_FN || "medical-notes";
-const MEDICAL_NOTES_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/${MEDICAL_NOTES_FN}`;
+// VITE_LOCAL_FUNCTIONS=1 routes to the dev server's stand-in
+// (scripts/local-functions/vite-plugin.ts). DEV-gated so a stray env var can't
+// point a production build at a route that doesn't exist.
+const MEDICAL_NOTES_URL =
+  import.meta.env.DEV && import.meta.env.VITE_LOCAL_FUNCTIONS === "1"
+    ? "/__local-fns/medical-notes"
+    : `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/${MEDICAL_NOTES_FN}`;
 
 /**
  * Request body accepted by the `medical-notes` edge function. All fields are
