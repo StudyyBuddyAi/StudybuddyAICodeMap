@@ -210,11 +210,16 @@ export interface VisualPlanResult {
   reason: string;
 }
 
-/** Placement is decided here, never by the model. */
+/**
+ * Placement is decided here, never by the model — and by the kind of visual,
+ * not the teaching point. A sheet whose clinical approach is brief can read as
+ * a "process" rather than a "decision"; both are flowcharts, and a student
+ * should find a flowchart in the same place either way.
+ */
 const PLACEMENT: Record<"structure" | "decision" | "process" | "numbers", string> = {
   structure: "overview",
   decision: "clinicalApproach",
-  process: "overview",
+  process: "clinicalApproach",
   numbers: "keyPoints",
 };
 

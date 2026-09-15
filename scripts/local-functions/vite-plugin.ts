@@ -110,7 +110,7 @@ async function routeWriter(env: Env, req: IncomingMessage, body: Record<string, 
       if (r.ok) profile = ((await r.json()) as RoutingProfile[])[0] ?? null;
       else say(`profile read failed (${r.status}) — routing as free`);
     } catch (err) {
-      say(`profile read failed — ${err instanceof Error ? err.message : String(err)} — routing as free`);
+      say(`profile read failed — ${errorText(err)} — routing as free`);
     }
   }
 
@@ -147,6 +147,13 @@ async function routeWriter(env: Env, req: IncomingMessage, body: Record<string, 
 
 const tag = "\x1b[36m[local-fns]\x1b[0m";
 const say = (msg: string) => console.log(`${tag} ${msg}`);
+
+/** Node's fetch reports every network failure as "fetch failed"; the real reason is in `cause`. */
+function errorText(err: unknown): string {
+  if (!(err instanceof Error)) return String(err);
+  const cause = (err as Error & { cause?: { code?: string; message?: string } }).cause;
+  return cause ? `${err.message} (${cause.code ?? cause.message ?? "unknown cause"})` : err.message;
+}
 
 function readJson(req: IncomingMessage): Promise<Record<string, unknown>> {
   return new Promise((resolve, reject) => {
@@ -258,7 +265,7 @@ async function handleMedicalNotes(server: ViteDevServer, env: Env, req: Incoming
         }
       } catch (err) {
         if (controller.signal.aborted) throw err;
-        failure = err instanceof Error ? err.message : String(err);
+        failure = errorText(err);
       }
       if (failure !== null) {
         if (!hasOpenRouter(env)) throw new Error(`Corti unavailable and no OpenRouter key — ${failure}`);
@@ -272,7 +279,7 @@ async function handleMedicalNotes(server: ViteDevServer, env: Env, req: Incoming
       upstream = await openRouter(route.writer);
     }
   } catch (err) {
-    say(`medical-notes: upstream request failed — ${err instanceof Error ? err.message : String(err)}`);
+    say(`medical-notes: upstream request failed — ${errorText(err)}`);
     return sendJson(res, 500, { error: "AI service error (local)" });
   }
 
@@ -319,7 +326,7 @@ async function handleMedicalNotes(server: ViteDevServer, env: Env, req: Incoming
       }
     }
   } catch (err) {
-    if (!controller.signal.aborted) say(`medical-notes: stream error — ${err instanceof Error ? err.message : String(err)}`);
+    if (!controller.signal.aborted) say(`medical-notes: stream error — ${errorText(err)}`);
   }
   res.write("data: [DONE]\n\n");
   res.end();
@@ -384,7 +391,7 @@ async function handleSheetImage(server: ViteDevServer, env: Env, root: string, r
       cached: false,
     });
   } catch (err) {
-    say(`image FAILED after ${((Date.now() - startedAt) / 1000).toFixed(1)}s — ${err instanceof Error ? err.message : String(err)}`);
+    say(`image FAILED after ${((Date.now() - startedAt) / 1000).toFixed(1)}s — ${errorText(err)}`);
     return sendJson(res, 502, { error: "image_unavailable" });
   }
 }
@@ -404,7 +411,7 @@ async function handleSheetVisual(server: ViteDevServer, env: Env, req: IncomingM
     say(`sheet-visual "${input.topic}" · ${result.teachingPoint} → ${kind} (${result.reason}) · ${((Date.now() - startedAt) / 1000).toFixed(1)}s`);
     return sendJson(res, 200, result);
   } catch (err) {
-    say(`sheet-visual FAILED after ${((Date.now() - startedAt) / 1000).toFixed(1)}s — ${err instanceof Error ? err.message : String(err)}`);
+    say(`sheet-visual FAILED after ${((Date.now() - startedAt) / 1000).toFixed(1)}s — ${errorText(err)}`);
     return sendJson(res, 502, { error: "planner_unavailable" });
   }
 }
