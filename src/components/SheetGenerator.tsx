@@ -1589,7 +1589,7 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
         onClick={() => setConfigDrawerOpen(false)}
       />
       <div
-        className={`absolute inset-y-0 left-0 w-[320px] overflow-y-auto bg-card border-r border-border p-4 motion-safe:transition-transform motion-safe:duration-[250ms] motion-safe:ease-out ${
+        className={`absolute inset-y-0 left-0 w-[320px] overflow-y-auto bg-card border-r border-border p-4 motion-safe:transition-transform motion-safe:duration-300 motion-safe:ease-out ${
           configDrawerOpen ? "translate-x-0" : "-translate-x-full"
         }`}
       >
