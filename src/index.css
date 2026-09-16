@@ -830,3 +830,111 @@
     }
   }
 }
+
+/* ─── Interactive anatomy panel ──────────────────────────────────────────────
+   Motion tokens are namespaced under .anatomy-panel on purpose:
+   styles/design-system.css already defines --ease and --dur-fast, and
+   redefining those globally would silently retime existing components.
+   Colours use the openmed tokens (loaded globally from main.tsx), matching
+   FigureFrame — not the --color-* set, which is only defined in the
+   landing-page stylesheet. ─────────────────────────────────────────────── */
+@layer components {
+  .anatomy-panel {
+    --anatomy-ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+    --anatomy-ease-swap: cubic-bezier(0.65, 0, 0.35, 1);
+    --anatomy-dur-fast: 140ms;
+    --anatomy-dur-base: 260ms;
+    --anatomy-dur-slow: 420ms;
+  }
+
+  /* Ratio comes from an inline style per image — anatomical drawings are not
+     one shape, and a fixed ratio letterboxes exactly the tall ones. */
+  .anatomy-media {
+    position: relative;
+    overflow: hidden;
+    border-radius: var(--radius-md);
+    background: var(--bg-panel);
+    touch-action: pan-y;
+  }
+
+  .anatomy-media img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    opacity: 0;
+    transform: scale(0.985);
+    transition: opacity var(--anatomy-dur-base) var(--anatomy-ease-out),
+                transform var(--anatomy-dur-base) var(--anatomy-ease-out);
+    user-select: none;
+    -webkit-user-drag: none;
+  }
+  .anatomy-media img[data-loaded="true"] { opacity: 1; transform: none; }
+
+  /* Only take the gesture once there is something to pan. */
+  .anatomy-media[data-zoomed="true"] { touch-action: none; cursor: grab; }
+  .anatomy-media[data-zoomed="true"]:active { cursor: grabbing; }
+
+  .anatomy-skeleton {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+      100deg,
+      var(--bg-panel) 40%,
+      color-mix(in srgb, var(--bg-panel) 60%, var(--bg-elevated)) 50%,
+      var(--bg-panel) 60%
+    );
+    background-size: 200% 100%;
+    animation: anatomy-shimmer 1.4s linear infinite;
+  }
+  @keyframes anatomy-shimmer {
+    from { background-position: 150% 0; }
+    to { background-position: -50% 0; }
+  }
+
+  .anatomy-chip {
+    opacity: 0;
+    transform: translateY(6px);
+    animation: anatomy-chip-in var(--anatomy-dur-base) var(--anatomy-ease-out) forwards;
+    transition: border-color var(--anatomy-dur-fast) ease,
+                color var(--anatomy-dur-fast) ease,
+                transform var(--anatomy-dur-fast) ease;
+  }
+  @keyframes anatomy-chip-in { to { opacity: 1; transform: none; } }
+  .anatomy-chip:hover { transform: translateY(-1px); }
+  .anatomy-chip:active { transform: translateY(0) scale(0.97); }
+
+  @keyframes anatomy-pulse {
+    from { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 45%, transparent); }
+    to { box-shadow: 0 0 0 10px transparent; }
+  }
+  .anatomy-chip[data-just-pressed="true"] {
+    animation: anatomy-pulse 600ms var(--anatomy-ease-out);
+  }
+
+  /* grid-rows is animatable; height:auto is not, and this needs no measurement. */
+  .anatomy-answer {
+    display: grid;
+    grid-template-rows: 0fr;
+    transition: grid-template-rows var(--anatomy-dur-base) var(--anatomy-ease-out);
+  }
+  .anatomy-answer[data-open="true"] { grid-template-rows: 1fr; }
+  .anatomy-answer > div { overflow: hidden; }
+
+  .anatomy-answer-text {
+    opacity: 0;
+    transform: translateY(4px);
+    transition: opacity var(--anatomy-dur-base) var(--anatomy-ease-swap),
+                transform var(--anatomy-dur-base) var(--anatomy-ease-swap);
+  }
+  .anatomy-answer-text[data-visible="true"] { opacity: 1; transform: none; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .anatomy-panel *,
+    .anatomy-panel *::before,
+    .anatomy-panel *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}
