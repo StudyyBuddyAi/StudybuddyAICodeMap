@@ -1,6 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { X, BookOpen, Layers, ArrowLeft, RotateCcw, AlertTriangle, CheckCircle2 } from "lucide-react";
+import { X, BookOpen, Layers, ArrowLeft, RotateCcw, AlertTriangle, CheckCircle2, Clock } from "lucide-react";
+import RatingButtons from "@/components/flashcards/RatingButtons";
+import { useRatingKeys, useStudySession } from "@/hooks/use-study-session";
+import { formatInterval, type ReviewOutcome, type ReviewRating, type SrsSettings } from "@/lib/spaced-repetition";
 import { getTagColors } from "@/lib/tag-colors";
 import { type Card, useDeckGrounding } from "@/hooks/use-flashcard-deck";
 import { useToast } from "@/hooks/use-toast";
@@ -14,18 +17,24 @@ import CitationBadgeList from "@/components/CitationBadgeList";
 import SheetSources from "@/components/SheetSources";
 import { startTopProgress, finishTopProgress } from "@/components/TopProgressBar";
 import { callMedicalNotes } from "@/lib/callMedicalNotes";
+import { parseModelUsed, type ModelUsed } from "@/lib/model-used";
+import { ModelCredit } from "@/components/PoweredByCorti";
 import { useMemoryPreference } from "@/hooks/use-memory-preference";
 
 interface StudyModeProps {
+  /** The cards this session starts with, snapshotted on mount. */
   dueCards: Card[];
-  onReview: (id: string, rating: "again" | "good" | "easy") => void;
+  /** The live deck, so cards shown again use their updated schedule. */
+  liveCards: Card[];
+  onReview: (id: string, rating: ReviewRating, opts?: { durationMs?: number }) => Promise<ReviewOutcome | null>;
+  settings: Pick<SrsSettings, "desiredRetention" | "weights">;
   onClose: () => void;
 }
 
-function vibrate(rating: "again" | "good" | "easy" | "flip") {
+function vibrate(rating: ReviewRating | "flip") {
   try {
     if (typeof navigator !== "undefined" && navigator.vibrate) {
-      const ms = rating === "easy" ? 5 : rating === "good" ? 10 : rating === "again" ? 15 : 8;
+      const ms = rating === "easy" ? 5 : rating === "good" ? 10 : rating === "hard" ? 12 : rating === "again" ? 15 : 8;
       navigator.vibrate(ms);
     }
   } catch {
@@ -33,16 +42,23 @@ function vibrate(rating: "again" | "good" | "easy" | "flip") {
   }
 }
 
-const StudyMode = ({ dueCards, onReview, onClose }: StudyModeProps) => {
-  // Snapshot session cards on mount
-  const sessionCards = useMemo(() => dueCards.slice(), []);
-  const [index, setIndex] = useState(0);
-  const [flipped, setFlipped] = useState(false);
-  const [reviewedCount, setReviewedCount] = useState(0);
-  const [done, setDone] = useState(sessionCards.length === 0);
+const StudyMode = ({ dueCards, liveCards, onReview, settings, onClose }: StudyModeProps) => {
+  const s = useStudySession({ liveCards, reviewCard: onReview, settings });
+  const [started, setStarted] = useState(false);
   const [explainOpen, setExplainOpen] = useState(false);
   const [explainScope, setExplainScope] = useState<"card" | "topic">("card");
   const [slidePhase, setSlidePhase] = useState<"idle" | "exit">("idle");
+
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  // Snapshot session cards on mount. Focus moves into the overlay so Space
+  // flips the card instead of re-pressing the deck button underneath.
+  useEffect(() => {
+    s.start(dueCards, "Study");
+    setStarted(true);
+    rootRef.current?.focus();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -52,8 +68,12 @@ const StudyMode = ({ dueCards, onReview, onClose }: StudyModeProps) => {
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  const current = sessionCards[index];
-  const progress = sessionCards.length === 0 ? 0 : (reviewedCount / sessionCards.length) * 100;
+  const sessionCards = s.sessionCards;
+  const current = s.current;
+  const flipped = s.flipped;
+  const done = started && (!s.active || s.status === "done");
+  const waiting = s.active && s.status === "wait";
+  const progress = s.total === 0 ? 0 : (s.reviewed / s.total) * 100;
 
   // Scoped to whichever card is on screen, not the whole session — a due-cards
   // or all-cards review can span multiple decks/topics, so there's no single
@@ -67,32 +87,34 @@ const StudyMode = ({ dueCards, onReview, onClose }: StudyModeProps) => {
   const ungroundedCount = sessionCards.filter((c) => !c.grounded).length;
   const allUngrounded = ungroundedCount > 0 && ungroundedCount === sessionCards.length;
 
-  const handleFlip = () => {
+  const handleFlip = useCallback(() => {
     vibrate("flip");
-    setFlipped((f) => !f);
-  };
+    s.flip();
+  }, [s]);
 
-  const handleRate = (rating: "again" | "good" | "easy") => {
-    if (!current || slidePhase !== "idle") return;
-    vibrate(rating);
-    onReview(current.id, rating);
-    const nextReviewed = reviewedCount + 1;
-    setReviewedCount(nextReviewed);
-    if (index + 1 >= sessionCards.length) {
-      setDone(true);
-      return;
-    }
-    // Slide current card out left (150ms), then bring the next in from the right
-    setSlidePhase("exit");
-    window.setTimeout(() => {
-      setFlipped(false);
-      setIndex((i) => i + 1);
-      setSlidePhase("idle");
-    }, 150);
-  };
+  const handleRate = useCallback(
+    (rating: ReviewRating) => {
+      if (!current || slidePhase !== "idle") return;
+      vibrate(rating);
+      // Slide current card out left (150ms), then bring the next in from the right
+      setSlidePhase("exit");
+      window.setTimeout(() => {
+        s.rate(rating);
+        setSlidePhase("idle");
+      }, 150);
+    },
+    [current, slidePhase, s]
+  );
+
+  useRatingKeys({
+    enabled: !!current && !explainOpen,
+    flipped,
+    onFlip: handleFlip,
+    onRate: handleRate,
+  });
 
   return (
-    <div className="fixed inset-0 z-50 bg-background flex flex-col">
+    <div ref={rootRef} tabIndex={-1} className="fixed inset-0 z-50 bg-background flex flex-col outline-none">
       {/* Progress bar */}
       <div className="h-[2px] w-full bg-border">
         <div
@@ -109,9 +131,26 @@ const StudyMode = ({ dueCards, onReview, onClose }: StudyModeProps) => {
       </div>
 
       <div className="flex-1 flex items-center justify-center px-4 pb-4 md:pb-10 overflow-y-auto">
-        {done ? (
+        {waiting ? (
+          <div className="text-center space-y-4 animate-fade-in max-w-md">
+            <Clock className="mx-auto h-10 w-10 text-primary" />
+            <h2 className="text-2xl font-semibold tracking-tight text-foreground">Almost there.</h2>
+            <p className="text-muted-foreground">
+              {s.remaining} {s.remaining === 1 ? "card is" : "cards are"} still in learning, next due in{" "}
+              {formatInterval(Math.max(0, (s.waitUntil ?? Date.now()) - Date.now()))}.
+            </p>
+            <div className="flex flex-wrap justify-center gap-3">
+              <Button onClick={s.studyAhead} className="h-10 px-6 rounded-lg font-medium">
+                Study them now
+              </Button>
+              <Button variant="outline" onClick={onClose} className="h-10 px-6 rounded-lg font-medium">
+                Finish for now
+              </Button>
+            </div>
+          </div>
+        ) : done ? (
           <div className="text-center space-y-4 animate-fade-in">
-            {sessionCards.length === 0 ? (
+            {s.reviewed === 0 ? (
               <>
                 <h2 className="text-2xl font-semibold tracking-tight text-foreground">You're all caught up.</h2>
                 <p className="text-muted-foreground">
@@ -121,8 +160,9 @@ const StudyMode = ({ dueCards, onReview, onClose }: StudyModeProps) => {
             ) : (
               <>
                 <h2 className="text-2xl font-semibold tracking-tight text-foreground">Session complete</h2>
-                <p className="text-muted-foreground">
-                  {reviewedCount} {reviewedCount === 1 ? "card" : "cards"} reviewed. See you tomorrow.
+                <p className="text-muted-foreground tabular-nums">
+                  {s.reviewed} {s.reviewed === 1 ? "review" : "reviews"} · {s.tally.again} again · {s.tally.hard} hard ·{" "}
+                  {s.tally.good} good · {s.tally.easy} easy. See you next time.
                 </p>
               </>
             )}
@@ -152,8 +192,17 @@ const StudyMode = ({ dueCards, onReview, onClose }: StudyModeProps) => {
               )
             )}
             {/* Card with flip — tap to flip; keyed wrapper drives slide transitions */}
+            {current.isLeech && (
+              <div className="flex items-start gap-2 px-4 py-3 rounded-lg border border-danger/40 bg-danger/10 text-danger text-xs">
+                <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                <span>
+                  Leech: you've forgotten this card {current.lapses} times. Try "Explain this card", or rewrite or
+                  delete it from its deck.
+                </span>
+              </div>
+            )}
             <div
-              key={current.id}
+              key={`${current.id}-${s.reviewed}`}
               className={slidePhase === "exit" ? "card-slide-exit-left" : "card-slide-enter-right"}
             >
               <div
@@ -200,7 +249,7 @@ const StudyMode = ({ dueCards, onReview, onClose }: StudyModeProps) => {
               <div className="space-y-3">
                 <div className="flex items-center justify-center gap-5">
                   <button
-                    onClick={(e) => { e.stopPropagation(); setFlipped(false); }}
+                    onClick={(e) => { e.stopPropagation(); s.setFlipped(false); }}
                     className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-primary transition-colors"
                   >
                     <RotateCcw className="h-3.5 w-3.5" />
@@ -214,34 +263,17 @@ const StudyMode = ({ dueCards, onReview, onClose }: StudyModeProps) => {
                     Explain this card
                   </button>
                 </div>
-                <div className="grid grid-cols-3 gap-2 sm:gap-3">
-                <Button
-                  variant="outline"
-                  onClick={() => handleRate("again")}
-                  className="h-11 rounded-lg font-medium text-red-600 dark:text-red-400 border-red-500/30 hover:bg-red-500/10 hover:text-red-600 dark:hover:text-red-400"
-                >
-                  Still learning
-                </Button>
-                <Button
-                  variant="outline"
-                  onClick={() => handleRate("good")}
-                  className="h-11 rounded-lg font-medium text-emerald-600 dark:text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/10 hover:text-emerald-600 dark:hover:text-emerald-400"
-                >
-                  Got it
-                </Button>
-                <Button
-                  variant="outline"
-                  onClick={() => handleRate("easy")}
-                  className="h-11 rounded-lg font-medium text-primary border-primary/30 hover:bg-primary/10 hover:text-primary"
-                >
-                  Easy
-                </Button>
-                </div>
+                <RatingButtons
+                  previews={s.previews}
+                  onRate={handleRate}
+                  disabled={slidePhase !== "idle"}
+                  compact
+                />
               </div>
             )}
 
             <p className="text-center text-xs text-muted-foreground">
-              Card {index + 1} of {sessionCards.length}
+              {s.reviewed} reviewed · {s.remaining} left
             </p>
 
             {/* Guideline sources behind the current card's deck — same
@@ -401,10 +433,12 @@ export const ExplainPanel = ({ open, scope, card, onClose }: ExplainPanelProps) 
   const [started, setStarted] = useState(false);
   const [goProOpen, setGoProOpen] = useState(false);
   const [authModalOpen, setAuthModalOpen] = useState(false);
+  const [modelUsed, setModelUsed] = useState<ModelUsed | null>(null);
 
   useEffect(() => {
     setStarted(false);
     setOutput("");
+    setModelUsed(null);
   }, [card.id, scope]);
 
   useEffect(() => {
@@ -450,6 +484,7 @@ export const ExplainPanel = ({ open, scope, card, onClose }: ExplainPanelProps) 
           const err = await response.json().catch(() => ({}));
           throw new Error(err.error || `Error: ${response.status}`);
         }
+        setModelUsed(parseModelUsed(response.headers));
         const reader = response.body?.getReader();
         if (!reader) throw new Error("No response body");
         const decoder = new TextDecoder();
@@ -520,9 +555,12 @@ export const ExplainPanel = ({ open, scope, card, onClose }: ExplainPanelProps) 
           <ArrowLeft className="h-4 w-4 mr-1.5" />
           Back to review
         </Button>
-        <Button variant="ghost" size="icon" onClick={onClose} aria-label="Close">
-          <X className="h-5 w-5" />
-        </Button>
+        <div className="flex items-center gap-2">
+          <ModelCredit used={modelUsed} compact />
+          <Button variant="ghost" size="icon" onClick={onClose} aria-label="Close">
+            <X className="h-5 w-5" />
+          </Button>
+        </div>
       </div>
       <div className="flex-1 overflow-y-auto px-4 py-6">
         <div className="mx-auto max-w-2xl">

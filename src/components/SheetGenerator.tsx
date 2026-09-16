@@ -39,6 +39,8 @@ import { usePremiumHook } from "@/hooks/use-premium-hook";
 import { useModelPreference } from "@/hooks/use-model-preference";
 import { useAuth } from "@/hooks/use-auth";
 import { callMedicalNotes } from "@/lib/callMedicalNotes";
+import { parseModelUsed, type ModelUsed } from "@/lib/model-used";
+import { PoweredByCorti } from "@/components/PoweredByCorti";
 import { useFlashcardDeck } from "@/hooks/use-flashcard-deck";
 import { parseFlashcardsFromOutput } from "@/lib/parse-flashcards";
 import { parsePartialSheet, parseSheetOutput } from "@/lib/parse-partial-sheet";
@@ -406,7 +408,7 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
   const [legacyOutput, setLegacyOutput] = useState<string>(
     prefill?.output && !isJsonSheet(prefill.output) ? prefill.output : ""
   );
-  const [modelUsed, setModelUsed] = useState<"flash" | "gpt-oss" | "claude" | undefined>(undefined);
+  const [modelUsed, setModelUsed] = useState<ModelUsed | undefined>(undefined);
   const [loading, setLoading] = useState(false);
   const [deckSaved, setDeckSaved] = useState(false);
   // Sections whose JSON has fully arrived, so the renderer knows how much of a
@@ -482,7 +484,7 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
   };
 
   const { sheetCount, isSheetLimited, isProUser: pro, refresh: refreshUsage } = useUsageLimit();
-  const { premiumRemaining, isPremiumHookActive } = usePremiumHook();
+  const { premiumRemaining, isPremiumHookActive, refetch: refetchPremium } = usePremiumHook();
   const {
     preferredModel,
     setPreferredModel,
@@ -553,14 +555,6 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
         preferredModel: pro ? preferredModel : undefined,
       });
 
-      const xModel = response.headers.get("X-Model-Used") ?? "";
-      const resolvedModel = xModel.includes("gpt-oss")
-        ? "gpt-oss"
-        : xModel.includes("claude-haiku")
-        ? "claude"
-        : "flash";
-      setModelUsed(resolvedModel);
-
       if (!response.ok) {
         const err = await response.json().catch(() => ({}));
         if (response.status === 429) {
@@ -569,8 +563,11 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
         throw new Error(err.error || `Error: ${response.status}`);
       }
 
-      // Usage was incremented server-side; refresh the displayed count.
+      setModelUsed(parseModelUsed(response.headers));
+
+      // Usage was incremented server-side; refresh the displayed counts.
       refreshUsage();
+      refetchPremium();
 
       const reader = response.body?.getReader();
       if (!reader) throw new Error("No response body");
@@ -1207,7 +1204,7 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
                     }
                   }}
                 >
-                  {isAnonymous ? "Sign in free to keep going" : "Go Pro for Claude + unlimited"}
+                  Go Pro for Claude + unlimited
                 </button>
               </span>
             ) : (
@@ -1215,18 +1212,25 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
             )}
             {isPremiumHookActive ? (
               <span className="text-info font-medium block">
-                ✦ {premiumRemaining} Claude generation{premiumRemaining !== 1 ? "s" : ""} left ·{" "}
+                ✦ {premiumRemaining} Corti generation{premiumRemaining !== 1 ? "s" : ""} left ·{" "}
                 <button
                   type="button"
                   className="underline hover:text-info transition-colors"
                   onClick={() => setGoProOpen(true)}
                 >
-                  Go Pro for unlimited Claude
+                  Go Pro for unlimited Corti
                 </button>
               </span>
             ) : !isSheetLimited ? (
               <span className="text-muted-foreground block">
-                Powered by GPT-OSS 20B
+                Free tier: GPT-OSS 20B ·{" "}
+                <button
+                  type="button"
+                  className="underline hover:text-foreground transition-colors"
+                  onClick={() => setGoProOpen(true)}
+                >
+                  Go Pro for Corti
+                </button>
               </span>
             ) : null}
           </div>
@@ -1240,30 +1244,37 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
               <div className="inline-flex items-center rounded-lg bg-card p-0.5 shadow-sm">
                 <button
                   type="button"
-                  onClick={() => setPreferredModel("gpt-oss")}
+                  onClick={() => setPreferredModel("corti")}
                   disabled={modelSaving || modelLoading}
+                  aria-pressed={!modelLoading && preferredModel === "corti"}
                   className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
-                    !modelLoading && preferredModel === "gpt-oss"
+                    !modelLoading && preferredModel === "corti"
                       ? "bg-card text-foreground shadow-sm"
                       : "text-muted-foreground hover:text-foreground"
                     }`}
                   >
-                    GPT-OSS 20B
+                    Corti S1 · best quality
                   </button>
                   <button
                     type="button"
-                    onClick={() => setPreferredModel("claude")}
+                    onClick={() => setPreferredModel("gpt-oss")}
                     disabled={modelSaving || modelLoading}
+                    aria-pressed={!modelLoading && preferredModel === "gpt-oss"}
                     className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
-                      !modelLoading && preferredModel === "claude"
+                      !modelLoading && preferredModel === "gpt-oss"
                         ? "bg-card text-foreground shadow-sm"
                         : "text-muted-foreground hover:text-foreground"
                     }`}
                   >
-                    Claude Haiku 4.5
+                    GPT-OSS 20B · fastest
                   </button>
                 </div>
               </div>
+              {!modelLoading && preferredModel === "corti" && (
+                <div className="flex justify-center">
+                  <PoweredByCorti compact />
+                </div>
+              )}
               {modelSaving && (
                 <p className="text-[11px] text-muted-foreground text-center">Saving preference…</p>
               )}

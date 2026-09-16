@@ -48,9 +48,16 @@ export type Database = {
           grounded: boolean
           id: string
           interval_days: number
+          is_leech: boolean
+          lapses: number
           last_reviewed_at: string | null
+          learning_steps: number
           question: string
           review_count: number
+          scheduled_days: number
+          srs_state: number | null
+          stability: number | null
+          difficulty: number | null
           tag: string | null
           topic: string
           topic_emoji: string | null
@@ -65,9 +72,16 @@ export type Database = {
           grounded?: boolean
           id?: string
           interval_days?: number
+          is_leech?: boolean
+          lapses?: number
           last_reviewed_at?: string | null
+          learning_steps?: number
           question: string
           review_count?: number
+          scheduled_days?: number
+          srs_state?: number | null
+          stability?: number | null
+          difficulty?: number | null
           tag?: string | null
           topic: string
           topic_emoji?: string | null
@@ -82,9 +96,16 @@ export type Database = {
           grounded?: boolean
           id?: string
           interval_days?: number
+          is_leech?: boolean
+          lapses?: number
           last_reviewed_at?: string | null
+          learning_steps?: number
           question?: string
           review_count?: number
+          scheduled_days?: number
+          srs_state?: number | null
+          stability?: number | null
+          difficulty?: number | null
           tag?: string | null
           topic?: string
           topic_emoji?: string | null
@@ -208,6 +229,13 @@ export type Database = {
           pro_source: string | null
           premium_used: number
           preferred_model: string
+          srs_desired_retention: number
+          srs_max_reviews_per_day: number
+          srs_new_per_day: number
+          srs_weights: Json | null
+          srs_weights_log_loss: number | null
+          srs_weights_review_count: number | null
+          srs_weights_updated_at: string | null
         }
         Insert: {
           created_at?: string
@@ -234,23 +262,50 @@ export type Database = {
       review_sessions: {
         Row: {
           card_id: string
+          difficulty_after: number | null
+          difficulty_before: number | null
+          due_after: string | null
+          duration_ms: number | null
+          elapsed_days: number | null
           id: string
           rating: string
           reviewed_at: string
+          scheduled_days: number | null
+          stability_after: number | null
+          stability_before: number | null
+          state_before: number | null
           user_id: string
         }
         Insert: {
           card_id: string
+          difficulty_after?: number | null
+          difficulty_before?: number | null
+          due_after?: string | null
+          duration_ms?: number | null
+          elapsed_days?: number | null
           id?: string
           rating: string
           reviewed_at?: string
+          scheduled_days?: number | null
+          stability_after?: number | null
+          stability_before?: number | null
+          state_before?: number | null
           user_id: string
         }
         Update: {
           card_id?: string
+          difficulty_after?: number | null
+          difficulty_before?: number | null
+          due_after?: string | null
+          duration_ms?: number | null
+          elapsed_days?: number | null
           id?: string
           rating?: string
           reviewed_at?: string
+          scheduled_days?: number | null
+          stability_after?: number | null
+          stability_before?: number | null
+          state_before?: number | null
           user_id?: string
         }
         Relationships: [
@@ -490,7 +545,7 @@ export type Database = {
           selected_option: 'a' | 'b' | 'c' | 'd' | 'e'
           is_correct: boolean
           time_taken_ms: number | null
-          attempted_at: string
+          created_at: string
           session_id: string | null
         }
         Insert: {
@@ -500,7 +555,7 @@ export type Database = {
           selected_option: 'a' | 'b' | 'c' | 'd' | 'e'
           is_correct: boolean
           time_taken_ms?: number | null
-          attempted_at?: string
+          created_at?: string
           session_id?: string | null
         }
         Update: {
@@ -510,7 +565,7 @@ export type Database = {
           selected_option?: 'a' | 'b' | 'c' | 'd' | 'e'
           is_correct?: boolean
           time_taken_ms?: number | null
-          attempted_at?: string
+          created_at?: string
           session_id?: string | null
         }
         Relationships: [
@@ -576,34 +631,50 @@ export type Database = {
           id: string
           user_id: string
           started_at: string
-          ended_at: string
+          ended_at: string | null
           score: number
           total: number
           total_time_ms: number
           system: string
           created_at: string
+          status: string
+          mode: string
+          question_ids: string[] | null
+          current_index: number
+          skipped_ids: string[]
+          elapsed_ms: number
+          expected_total: number | null
+          generation: Json | null
+          annotations: Json
+          progress_seq: number
+          last_activity_at: string | null
         }
         Insert: {
           id?: string
           user_id: string
           started_at: string
-          ended_at: string
+          ended_at?: string | null
           score: number
           total: number
           total_time_ms: number
           system?: string
           created_at?: string
+          status?: string
+          mode?: string
+          question_ids?: string[] | null
         }
         Update: {
           id?: string
           user_id?: string
           started_at?: string
-          ended_at?: string
+          ended_at?: string | null
           score?: number
           total?: number
           total_time_ms?: number
           system?: string
           created_at?: string
+          status?: string
+          mode?: string
         }
         Relationships: [
           {
@@ -690,12 +761,91 @@ export type Database = {
     }
     Functions: {
       redeem_pro_code: { Args: { code_input: string }; Returns: Json }
+      review_flashcard: {
+        Args: {
+          p_client_id: string
+          p_rating: string
+          p_expected_reps: number
+          p_next: Json
+          p_log: Json
+        }
+        Returns: Json
+      }
+      set_flashcard_states: {
+        Args: { p_mode: string; p_states: Json }
+        Returns: Json
+      }
+      set_srs_settings: {
+        Args: {
+          p_desired_retention: number
+          p_new_per_day: number
+          p_max_reviews_per_day: number
+        }
+        Returns: Json
+      }
+      set_srs_weights: {
+        Args: { p_weights: Json | null; p_review_count: number; p_log_loss: number }
+        Returns: Json
+      }
+      get_srs_today: {
+        Args: { p_since: string }
+        Returns: Json
+      }
       start_qbank_session: {
         Args: {
           p_domains: string[] | null
           p_limit: number
           p_system: string | null
           p_question_ids: string[] | null
+          p_mode?: string
+        }
+        Returns: Json
+      }
+      save_qbank_progress: {
+        Args: {
+          p_session: string
+          p_seq: number
+          p_current_index: number
+          p_skipped_ids: string[]
+          p_elapsed_ms: number
+          p_expected_total: number
+          p_generation: Json | null
+          p_annotations: Json
+          p_flagged_ids?: string[] | null
+        }
+        Returns: Json
+      }
+      set_question_flag: {
+        Args: { p_session: string; p_question: string; p_flagged: boolean }
+        Returns: Json
+      }
+      list_unfinished_sessions: {
+        Args: Record<PropertyKey, never>
+        Returns: {
+          id: string
+          mode: string
+          system: string
+          topic: string | null
+          exam_mode: string | null
+          started_at: string
+          last_activity_at: string | null
+          question_count: number
+          expected_total: number
+          answered_count: number
+          flagged_count: number
+          elapsed_ms: number
+        }[]
+      }
+      resume_qbank_session: {
+        Args: { p_session: string }
+        Returns: Json
+      }
+      record_timed_answer: {
+        Args: {
+          p_session: string
+          p_question: string
+          p_selected: string | null
+          p_time_ms: number
         }
         Returns: Json
       }

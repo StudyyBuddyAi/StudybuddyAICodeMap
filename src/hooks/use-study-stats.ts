@@ -7,7 +7,11 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 interface ReviewRow {
   rating: string;
   reviewed_at: string;
+  /** FSRS state before the review; null for reviews logged before FSRS. */
+  state_before: number | null;
 }
+
+const REVIEW_STATE = 2;
 
 interface StudyStats {
   streak: number | null;
@@ -58,7 +62,7 @@ export function useStudyStats(): StudyStats {
       const since = new Date(Date.now() - 90 * DAY_MS).toISOString();
       const { data, error } = await supabase
         .from("review_sessions")
-        .select("rating, reviewed_at")
+        .select("rating, reviewed_at, state_before")
         .eq("user_id", userId!)
         .gte("reviewed_at", since);
       if (error) throw error;
@@ -93,14 +97,18 @@ export function useStudyStats(): StudyStats {
 
   const streak = computeStreak(rows);
 
+  // True retention, as Anki reports it: the pass rate on cards that had
+  // graduated to review. Learning-step repetitions are practice, not tests of
+  // memory, and would drag the number down. Hard is a pass. Reviews logged
+  // before FSRS carry no state, so they are counted as they come.
   const last30 = rows.filter(
-    (r) => new Date(r.reviewed_at).getTime() >= thirtyDaysAgo
+    (r) =>
+      new Date(r.reviewed_at).getTime() >= thirtyDaysAgo &&
+      (r.state_before === REVIEW_STATE || r.state_before === null)
   );
   let retentionRate: number | null = null;
   if (last30.length >= 5) {
-    const successes = last30.filter(
-      (r) => r.rating === "good" || r.rating === "easy"
-    ).length;
+    const successes = last30.filter((r) => r.rating !== "again").length;
     retentionRate = Math.round((successes / last30.length) * 100);
   }
 

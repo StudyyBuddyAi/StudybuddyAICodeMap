@@ -25,7 +25,9 @@ import FlashcardsSection from "@/components/FlashcardsSection";
 import SaveButton from "@/components/SaveButton";
 import SectionSkeleton from "@/components/SectionSkeleton";
 import CitationBadgeList from "@/components/CitationBadgeList";
+import { ModelCredit } from "@/components/PoweredByCorti";
 import { startTopProgress, finishTopProgress } from "@/components/TopProgressBar";
+import { parseModelUsed, type ModelUsed } from "@/lib/model-used";
 import type { CitationResult } from "@/lib/citation";
 import {
   type GeneratedSheet,
@@ -171,7 +173,8 @@ interface OutputSectionProps {
   citationState?: CitationState;
   onCitationLockedClick?: () => void;
   citationIsLoggedIn?: boolean;
-  modelUsed?: "flash" | "gpt-oss" | "claude";
+  /** Which model wrote the sheet, from the response headers. */
+  modelUsed?: ModelUsed | null;
   isPro?: boolean;
   userId?: string | null;
   isAnonymous?: boolean;
@@ -574,35 +577,11 @@ function resolveSavedAnchor(sheet: GeneratedSheet, sourceText: string): string |
 
 // ─── Shared sub-components ─────────────────────────────────────────────────
 
-function ModelBadge({ model, isPro }: { model: "flash" | "gpt-oss" | "claude"; isPro: boolean }) {
-  const label =
-    isPro && model === "claude"
-      ? "Claude Haiku 4.5"
-      : isPro && model === "gpt-oss"
-      ? "GPT-OSS 20B"
-      : model === "claude"
-      ? "Premium AI"
-      : "GPT-OSS 20B";
-
+/** Credits the model that wrote the sheet, beside the first section's title. */
+function ModelBadge({ model }: { model: ModelUsed }) {
   return (
-    <span
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 4,
-        padding: "2px 8px",
-        borderRadius: "var(--radius-pill)",
-        border: "1px solid var(--border-strong)",
-        background: "var(--bg)",
-        fontFamily: "var(--font-mono)",
-        fontSize: 11,
-        fontWeight: 500,
-        color: "var(--fg-muted)",
-        marginLeft: 8,
-      }}
-    >
-      <Zap style={{ width: 10, height: 10 }} />
-      {label}
+    <span style={{ display: "inline-flex", marginLeft: 8 }}>
+      <ModelCredit used={model} />
     </span>
   );
 }
@@ -750,6 +729,9 @@ const InlineEnhancement = ({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [closing, setClosing] = useState(false);
+  // Only known for a result generated in this session; saved or cached results
+  // don't record which model wrote them.
+  const [enhanceModel, setEnhanceModel] = useState<ModelUsed | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   // enhance reads the shared window but never writes a turn — see the MEMORY
   // note in the medical-notes edge function.
@@ -784,6 +766,7 @@ const InlineEnhancement = ({
       );
 
       if (!response.ok) throw new Error("Enhancement failed");
+      setEnhanceModel(parseModelUsed(response.headers));
 
       const reader = response.body?.getReader();
       if (!reader) throw new Error("No response body");
@@ -901,6 +884,11 @@ const InlineEnhancement = ({
           >
             {kindLabel[enhancement.kind]}
           </span>
+          {enhanceModel && (
+            <span style={{ marginLeft: "auto" }}>
+              <ModelCredit used={enhanceModel} compact />
+            </span>
+          )}
           <button
             type="button"
             onClick={handleClose}
@@ -1280,7 +1268,7 @@ const OutputSection = ({
                   <h3 style={SECTION_TITLE_STYLE}>{config.label}</h3>
                   {showEvidenceBadge && <EvidenceBadge onClick={scrollToReference} />}
                   {title === "SUMMARY" && modelUsed && (
-                    <ModelBadge model={modelUsed} isPro={isPro} />
+                    <ModelBadge model={modelUsed} />
                   )}
                 </div>
                 <CopyButton text={content} />
@@ -1503,7 +1491,7 @@ const OutputSection = ({
                 </h3>
                 {showEvidenceBadge && <EvidenceBadge onClick={scrollToReference} />}
                 {ready && key === "overview" && modelUsed && (
-                  <ModelBadge model={modelUsed} isPro={isPro} />
+                  <ModelBadge model={modelUsed} />
                 )}
               </div>
               <div className="flex items-center gap-1">
