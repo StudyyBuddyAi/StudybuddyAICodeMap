@@ -54,6 +54,7 @@ const HEADING = {
   clinicalApproach: /Clinical Approach/,
   keyPoints: /Key Points/,
   examTraps: /Exam Traps/,
+  visual: /Visual Aid/,
   flashcards: /Flashcards/,
   referenceNote: /Reference Note/,
 };
@@ -137,7 +138,9 @@ describe("OutputSection streaming", () => {
     for (const name of Object.values(HEADING)) {
       expect(heading(name)).toBeInTheDocument();
     }
-    expect(screen.getAllByLabelText("Section loaded")).toHaveLength(7);
+    // Seven streamed sections plus the Visual Aid card, which is ready as soon
+    // as the sheet is (its content comes from a button, not the stream).
+    expect(screen.getAllByLabelText("Section loaded")).toHaveLength(8);
     expect(screen.queryByLabelText("Writing section")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Waiting")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /save/i })).toBeEnabled();

@@ -19,16 +19,15 @@ import {
   Sparkles,
   RotateCcw,
   X,
-  Loader2,
+  Image as ImageIcon,
 } from "lucide-react";
 import CopyButton from "@/components/CopyButton";
 import FlashcardsSection from "@/components/FlashcardsSection";
 import SaveButton from "@/components/SaveButton";
 import SectionSkeleton from "@/components/SectionSkeleton";
 import CitationBadgeList from "@/components/CitationBadgeList";
-import SheetVisual from "@/components/sheet-visual/SheetVisual";
+import VisualSection, { type VisualPlanner } from "@/components/sheet-visual/VisualSection";
 import type { SheetImageRequester } from "@/lib/generate-sheet-image";
-import { parseSheetVisual } from "@/lib/parse-sheet-visual";
 import { ModelCredit } from "@/components/PoweredByCorti";
 import { startTopProgress, finishTopProgress } from "@/components/TopProgressBar";
 import { parseModelUsed, type ModelUsed } from "@/lib/model-used";
@@ -37,6 +36,7 @@ import {
   type GeneratedSheet,
   type EnhancementResult,
   type VisualImageResult,
+  type VisualSpec,
   parseStoredSheet,
   isJsonSheet,
 } from "@/types/generated-sheet";
@@ -190,8 +190,8 @@ interface OutputSectionProps {
   streamedKeys?: string[];
   /** Overrides the image edge function call — used by the dev preview page. */
   requestVisualImage?: SheetImageRequester;
-  /** True while sheet-visual is planning this sheet's visual (after the stream). */
-  visualPlanning?: boolean;
+  /** Overrides the visual planner call — used by the dev preview page. */
+  requestVisualPlan?: VisualPlanner;
 }
 
 // ─── Legacy renderer helpers (kept for old text-blob sheets) ───────────────
@@ -264,6 +264,7 @@ const JSON_SECTION_CONFIG = {
   clinicalApproach: { icon: Stethoscope, label: "🩺 Clinical Approach", className: "section-clinical", evidenceBacked: true },
   keyPoints: { icon: List, label: "📌 Key Points", className: "section-keypoints", evidenceBacked: true },
   examTraps: { icon: AlertTriangle, label: "⚠️ Exam Traps", className: "section-examtraps", evidenceBacked: false },
+  visual: { icon: ImageIcon, label: "🖼️ Visual Aid", className: "section-visual", evidenceBacked: false },
   flashcards: { icon: HelpCircle, label: "❓ Flashcards", className: "section-flashcards", evidenceBacked: false },
   referenceNote: { icon: FileText, label: "📚 Reference Note", className: "section-reference", evidenceBacked: false },
 } as const;
@@ -996,7 +997,7 @@ const OutputSection = ({
   isStreaming = false,
   streamedKeys,
   requestVisualImage,
-  visualPlanning = false,
+  requestVisualPlan,
 }: OutputSectionProps) => {
   const navigate = useNavigate();
   const ref = useRef<HTMLDivElement>(null);
@@ -1186,6 +1187,19 @@ const OutputSection = ({
   // Same route as enhancements: the generator owns the sheet, so the image is
   // merged there and rides along in `output` when the student saves. Carries
   // the subject so a result that lands after a new sheet started is ignored.
+  // Same route as enhancements: the generator owns the sheet, so the plan is
+  // merged there and rides along in `output` when the student saves. The topic
+  // it was planned from travels with it, so it cannot land on a newer sheet.
+  const plannedTopic = sheet?.topic ?? inputText ?? "";
+  const handleVisualPlanned = useCallback(
+    (visual: VisualSpec) => {
+      window.dispatchEvent(
+        new CustomEvent("studybuddy:visual-planned", { detail: { visual, topic: plannedTopic } })
+      );
+    },
+    [plannedTopic]
+  );
+
   const handleVisualImageResolved = useCallback(
     (result: VisualImageResult, subject: string) => {
       window.dispatchEvent(
@@ -1357,6 +1371,7 @@ const OutputSection = ({
     "clinicalApproach",
     "keyPoints",
     "examTraps",
+    "visual",
     "flashcards",
     "referenceNote",
   ];
@@ -1365,17 +1380,14 @@ const OutputSection = ({
   // never changes shape — placeholders are filled in rather than replaced.
   // A section renders its content only once its JSON has closed; before that
   // it would show half a sentence and then reflow.
-  const isReady = (key: JsonSectionKey) => !isStreaming || !!streamedKeys?.includes(key);
+  // The visual section holds a button rather than streamed JSON, so it is ready
+  // as soon as the sheet is on screen.
+  const isReady = (key: JsonSectionKey) =>
+    key === "visual" ? !isStreaming : !isStreaming || !!streamedKeys?.includes(key);
   // Sections arrive in order, so the first one not yet complete is in flight.
   const writingKey = isStreaming
-    ? JSON_SECTION_ORDER.find((key) => !isReady(key))
+    ? JSON_SECTION_ORDER.find((key) => key !== "visual" && !isReady(key))
     : undefined;
-
-  // The visual is planned after the sheet finishes (sheet-visual), so it never
-  // arrives mid-stream. Re-validated on every render: a saved sheet's JSON is
-  // trusted no more than a fresh response, and older shapes are dropped.
-  const visual = parseSheetVisual(sheet.visual);
-  const visualReady = !!visual && !isStreaming;
 
   // Group active enhancements by anchor so they can be injected inline.
   // Open ones render as inline blocks; collapsed ones render as golden
@@ -1456,22 +1468,9 @@ const OutputSection = ({
           input={inputText || ""}
           output={output}
           modeInfo={modeInfo}
-          // Held until the visual is planned, so a saved sheet always includes it.
-          disabled={isStreaming || visualPlanning}
+          disabled={isStreaming}
         />
       </div>
-
-      {visualPlanning && (
-        <div
-          role="status"
-          aria-live="polite"
-          className="animate-fade-in flex items-center gap-2"
-          style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--fg-muted)", letterSpacing: "0.02em" }}
-        >
-          <Loader2 className="h-3 w-3 animate-spin" style={{ color: "var(--accent)" }} />
-          Adding a visual to this sheet…
-        </div>
-      )}
 
       {JSON_SECTION_ORDER.map((key, idx) => {
         const config = JSON_SECTION_CONFIG[key];
@@ -1483,7 +1482,9 @@ const OutputSection = ({
           ready && citationState === "found" && config.evidenceBacked;
 
         const copyText =
-          key === "flashcards"
+          key === "visual"
+            ? ""
+            : key === "flashcards"
             ? (sheet.flashcards ?? [])
                 .map((c) => `Q: [${c.tag}] ${c.question}\nA: ${c.answer}`)
                 .join("\n\n")
@@ -1549,7 +1550,7 @@ const OutputSection = ({
                         animationFillMode: "backwards",
                       }}
                     />
-                    <CopyButton text={copyText} />
+                    {key !== "visual" && <CopyButton text={copyText} />}
                   </>
                 ) : (
                   // Marks where the next content lands. Only the dot pulses —
@@ -1572,6 +1573,17 @@ const OutputSection = ({
             <div style={SECTION_BODY_STYLE} data-enh-section={key}>
               {!ready ? (
                 <SectionSkeleton variant="sheet-body" />
+              ) : key === "visual" ? (
+                <VisualSection
+                  sheet={sheet}
+                  topic={sheet.topic ?? inputText ?? ""}
+                  isPro={isPro}
+                  disabled={isStreaming}
+                  onPlanned={handleVisualPlanned}
+                  onImageResolved={handleVisualImageResolved}
+                  requestPlan={requestVisualPlan}
+                  requestImage={requestVisualImage}
+                />
               ) : key === "flashcards" ? (
                 <FlashcardsSection cards={sheet.flashcards ?? []} />
               ) : key === "overview" || key === "clinicalApproach" ? (
@@ -1612,16 +1624,6 @@ const OutputSection = ({
                 )
               )}
               {ready && renderInline(`${key}:end`)}
-              {ready && visualReady && visual.placement === key && (
-                <SheetVisual
-                  visual={visual}
-                  topic={sheet.topic ?? inputText ?? ""}
-                  visualImage={sheet.visualImage}
-                  onImageResolved={handleVisualImageResolved}
-                  isPro={isPro}
-                  requestImage={requestVisualImage}
-                />
-              )}
             </div>
           </div>
         );

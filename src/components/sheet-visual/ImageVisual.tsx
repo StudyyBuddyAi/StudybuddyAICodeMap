@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ImageIcon, Loader2, RotateCcw } from "lucide-react";
 import type { ImageView, VisualImageResult } from "@/types/generated-sheet";
 import {
@@ -19,6 +19,8 @@ export interface ImageVisualProps {
   onResolved?: (result: VisualImageResult) => void;
   isPro?: boolean;
   requestImage?: SheetImageRequester;
+  /** Request on mount, for the click that planned this visual. */
+  autoStart?: boolean;
 }
 
 type Status =
@@ -64,6 +66,7 @@ const ImageVisual = ({
   onResolved,
   isPro = false,
   requestImage = requestSheetImage,
+  autoStart = false,
 }: ImageVisualProps) => {
   const saved = visualImage && isTrustedVisualImageUrl(visualImage.url) ? visualImage : undefined;
   const [status, setStatus] = useState<Status>(() =>
@@ -94,6 +97,16 @@ const ImageVisual = ({
       }
     }
   };
+
+  // Fires once: the click that planned this visual already asked for the image.
+  const autoStarted = useRef(false);
+  useEffect(() => {
+    if (!autoStart || autoStarted.current || saved) return;
+    autoStarted.current = true;
+    void generate();
+    // generate closes over props that do not change for a given visual.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoStart]);
 
   if (status.kind === "done" && !imgFailed) {
     return (

@@ -19,6 +19,10 @@ export interface SheetVisualProps {
   isPro?: boolean;
   /** Test/preview seam; defaults to the real edge function. */
   requestImage?: SheetImageRequester;
+  /** Start the image request on mount — the student already asked, in the click that planned this. */
+  autoStartImage?: boolean;
+  /** Inside the Visual section the card already has a header, so drop the top margin. */
+  bare?: boolean;
 }
 
 const KIND_META = {
@@ -48,12 +52,16 @@ const FOOTNOTE_STYLE: React.CSSProperties = {
  * The sheet's one visual aid, mounted at the end of the section it illustrates.
  * An enhancement, never load-bearing: every failure path degrades to text.
  */
-const SheetVisual = ({ visual, topic, visualImage, onImageResolved, isPro, requestImage }: SheetVisualProps) => {
+const SheetVisual = ({ visual, topic, visualImage, onImageResolved, isPro, requestImage, autoStartImage, bare }: SheetVisualProps) => {
   const meta = KIND_META[visual.kind];
   const Icon = meta.icon;
 
   return (
-    <figure className="animate-fade-in" style={FIGURE_STYLE} data-sheet-visual={visual.kind}>
+    <figure
+      className="animate-fade-in"
+      style={bare ? { ...FIGURE_STYLE, marginTop: 0, border: "none", padding: 0, background: "transparent" } : FIGURE_STYLE}
+      data-sheet-visual={visual.kind}
+    >
       <figcaption className="mb-3 flex items-center gap-2">
         <Icon style={{ width: 14, height: 14, color: "var(--accent)", flexShrink: 0 }} />
         <span
@@ -90,6 +98,7 @@ const SheetVisual = ({ visual, topic, visualImage, onImageResolved, isPro, reque
           onResolved={(result) => onImageResolved?.(result, visual.imageSubject)}
           isPro={isPro}
           requestImage={requestImage}
+          autoStart={autoStartImage}
         />
       ) : (
         <Suspense fallback={<SectionSkeleton variant="sheet-body" />}>

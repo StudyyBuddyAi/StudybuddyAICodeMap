@@ -3,6 +3,7 @@ import DashboardLayout from "@/components/dashboard/DashboardLayout";
 import OutputSection from "@/components/OutputSection";
 import type { GeneratedSheet, VisualSpec } from "@/types/generated-sheet";
 import { SheetImageError, type SheetImageRequester } from "@/lib/generate-sheet-image";
+import type { VisualPlanner } from "@/components/sheet-visual/VisualSection";
 
 /**
  * DEV ONLY — /dev/sheet-visuals. Never routed in a production build (see App.tsx).
@@ -142,13 +143,19 @@ const STREAM_ORDER = [
 
 const DevSheetVisuals = () => {
   const [fixture, setFixture] = useState<string>("flowchart");
+  // Start without a visual to exercise the section's button and planning state.
+  const [unplanned, setUnplanned] = useState(false);
   const [streamedKeys, setStreamedKeys] = useState<string[] | null>(null);
   const [imageOutcome, setImageOutcome] = useState<MockOutcome>("success");
   const timer = useRef<number | null>(null);
 
-  const sheet: GeneratedSheet = {
-    ...BASE_SHEET,
-    visual: fixture === "image" ? IMAGE_FIXTURE : FIXTURES[fixture],
+  const chosen: VisualSpec = fixture === "image" ? IMAGE_FIXTURE : FIXTURES[fixture];
+  const sheet: GeneratedSheet = { ...BASE_SHEET, visual: unplanned ? undefined : chosen };
+
+  /** Stands in for sheet-visual: returns the selected fixture after a realistic pause. */
+  const mockPlanner: VisualPlanner = async () => {
+    await new Promise((r) => setTimeout(r, 1800));
+    return chosen;
   };
 
   const simulateStream = () => {
@@ -203,6 +210,10 @@ const DevSheetVisuals = () => {
                 <option value="failure">mock: failure</option>
               </select>
             )}
+            <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <input type="checkbox" checked={unplanned} onChange={(e) => setUnplanned(e.target.checked)} />
+              start unplanned (button)
+            </label>
             <button
               type="button"
               onClick={simulateStream}
@@ -214,9 +225,10 @@ const DevSheetVisuals = () => {
         </div>
 
         <OutputSection
-          key={`${fixture}:${imageOutcome}`}
+          key={`${fixture}:${imageOutcome}:${unplanned}`}
           output={JSON.stringify(sheet)}
           requestVisualImage={mockRequester(imageOutcome)}
+          requestVisualPlan={mockPlanner}
           inputText={sheet.topic}
           modeInfo={{ examMode: "General", difficulty: "Basic", focus: "Quick Revision", length: "Concise" }}
           isStreaming={streamedKeys !== null}
