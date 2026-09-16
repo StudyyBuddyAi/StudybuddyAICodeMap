@@ -15,6 +15,7 @@ import {
 import { Link, useNavigate } from "react-router-dom";
 import "./dashboard.css"
 import DashboardLayout from "@/components/dashboard/DashboardLayout";
+import SEO from "@/components/SEO";
 type StatValueProps = {
   value: ReactNode;
   label: string;
@@ -127,7 +128,12 @@ function Dashboard() {
   );
 
   return (
-  <>
+    <>
+      <SEO
+        title="Dashboard · Your Study Space"
+        description="Access your study sheets, flashcards, and QBank sessions. Track progress and continue learning where you left off."
+        keywords="medical dashboard, study progress, flashcards, QBank, medical education"
+      />
     <DashboardLayout >
       {/* <DashboardHeader /> */}
       <main className="dashboard-main ">

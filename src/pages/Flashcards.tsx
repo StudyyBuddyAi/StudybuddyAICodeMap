@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { useFlashcardDeck, makeCardId, useDeckGrounding, type Card as DeckCard } from "@/hooks/use-flashcard-deck";
 import { useToast } from "@/hooks/use-toast";
+import SEO from "@/components/SEO";
 
 const RECENT_DECK_LIMIT = 5;
 
@@ -802,7 +803,13 @@ const Flashcards = () => {
     );
 
   return (
-    <DashboardLayout wide>
+    <>
+      <SEO
+        title="Flashcards · Spaced Repetition"
+        description="Build AI-powered flashcard decks on any medical topic. Spaced repetition helps you remember what you study for the long term."
+        keywords="medical flashcards, spaced repetition, memory retention, study cards, medical students"
+      />
+      <DashboardLayout wide>
       <div className="space-y-6 max-w-[86%] mx-auto">
         <div className="mb-6">
           <p className="font-mono text-[11px] font-medium tracking-widest uppercase text-primary mb-2">
@@ -810,7 +817,7 @@ const Flashcards = () => {
           </p>
           <h1 className="text-[clamp(26px,3.5vw,36px)] font-serif font-medium leading-tight tracking-tight text-foreground">
             Study any topic,{" "}
-            <span className="italic text-primary">lock it in.</span>
+            <span className="italic text-[]">lock it in.</span>
           </h1>
           <p className="mt-2.5 max-w-xl text-base leading-relaxed text-muted-foreground">
             Enter any medical topic — a deck of vignette cards is written for it,
@@ -921,6 +928,7 @@ const Flashcards = () => {
         />
       )}
     </DashboardLayout>
+    </>
   );
 };
 

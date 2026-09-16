@@ -23,6 +23,7 @@ import { useQBankContext } from "@/contexts/QBankContext";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { MIN_SET_SIZE, MAX_SET_SIZE, SET_SIZE_STEP } from "@/lib/qbank-wave-runner";
+import SEO from "@/components/SEO";
 import {
   CHALLENGE_LABELS,
   CHALLENGE_BLURBS,
@@ -448,7 +449,13 @@ const QBank = () => {
   );
 
   return (
-    <DashboardLayout wide>
+    <>
+      <SEO
+        title="QBank · USMLE-Style Questions"
+        description="Generate USMLE-style clinical vignettes on any medical topic. Adaptive practice with spaced repetition and detailed explanations."
+        keywords="medical QBank, USMLE questions, clinical vignettes, medical exam prep, spaced repetition"
+      />
+      <DashboardLayout wide>
       {/* The layout owns the page gutter; no padding of our own on top of it. */}
       <div className="flex flex-col gap-6 lg:flex-row lg:gap-8 max-w-[86%] mx-auto">
         {/* Left Panel — the generator */}
@@ -788,6 +795,7 @@ const QBank = () => {
         )}
       </div>
     </DashboardLayout>
+    </>
   );
 };
 
