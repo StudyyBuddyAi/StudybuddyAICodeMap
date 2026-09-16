@@ -13,6 +13,9 @@ import SrsSettingsDialog from "@/components/flashcards/SrsSettings";
 import { useFlashcardDeck, makeCardId, useDeckGrounding, type Card as DeckCard } from "@/hooks/use-flashcard-deck";
 import { useRatingKeys, useStudySession } from "@/hooks/use-study-session";
 import { useToast } from "@/hooks/use-toast";
+import { formatInterval, newSrsFields, ReviewRating } from "@/lib/spaced-repetition";
+import SEO from "@/components/SEO";
+import { shouldSuggestOptimize } from "@/lib/fsrs-items";
 
 const RECENT_DECK_LIMIT = 5;
 
