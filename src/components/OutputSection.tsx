@@ -20,13 +20,17 @@ import {
   RotateCcw,
   X,
   Image as ImageIcon,
+  Workflow,
 } from "lucide-react";
 import CopyButton from "@/components/CopyButton";
 import FlashcardsSection from "@/components/FlashcardsSection";
 import SaveButton from "@/components/SaveButton";
 import SectionSkeleton from "@/components/SectionSkeleton";
 import CitationBadgeList from "@/components/CitationBadgeList";
-import VisualSection, { type VisualPlanner } from "@/components/sheet-visual/VisualSection";
+import DiagramSection from "@/components/sheet-visual/DiagramSection";
+import IllustrationSection from "@/components/sheet-visual/IllustrationSection";
+import type { VisualPlanner } from "@/components/sheet-visual/visual-section-ui";
+import { planSheetVisual, type SheetVisualPlan } from "@/lib/plan-sheet-visual";
 import type { SheetImageRequester } from "@/lib/generate-sheet-image";
 import { ModelCredit } from "@/components/PoweredByCorti";
 import { startTopProgress, finishTopProgress } from "@/components/TopProgressBar";
@@ -36,7 +40,6 @@ import {
   type GeneratedSheet,
   type EnhancementResult,
   type VisualImageResult,
-  type VisualSpec,
   parseStoredSheet,
   isJsonSheet,
 } from "@/types/generated-sheet";
@@ -264,7 +267,8 @@ const JSON_SECTION_CONFIG = {
   clinicalApproach: { icon: Stethoscope, label: "🩺 Clinical Approach", className: "section-clinical", evidenceBacked: true },
   keyPoints: { icon: List, label: "📌 Key Points", className: "section-keypoints", evidenceBacked: true },
   examTraps: { icon: AlertTriangle, label: "⚠️ Exam Traps", className: "section-examtraps", evidenceBacked: false },
-  visual: { icon: ImageIcon, label: "🖼️ Visual Aid", className: "section-visual", evidenceBacked: false },
+  diagram: { icon: Workflow, label: "🗺️ Diagram", className: "section-diagram", evidenceBacked: false },
+  illustration: { icon: ImageIcon, label: "🖼️ Illustration", className: "section-illustration", evidenceBacked: false },
   flashcards: { icon: HelpCircle, label: "❓ Flashcards", className: "section-flashcards", evidenceBacked: false },
   referenceNote: { icon: FileText, label: "📚 Reference Note", className: "section-reference", evidenceBacked: false },
 } as const;
@@ -1191,13 +1195,25 @@ const OutputSection = ({
   // merged there and rides along in `output` when the student saves. The topic
   // it was planned from travels with it, so it cannot land on a newer sheet.
   const plannedTopic = sheet?.topic ?? inputText ?? "";
-  const handleVisualPlanned = useCallback(
-    (visual: VisualSpec) => {
-      window.dispatchEvent(
-        new CustomEvent("studybuddy:visual-planned", { detail: { visual, topic: plannedTopic } })
-      );
+  // Both buttons share one planner call — whichever is pressed first makes it,
+  // and the other card then already knows what it has. Keyed to the sheet, so a
+  // new sheet plans afresh.
+  const planRef = useRef<{ key: string; promise: Promise<SheetVisualPlan> } | null>(null);
+  const ensureVisualPlan = useCallback<VisualPlanner>(
+    (planFor, fallbackTopic) => {
+      const key = `${planFor.topic ?? ""}::${(planFor.overview ?? "").slice(0, 120)}`;
+      if (planRef.current?.key !== key) {
+        const promise = (requestVisualPlan ?? planSheetVisual)(planFor, fallbackTopic).then((plan) => {
+          window.dispatchEvent(
+            new CustomEvent("studybuddy:visual-planned", { detail: { ...plan, topic: plannedTopic } })
+          );
+          return plan;
+        });
+        planRef.current = { key, promise };
+      }
+      return planRef.current.promise;
     },
-    [plannedTopic]
+    [plannedTopic, requestVisualPlan]
   );
 
   const handleVisualImageResolved = useCallback(
@@ -1371,7 +1387,8 @@ const OutputSection = ({
     "clinicalApproach",
     "keyPoints",
     "examTraps",
-    "visual",
+    "diagram",
+    "illustration",
     "flashcards",
     "referenceNote",
   ];
@@ -1382,11 +1399,12 @@ const OutputSection = ({
   // it would show half a sentence and then reflow.
   // The visual section holds a button rather than streamed JSON, so it is ready
   // as soon as the sheet is on screen.
+  const isVisualKey = (key: JsonSectionKey) => key === "diagram" || key === "illustration";
   const isReady = (key: JsonSectionKey) =>
-    key === "visual" ? !isStreaming : !isStreaming || !!streamedKeys?.includes(key);
+    isVisualKey(key) ? !isStreaming : !isStreaming || !!streamedKeys?.includes(key);
   // Sections arrive in order, so the first one not yet complete is in flight.
   const writingKey = isStreaming
-    ? JSON_SECTION_ORDER.find((key) => key !== "visual" && !isReady(key))
+    ? JSON_SECTION_ORDER.find((key) => !isVisualKey(key) && !isReady(key))
     : undefined;
 
   // Group active enhancements by anchor so they can be injected inline.
@@ -1482,7 +1500,7 @@ const OutputSection = ({
           ready && citationState === "found" && config.evidenceBacked;
 
         const copyText =
-          key === "visual"
+          isVisualKey(key)
             ? ""
             : key === "flashcards"
             ? (sheet.flashcards ?? [])
@@ -1550,7 +1568,7 @@ const OutputSection = ({
                         animationFillMode: "backwards",
                       }}
                     />
-                    {key !== "visual" && <CopyButton text={copyText} />}
+                    {!isVisualKey(key) && <CopyButton text={copyText} />}
                   </>
                 ) : (
                   // Marks where the next content lands. Only the dot pulses —
@@ -1573,15 +1591,21 @@ const OutputSection = ({
             <div style={SECTION_BODY_STYLE} data-enh-section={key}>
               {!ready ? (
                 <SectionSkeleton variant="sheet-body" />
-              ) : key === "visual" ? (
-                <VisualSection
+              ) : key === "diagram" ? (
+                <DiagramSection
                   sheet={sheet}
-                  topic={sheet.topic ?? inputText ?? ""}
+                  topic={plannedTopic}
+                  disabled={isStreaming}
+                  ensurePlan={ensureVisualPlan}
+                />
+              ) : key === "illustration" ? (
+                <IllustrationSection
+                  sheet={sheet}
+                  topic={plannedTopic}
                   isPro={isPro}
                   disabled={isStreaming}
-                  onPlanned={handleVisualPlanned}
+                  ensurePlan={ensureVisualPlan}
                   onImageResolved={handleVisualImageResolved}
-                  requestPlan={requestVisualPlan}
                   requestImage={requestVisualImage}
                 />
               ) : key === "flashcards" ? (

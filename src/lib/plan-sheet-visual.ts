@@ -1,6 +1,6 @@
 import { supabase } from "@/integrations/supabase/client";
-import { parseSheetVisual } from "@/lib/parse-sheet-visual";
-import type { GeneratedSheet, VisualSpec } from "@/types/generated-sheet";
+import { parseIllustration, parseSheetVisual } from "@/lib/parse-sheet-visual";
+import type { GeneratedSheet, IllustrationSpec, VisualSpec } from "@/types/generated-sheet";
 
 // VITE_LOCAL_FUNCTIONS=1: the dev server's stand-in (scripts/local-functions/vite-plugin.ts).
 const FN_URL =
@@ -16,12 +16,19 @@ export function canPlanVisual(sheet: GeneratedSheet): boolean {
   return !!(sheet.overview?.trim() || sheet.clinicalApproach?.trim());
 }
 
+/** What the sheet gets: either half may be absent, and both are absent on failure. */
+export interface SheetVisualPlan {
+  diagram?: VisualSpec;
+  illustration?: IllustrationSpec;
+}
+
 /**
- * Plans the finished sheet's visual. Resolves with undefined when the planner
- * chose none, rejected the plan, or was unreachable — the sheet is complete
- * without a visual, so no failure here is surfaced as an error.
+ * Plans the finished sheet's diagram and illustration in one call. Resolves
+ * with an empty plan when the planner chose neither, rejected them, or was
+ * unreachable — the sheet is complete without visuals, so no failure here is
+ * surfaced as an error.
  */
-export async function planSheetVisual(sheet: GeneratedSheet, fallbackTopic: string): Promise<VisualSpec | undefined> {
+export async function planSheetVisual(sheet: GeneratedSheet, fallbackTopic: string): Promise<SheetVisualPlan> {
   const {
     data: { session },
   } = await supabase.auth.getSession();
@@ -43,12 +50,15 @@ export async function planSheetVisual(sheet: GeneratedSheet, fallbackTopic: stri
         keyPoints: sheet.keyPoints,
       }),
     });
-    if (!res.ok) return undefined;
+    if (!res.ok) return {};
     const body = await res.json().catch(() => null);
     // Validated again client-side: the renderer only ever sees a known-good shape.
-    return parseSheetVisual(body?.visual);
+    return {
+      diagram: parseSheetVisual(body?.diagram),
+      illustration: parseIllustration(body?.illustration),
+    };
   } catch {
-    return undefined;
+    return {};
   } finally {
     clearTimeout(timer);
   }

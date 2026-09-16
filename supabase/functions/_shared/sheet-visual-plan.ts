@@ -1,5 +1,10 @@
 /**
- * Planning a study sheet's one visual aid — a separate step after the sheet.
+ * Planning a study sheet's visual aids — a separate step after the sheet.
+ *
+ * Two are planned independently in one call: a DIAGRAM (flowchart or chart,
+ * rendered from the sheet's own data, free) and an ILLUSTRATION (a picture an
+ * image model draws on request, which costs money per new subject). Either can
+ * be none.
  *
  * Why separate: when the sheet writer chose the visual inside its own stream,
  * the choice moved with the writer (Corti at 0.3, GPT-OSS at 0.7, Haiku on
@@ -10,7 +15,7 @@
  * a real flowchart, whether chart numbers are real) are decided in code.
  *
  * Plans are made per sheet from its own text and not cached: labels follow each
- * sheet's wording; the kind of visual is what stays stable.
+ * sheet's wording; what stays stable is which visuals a topic gets.
  *
  * Deno-free — used by the sheet-visual edge function and the local dev harness.
  */
@@ -24,8 +29,6 @@ const PLAN_TIMEOUT_MS = 25_000;
 const TOPIC_MAX = 120;
 const SECTION_MAX = 6_000;
 const KEY_POINTS_MAX = 12;
-
-export type TeachingPoint = "structure" | "decision" | "process" | "numbers" | "none";
 
 export interface SheetVisualPlanInput {
   topic: string;
@@ -51,34 +54,38 @@ export function cleanPlanInput(body: unknown): SheetVisualPlanInput | null {
 
 // ── The model call ──────────────────────────────────────────────────────────
 
-const SYSTEM_PROMPT = `You choose ONE visual aid for a medical study sheet and write its content. Work in two steps.
+const SYSTEM_PROMPT = `You plan the visual aids for a medical study sheet. There are two, decided INDEPENDENTLY — a sheet may warrant both, one, or neither.
 
-STEP 1 — teachingPoint: the single thing a student most needs to picture.
-- "structure": the topic itself names a physical structure (gross anatomy, histology, a sectional view) — e.g. brachial plexus, nephron histology, chambers and valves of the heart.
-- "decision": the clinical approach contains a diagnostic or treatment algorithm with branches (if X → do Y, otherwise Z).
-- "process": a causal mechanism or cascade that branches or loops back.
-- "numbers": two or more comparable numeric values that are written in the sheet (thresholds, lab values by condition, dose steps).
-- "none": none of these clearly applies.
-When several apply, use this order: structure (only when the topic name itself is a structure) > decision > numbers > process > none.
+1. DIAGRAM — built from the sheet's own words, so it must be supported by the text.
+   - "flowchart": a diagnostic or treatment pathway, or a mechanism that branches or loops. 4-12 nodes, labels at most 6 words taken from the sheet. "decision" nodes are questions and each of their outgoing edges carries the answer as its label. At least one node must branch.
+   - "chart": two or more comparable numbers that are WRITTEN IN THE SHEET (thresholds, lab values by condition, dose steps). xLabels are the categories; one series per measured quantity, all in the same unit. Never invent or estimate a number.
+   - "none": the sheet has no pathway and no comparable numbers. This is a normal answer.
 
-STEP 2 — fill ONLY the field for your choice and set every other field to null.
-- structure → "structure": the name of the whole structure the topic is about, 1-5 words (e.g. "brachial plexus", "renal corpuscle") — never a list of its parts. "structureView": histology for tissue- or cell-level topics, cross-section for sectional anatomy, schematic for networks such as plexuses, tracts or pathways, gross otherwise.
-- decision or process → "flowchart": 4-12 nodes. Labels are at most 6 words, taken from the sheet. "decision" nodes are questions, and each of their outgoing edges carries the answer as its label. At least one node must branch.
-- numbers → "chart": xLabels are the categories being compared. Every value is a number written in the sheet. One series per measured quantity, all in the same unit.
-- "title": at most 8 words.`;
+2. ILLUSTRATION — a picture of a physical structure, drawn later by an image model.
+   - Give "illustrationSubject" when the topic has a structure a student must be able to picture: an organ, a tissue under the microscope, a nerve or vessel network, a sectional view. Name the whole structure in 1-5 words, never a list of its parts.
+   - "illustrationView": histology for tissue- or cell-level topics, cross-section for sectional anatomy, schematic for networks such as plexuses, tracts or conduction pathways, gross otherwise.
+   - Leave all three illustration fields null when the topic is a process, a drug, or a management strategy with no structure worth drawing.
+
+Titles are at most 8 words.`;
 
 const nullable = (schema: Record<string, unknown>) => ({ anyOf: [schema, { type: "null" }] });
 
-/** Strict: every property required, nothing extra. Property order = generation order, so the decision comes first. */
+/** Strict: every property required, nothing extra. Property order = generation order, so each decision comes before its content. */
 export const VISUAL_PLAN_SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["teachingPoint", "title", "structure", "structureView", "flowchart", "chart"],
+  required: [
+    "diagramKind",
+    "diagramTitle",
+    "flowchart",
+    "chart",
+    "illustrationSubject",
+    "illustrationView",
+    "illustrationTitle",
+  ],
   properties: {
-    teachingPoint: { type: "string", enum: ["structure", "decision", "process", "numbers", "none"] },
-    title: { type: "string" },
-    structure: nullable({ type: "string" }),
-    structureView: nullable({ type: "string", enum: ["gross", "histology", "cross-section", "schematic"] }),
+    diagramKind: { type: "string", enum: ["flowchart", "chart", "none"] },
+    diagramTitle: { type: "string" },
     flowchart: nullable({
       type: "object",
       additionalProperties: false,
@@ -135,6 +142,9 @@ export const VISUAL_PLAN_SCHEMA = {
         yLabel: nullable({ type: "string" }),
       },
     }),
+    illustrationSubject: nullable({ type: "string" }),
+    illustrationView: nullable({ type: "string", enum: ["gross", "histology", "cross-section", "schematic"] }),
+    illustrationTitle: nullable({ type: "string" }),
   },
 } as const;
 
@@ -200,27 +210,21 @@ export async function requestVisualPlan(apiKey: string, input: SheetVisualPlanIn
 
 // ── Deterministic rules ─────────────────────────────────────────────────────
 
-/** The client re-validates this shape with src/lib/parse-sheet-visual.ts. */
-export type PlannedVisual = Record<string, unknown> & { kind: "flowchart" | "chart" | "image" };
+/** The client re-validates both of these with src/lib/parse-sheet-visual.ts. */
+export type PlannedDiagram = Record<string, unknown> & { kind: "flowchart" | "chart" };
+export type PlannedIllustration = { title: string; view: ImageView; subject: string; alt: string };
 
 export interface VisualPlanResult {
-  visual: PlannedVisual | null;
-  teachingPoint: TeachingPoint | "invalid";
-  /** Why the visual is what it is — logged, never shown. */
-  reason: string;
+  diagram: PlannedDiagram | null;
+  illustration: PlannedIllustration | null;
+  /** Why each is what it is — logged, never shown. */
+  reason: { diagram: string; illustration: string };
 }
 
-/**
- * Placement is decided here, never by the model — and by the kind of visual,
- * not the teaching point. A sheet whose clinical approach is brief can read as
- * a "process" rather than a "decision"; both are flowcharts, and a student
- * should find a flowchart in the same place either way.
- */
-const PLACEMENT: Record<"structure" | "decision" | "process" | "numbers", string> = {
-  structure: "overview",
-  decision: "clinicalApproach",
-  process: "clinicalApproach",
-  numbers: "keyPoints",
+/** Placement is decided here, never by the model, and by the kind of diagram. */
+const PLACEMENT: Record<"flowchart" | "chart", string> = {
+  flowchart: "clinicalApproach",
+  chart: "keyPoints",
 };
 
 const VIEW_LABEL: Record<ImageView, string> = {
@@ -258,7 +262,10 @@ function finalizeFlowchart(raw: unknown): { flowchart: Record<string, unknown> |
     .map((e) => ({ from: str(e.from, 40), to: str(e.to, 40), label: str(e.label, 24) }))
     .filter((e) => ids.has(e.from) && ids.has(e.to) && e.from !== e.to);
 
-  if (nodes.length < 3 || edges.length < 2) return { flowchart: null, reason: "flowchart_too_small" };
+  // A node no edge touches floats next to the diagram as a stray box.
+  const connected = new Set(edges.flatMap((e) => [e.from, e.to]));
+  const linked = nodes.filter((n) => connected.has(n.id));
+  if (linked.length < 3 || edges.length < 2) return { flowchart: null, reason: "flowchart_too_small" };
 
   // A chain of boxes is a list, not a flowchart: require a real branch, merge or loop.
   const outDegree = new Map<string, number>();
@@ -273,7 +280,7 @@ function finalizeFlowchart(raw: unknown): { flowchart: Record<string, unknown> |
   return {
     flowchart: {
       direction: raw.direction === "LR" ? "LR" : "TD",
-      nodes,
+      nodes: linked,
       edges: edges.map((e) => (e.label ? e : { from: e.from, to: e.to })),
     },
     reason: "ok",
@@ -306,49 +313,53 @@ function finalizeChart(raw: unknown, sheetText: string): { chart: Record<string,
   };
 }
 
-/** Turns the planner's answer into the visual the sheet gets — or none, with the reason. */
-export function finalizeVisualPlan(raw: unknown, input: SheetVisualPlanInput): VisualPlanResult {
-  if (!isRecord(raw)) return { visual: null, teachingPoint: "invalid", reason: "invalid_response" };
-  const teachingPoint = raw.teachingPoint as TeachingPoint;
-  const title = str(raw.title, 80);
+function finalizeDiagram(raw: Record<string, unknown>, sheetText: string): { diagram: PlannedDiagram | null; reason: string } {
+  const kind = raw.diagramKind;
+  const title = str(raw.diagramTitle, 80);
 
-  switch (teachingPoint) {
-    case "structure": {
-      const structure = str(raw.structure, 60);
-      const view = raw.structureView;
-      if (!structure || !isImageView(view)) return { visual: null, teachingPoint, reason: "structure_incomplete" };
-      return {
-        teachingPoint,
-        reason: "ok",
-        visual: {
-          kind: "image",
-          title: title || structure,
-          placement: PLACEMENT.structure,
-          imageSubject: `${structure} — ${VIEW_LABEL[view].toLowerCase()}`,
-          imageAlt: `${VIEW_LABEL[view]} illustration of ${structure}.`,
-          imageView: view,
-        },
-      };
-    }
-    case "decision":
-    case "process": {
-      const { flowchart, reason } = finalizeFlowchart(raw.flowchart);
-      if (!flowchart) return { visual: null, teachingPoint, reason };
-      return {
-        teachingPoint,
-        reason,
-        visual: { kind: "flowchart", title, placement: PLACEMENT[teachingPoint], flowchart },
-      };
-    }
-    case "numbers": {
-      const sheetText = [input.overview, input.clinicalApproach, ...input.keyPoints].join("\n");
-      const { chart, reason } = finalizeChart(raw.chart, sheetText);
-      if (!chart) return { visual: null, teachingPoint, reason };
-      return { teachingPoint, reason, visual: { kind: "chart", title, placement: PLACEMENT.numbers, chart } };
-    }
-    case "none":
-      return { visual: null, teachingPoint, reason: "planner_chose_none" };
-    default:
-      return { visual: null, teachingPoint: "invalid", reason: "invalid_teaching_point" };
+  if (kind === "flowchart") {
+    const { flowchart, reason } = finalizeFlowchart(raw.flowchart);
+    return flowchart
+      ? { diagram: { kind: "flowchart", title, placement: PLACEMENT.flowchart, flowchart }, reason }
+      : { diagram: null, reason };
   }
+  if (kind === "chart") {
+    const { chart, reason } = finalizeChart(raw.chart, sheetText);
+    return chart
+      ? { diagram: { kind: "chart", title, placement: PLACEMENT.chart, chart }, reason }
+      : { diagram: null, reason };
+  }
+  return { diagram: null, reason: kind === "none" ? "planner_chose_none" : "invalid_diagram_kind" };
+}
+
+function finalizeIllustration(raw: Record<string, unknown>): { illustration: PlannedIllustration | null; reason: string } {
+  const subject = str(raw.illustrationSubject, 60);
+  const view = raw.illustrationView;
+  if (!subject && view == null) return { illustration: null, reason: "planner_chose_none" };
+  if (!subject || !isImageView(view)) return { illustration: null, reason: "illustration_incomplete" };
+  const title = str(raw.illustrationTitle, 80) || subject;
+  return {
+    illustration: {
+      title,
+      view,
+      subject: `${subject} — ${VIEW_LABEL[view].toLowerCase()}`,
+      alt: `${VIEW_LABEL[view]} illustration of ${subject}.`,
+    },
+    reason: "ok",
+  };
+}
+
+/** Turns the planner's answer into the visuals the sheet gets — or none, with the reason. */
+export function finalizeVisualPlan(raw: unknown, input: SheetVisualPlanInput): VisualPlanResult {
+  if (!isRecord(raw)) {
+    return { diagram: null, illustration: null, reason: { diagram: "invalid_response", illustration: "invalid_response" } };
+  }
+  const sheetText = [input.overview, input.clinicalApproach, ...input.keyPoints].join("\n");
+  const d = finalizeDiagram(raw, sheetText);
+  const ill = finalizeIllustration(raw);
+  return {
+    diagram: d.diagram,
+    illustration: ill.illustration,
+    reason: { diagram: d.reason, illustration: ill.reason },
+  };
 }

@@ -127,19 +127,26 @@ export interface VisualSpecBase {
   placement: VisualPlacement;
 }
 
+/** The diagram half: drawn from the sheet's own data, free and instant. */
 export type VisualSpec =
   | (VisualSpecBase & { kind: "flowchart"; flowchart: VisualFlowchartSpec })
-  | (VisualSpecBase & { kind: "chart"; chart: VisualChartSpec })
-  | (VisualSpecBase & {
-      kind: "image";
-      /** How it's drawn. With the sheet topic this is the whole image request and
-       *  its cache key — the server builds the prompt from these alone. */
-      imageView: ImageView;
-      /** Display only ("brachial plexus — schematic"); never sent to the image model. */
-      imageSubject: string;
-      /** Alt text, and the caption fallback. */
-      imageAlt: string;
-    });
+  | (VisualSpecBase & { kind: "chart"; chart: VisualChartSpec });
+
+/**
+ * The illustration half: a plan for an AI-drawn picture, kept separate from the
+ * diagram because it costs money per new subject and is the least reliable
+ * thing on the sheet. Nothing is drawn until the student asks.
+ */
+export interface IllustrationSpec {
+  /** Caption, e.g. "Renal corpuscle histology". */
+  title: string;
+  /** How it is drawn. With the sheet topic this is the whole image request and its cache key. */
+  view: ImageView;
+  /** Display only ("brachial plexus — schematic"); never sent to the image model. */
+  subject: string;
+  /** Alt text. */
+  alt: string;
+}
 
 export type VisualKind = VisualSpec["kind"];
 
@@ -176,9 +183,11 @@ export interface GeneratedSheet {
   // sheet can still distinguish "nothing retrieved" from "retrieved but the
   // model judged it not relevant" (both reconcile to groundingLevel "none").
   retrievedChunks?: number;
-  /** Absent when the model chose no visual, and on sheets saved before visuals existed. */
+  /** The planned diagram. Absent until the student asks for one, or when none fits. */
   visual?: VisualSpec;
-  /** Present only after the student generated the image for an `image` visual. */
+  /** The planned illustration. Absent until the student asks, or when the topic has nothing to draw. */
+  illustration?: IllustrationSpec;
+  /** Present only once the illustration has actually been generated. */
   visualImage?: VisualImageResult;
 }
 

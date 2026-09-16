@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import DashboardLayout from "@/components/dashboard/DashboardLayout";
 import OutputSection from "@/components/OutputSection";
-import type { GeneratedSheet, VisualSpec } from "@/types/generated-sheet";
+import type { GeneratedSheet, IllustrationSpec, VisualSpec } from "@/types/generated-sheet";
 import { SheetImageError, type SheetImageRequester } from "@/lib/generate-sheet-image";
-import type { VisualPlanner } from "@/components/sheet-visual/VisualSection";
+import type { VisualPlanner } from "@/components/sheet-visual/visual-section-ui";
 
 /**
  * DEV ONLY — /dev/sheet-visuals. Never routed in a production build (see App.tsx).
@@ -101,13 +101,11 @@ const FIXTURES: Record<string, VisualSpec> = {
   },
 };
 
-const IMAGE_FIXTURE: VisualSpec = {
-  kind: "image",
+const ILLUSTRATION_FIXTURE: IllustrationSpec = {
   title: "Heart chambers and valves",
-  placement: "overview",
-  imageView: "cross-section",
-  imageSubject: "heart chambers and valves — cross-section",
-  imageAlt: "Coronal section of the heart with the four chambers and four valves labeled.",
+  view: "cross-section",
+  subject: "heart — cross-section",
+  alt: "Cross-section of the heart with the four chambers and four valves labeled.",
 };
 
 type MockOutcome = "success" | "quota" | "failure";
@@ -149,13 +147,18 @@ const DevSheetVisuals = () => {
   const [imageOutcome, setImageOutcome] = useState<MockOutcome>("success");
   const timer = useRef<number | null>(null);
 
-  const chosen: VisualSpec = fixture === "image" ? IMAGE_FIXTURE : FIXTURES[fixture];
-  const sheet: GeneratedSheet = { ...BASE_SHEET, visual: unplanned ? undefined : chosen };
+  // Every fixture sheet also offers the illustration, so both cards can be tried.
+  const chosen: VisualSpec | undefined = FIXTURES[fixture];
+  const sheet: GeneratedSheet = {
+    ...BASE_SHEET,
+    visual: unplanned ? undefined : chosen,
+    illustration: unplanned ? undefined : ILLUSTRATION_FIXTURE,
+  };
 
-  /** Stands in for sheet-visual: returns the selected fixture after a realistic pause. */
+  /** Stands in for sheet-visual: returns the selected fixtures after a realistic pause. */
   const mockPlanner: VisualPlanner = async () => {
     await new Promise((r) => setTimeout(r, 1800));
-    return chosen;
+    return { diagram: chosen, illustration: ILLUSTRATION_FIXTURE };
   };
 
   const simulateStream = () => {
@@ -186,7 +189,7 @@ const DevSheetVisuals = () => {
             Dev preview · sheet visuals
           </p>
           <div className="flex flex-wrap gap-2">
-            {[...Object.keys(FIXTURES), "image"].map((name) => (
+            {Object.keys(FIXTURES).map((name) => (
               <button
                 key={name}
                 type="button"

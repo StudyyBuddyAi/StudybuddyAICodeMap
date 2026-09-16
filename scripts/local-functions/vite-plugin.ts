@@ -407,8 +407,9 @@ async function handleSheetVisual(server: ViteDevServer, env: Env, req: IncomingM
   const startedAt = Date.now();
   try {
     const result = plan.finalizeVisualPlan(await plan.requestVisualPlan(env.OPENROUTER_API_KEY, input), input);
-    const kind = result.visual ? `${result.visual.kind} → ${result.visual.placement}` : "none";
-    say(`sheet-visual "${input.topic}" · ${result.teachingPoint} → ${kind} (${result.reason}) · ${((Date.now() - startedAt) / 1000).toFixed(1)}s`);
+    const diagram = result.diagram ? `${result.diagram.kind} (${result.reason.diagram})` : `none (${result.reason.diagram})`;
+    const illustration = result.illustration ? `${result.illustration.view} (${result.reason.illustration})` : `none (${result.reason.illustration})`;
+    say(`sheet-visual "${input.topic}" · diagram: ${diagram} · illustration: ${illustration} · ${((Date.now() - startedAt) / 1000).toFixed(1)}s`);
     return sendJson(res, 200, result);
   } catch (err) {
     say(`sheet-visual FAILED after ${((Date.now() - startedAt) / 1000).toFixed(1)}s — ${errorText(err)}`);

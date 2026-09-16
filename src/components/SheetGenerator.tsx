@@ -750,17 +750,21 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
       window.removeEventListener("studybuddy:enhancement-saved", handleEnhancementSaved);
   }, []);
 
-  // A planned visual joins the sheet so Save persists it, unless a different
-  // sheet is already on screen by the time it lands.
+  // A planned diagram or illustration joins the sheet so Save persists it,
+  // unless a different sheet is already on screen by the time it lands.
   useEffect(() => {
     function handleVisualPlanned(e: Event) {
-      const { visual, topic } = (e as CustomEvent).detail ?? {};
-      if (!visual) return;
+      const { diagram, illustration, topic } = (e as CustomEvent).detail ?? {};
+      if (!diagram && !illustration) return;
       setSheet((prev) => {
         if (!prev) return prev;
         const current = prev.topic ?? "";
         if (topic && current && topic !== current) return prev;
-        return { ...prev, visual };
+        return {
+          ...prev,
+          ...(diagram ? { visual: diagram } : {}),
+          ...(illustration ? { illustration } : {}),
+        };
       });
     }
     window.addEventListener("studybuddy:visual-planned", handleVisualPlanned);
@@ -775,7 +779,7 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
       const { result, subject } = (e as CustomEvent).detail ?? {};
       if (!result || !subject) return;
       setSheet((prev) => {
-        if (prev?.visual?.kind !== "image" || prev.visual.imageSubject !== subject) return prev;
+        if (!prev?.illustration || prev.illustration.subject !== subject) return prev;
         return { ...prev, visualImage: result };
       });
     }

@@ -6,8 +6,9 @@
  *      visual. Variation here mixes sheet wording with the planner.
  *   2. replans — plans ONE fixed sheet RUNS times. Variation here is the
  *      planner alone and should be zero.
- * Agreement is scored on what a student sees — kind @ placement; the planner's
- * teaching point is printed alongside for diagnosis.
+ * Agreement is scored on what a student sees — which diagram and which
+ * illustration view the sheet offers; the planner's reasons are printed
+ * alongside for diagnosis.
  *
  *   node scripts/notes-eval/visual-stability.ts
  *   BASE=http://localhost:8083 RUNS=3 WRITERS=corti,gpt-oss TOPICS="DKA management|Brachial plexus anatomy" node scripts/notes-eval/visual-stability.ts
@@ -62,8 +63,8 @@ async function plan(sheet: Sheet, fallbackTopic: string): Promise<[string, strin
   });
   if (!res.ok) return [`planner_error_${res.status}`, `planner_error_${res.status}`];
   const r = await res.json();
-  const seen = r.visual ? `${r.visual.kind} @ ${r.visual.placement}` : "none";
-  return [seen, `${seen}   (${r.teachingPoint}, ${r.reason})`];
+  const seen = `diagram: ${r.diagram?.kind ?? "none"} · illustration: ${r.illustration?.view ?? "none"}`;
+  return [seen, `${seen}   (${r.reason?.diagram}, ${r.reason?.illustration})`];
 }
 
 function agreement(outcomes: string[]): string {

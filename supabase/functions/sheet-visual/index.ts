@@ -1,8 +1,9 @@
 /**
- * sheet-visual — plans a finished study sheet's one visual aid.
+ * sheet-visual — plans a finished study sheet's visual aids.
  *
  * Request:  POST { topic, overview, clinicalApproach, keyPoints }   (Authorization: Bearer <user JWT>)
- * Response: 200 { visual | null, teachingPoint, reason }
+ * Response: 200 { diagram | null, illustration | null, reason: { diagram, illustration } }
+ *           The two are planned independently: a sheet may get both, one or neither.
  *           401 invalid_token · 400 invalid_request · 502 planner_unavailable
  *
  * Called by the client after the sheet stream ends, for every tier alike, so
@@ -62,8 +63,8 @@ serve(async (req: Request): Promise<Response> => {
     log("planned", {
       userId: user.id,
       model: SHEET_VISUAL_MODEL,
-      teachingPoint: result.teachingPoint,
-      kind: result.visual?.kind ?? "none",
+      diagram: result.diagram?.kind ?? "none",
+      illustration: result.illustration?.view ?? "none",
       reason: result.reason,
       elapsedMs: Date.now() - startedAt,
     });

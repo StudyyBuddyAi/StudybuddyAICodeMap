@@ -110,7 +110,7 @@ const FlowchartVisual = ({ spec, title }: { spec: VisualFlowchartSpec; title: st
       <div
         role="img"
         aria-label={title || "Flowchart"}
-        className="flex justify-center overflow-x-auto [&_svg]:h-auto [&_svg]:max-h-[560px] [&_foreignObject]:overflow-visible"
+        className="flex justify-center overflow-x-auto [&_svg]:h-auto [&_foreignObject]:overflow-visible"
         // Mermaid's own output, rendered at securityLevel "strict" from syntax
         // this app generated — no model text reaches it unescaped.
         dangerouslySetInnerHTML={{ __html: svg }}

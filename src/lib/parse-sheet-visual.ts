@@ -1,4 +1,5 @@
 import type {
+  IllustrationSpec,
   ImageView,
   FlowchartEdge,
   FlowchartNode,
@@ -41,11 +42,10 @@ const PLACEMENTS: readonly VisualPlacement[] = [
   "memoryHooks",
 ];
 
-/** Where each kind belongs when the model names no usable section. */
+/** Where each kind belongs when the plan names no usable section. */
 const DEFAULT_PLACEMENT: Record<VisualSpec["kind"], VisualPlacement> = {
   flowchart: "clinicalApproach",
   chart: "keyPoints",
-  image: "overview",
 };
 
 const IMAGE_VIEWS: readonly ImageView[] = ["gross", "histology", "cross-section", "schematic"];
@@ -137,7 +137,7 @@ function parseChart(v: unknown): VisualChartSpec | null {
 export function parseSheetVisual(v: unknown): VisualSpec | undefined {
   if (!isRecord(v)) return undefined;
   const kind = v.kind;
-  if (kind !== "flowchart" && kind !== "chart" && kind !== "image") return undefined;
+  if (kind !== "flowchart" && kind !== "chart") return undefined;
 
   const title = cleanText(v.title, VISUAL_LIMITS.titleMax);
   const placement = PLACEMENTS.includes(v.placement as VisualPlacement)
@@ -149,17 +149,18 @@ export function parseSheetVisual(v: unknown): VisualSpec | undefined {
     return flowchart ? { kind, title, placement, flowchart } : undefined;
   }
 
-  if (kind === "chart") {
-    const chart = parseChart(v.chart);
-    return chart ? { kind, title, placement, chart } : undefined;
-  }
+  const chart = parseChart(v.chart);
+  return chart ? { kind, title, placement, chart } : undefined;
+}
 
-  // The view is half of the image request, so without a known one there is
-  // nothing to ask for. Visuals saved before views existed are dropped here.
-  if (!IMAGE_VIEWS.includes(v.imageView as ImageView)) return undefined;
-  const imageView = v.imageView as ImageView;
-  const imageSubject = cleanText(v.imageSubject, VISUAL_LIMITS.imageSubjectMax) || title;
-  if (!imageSubject) return undefined;
-  const imageAlt = cleanText(v.imageAlt, 200) || imageSubject;
-  return { kind, title: title || imageSubject, placement, imageView, imageSubject, imageAlt };
+/** The illustration plan: a known view plus something to draw. Fails closed like the diagram. */
+export function parseIllustration(v: unknown): IllustrationSpec | undefined {
+  if (!isRecord(v)) return undefined;
+  if (!IMAGE_VIEWS.includes(v.view as ImageView)) return undefined;
+  const view = v.view as ImageView;
+  const subject = cleanText(v.subject, VISUAL_LIMITS.imageSubjectMax);
+  if (!subject) return undefined;
+  const title = cleanText(v.title, VISUAL_LIMITS.titleMax) || subject;
+  const alt = cleanText(v.alt, 200) || subject;
+  return { title, view, subject, alt };
 }
