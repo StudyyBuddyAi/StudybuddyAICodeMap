@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll } from "vitest";
-import { act, render, screen, type RenderResult } from "@testing-library/react";
+import { act, fireEvent, render, screen, type RenderResult } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import OutputSection from "./OutputSection";
@@ -221,5 +221,54 @@ describe("OutputSection figures section", () => {
     for (const name of Object.values(HEADING)) {
       expect(heading(name)).toBeInTheDocument();
     }
+  });
+});
+
+describe("Expand menu on figures", () => {
+  // jsdom implements Selection and Range but has no layout, and the handler
+  // positions the menu from the range's rect.
+  beforeAll(() => {
+    Range.prototype.getBoundingClientRect = () =>
+      ({ top: 0, left: 0, bottom: 0, right: 0, width: 0, height: 0, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
+  });
+
+  const FIGURE_SHEET: GeneratedSheet = {
+    ...SHEET,
+    overview: "Mechanism: reduced cardiac output causes congestion",
+    figures: [
+      {
+        kind: "compare",
+        title: "Nephrotic vs nephritic",
+        columns: ["Nephrotic", "Nephritic"],
+        rows: [{ label: "Proteinuria", cells: ["over 3.5 g per day", "under 3.5 g per day"] }],
+      },
+    ],
+  };
+
+  const selectContents = (el: Element) => {
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    const selection = window.getSelection()!;
+    selection.removeAllRanges();
+    selection.addRange(range);
+    fireEvent.mouseUp(el);
+  };
+
+  const expandButton = () => screen.queryByRole("button", { name: /↗\s*Expand/ });
+
+  it("offers Expand for a selection in a prose section", async () => {
+    // Positive control: proves the harness can open the menu at all, so the
+    // figures case below cannot pass vacuously.
+    await renderSheet(<OutputSection output={JSON.stringify(FIGURE_SHEET)} />);
+    selectContents(document.querySelector('[data-enh-section="overview"]')!);
+    expect(expandButton()).toBeInTheDocument();
+  });
+
+  it("does not offer Expand for a selection inside a figure", async () => {
+    // The edge function rejects enhancements anchored to figures, so offering
+    // the menu here only ever produced "Enhancement failed".
+    await renderSheet(<OutputSection output={JSON.stringify(FIGURE_SHEET)} />);
+    selectContents(document.querySelector('[data-section-key="figures"] table')!);
+    expect(expandButton()).toBeNull();
   });
 });

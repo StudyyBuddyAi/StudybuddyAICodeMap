@@ -7,26 +7,36 @@ import FigureFrame from "./FigureFrame";
 /**
  * A flowchart, laid out top-down in layers.
  *
- * Two deliberate constraints make this a single deterministic pass:
+ * Three deliberate constraints make this a single deterministic pass:
  *
  * 1. Text is never measured. SVG text width is unknowable before paint, and
  *    `getBBox` would force a mount → measure → re-layout cycle with a visible
  *    flash of the wrong layout. Nodes are a fixed width and labels are wrapped
  *    to a character budget instead.
- * 2. The graph is assumed to be a DAG with at least one root. `parseFigures`
+ * 2. Text is never truncated. A clinical step cut short can invert its meaning,
+ *    so a node grows taller until its whole label fits; the validator's label
+ *    cap is what bounds that height.
+ * 3. The graph is assumed to be a DAG with at least one root. `parseFigures`
  *    rejects cycles and rootless graphs, so the longest-path walk below always
  *    terminates — that check belongs to the validator, not to this component.
  */
 
 const NODE_W = 156;
-const NODE_H = 58;
+const NODE_MIN_H = 58;
 const H_GAP = 20;
 const V_GAP = 46;
 const PAD = 12;
 
+const LINE_H = 14;
+/** Breathing room above and below a node's block of lines. */
+const TEXT_PAD_Y = 15;
+
 /** Roughly what fits on one line of NODE_W at the label font size. */
-const CHARS_PER_LINE = 24;
-const MAX_LINES = 2;
+const BOX_CHARS_PER_LINE = 24;
+/** Decision nodes lose width to their pointed ends. */
+const DECISION_CHARS_PER_LINE = 20;
+/** How far a decision node's points reach in from the box edge. */
+const DECISION_INSET = 16;
 
 const SVG_STYLE: CSSProperties = { width: "100%", height: "auto", display: "block" };
 
@@ -44,47 +54,45 @@ const EDGE_TEXT_STYLE: CSSProperties = {
 };
 
 /**
- * Greedy word wrap into at most `MAX_LINES`, ellipsing the overflow.
+ * Greedy word wrap with no line limit and no ellipsis.
  *
- * The validator already caps labels at 80 characters; this is the tighter
- * budget that fits the drawn box.
+ * A word longer than the budget is split across lines rather than cut, so every
+ * character of the label is always drawn.
  */
-const clamp = (line: string): string =>
-  line.length > CHARS_PER_LINE ? `${line.slice(0, CHARS_PER_LINE - 1)}…` : line;
-
-function wrapLabel(label: string): string[] {
-  const words = label.split(/\s+/).filter(Boolean);
+function wrapLabel(label: string, budget: number): string[] {
   const lines: string[] = [];
   let current = "";
 
-  for (const word of words) {
+  for (const word of label.split(/\s+/).filter(Boolean)) {
     const candidate = current ? `${current} ${word}` : word;
-    if (candidate.length <= CHARS_PER_LINE) {
+    if (candidate.length <= budget) {
       current = candidate;
       continue;
     }
     if (current) lines.push(current);
-    current = word;
-    if (lines.length === MAX_LINES) break;
+    let rest = word;
+    while (rest.length > budget) {
+      lines.push(rest.slice(0, budget));
+      rest = rest.slice(budget);
+    }
+    current = rest;
   }
-  if (current && lines.length < MAX_LINES) lines.push(current);
-
-  // A single word longer than the budget still has to be cut, or it runs
-  // outside the node box with nothing to signal that it did.
-  const fitted = lines.slice(0, MAX_LINES).map(clamp);
-
-  // Words that did not fit at all are signalled rather than silently dropped.
-  if (lines.join(" ") !== label && fitted.length) {
-    const last = fitted.length - 1;
-    if (!fitted[last].endsWith("…")) fitted[last] = clamp(`${fitted[last]}…`);
-  }
-  return fitted;
+  if (current) lines.push(current);
+  return lines;
 }
+
+const budgetFor = (node: FigureNode): number =>
+  node.shape === "diamond" ? DECISION_CHARS_PER_LINE : BOX_CHARS_PER_LINE;
+
+const heightFor = (lineCount: number): number =>
+  Math.max(NODE_MIN_H, TEXT_PAD_Y * 2 + lineCount * LINE_H);
 
 interface Placed {
   node: FigureNode;
+  lines: string[];
   x: number;
   y: number;
+  h: number;
 }
 
 /** Longest path from the roots — the layer each node is drawn on. */
@@ -143,40 +151,61 @@ function layout(nodes: FigureNode[], edges: FigureEdge[]) {
     layers[d].forEach((n, i) => indexInLayer.set(n.id, i));
   }
 
+  const linesOf = new Map(nodes.map((n) => [n.id, wrapLabel(n.label, budgetFor(n))]));
+
+  // Siblings share one height so each layer still reads as a straight row.
+  const rowHeights = layers.map((layer) =>
+    Math.max(...layer.map((n) => heightFor(linesOf.get(n.id)!.length)))
+  );
+
   const widest = Math.max(...layers.map((l) => l.length));
   const contentW = widest * NODE_W + (widest - 1) * H_GAP;
-  const contentH = layers.length * NODE_H + (layers.length - 1) * V_GAP;
+  const contentH = rowHeights.reduce((sum, h) => sum + h, 0) + (layers.length - 1) * V_GAP;
 
   const placed = new Map<string, Placed>();
+  let rowY = PAD;
   layers.forEach((layer, d) => {
     const rowW = layer.length * NODE_W + (layer.length - 1) * H_GAP;
     const startX = PAD + (contentW - rowW) / 2;
     layer.forEach((node, i) => {
       placed.set(node.id, {
         node,
+        lines: linesOf.get(node.id)!,
         x: startX + i * (NODE_W + H_GAP),
-        y: PAD + d * (NODE_H + V_GAP),
+        y: rowY,
+        h: rowHeights[d],
       });
     });
+    rowY += rowHeights[d] + V_GAP;
   });
 
   return { placed, width: contentW + PAD * 2, height: contentH + PAD * 2 };
 }
 
 const NodeShape = ({ at }: { at: Placed }) => {
-  const { x, y, node } = at;
+  const { x, y, h, node } = at;
+  const isDecision = node.shape === "diamond";
   const common: CSSProperties = {
     fill: "var(--bg)",
-    stroke: node.shape === "diamond" ? "var(--accent)" : "var(--border-strong, var(--border))",
-    strokeWidth: node.shape === "diamond" ? 1.75 : 1.25,
+    stroke: isDecision ? "var(--accent)" : "var(--border-strong, var(--border))",
+    strokeWidth: isDecision ? 1.75 : 1.25,
   };
 
-  if (node.shape === "diamond") {
-    const cx = x + NODE_W / 2;
-    const cy = y + NODE_H / 2;
+  if (isDecision) {
+    // A pointed hexagon rather than a true diamond: a diamond keeps only half
+    // its width near the top and bottom, so any label longer than one line
+    // would spill past its slanted edges.
+    const cy = y + h / 2;
     return (
       <polygon
-        points={`${cx},${y} ${x + NODE_W},${cy} ${cx},${y + NODE_H} ${x},${cy}`}
+        points={[
+          `${x + DECISION_INSET},${y}`,
+          `${x + NODE_W - DECISION_INSET},${y}`,
+          `${x + NODE_W},${cy}`,
+          `${x + NODE_W - DECISION_INSET},${y + h}`,
+          `${x + DECISION_INSET},${y + h}`,
+          `${x},${cy}`,
+        ].join(" ")}
         style={common}
       />
     );
@@ -187,8 +216,9 @@ const NodeShape = ({ at }: { at: Placed }) => {
       x={x}
       y={y}
       width={NODE_W}
-      height={NODE_H}
-      rx={node.shape === "round" ? NODE_H / 2 : 8}
+      height={h}
+      // Capped so a tall rounded node keeps its corners clear of the text.
+      rx={node.shape === "round" ? Math.min(h / 2, 22) : 8}
       style={common}
     />
   );
@@ -231,7 +261,7 @@ const FlowFigure = ({ figure }: { figure: FlowFigureData }) => {
           const from = placed.get(edge.from)!;
           const to = placed.get(edge.to)!;
           const x1 = from.x + NODE_W / 2;
-          const y1 = from.y + NODE_H;
+          const y1 = from.y + from.h;
           const x2 = to.x + NODE_W / 2;
           const y2 = to.y;
           return (
@@ -259,15 +289,15 @@ const FlowFigure = ({ figure }: { figure: FlowFigureData }) => {
         })}
 
         {[...placed.values()].map((at) => {
-          const lines = wrapLabel(at.node.label);
-          // Centre the block of lines on the node, whether it is one or two.
-          const firstY = at.y + NODE_H / 2 - (lines.length - 1) * 7 + 4;
+          const cx = at.x + NODE_W / 2;
+          // Centre the block of lines on the node; +4 settles the baseline.
+          const firstY = at.y + at.h / 2 - ((at.lines.length - 1) * LINE_H) / 2 + 4;
           return (
             <g key={at.node.id}>
               <NodeShape at={at} />
-              <text x={at.x + NODE_W / 2} textAnchor="middle" style={NODE_TEXT_STYLE}>
-                {lines.map((line, i) => (
-                  <tspan key={line} x={at.x + NODE_W / 2} y={firstY + i * 14}>
+              <text x={cx} textAnchor="middle" style={NODE_TEXT_STYLE}>
+                {at.lines.map((line, i) => (
+                  <tspan key={`${i}-${line}`} x={cx} y={firstY + i * LINE_H}>
                     {line}
                   </tspan>
                 ))}

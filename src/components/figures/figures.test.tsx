@@ -197,7 +197,7 @@ describe("FlowFigure", () => {
     expect(container.querySelectorAll("line")).toHaveLength(3);
   });
 
-  it("draws a decision point as a diamond and plain steps as rects", () => {
+  it("draws a decision point in its accent shape and plain steps as rects", () => {
     const { container } = render(<FlowFigure figure={flow()} />);
     expect(container.querySelectorAll("polygon")).toHaveLength(1);
     expect(container.querySelectorAll("rect")).toHaveLength(3);
@@ -257,54 +257,74 @@ describe("FlowFigure", () => {
   });
 });
 
-describe("FlowFigure — labels are cut, never overflowed", () => {
+describe("FlowFigure — labels are never truncated", () => {
   const labelsOf = (container: HTMLElement) =>
     [...container.querySelectorAll("tspan")].map((t) => t.textContent ?? "");
 
-  it("wraps a long multi-word label onto two lines", () => {
-    const wide = validated<FlowData>({
+  // A clinical step cut short can invert its meaning, so the renderer must draw
+  // every character of any label the validator accepts.
+  const LONG_STEP = "No ST elevation: repeat high-sensitivity troponin at 0 and 1 hour";
+
+  const single = (label: string, shape?: "diamond") =>
+    validated<FlowData>({
       kind: "flow",
-      title: "Wrap",
-      nodes: [{ id: "a", label: "Administer intravenous fluids before insulin" }],
+      title: "Label",
+      nodes: [shape ? { id: "a", label, shape } : { id: "a", label }],
       edges: [],
     });
-    const { container } = render(<FlowFigure figure={wide} />);
+
+  it("wraps a long label onto as many lines as it needs, keeping every word", () => {
+    const { container } = render(<FlowFigure figure={single(LONG_STEP)} />);
     const lines = labelsOf(container);
-    expect(lines.length).toBeGreaterThan(1);
-    expect(lines.length).toBeLessThanOrEqual(2);
+    expect(lines.length).toBeGreaterThan(2);
+    expect(lines.join(" ")).toBe(LONG_STEP);
+    expect(lines.join("")).not.toContain("…");
   });
 
-  it("clamps a single word longer than the line budget", () => {
-    const long = validated<FlowData>({
-      kind: "flow",
-      title: "Long word",
-      nodes: [{ id: "a", label: "Pneumonoultramicroscopicsilicovolcanoconiosis" }],
-      edges: [],
-    });
-    const { container } = render(<FlowFigure figure={long} />);
+  it("keeps the full label in a decision node too", () => {
+    const { container } = render(<FlowFigure figure={single(LONG_STEP, "diamond")} />);
+    expect(labelsOf(container).join(" ")).toBe(LONG_STEP);
+  });
+
+  it("draws every character of a label at the validator's cap", () => {
+    const atCap = `${"abcd ".repeat(15)}abcde`;
+    expect(atCap).toHaveLength(FIGURE_LIMITS.label);
+    const { container } = render(<FlowFigure figure={single(atCap)} />);
+    expect(labelsOf(container).join(" ")).toBe(atCap);
+  });
+
+  it("splits a word longer than a line rather than cutting it", () => {
+    const word = "Pneumonoultramicroscopicsilicovolcanoconiosis";
+    const { container } = render(<FlowFigure figure={single(word)} />);
     const lines = labelsOf(container);
+    expect(lines.join("")).toBe(word);
     expect(lines.every((l) => l.length <= 24)).toBe(true);
-    expect(lines.join("")).toContain("…");
   });
 
-  it("signals truncation when a label cannot fit in two lines", () => {
-    const overflowing = validated<FlowData>({
+  it("grows a node to fit a long label and keeps its row aligned", () => {
+    const mixed = validated<FlowData>({
       kind: "flow",
-      title: "Overflow",
+      title: "Mixed",
       nodes: [
-        {
-          id: "a",
-          // Under the validator's 80-char cap, over the drawn box's budget.
-          label: "Give isotonic saline then potassium then insulin and recheck gas",
-        },
+        { id: "a", label: "Chest pain" },
+        { id: "b", label: LONG_STEP },
+        { id: "c", label: "Activate cath lab" },
       ],
-      edges: [],
+      edges: [
+        { from: "a", to: "b" },
+        { from: "a", to: "c" },
+      ],
     });
-    const { container } = render(<FlowFigure figure={overflowing} />);
-    expect(labelsOf(container).join("")).toContain("…");
+    const { container } = render(<FlowFigure figure={mixed} />);
+    const [root, long, sibling] = [...container.querySelectorAll("rect")].map((r) =>
+      Number(r.getAttribute("height"))
+    );
+    expect(long).toBeGreaterThan(root);
+    // The short sibling shares the taller row, so the layer stays straight.
+    expect(sibling).toBe(long);
   });
 
-  it("leaves a short label untouched", () => {
+  it("leaves a short label on a single untouched line", () => {
     const { container } = render(<FlowFigure figure={flow()} />);
     expect(labelsOf(container)).toContain("Start insulin");
   });

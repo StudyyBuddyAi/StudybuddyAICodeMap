@@ -511,6 +511,9 @@ FIGURES — the "figures" key above. Only when the topic genuinely has a visual 
 - "flow" for algorithms and cascades: nodes are steps, edges are transitions.
   Every edge's "from" and "to" MUST match an "id" you declared. Use shape
   "diamond" for decision points. Maximum 8 nodes.
+  Keep each node a short step, ideally under 40 characters. Put branch
+  conditions such as "yes", "no" or "ST elevation" on the edge label, never
+  inside a node label.
   The chart must flow in ONE direction — no edge may point back to an earlier
   step, and no step may loop to itself. Omit the figure if the process is
   genuinely circular.

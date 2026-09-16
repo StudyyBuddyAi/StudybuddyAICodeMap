@@ -1120,6 +1120,13 @@ const OutputSection = ({
       range.startContainer instanceof Element
         ? range.startContainer
         : range.startContainer.parentElement;
+    // Figures are diagram labels, not prose. The edge function only accepts
+    // enhancements anchored to a prose section, so offering Expand here would
+    // always fail with "Enhancement failed".
+    if (startEl?.closest('[data-section-key="figures"]')) {
+      setSelection(null);
+      return;
+    }
     const rect = range.getBoundingClientRect();
     setSelection({ text, anchor: anchorFromElement(startEl), ...anchorMenuPos(rect) });
   }, [anchorMenuPos]);

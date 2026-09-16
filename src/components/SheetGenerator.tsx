@@ -140,7 +140,7 @@ const PillGroup = ({ label, options, value, onChange }: PillGroupProps) => (
  * switch: while it is "none" the system prompt is byte-identical to its
  * pre-figures form, so no sheet can carry a figure and nothing below changes.
  */
-const FIGURE_MODE = "none" as "none" | "auto";
+const FIGURE_MODE = "auto" as "none" | "auto";
 
 // ── Right-rail section navigator (lg+ only) ──────────────────────────────────
 
