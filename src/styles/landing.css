@@ -985,6 +985,8 @@ h1, h2, h3 { letter-spacing: -0.035em; }
 
   .container { width: calc(100% - 40px); }
 
+  .site-header > .header-inner { width: 100%; max-width: none; box-sizing: border-box; }
+
   .site-header { min-height: 64px; }
 
   .header-inner { min-height: 64px; }

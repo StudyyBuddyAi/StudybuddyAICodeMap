@@ -875,7 +875,7 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
                         <Icon className="h-4 w-4" strokeWidth={2.2} />
                       </span>
                       <div className="text-center">
-                        <p className="text-xs font-medium leading-tight text-[color:var(--color-foreground)] group-hover:text-[color:var(--color-accent)]">{label}</p>
+                        <p className="text-sm font-medium leading-tight text-[color:var(--color-foreground)] group-hover:text-[color:var(--color-accent)]">{label}</p>
                         <p className="text-[10px] text-[color:var(--color-muted-foreground)]">{category}</p>
                       </div>
                     </button>

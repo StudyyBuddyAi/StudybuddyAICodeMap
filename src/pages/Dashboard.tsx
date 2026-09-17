@@ -141,7 +141,7 @@ function Dashboard() {
           <section className="dashboard-welcome" aria-labelledby="dashboard-title">
             <div>
               <div className="dashboard-eyebrow"><span className="dashboard-eyebrow-dot" /> Your study space</div>
-              <h1 id="dashboard-title">Make today’s study hour <em>count.</em></h1>
+              <h1 className="[font-family:var(--app-font-serif)] text-[clamp(28px,4vw,40px)] font-medium leading-[1.1] tracking-[-0.012em] text-foreground" id="dashboard-title">Make today’s study hour <em>count.</em></h1>
               <p>Pick up where you left off, or start with a focused study sheet.</p>
             </div>
             <div className="dashboard-date" data-testid="text-dashboard-date">

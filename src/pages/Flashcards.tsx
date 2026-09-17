@@ -815,9 +815,9 @@ const Flashcards = () => {
           <p className="font-mono text-[11px] font-medium tracking-widest uppercase text-primary mb-2">
             Flashcards · Spaced repetition
           </p>
-          <h1 className="text-[clamp(26px,3.5vw,36px)] font-serif font-medium leading-tight tracking-tight text-foreground">
+          <h1 className="[font-family:var(--app-font-serif)] text-[clamp(28px,4vw,40px)] font-medium leading-[1.1] tracking-[-0.012em] text-foreground">
             Study any topic,{" "}
-            <span className="italic text-[]">lock it in.</span>
+            <span className="italic text-[--color-accent]">lock it in.</span>
           </h1>
           <p className="mt-2.5 max-w-xl text-base leading-relaxed text-muted-foreground">
             Enter any medical topic — a deck of vignette cards is written for it,
