@@ -875,7 +875,7 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
                         <Icon className="h-4 w-4" strokeWidth={2.2} />
                       </span>
                       <div className="text-center">
-                        <p className="text-xs font-medium leading-tight text-[color:var(--color-foreground)] group-hover:text-[color:var(--color-accent)]">{label}</p>
+                        <p className="text-sm font-medium leading-tight text-[color:var(--color-foreground)] group-hover:text-[color:var(--color-accent)]">{label}</p>
                         <p className="text-[10px] text-[color:var(--color-muted-foreground)]">{category}</p>
                       </div>
                     </button>
@@ -1589,7 +1589,7 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
         onClick={() => setConfigDrawerOpen(false)}
       />
       <div
-        className={`absolute inset-y-0 left-0 w-[320px] overflow-y-auto bg-card border-r border-border p-4 motion-safe:transition-transform motion-safe:duration-[250ms] motion-safe:ease-out ${
+        className={`absolute inset-y-0 left-0 w-[320px] overflow-y-auto bg-card border-r border-border p-4 motion-safe:transition-transform motion-safe:duration-300 motion-safe:ease-out ${
           configDrawerOpen ? "translate-x-0" : "-translate-x-full"
         }`}
       >
