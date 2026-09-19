@@ -24,6 +24,7 @@ import {
 import CopyButton from "@/components/CopyButton";
 import FlashcardsSection from "@/components/FlashcardsSection";
 import FiguresSection from "@/components/figures/FiguresSection";
+import AnatomySection from "@/components/anatomy/AnatomySection";
 import SaveButton from "@/components/SaveButton";
 import SectionSkeleton from "@/components/SectionSkeleton";
 import CitationBadgeList from "@/components/CitationBadgeList";
@@ -247,6 +248,14 @@ function renderFormattedContent(content: string) {
 }
 
 // ─── JSON renderer helpers ─────────────────────────────────────────────────
+
+/**
+ * Anatomy illustrations, off until anatomy-match and anatomy-explain are
+ * deployed and the image library covers enough systems to be worth showing.
+ * While "off" no request is made and the sheet is unchanged; flipping to
+ * "auto" is the whole switch.
+ */
+const ANATOMY_MODE = "off" as "off" | "auto";
 
 const JSON_SECTION_CONFIG = {
   overview: { icon: BookOpen, label: "📋 Overview", className: "section-summary", evidenceBacked: true },
@@ -1606,6 +1615,14 @@ const OutputSection = ({
       {/* Fallback: selections that couldn't be anchored to a specific line */}
       {enhancementsByAnchor["end"]?.length ? (
         <div className="space-y-1">{renderInline("end")}</div>
+      ) : null}
+
+      {/* Anatomy sits after the generated sections and inside .print-document,
+          so it exports with the sheet. It matches on its own and renders
+          nothing when no illustration fits the topic, which is most topics.
+          Held back until the stream ends so it never competes with it. */}
+      {ANATOMY_MODE === "auto" && !isStreaming && inputText?.trim() ? (
+        <AnatomySection topic={inputText} />
       ) : null}
 
       {/* The nudge says the sheet is ready, so it waits until it actually is. */}
