@@ -1,0 +1,10 @@
+-- Placeholder. Applies nothing.
+--
+-- The remote database has migration 20260919000000 in its history, but
+-- this branch does not carry the file, so `supabase db push` refuses to
+-- run at all. This file reconciles that history so unrelated migrations
+-- can be pushed from this branch.
+--
+-- No file with this version exists on any branch — it was applied
+-- directly to the database. Find out what it did before assuming this
+-- placeholder is harmless.

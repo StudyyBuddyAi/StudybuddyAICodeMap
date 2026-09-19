@@ -1,0 +1,10 @@
+-- Placeholder. Applies nothing.
+--
+-- The remote database has migration 20260917000000 in its history, but
+-- this branch does not carry the file, so `supabase db push` refuses to
+-- run at all. This file reconciles that history so unrelated migrations
+-- can be pushed from this branch.
+--
+-- The real migration is 20260917000000_qbank_flags_in_progress.sql,
+-- on main. DELETE THIS FILE when main is merged into this branch, or
+-- two migrations will share version 20260917000000.

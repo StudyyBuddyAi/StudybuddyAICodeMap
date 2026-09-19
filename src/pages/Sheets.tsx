@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useLocation } from "react-router-dom";
+import { useLocation, useSearchParams } from "react-router-dom";
 import {
   ArrowRight,
   BookOpenCheck,
@@ -11,6 +11,9 @@ import {
 } from "lucide-react";
 import DashboardLayout from "@/components/dashboard/DashboardLayout";
 import SheetGenerator from "@/components/SheetGenerator";
+import AnatomyPanel from "@/components/anatomy/AnatomyPanel";
+import AnatomySection from "@/components/anatomy/AnatomySection";
+import type { AnatomyImage } from "@/lib/callAnatomy";
 import "@/index.css";
 // Steps shown above the generator so a first-time visitor immediately
 // understands the flow: type a topic -> AI builds the sheet -> study it.
@@ -43,12 +46,43 @@ const SUGGESTED_TOPICS = [
   "Nephrotic Syndrome",
   "Stroke Management",
 ];
+
+// ── TEMPORARY: /sheets?anatomy=1 harness (plan Part II, N1) ──────────────────
+// One hardcoded image so the interaction, the tall-image layout and zoom can be
+// exercised before any database, storage or matching exists. The artwork is a
+// crude AI-drawn placeholder, labelled as such inside the SVG — it is a layout
+// fixture, not anatomy to learn from. Delete this block, the conditional below
+// and public/nephron-placeholder.svg once N2 lands.
+const NEPHRON_HARNESS: AnatomyImage = {
+  id: "nephron_placeholder",
+  title: "Nephron (placeholder)",
+  // Deliberately tall: 400 × 900 is the case a fixed 4/3 box would letterbox.
+  aspectRatio: 400 / 900,
+  url: "/nephron-placeholder.svg",
+  labels: [
+    "Glomerulus",
+    "Bowman's capsule",
+    "Proximal convoluted tubule",
+    "Loop of Henle",
+    "Distal convoluted tubule",
+    "Collecting duct",
+  ],
+  attribution: null,
+  sourceUrl: null,
+};
  
 const Sheets = () => {
   // The Roadmap navigates here with a topic to seed the notes field.
   const location = useLocation();
   const state = location.state as { topic?: string } | null;
  
+  const [searchParams] = useSearchParams();
+  // ?anatomy=1&topic=… exercises real matching against the ingested library.
+  // ?anatomy=placeholder keeps the offline layout fixture, which needs no
+  // deployed function and no database.
+  const anatomyParam = searchParams.get("anatomy");
+  const anatomyTopic = searchParams.get("topic") ?? "Digestive system";
+
   const [activeTopic, setActiveTopic] = useState(state?.topic ?? "");
   const prefill = activeTopic ? { input: activeTopic, output: "" } : undefined;
  
@@ -162,7 +196,13 @@ const Sheets = () => {
           </span>
         </div>
  
-        <SheetGenerator key={activeTopic || "blank"} prefill={prefill} />
+        {anatomyParam === "placeholder" ? (
+          <AnatomyPanel image={NEPHRON_HARNESS} />
+        ) : anatomyParam === "1" ? (
+          <AnatomySection key={anatomyTopic} topic={anatomyTopic} />
+        ) : (
+          <SheetGenerator key={activeTopic || "blank"} prefill={prefill} />
+        )}
       </div>
     </DashboardLayout>
   );

@@ -1,0 +1,15 @@
+-- Placeholder. Applies nothing.
+--
+-- The remote database has migration 20260916000000 in its history, but
+-- this branch does not carry the file, so `supabase db push` refuses to
+-- run at all. This file reconciles that history so unrelated migrations
+-- can be pushed from this branch.
+--
+-- The real migration is 20260916000000_qbank_attempts_created_at.sql,
+-- on main. DELETE THIS FILE when main is merged into this branch, or
+-- two migrations will share version 20260916000000.
+--
+-- Note: the anatomy migration was originally numbered 20260916000000 and
+-- was renamed to 20260921000000 precisely because this version is already
+-- applied remotely — pushing it under this number would have been treated
+-- as already-applied and silently skipped.
