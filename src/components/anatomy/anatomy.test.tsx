@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import AnatomyPanel from "./AnatomyPanel";
 import { ANATOMY_PROVENANCE } from "./AnatomyFrame";
 import type { AnatomyImage } from "@/lib/callAnatomy";
@@ -224,5 +224,97 @@ describe("AnatomyPanel — presentation and safety", () => {
       .filter((f) => f.endsWith(".tsx") && !f.includes(".test."))
       .filter((f) => readFileSync(join(dir, f), "utf8").includes("dangerouslySetInnerHTML"));
     expect(offenders).toEqual([]);
+  });
+});
+
+describe("AnatomyPanel — layout", () => {
+  it("exposes the ratio to CSS so the height cap can derive a width", () => {
+    const { container } = render(<AnatomyPanel image={IMAGE} explain={explainOk()} />);
+    const media = container.querySelector(".anatomy-media") as HTMLElement;
+    expect(media.style.getPropertyValue("--anatomy-ratio")).toBe("0.75");
+  });
+
+  it("falls back to the default ratio in the custom property too", () => {
+    const { container } = render(<AnatomyPanel image={unlabelled} explain={explainOk()} />);
+    const media = container.querySelector(".anatomy-media") as HTMLElement;
+    expect(Number(media.style.getPropertyValue("--anatomy-ratio"))).toBeCloseTo(4 / 3);
+  });
+
+  it("puts the chips in a class, not an inline flex row", () => {
+    const { container } = render(<AnatomyPanel image={IMAGE} explain={explainOk()} />);
+    expect(container.querySelector(".anatomy-chips")).not.toBeNull();
+  });
+
+  it("leaves chip padding to the stylesheet", () => {
+    // An inline padding would beat .anatomy-chip and the class would silently
+    // do nothing — which is exactly how the first attempt at this failed.
+    render(<AnatomyPanel image={IMAGE} explain={explainOk()} />);
+    expect(screen.getByRole("button", { name: "Aorta" }).style.padding).toBe("");
+  });
+
+  it("keeps explicit padding on the zoom controls", () => {
+    render(<AnatomyPanel image={IMAGE} explain={explainOk()} />);
+    expect(screen.getByRole("button", { name: "Zoom in" }).style.padding).not.toBe("");
+  });
+});
+
+describe("AnatomyPanel — panning must not crash the tree", () => {
+  it("survives a move and release batched in one flush", () => {
+    // The move queues a state update; the release clears the drag ref. If the
+    // updater reads that ref, React runs it during the render phase after the
+    // ref is already null, throws, and unmounts the entire app — the page just
+    // vanishes. Batching both in one act() reproduces that ordering.
+    const { container } = render(<AnatomyPanel image={IMAGE} explain={explainOk()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Zoom in" }));
+
+    const media = container.querySelector(".anatomy-media") as HTMLElement;
+    fireEvent.pointerDown(media, { pointerId: 1, clientX: 100, clientY: 100 });
+
+    act(() => {
+      fireEvent.pointerMove(media, { pointerId: 1, clientX: 140, clientY: 130 });
+      fireEvent.pointerUp(media, { pointerId: 1, clientX: 140, clientY: 130 });
+    });
+
+    expect(container.querySelector(".anatomy-media")).not.toBeNull();
+    expect(screen.getByAltText("Heart, anterior view")).toBeInTheDocument();
+  });
+
+  it("survives a stray move arriving after the release", () => {
+    const { container } = render(<AnatomyPanel image={IMAGE} explain={explainOk()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Zoom in" }));
+
+    const media = container.querySelector(".anatomy-media") as HTMLElement;
+    fireEvent.pointerDown(media, { pointerId: 1, clientX: 100, clientY: 100 });
+    fireEvent.pointerUp(media, { pointerId: 1, clientX: 100, clientY: 100 });
+    fireEvent.pointerMove(media, { pointerId: 1, clientX: 200, clientY: 200 });
+
+    expect(screen.getByAltText("Heart, anterior view")).toBeInTheDocument();
+  });
+});
+
+describe("AnatomyBoundary", () => {
+  const Boom = () => {
+    throw new Error("panel exploded");
+  };
+
+  it("hides a crashing panel instead of unmounting the page", async () => {
+    const { default: AnatomyBoundary } = await import("./AnatomyBoundary");
+    // React logs the caught error; silence it so the run stays readable.
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const { container } = render(
+      <div>
+        <p>sheet content</p>
+        <AnatomyBoundary>
+          <Boom />
+        </AnatomyBoundary>
+      </div>
+    );
+
+    // The diagram is gone, but everything around it survives — which is the
+    // whole point: a broken panel must never blank the sheet.
+    expect(screen.getByText("sheet content")).toBeInTheDocument();
+    expect(container.textContent).toBe("sheet content");
+    spy.mockRestore();
   });
 });

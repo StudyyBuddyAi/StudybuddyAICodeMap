@@ -33,21 +33,30 @@ interface View {
   y: number;
 }
 
-const CHIP_BASE: CSSProperties = {
+/**
+ * Shared pill surface. Label chips deliberately omit padding here and take it
+ * from `.anatomy-chip` in index.css — an inline padding would override the
+ * stylesheet and the class would silently do nothing.
+ */
+const SURFACE: CSSProperties = {
   border: "1px solid var(--border)",
   borderRadius: "var(--radius-pill, 999px)",
   background: "var(--bg)",
   color: "var(--fg-muted)",
   fontFamily: "var(--font-sans)",
   fontSize: 12,
-  padding: "6px 12px",
   cursor: "pointer",
 };
+
+const CONTROL_STYLE: CSSProperties = { ...SURFACE, padding: "6px 12px" };
 
 export function AnatomySkeleton({ ratio = FALLBACK_RATIO }: { ratio?: number }) {
   return (
     <div className="anatomy-panel">
-      <div className="anatomy-media" style={{ aspectRatio: ratio }}>
+      <div
+        className="anatomy-media"
+        style={{ aspectRatio: ratio, "--anatomy-ratio": ratio } as CSSProperties}
+      >
         <div className="anatomy-skeleton" />
       </div>
     </div>
@@ -160,16 +169,22 @@ export default function AnatomyPanel({
       return;
     }
 
-    if (panFrom.current) {
+    const from = panFrom.current;
+    if (from) {
       const rect = mediaRef.current?.getBoundingClientRect();
       if (!rect?.width) return;
-      const bx = ((view.s - 1) / 2) * rect.width;
-      const by = ((view.s - 1) / 2) * rect.height;
-      setView((v) => ({
-        s: v.s,
-        x: clamp(panFrom.current!.vx + (e.clientX - panFrom.current!.px), -bx, bx),
-        y: clamp(panFrom.current!.vy + (e.clientY - panFrom.current!.py), -by, by),
-      }));
+      // Everything the updater needs is captured here as plain numbers.
+      // Reading panFrom.current inside it would be a null dereference in the
+      // render phase: a pointermove is batched at default priority, so React
+      // can run its updater *after* the pointerup handler has cleared the ref,
+      // and an error thrown there unmounts the whole tree.
+      const dx = e.clientX - from.px;
+      const dy = e.clientY - from.py;
+      setView((v) => {
+        const bx = ((v.s - 1) / 2) * rect.width;
+        const by = ((v.s - 1) / 2) * rect.height;
+        return { s: v.s, x: clamp(from.vx + dx, -bx, bx), y: clamp(from.vy + dy, -by, by) };
+      });
     }
   };
 
@@ -210,6 +225,7 @@ export default function AnatomyPanel({
   );
 
   const open = status !== "idle";
+  const ratio = image.aspectRatio ?? FALLBACK_RATIO;
 
   return (
     <AnatomyFrame
@@ -221,7 +237,9 @@ export default function AnatomyPanel({
         ref={mediaRef}
         className="anatomy-media"
         data-zoomed={zoomed ? "true" : "false"}
-        style={{ aspectRatio: image.aspectRatio ?? FALLBACK_RATIO }}
+        // The custom property drives the 70vh height cap in index.css, which
+        // needs the ratio as a number to work back to a width.
+        style={{ aspectRatio: ratio, "--anatomy-ratio": ratio } as CSSProperties}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={endPointer}
@@ -249,7 +267,7 @@ export default function AnatomyPanel({
           type="button"
           aria-label="Zoom out"
           onClick={() => applyZoom(view.s / 1.4)}
-          style={CHIP_BASE}
+          style={CONTROL_STYLE}
         >
           −
         </button>
@@ -257,19 +275,19 @@ export default function AnatomyPanel({
           type="button"
           aria-label="Zoom in"
           onClick={() => applyZoom(view.s * 1.4)}
-          style={CHIP_BASE}
+          style={CONTROL_STYLE}
         >
           +
         </button>
         {zoomed && (
-          <button type="button" aria-label="Reset zoom" onClick={resetZoom} style={CHIP_BASE}>
+          <button type="button" aria-label="Reset zoom" onClick={resetZoom} style={CONTROL_STYLE}>
             Reset
           </button>
         )}
       </div>
 
       {image.labels.length > 0 ? (
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 12 }}>
+        <div className="anatomy-chips">
           {image.labels.map((label, i) => {
             const active = part === label;
             return (
@@ -282,7 +300,7 @@ export default function AnatomyPanel({
                 onAnimationEnd={() => justPressed === label && setJustPressed(null)}
                 onClick={() => ask(label)}
                 style={{
-                  ...CHIP_BASE,
+                  ...SURFACE,
                   // Capped: forty labels must not take a second to finish appearing.
                   animationDelay: `${Math.min(i * 22, 260)}ms`,
                   ...(active ? { borderColor: "var(--accent)", color: "var(--accent)" } : null),
@@ -308,9 +326,9 @@ export default function AnatomyPanel({
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Ask about a structure…"
             aria-label="Structure to explain"
-            style={{ ...CHIP_BASE, flex: 1, cursor: "text", color: "var(--fg)" }}
+            style={{ ...CONTROL_STYLE, flex: 1, cursor: "text", color: "var(--fg)" }}
           />
-          <button type="submit" style={CHIP_BASE}>
+          <button type="submit" style={CONTROL_STYLE}>
             Explain
           </button>
         </form>
