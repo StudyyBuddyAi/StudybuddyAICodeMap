@@ -255,7 +255,7 @@ function renderFormattedContent(content: string) {
  * While "off" no request is made and the sheet is unchanged; flipping to
  * "auto" is the whole switch.
  */
-const ANATOMY_MODE = "off" as "off" | "auto";
+const ANATOMY_MODE = "auto" as "off" | "auto";
 
 const JSON_SECTION_CONFIG = {
   overview: { icon: BookOpen, label: "📋 Overview", className: "section-summary", evidenceBacked: true },

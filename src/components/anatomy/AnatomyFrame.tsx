@@ -21,6 +21,8 @@ const FRAME_STYLE: CSSProperties = {
   margin: 0,
 };
 
+const BARE_STYLE: CSSProperties = { margin: 0 };
+
 const TITLE_STYLE: CSSProperties = {
   fontFamily: "var(--font-sans)",
   fontSize: 13,
@@ -40,14 +42,20 @@ const CAPTION_STYLE: CSSProperties = {
 
 interface AnatomyFrameProps {
   title: string;
+  /**
+   * Drops the frame's own border and padding. Used when the panel sits inside
+   * a sheet section card, which already supplies that chrome — nesting both
+   * draws a box inside a box.
+   */
+  bare?: boolean;
   /** Credit for the illustration, shown alongside the provenance line. */
   attribution?: string | null;
   sourceUrl?: string | null;
   children: ReactNode;
 }
 
-const AnatomyFrame = ({ title, attribution, sourceUrl, children }: AnatomyFrameProps) => (
-  <figure className="anatomy-panel" style={FRAME_STYLE}>
+const AnatomyFrame = ({ title, attribution, sourceUrl, bare, children }: AnatomyFrameProps) => (
+  <figure className="anatomy-panel" style={bare ? BARE_STYLE : FRAME_STYLE}>
     <div style={TITLE_STYLE}>{title}</div>
     {children}
     <figcaption style={CAPTION_STYLE}>

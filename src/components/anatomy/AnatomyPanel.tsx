@@ -65,12 +65,15 @@ export function AnatomySkeleton({ ratio = FALLBACK_RATIO }: { ratio?: number }) 
 
 interface AnatomyPanelProps {
   image: AnatomyImage;
+  /** Passed through to AnatomyFrame when the panel sits inside a section card. */
+  bare?: boolean;
   /** Injected in tests; defaults to the real edge-function call. */
   explain?: ExplainFn;
 }
 
 export default function AnatomyPanel({
   image,
+  bare,
   explain = callAnatomyExplain,
 }: AnatomyPanelProps) {
   const [part, setPart] = useState("");
@@ -232,6 +235,7 @@ export default function AnatomyPanel({
       title={image.title}
       attribution={image.attribution}
       sourceUrl={image.sourceUrl}
+      bare={bare}
     >
       <div
         ref={mediaRef}

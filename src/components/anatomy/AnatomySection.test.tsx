@@ -104,3 +104,29 @@ describe("AnatomySection", () => {
     expect(container.querySelector('[data-section-key="anatomy"]')).not.toBeNull();
   });
 });
+
+describe("AnatomySection — reads as a sheet section", () => {
+  it("renders inside a titled card, like the other sections", async () => {
+    render(<AnatomySection topic="Heart failure" match={matching([image()])} explain={explain()} />);
+    await waitFor(() => screen.getByAltText("Heart, anterior view"));
+    expect(screen.getByRole("heading", { name: /Anatomy/ })).toBeInTheDocument();
+  });
+
+  it("holds the card's shape while matching, so the sheet does not jump", () => {
+    const { container } = render(
+      <AnatomySection topic="Heart failure" match={() => new Promise(() => {})} explain={explain()} />
+    );
+    expect(container.querySelector('[data-section-key="anatomy"]')).not.toBeNull();
+    expect(container.querySelector(".anatomy-skeleton")).not.toBeNull();
+  });
+
+  it("shows no card at all when nothing matches", async () => {
+    const { container } = render(
+      <AnatomySection topic="Informed consent" match={matching([])} explain={explain()} />
+    );
+    await waitFor(() => expect(container.querySelector(".anatomy-skeleton")).toBeNull());
+    // An empty card would be worse than no card — the reader would think
+    // something failed to load.
+    expect(container.querySelector('[data-section-key="anatomy"]')).toBeNull();
+  });
+});
