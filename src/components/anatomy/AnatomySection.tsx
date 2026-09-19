@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { CSSProperties } from "react";
+import { HeartPulse } from "lucide-react";
 import { callAnatomyMatch, type AnatomyImage } from "@/lib/callAnatomy";
 import AnatomyPanel, { AnatomySkeleton } from "./AnatomyPanel";
 import AnatomyBoundary from "./AnatomyBoundary";
@@ -22,6 +23,66 @@ type ExplainFn = (
   params: { diagram: string; part: string },
   signal?: AbortSignal
 ) => Promise<{ text: string }>;
+
+/**
+ * Mirrors the sheet's own section cards (see OutputSection) so anatomy reads as
+ * part of the document rather than something bolted underneath it. Expressed in
+ * the same tokens rather than imported, to avoid making those private constants
+ * part of OutputSection's public surface.
+ */
+const CARD_STYLE: CSSProperties = {
+  border: "1px solid var(--border)",
+  borderLeft: "3px solid var(--accent)",
+  borderRadius: "var(--radius-md)",
+  background: "var(--bg-elevated)",
+  overflow: "hidden",
+};
+
+const HEADER_STYLE: CSSProperties = {
+  padding: "20px 24px 8px",
+  display: "flex",
+  alignItems: "center",
+  gap: 10,
+};
+
+const ICON_STYLE: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  width: 28,
+  height: 28,
+  borderRadius: "var(--radius-sm)",
+  border: "1px solid var(--border)",
+  background: "var(--bg)",
+  flexShrink: 0,
+};
+
+const CARD_TITLE_STYLE: CSSProperties = {
+  fontFamily: "var(--font-sans)",
+  fontSize: 14,
+  fontWeight: 600,
+  letterSpacing: "-0.004em",
+  color: "var(--fg)",
+  margin: 0,
+};
+
+const BODY_STYLE: CSSProperties = { padding: "4px 24px 20px" };
+
+const Card = ({ children }: { children: React.ReactNode }) => (
+  <section
+    data-section-key="anatomy"
+    className="section-visuals animate-fade-in"
+    style={CARD_STYLE}
+  >
+    <div style={HEADER_STYLE}>
+      <span style={ICON_STYLE}>
+        <HeartPulse style={{ width: 15, height: 15, color: "var(--accent)" }} />
+      </span>
+      <h3 style={CARD_TITLE_STYLE}>🫀 Anatomy</h3>
+    </div>
+    <div style={BODY_STYLE}>{children}</div>
+  </section>
+);
 
 const TAB_STYLE: CSSProperties = {
   border: "none",
@@ -84,13 +145,20 @@ export default function AnatomySection({
     setIndicator({ left: tab.offsetLeft, width: tab.offsetWidth });
   }, [active, images]);
 
-  if (images === null) return <AnatomySkeleton />;
+  // The card holds its shape while matching, so the sheet does not jump when
+  // the illustration lands. No match renders nothing at all — no empty card.
+  if (images === null)
+    return (
+      <Card>
+        <AnatomySkeleton />
+      </Card>
+    );
   if (images.length === 0) return null;
 
   const current = images[Math.min(active, images.length - 1)];
 
   return (
-    <section data-section-key="anatomy">
+    <Card>
       {images.length > 1 && (
         <div className="anatomy-tabs" ref={tabsRef} style={{ display: "flex", gap: 4 }}>
           {images.map((image, i) => (
@@ -115,8 +183,8 @@ export default function AnatomySection({
       )}
 
       <AnatomyBoundary>
-        <AnatomyPanel image={current} explain={explain} />
+        <AnatomyPanel image={current} bare explain={explain} />
       </AnatomyBoundary>
-    </section>
+    </Card>
   );
 }
