@@ -253,27 +253,26 @@ const QUICKSTART_TOPICS = [
 ] as const;
 
 const QuickstartChips = ({ onStartTopic }: { onStartTopic: (label: string) => void }) => (
-  <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-    {QUICKSTART_TOPICS.map(({ label, icon: Icon, category }) => (
-      <button
-        key={label}
-        type="button"
-        onClick={() => onStartTopic(label)}
-        className="group flex items-center gap-3 rounded-2xl border border-[color:var(--color-border)] bg-[color:var(--color-card)] p-3 text-left transition-all duration-200 hover:-translate-y-0.5 hover:border-[color:var(--color-accent)] hover:shadow-[0_14px_28px_rgba(17,85,90,0.08)]"
-      >
-        <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-[color:var(--color-foreground)] text-[color:var(--color-accent)] shadow-sm">
-          <Icon className="h-4 w-4" strokeWidth={2.2} />
-        </span>
-        <span className="min-w-0">
-          <span className="block truncate text-sm font-semibold text-[color:var(--color-foreground)] group-hover:text-[color:var(--color-accent)]">
-            {label}
+  <div className="space-y-3">
+    <p className="font-mono text-[11px] font-medium uppercase tracking-widest text-muted-foreground">Start Fresh</p>
+    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+      {QUICKSTART_TOPICS.map(({ label, icon: Icon, category }) => (
+        <button
+          key={label}
+          type="button"
+          onClick={() => onStartTopic(label)}
+          className="group flex items-center gap-3 rounded-2xl border border-primary/30 bg-primary/5 p-3 text-left transition-all duration-200 hover:-translate-y-0.5 hover:border-primary hover:shadow-[0_14px_28px_rgba(17,85,90,0.08)]"
+        >
+          <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-[color:var(--color-foreground)] text-[color:var(--color-accent)] shadow-sm">
+            <Icon className="h-4 w-4" strokeWidth={2.2} />
           </span>
-          <span className="block text-[10px] uppercase tracking-[0.08em] text-[color:var(--color-muted-foreground)]">
-            {category}
+          <span className="min-w-0">
+            <span className="block truncate text-sm font-semibold text-[color:var(--color-foreground)] group-hover:text-[color:var(--color-accent)]">{label}</span>
+            <span className="block text-[10px] uppercase tracking-[0.08em] text-[color:var(--color-muted-foreground)]">{category}</span>
           </span>
-        </span>
-      </button>
-    ))}
+        </button>
+      ))}
+    </div>
   </div>
 );
 
@@ -499,6 +498,12 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
   } = useCitationUsage();
   const { saveCards } = useFlashcardDeck();
   const { persona, setPersona } = usePersona();
+
+  useEffect(() => {
+    if (prefill?.input !== undefined && prefill.input !== notes) {
+      setNotes(prefill.input);
+    }
+  }, [prefill?.input]);
 
   // `overridePersona` lets a persona button generate with the tier just clicked —
   // `setPersona` state won't have flushed by the time this reads the closure.
@@ -749,12 +754,9 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
       window.removeEventListener("studybuddy:enhancement-saved", handleEnhancementSaved);
   }, []);
 
-  // Persona buttons are the generation trigger — there is no separate submit.
-  const generateWithPersona = (p: Persona) => {
+  const selectPersona = (p: Persona) => {
+    if (loading) return;
     setPersona(p);
-    setDeckSaved(false);
-    setConfigDrawerOpen(false);
-    generate(undefined, p);
   };
 
   const startTopic = (label: string) => {
@@ -868,8 +870,9 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
                     <button
                       key={label}
                       type="button"
-                      onClick={() => setNotes(label)}
-                      className="group flex flex-col items-center gap-1.5 rounded-xl border border-[color:var(--color-border)] bg-[color:var(--color-card)] p-3 transition-all duration-200 hover:border-[color:var(--color-accent)] hover:shadow-sm"
+                      onClick={() => setNotes((current) => current === label ? "" : label)}
+                      aria-pressed={notes === label}
+                      className={`group flex flex-col items-center gap-1.5 rounded-xl border p-3 transition-all duration-200 hover:border-[color:var(--color-accent)] hover:shadow-sm ${notes === label ? "border-[color:var(--color-accent)] bg-[color:var(--color-accent)]/10" : "border-[color:var(--color-border)] bg-[color:var(--color-card)]"}`}
                     >
                       <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-[color:var(--color-foreground)] text-[color:var(--color-accent)]">
                         <Icon className="h-4 w-4" strokeWidth={2.2} />
@@ -1120,7 +1123,7 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
                   <button
                     key={id}
                     type="button"
-                    onClick={() => !loading && generateWithPersona(id)}
+                    onClick={() => selectPersona(id)}
                     disabled={loading}
                     aria-pressed={active}
                     className={`relative group w-full flex items-start gap-4 p-4 rounded-xl text-left transition-all duration-200 ${
@@ -1155,7 +1158,7 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
                           ? (color === "blue" ? "text-success" : color === "teal" ? "text-primary" : "text-info")
                           : "text-foreground"
                       }`}>
-                        {loading && active ? "Generating…" : label}
+                        {label}
                       </p>
                       <p className="text-xs text-muted-foreground leading-relaxed">
                         {sub}
@@ -1349,6 +1352,15 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
       <div className="w-full space-y-6">
       {!loading && !sheet && !legacyOutput && (
         <SheetsEmptyState onStartTopic={startTopic} onSelectHistory={loadHistoryItem} />
+      )}
+
+      {!loading && (sheet || legacyOutput) && (
+        <div className="border-b border-border pb-4">
+          <p className="font-mono text-[11px] font-medium uppercase tracking-widest text-muted-foreground">Generated study sheet</p>
+          <h2 className="mt-1 text-2xl font-semibold tracking-tight text-foreground">
+            {sheet?.topic?.trim() || notes.trim() || "Study sheet"}
+          </h2>
+        </div>
       )}
 
       {/* Grounding verdict sits above the sheet — it qualifies everything

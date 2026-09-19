@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
   LayoutDashboard,
@@ -10,20 +10,15 @@ import {
   Settings,
   LogOut,
   LogIn,
-  Sparkles,
   Menu,
   X,
   HeartPulse,
-  ArrowRight,
   ArrowUpRight,
-  Moon,
-  Sun,
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
-import GoProModal from "@/components/GoProModal";
 import "./AppNav.css";
 
 interface ProfileRow {
@@ -38,8 +33,7 @@ interface AppNavProps {
 }
 
 const navItems = [
-  { to: "/", label: "Home", icon: LayoutDashboard },
-  { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { to: "/dashboard", label: "Home", icon: LayoutDashboard },
   { to: "/roadmap", label: "Roadmap", icon: MapIcon },
   { to: "/sheets", label: "Sheets", icon: FileText },
   { to: "/flashcards", label: "Flashcards", icon: Layers },
@@ -52,27 +46,10 @@ const AppNav = ({ onNavigate, onOpenAuth, onOpenAccount }: AppNavProps) => {
   const { toast } = useToast();
   const location = useLocation();
   const navigate = useNavigate();
-  const [goProOpen, setGoProOpen] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [isDark, setIsDark] = useState(() => {
-    try {
-      return localStorage.getItem("studybuddy-theme") === "dark";
-    } catch {
-      return false;
-    }
-  });
-
-  useEffect(() => {
-    document.documentElement.classList.toggle("dark", isDark);
-    try {
-      localStorage.setItem("studybuddy-theme", isDark ? "dark" : "light");
-    } catch {
-      // Storage can be unavailable in private browsing; theme still works in-memory.
-    }
-  }, [isDark]);
 
   const userId = user?.id ?? null;
-  const profileQuery = useQuery({
+  useQuery({
     queryKey: ["profile", userId],
     enabled: !!userId && !isAnonymous,
     queryFn: async (): Promise<ProfileRow | null> => {
@@ -85,11 +62,6 @@ const AppNav = ({ onNavigate, onOpenAuth, onOpenAccount }: AppNavProps) => {
       return data;
     },
   });
-  const profile = profileQuery.data ?? null;
-  const isPro =
-    profile?.is_pro === true &&
-    (profile.pro_expires_at === null ||
-      new Date(profile.pro_expires_at) > new Date());
 
   const handleSignOut = async () => {
     const { error } = await signOut();
@@ -97,7 +69,7 @@ const AppNav = ({ onNavigate, onOpenAuth, onOpenAccount }: AppNavProps) => {
       toast({ title: "Sign out failed", description: error, variant: "destructive" });
     } else {
       toast({ title: "Signed out" });
-      navigate("/dashboard");
+      navigate("/");
     }
     setMobileOpen(false);
   };
@@ -117,7 +89,7 @@ const AppNav = ({ onNavigate, onOpenAuth, onOpenAccount }: AppNavProps) => {
       >
         <div className="header-inner">
           <Link
-            to="/dashboard"
+            to="/"
             onClick={handleNav}
             className="brand"
             aria-label="StudyBuddy AI home"
@@ -147,19 +119,6 @@ const AppNav = ({ onNavigate, onOpenAuth, onOpenAccount }: AppNavProps) => {
 
           {/* Desktop right actions */}
           <div className="header-actions">
-            <button 
-              className="theme-button" 
-              type="button" 
-              onClick={() => setIsDark((value) => !value)} 
-              aria-label={isDark ? "Switch to light theme" : "Switch to dark theme"}
-            >
-              {isDark ? <Sun size={17} /> : <Moon size={17} />}
-            </button>
-
-            {isPro && (
-              <span className="pro-badge">Pro</span>
-            )}
-
             {!isAnonymous && user && (
               <button
                 onClick={onOpenAccount}
@@ -190,8 +149,8 @@ const AppNav = ({ onNavigate, onOpenAuth, onOpenAccount }: AppNavProps) => {
               </button>
             )}
 
-            <button 
-              className="menu-button" 
+            <button
+              className="menu-button"
               type="button" 
               onClick={() => setMobileOpen((value) => !value)} 
               aria-expanded={mobileOpen}
@@ -222,16 +181,6 @@ const AppNav = ({ onNavigate, onOpenAuth, onOpenAccount }: AppNavProps) => {
           })}
 
           <div className="mobile-actions">
-            <button 
-              className="mobile-action-button" 
-              type="button" 
-              onClick={() => setIsDark((value) => !value)} 
-              aria-label={isDark ? "Switch to light theme" : "Switch to dark theme"}
-            >
-              {isDark ? <Sun size={14} /> : <Moon size={14} />}
-              {isDark ? "Light Mode" : "Dark Mode"}
-            </button>
-
             {!isAnonymous && user && (
               <button
                 onClick={() => {
@@ -269,7 +218,6 @@ const AppNav = ({ onNavigate, onOpenAuth, onOpenAccount }: AppNavProps) => {
         </nav>
       </header>
 
-      <GoProModal open={goProOpen} onOpenChange={setGoProOpen} />
     </>
   );
 };

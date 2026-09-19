@@ -51,7 +51,7 @@ const Sheets = () => {
   const state = location.state as { topic?: string } | null;
  
   const [activeTopic, setActiveTopic] = useState(state?.topic ?? "");
-  const prefill = activeTopic ? { input: activeTopic, output: "" } : undefined;
+  const prefill = { input: activeTopic, output: "" };
  
   return (
     <>
@@ -61,7 +61,7 @@ const Sheets = () => {
         keywords="medical study sheets, clinical notes, AI medical education, pathophysiology, medical students"
       />
       <DashboardLayout wide>
-        <div className="space-y-8 max-w-[86%] mx-auto">
+        <div className="space-y-8 mx-auto sm:max-w-[86%]">
           {/* Header */}
           <div>
             <p
@@ -95,12 +95,12 @@ const Sheets = () => {
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
               {HOW_IT_WORKS.map(({ label, title, description, icon: Icon }, index) => (
                 <div key={title} className="relative z-10">
-                  <div className="group flex items-center gap-4 rounded-[28px] border border-[color:var(--color-border)] bg-[color:var(--color-card)] p-4 shadow-[0_12px_30px_rgba(15,23,42,0.06)] transition-all duration-200 hover:-translate-y-1 hover:border-[color:var(--color-accent)]/70 hover:shadow-[0_18px_38px_rgba(19,128,134,0.12)] sm:flex-col sm:items-center sm:text-center sm:p-5">
-                    <div className="relative flex h-14 w-14 shrink-0 items-center justify-center rounded-full border-4 border-[color:var(--color-card)] bg-[color:var(--color-foreground)] text-[color:var(--color-accent)] shadow-[0_10px_18px_rgba(15,23,42,0.12)]">
+                  <div className="group flex items-center gap-3 rounded-2xl border border-[color:var(--color-border)] bg-[color:var(--color-card)] p-3 shadow-[0_8px_20px_rgba(15,23,42,0.05)] transition-all duration-200 hover:-translate-y-0.5 hover:border-[color:var(--color-accent)]/70 sm:flex-col sm:items-center sm:text-center sm:p-4">
+                    <div className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full border-2 border-[color:var(--color-card)] bg-[color:var(--color-foreground)] text-[color:var(--color-accent)] shadow-sm">
                       <span className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-[color:var(--color-accent)] text-[9px] font-bold text-[color:var(--color-background)] shadow-sm">
                         {index + 1}
                       </span>
-                      <Icon size={20} strokeWidth={2.2} />
+                      <Icon size={16} strokeWidth={2.2} />
                     </div>
 
                     <div className="min-w-0 flex-1 sm:flex-none">
@@ -111,10 +111,10 @@ const Sheets = () => {
                         <ArrowRight size={12} className="text-[color:var(--color-muted-foreground)] transition-transform duration-200 group-hover:translate-x-0.5" />
                       </div>
 
-                      <h3 className="[font-family:var(--app-font-serif)] text-lg font-medium leading-snug tracking-[-0.02em] text-[color:var(--color-foreground)]">
+                      <h3 className="[font-family:var(--app-font-serif)] text-base font-medium leading-snug text-[color:var(--color-foreground)]">
                         {title}
                       </h3>
-                      <p className="mt-2 text-xs leading-relaxed text-[color:var(--color-muted-foreground)]">
+                      <p className="mt-1 text-[11px] leading-relaxed text-[color:var(--color-muted-foreground)]">
                         {description}
                       </p>
                     </div>
@@ -168,7 +168,7 @@ const Sheets = () => {
             </span>
           </div>
 
-          <SheetGenerator key={activeTopic || "blank"} prefill={prefill} />
+          <SheetGenerator prefill={prefill} />
         </div>
       </DashboardLayout>
     </>

@@ -116,7 +116,7 @@ const Library = () => {
         />
       )}
 
-      <div className="space-y-8 max-w-[86%] mx-auto">
+      <div className="space-y-8 mx-auto sm:max-w-[86%]">
         {/* Header — same voice as Sheets: mono eyebrow, serif headline, one-line lede. */}
         <div>
           <p

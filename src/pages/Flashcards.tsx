@@ -810,7 +810,7 @@ const Flashcards = () => {
         keywords="medical flashcards, spaced repetition, memory retention, study cards, medical students"
       />
       <DashboardLayout wide>
-      <div className="space-y-6 max-w-[86%] mx-auto">
+      <div className="space-y-6 mx-auto sm:max-w-[86%]">
         <div className="mb-6">
           <p className="font-mono text-[11px] font-medium tracking-widest uppercase text-primary mb-2">
             Flashcards · Spaced repetition

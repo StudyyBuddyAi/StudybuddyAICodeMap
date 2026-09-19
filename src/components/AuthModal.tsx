@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   Dialog,
   DialogContent,
@@ -25,6 +26,7 @@ const AuthModal = ({ open, onOpenChange }: AuthModalProps) => {
   const { signIn, signUp, signInWithGoogle, resetPasswordForEmail, verifyOtp, resendSignUpOtp, isAnonymous } =
     useAuth();
   const { toast } = useToast();
+  const navigate = useNavigate();
 
   const [tab, setTab] = useState<"signin" | "signup">("signin");
 
@@ -38,6 +40,7 @@ const AuthModal = ({ open, onOpenChange }: AuthModalProps) => {
 
   const [signUpEmail, setSignUpEmail] = useState("");
   const [signUpPassword, setSignUpPassword] = useState("");
+  const [signUpConfirmPassword, setSignUpConfirmPassword] = useState("");
   const [signUpError, setSignUpError] = useState<string | null>(null);
   const [signUpLoading, setSignUpLoading] = useState(false);
 
@@ -70,6 +73,7 @@ const AuthModal = ({ open, onOpenChange }: AuthModalProps) => {
       setOtpError(null);
       setOtpLoading(false);
       setResendCooldown(0);
+      setSignUpConfirmPassword("");
       setGoogleLoading(false);
       setGoogleError(null);
     }
@@ -112,6 +116,7 @@ const AuthModal = ({ open, onOpenChange }: AuthModalProps) => {
     setSignInEmail("");
     setSignInPassword("");
     onOpenChange(false);
+    navigate("/", { replace: true });
   };
 
   const handleForgotPassword = async (e: React.FormEvent) => {
@@ -130,6 +135,10 @@ const AuthModal = ({ open, onOpenChange }: AuthModalProps) => {
   const handleSignUp = async (e: React.FormEvent) => {
     e.preventDefault();
     setSignUpError(null);
+    if (signUpPassword !== signUpConfirmPassword) {
+      setSignUpError("Passwords do not match");
+      return;
+    }
     setSignUpLoading(true);
     const { error, needsVerification, email } = await signUp(signUpEmail, signUpPassword);
     setSignUpLoading(false);
@@ -139,6 +148,7 @@ const AuthModal = ({ open, onOpenChange }: AuthModalProps) => {
     }
     if (needsVerification) {
       setPendingVerification(true);
+      setResendCooldown(60);
       setPendingEmail(email ?? signUpEmail);
       setOtpType(isAnonymous ? "email_change" : "signup");
       // The typed password lives here from the form step through the OTP step,
@@ -148,7 +158,9 @@ const AuthModal = ({ open, onOpenChange }: AuthModalProps) => {
       toast({ title: "Account created" });
       setSignUpEmail("");
       setSignUpPassword("");
+      setSignUpConfirmPassword("");
       onOpenChange(false);
+      navigate("/", { replace: true });
     }
   };
 
@@ -172,10 +184,13 @@ const AuthModal = ({ open, onOpenChange }: AuthModalProps) => {
     setOtpCode("");
     setSignUpEmail("");
     setSignUpPassword("");
+    setSignUpConfirmPassword("");
     onOpenChange(false);
+    navigate("/", { replace: true });
   };
 
   const handleResendOtp = async () => {
+    if (resendCooldown > 0) return;
     setOtpError(null);
     const { error } = await resendSignUpOtp(pendingEmail, otpType);
     if (error) {
@@ -191,7 +206,6 @@ const AuthModal = ({ open, onOpenChange }: AuthModalProps) => {
     setPendingEmail("");
     setOtpCode("");
     setOtpError(null);
-    setResendCooldown(0);
   };
 
   return (
@@ -431,6 +445,18 @@ const AuthModal = ({ open, onOpenChange }: AuthModalProps) => {
                       autoComplete="new-password"
                       value={signUpPassword}
                       onChange={(e) => setSignUpPassword(e.target.value)}
+                      required
+                      minLength={6}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="signup-confirm-password">Confirm Password</Label>
+                    <Input
+                      id="signup-confirm-password"
+                      type="password"
+                      autoComplete="new-password"
+                      value={signUpConfirmPassword}
+                      onChange={(e) => setSignUpConfirmPassword(e.target.value)}
                       required
                       minLength={6}
                     />

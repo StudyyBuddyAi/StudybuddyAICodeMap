@@ -155,8 +155,8 @@ const Roadmap = () => {
 
   return (
     <DashboardLayout wide>
-      <main className="dashboard-main">
-        <div className="dashboard-container mx-auto w-full max-w-[min(1200px,calc(100%-1rem))]">
+      <main className="dashboard-main px-4">
+        <div className="dashboard-container w-full">
           {/* Header Roadmap */}
           <section className="mb-5 sm:mb-6 md:mb-8 rounded-[var(--r-lg)] border border-border bg-card p-4 sm:p-5 lg:p-6 shadow-sm ring-1 ring-primary/5">
             <div className="flex flex-col gap-4 sm:gap-5 md:flex-row md:items-end md:justify-between lg:gap-5 xl:flex-row xl:items-end xl:justify-between">
@@ -333,15 +333,15 @@ const Roadmap = () => {
                       mobileSidebarOpen ? "translate-x-0" : "translate-x-full"
                     }`}
                   >
-                    <div className="flex items-center justify-between p-4 border-b border-border">
-                      <div className="flex items-center gap-2">
+                    <div className="flex items-center justify-between p-4 border-b border-border ">
+                      <div className="flex items-center gap-2 ">
                         <Layers className="h-4 w-4 text-[#0aafa9]" />
                         <p className="ds-label text-base sm:text-lg">Systems</p>
                       </div>
                       <button
                         type="button"
                         onClick={() => setMobileSidebarOpen(false)}
-                        className="p-2 rounded-[var(--r-sm)] hover:bg-secondary/50 transition-colors"
+                        className="p-2 rounded-[var(--r-sm)] hover:bg-secondary/50 transition-colors "
                       >
                         <X className="h-5 w-5 text-muted-foreground" />
                       </button>
@@ -402,7 +402,7 @@ const Roadmap = () => {
                     </div>
                   </div>
 
-                  <div className="grid gap-4 sm:gap-5 md:grid-cols-[220px_minmax(0,1fr)] lg:grid-cols-[250px_minmax(0,1fr)] xl:grid-cols-[300px_minmax(0,1fr)]">
+                  <div className="grid gap-4 sm:gap-5 grid-cols-1 md:grid-cols-[220px_minmax(0,1fr)] lg:grid-cols-[250px_minmax(0,1fr)] xl:grid-cols-[300px_minmax(0,1fr)]">
                     {/* Desktop sidebar */}
                     <nav aria-label="Body systems" className="hidden md:block md:sticky md:top-6 md:self-start">
                       <div className="mb-2 sm:mb-3 flex items-center gap-2">
