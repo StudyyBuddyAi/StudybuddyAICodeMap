@@ -63,6 +63,22 @@ serve(async (req) => {
       return json({ error: "invalid_diagram" }, 400);
     }
 
+    // Normalised so "Left ventricle" and "left  ventricle" share one entry.
+    const diagramKey = cleanDiagram.toLowerCase().replace(/\s+/g, " ");
+    const partKey = cleanPart.toLowerCase().replace(/\s+/g, " ");
+
+    const cached = await authClient
+      .from("anatomy_explanations")
+      .select("explanation")
+      .eq("diagram_key", diagramKey)
+      .eq("part_key", partKey)
+      .maybeSingle();
+
+    if (cached.data?.explanation) {
+      log("cache_hit", { elapsedMs: Date.now() - startedAt });
+      return json({ text: cached.data.explanation });
+    }
+
     const apiKey = Deno.env.get("OPENROUTER_API_KEY");
     if (!apiKey) throw new Error("OPENROUTER_API_KEY is not configured");
 
@@ -99,7 +115,23 @@ instead of guessing.`;
     const text: string = body?.choices?.[0]?.message?.content?.trim() ?? "";
     if (!text) return json({ error: "empty_completion" }, 502);
 
-    log("explained", { model: MODEL, elapsedMs: Date.now() - startedAt });
+    // Best effort: a failed cache write costs a repeat call, never the answer.
+    // upsert rather than insert so two readers racing on the same structure
+    // cannot make one of them fail.
+    const stored = await authClient.from("anatomy_explanations").upsert(
+      {
+        diagram_key: diagramKey,
+        part_key: partKey,
+        diagram: cleanDiagram,
+        part: cleanPart,
+        explanation: text,
+        model: MODEL,
+      },
+      { onConflict: "diagram_key,part_key" }
+    );
+    if (stored.error) log("cache_write_failed", { error: stored.error.message });
+
+    log("explained", { model: MODEL, cached: false, elapsedMs: Date.now() - startedAt });
     return json({ text });
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
