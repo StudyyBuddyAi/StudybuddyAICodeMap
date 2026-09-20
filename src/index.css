@@ -837,3 +837,58 @@
   --viz-3: #3987e5;
   --viz-4: #c98500;
 }
+
+/* ─── Sheet reader layout (src/components/sheet-reader/) ──────────────────────
+   The sheet used to run the full width of the dashboard container, which put
+   body text at roughly 180 characters a line — more than twice the 45–80 band
+   that reading research puts comprehension in, and about three times the ~60
+   that is comfortable for continuous prose. The column below is sized so the
+   sheet's body text lands near 75 characters: the wide end of the band, because
+   these are clinical notes being scanned as often as they are read.
+
+   Narrowing it leaves a gutter, and the gutter is not waste: the contents rail
+   lives in it, and the field behind the page uses the rest. */
+@layer components {
+  /* The field is a viewport-fixed canvas, and the dashboard shell paints an
+     opaque background over anything sitting behind it — so the sheet owns a
+     stacking context, the field takes the floor of it, and everything the
+     reader actually reads is lifted one layer clear. */
+  .sheet-reader {
+    isolation: isolate;
+  }
+
+  .sheet-reader-grid {
+    position: relative;
+    z-index: 1;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 24px;
+  }
+
+  @media (min-width: 1024px) {
+    .sheet-reader-grid {
+      grid-template-columns: 200px minmax(0, var(--reading-measure, 38rem));
+      justify-content: center;
+      align-items: start;
+      gap: 44px;
+    }
+  }
+
+  /* Body copy in the sheet. A touch larger and looser than the 14px/relaxed it
+     replaced — the column is narrower now, so the page holds the same amount of
+     text at a size that is easier to stay in for twenty minutes. */
+  .sheet-prose {
+    font-size: 15px;
+    line-height: 1.68;
+  }
+
+  /* On paper there is no rail and no gutter, so the column takes the page. */
+  @media print {
+    .sheet-reader-grid {
+      display: block;
+    }
+    .sheet-reader-column {
+      max-width: none;
+    }
+  }
+}

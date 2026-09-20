@@ -29,6 +29,13 @@ import SectionSkeleton from "@/components/SectionSkeleton";
 import CitationBadgeList from "@/components/CitationBadgeList";
 import DiagramSection from "@/components/sheet-visual/DiagramSection";
 import IllustrationSection from "@/components/sheet-visual/IllustrationSection";
+import StudyFieldBackground from "@/components/sheet-reader/StudyFieldBackground";
+import SheetRail, { SheetRailStrip, type RailSection } from "@/components/sheet-reader/SheetRail";
+import {
+  toneTokenFor,
+  useAmbientFieldPreference,
+  useReadingPosition,
+} from "@/components/sheet-reader/reading-model";
 import type { VisualPlanner } from "@/components/sheet-visual/visual-section-ui";
 import { planSheetVisual, type SheetVisualPlan } from "@/lib/plan-sheet-visual";
 import type { SheetImageRequester } from "@/lib/generate-sheet-image";
@@ -73,8 +80,8 @@ const ENH_MARK_STYLE: React.CSSProperties = {
 
 /** Section card chrome — shared by the legacy and JSON renderers. */
 const SECTION_CARD_STYLE: React.CSSProperties = {
-  border: "1px solid var(--border)",
-  borderLeft: "3px solid var(--accent)",
+  border: "1px solid hsl(var(--sb-border))",
+  borderLeft: "3px solid hsl(var(--sb-accent))",
   borderRadius: "var(--radius-md)",
   background: "var(--bg-elevated)",
   overflow: "hidden",
@@ -97,7 +104,7 @@ const SECTION_ICON_STYLE: React.CSSProperties = {
   width: 28,
   height: 28,
   borderRadius: "var(--radius-sm)",
-  border: "1px solid var(--border)",
+  border: "1px solid hsl(var(--sb-border))",
   background: "var(--bg)",
   flexShrink: 0,
 };
@@ -119,7 +126,7 @@ const MODE_BAR_STYLE: React.CSSProperties = {
   fontSize: 11,
   fontWeight: 500,
   color: "var(--fg-muted)",
-  border: "1px solid var(--border)",
+  border: "1px solid hsl(var(--sb-border))",
   borderRadius: "var(--radius-sm)",
   padding: "6px 12px",
   background: "var(--bg-elevated)",
@@ -137,7 +144,7 @@ const ModeInfoBar = ({
   );
   return (
     <div style={MODE_BAR_STYLE}>
-      <Settings2 style={{ width: 13, height: 13, color: "var(--accent)" }} />
+      <Settings2 style={{ width: 13, height: 13, color: "hsl(var(--sb-accent))" }} />
       <span>
         <span style={{ color: "var(--fg)" }}>{modeInfo.examMode}</span>
         {dot}
@@ -523,7 +530,7 @@ function renderArraySection(
           <li
             key={i}
             data-enh-anchor={sectionKey ? anchor : undefined}
-            className="text-sm text-muted-foreground leading-relaxed"
+            className="sheet-prose text-muted-foreground"
           >
             <span className="flex gap-2.5">
               <span
@@ -532,7 +539,7 @@ function renderArraySection(
                   fontFamily: "var(--font-mono)",
                   fontWeight: 500,
                   fontSize: 12,
-                  color: "var(--accent)",
+                  color: "hsl(var(--sb-accent))",
                   opacity: 0.7,
                   width: 20,
                   textAlign: "right",
@@ -612,13 +619,13 @@ function EvidenceBadge({ onClick }: { onClick: () => void }) {
         gap: 4,
         padding: "2px 8px",
         borderRadius: "var(--radius-pill)",
-        border: "1px solid var(--border)",
-        borderLeft: "2px solid var(--accent)",
+        border: "1px solid hsl(var(--sb-border))",
+        borderLeft: "2px solid hsl(var(--sb-accent))",
         background: "var(--accent-soft)",
         fontFamily: "var(--font-mono)",
         fontSize: 11,
         fontWeight: 500,
-        color: "var(--accent)",
+        color: "hsl(var(--sb-accent))",
         cursor: "pointer",
         marginLeft: 8,
         transition: "background var(--dur-micro) var(--ease-out)",
@@ -688,7 +695,7 @@ const EnhanceBubble = ({ top, left, onAction, innerRef }: EnhanceBubbleProps) =>
     <button
       type="button"
       onClick={() => onAction("enhance")}
-      style={{ ...BUBBLE_BUTTON_STYLE, color: "var(--accent)" }}
+      style={{ ...BUBBLE_BUTTON_STYLE, color: "hsl(var(--sb-accent))" }}
     >
       ✦ Enhance
     </button>
@@ -704,7 +711,7 @@ const EnhanceBubble = ({ top, left, onAction, innerRef }: EnhanceBubbleProps) =>
     <button
       type="button"
       onClick={() => onAction("clinical")}
-      style={{ ...BUBBLE_BUTTON_STYLE, color: "var(--accent)" }}
+      style={{ ...BUBBLE_BUTTON_STYLE, color: "hsl(var(--sb-accent))" }}
     >
       🔗 Clinical
     </button>
@@ -871,7 +878,7 @@ const InlineEnhancement = ({
       <span
         className="block"
         style={{
-          borderLeft: "3px solid var(--accent)",
+          borderLeft: "3px solid hsl(var(--sb-accent))",
           borderRadius: "0 var(--radius-sm) var(--radius-sm) 0",
           background: "var(--accent-soft)",
           padding: "10px 16px 12px",
@@ -893,7 +900,7 @@ const InlineEnhancement = ({
               fontWeight: 500,
               letterSpacing: "0.1em",
               textTransform: "uppercase",
-              color: "var(--accent)",
+              color: "hsl(var(--sb-accent))",
             }}
           >
             {kindLabel[enhancement.kind]}
@@ -966,7 +973,7 @@ const InlineEnhancement = ({
                 alignItems: "center",
                 gap: 4,
                 fontSize: 12,
-                color: "var(--accent)",
+                color: "hsl(var(--sb-accent))",
                 background: "none",
                 border: "none",
                 cursor: "pointer",
@@ -1043,6 +1050,16 @@ const OutputSection = ({
     sheet.overview = (sheet as { summary?: string }).summary as string;
   }
   const isJson = sheet !== null;
+
+  // Reader state. The rail and the field behind the page are driven off the
+  // same measurement, so the contents list and the gutter never disagree about
+  // where the reader is. Re-measured when the sheet's shape changes — a new
+  // section landing mid-stream — rather than on every streamed token.
+  const ambientField = useAmbientFieldPreference();
+  const { activeKey, progress } = useReadingPosition(
+    ref,
+    `${isStreaming ? 1 : 0}:${streamedKeys?.length ?? 0}:${sheet?.topic ?? ""}`
+  );
 
   // Keyword-click menu state — only used in JSON renderer. `top`/`left` are
   // relative to the document container so the menu scrolls with the content.
@@ -1274,7 +1291,7 @@ const OutputSection = ({
           <div
             className="animate-fade-in"
             style={{
-              border: "1px solid var(--border)",
+              border: "1px solid hsl(var(--sb-border))",
               borderRadius: "var(--radius-md)",
               background: "var(--bg-elevated)",
               padding: 24,
@@ -1318,7 +1335,7 @@ const OutputSection = ({
               <div style={SECTION_HEADER_STYLE}>
                 <div className="flex items-center gap-2.5 flex-wrap">
                   <div style={SECTION_ICON_STYLE}>
-                    <Icon style={{ width: 14, height: 14, color: "var(--accent)" }} />
+                    <Icon style={{ width: 14, height: 14, color: "hsl(var(--sb-accent))" }} />
                   </div>
                   <h3 style={SECTION_TITLE_STYLE}>{config.label}</h3>
                   {showEvidenceBadge && <EvidenceBadge onClick={scrollToReference} />}
@@ -1356,7 +1373,7 @@ const OutputSection = ({
             <div style={SECTION_HEADER_STYLE}>
               <div className="flex items-center gap-2.5">
                 <div style={SECTION_ICON_STYLE}>
-                  <FileText style={{ width: 14, height: 14, color: "var(--accent)" }} />
+                  <FileText style={{ width: 14, height: 14, color: "hsl(var(--sb-accent))" }} />
                 </div>
                 <h3 style={SECTION_TITLE_STYLE}>📚 Reference Note</h3>
               </div>
@@ -1441,232 +1458,255 @@ const OutputSection = ({
       ));
   };
 
+  // The rail mirrors the document order. Labels lose their emoji on the way in
+  // — the rail already carries the section's icon and its tone.
+  const railSections: RailSection[] = JSON_SECTION_ORDER.map((key) => ({
+    key,
+    label: JSON_SECTION_CONFIG[key].label.replace(/^\S+\s+/, ""),
+    icon: JSON_SECTION_CONFIG[key].icon,
+    state: isReady(key) ? "ready" : key === writingKey ? "writing" : "pending",
+  }));
+
   return (
     <div
       ref={ref}
-      className="print-document relative space-y-4"
+      className="print-document sheet-reader relative"
       onMouseUp={handleSelectionChange}
       onTouchEnd={handleSelectionChange}
     >
-      {/* Persistent highlight-to-enhance hint — sticky below the top nav */}
-      <div
-        className="sticky animate-fade-in"
-        style={{
-          top: "var(--nav-h, 64px)",
-          zIndex: 20,
-          display: "flex",
-          alignItems: "center",
-          gap: 6,
-          borderRadius: "var(--radius-sm)",
-          border: "1px solid var(--border)",
-          background: "color-mix(in srgb, var(--bg) 90%, transparent)",
-          backdropFilter: "blur(10px)",
-          WebkitBackdropFilter: "blur(10px)",
-          padding: "6px 12px",
-          marginBottom: 4,
-        }}
-      >
-        <Sparkles style={{ width: 12, height: 12, color: "var(--accent)", flexShrink: 0 }} />
-        <span
-          style={{
-            fontFamily: "var(--font-mono)",
-            fontSize: 11,
-            color: "var(--fg-muted)",
-            letterSpacing: "0.02em",
-          }}
-        >
-          Highlight any text to expand or get a clinical tie
-        </span>
-      </div>
-
-      {/* Mode header + Save */}
-      <div className="animate-fade-in flex items-center justify-between">
-        {modeInfo && <ModeInfoBar modeInfo={modeInfo} />}
-        <SaveButton
-          input={inputText || ""}
-          output={output}
-          modeInfo={modeInfo}
-          disabled={isStreaming}
+      {ambientField.enabled && (
+        <StudyFieldBackground
+          toneToken={toneTokenFor(activeKey)}
+          progress={progress}
+          reducedMotion={ambientField.reducedMotion}
         />
-      </div>
+      )}
 
-      {JSON_SECTION_ORDER.map((key, idx) => {
-        const config = JSON_SECTION_CONFIG[key];
-        const Icon = config.icon;
-        const isReference = key === "referenceNote";
-        const ready = isReady(key);
-        const writing = key === writingKey;
-        const showEvidenceBadge =
-          ready && citationState === "found" && config.evidenceBacked;
+      <SheetRailStrip sections={railSections} activeKey={activeKey} progress={progress} />
 
-        const copyText =
-          isVisualKey(key)
-            ? ""
-            : key === "flashcards"
-            ? (sheet.flashcards ?? [])
-                .map((c) => `Q: [${c.tag}] ${c.question}\nA: ${c.answer}`)
-                .join("\n\n")
-            : Array.isArray(sheet[key])
-            ? (sheet[key] as string[]).map((item, i) => `${i + 1}. ${item}`).join("\n")
-            : (sheet[key] as string) ?? "";
+      <div className="sheet-reader-grid">
+        <SheetRail
+          sections={railSections}
+          activeKey={activeKey}
+          progress={progress}
+          field={ambientField}
+        />
 
-        return (
-          <div
-            key={key}
-            ref={isReference ? referenceNoteRef : undefined}
-            data-section-key={key}
-            className="animate-fade-in scroll-mt-20"
+        <div className="sheet-reader-column space-y-4">
+          {/* Mode header + Save */}
+          <div className="animate-fade-in flex items-center justify-between">
+            {modeInfo && <ModeInfoBar modeInfo={modeInfo} />}
+            <SaveButton
+              input={inputText || ""}
+              output={output}
+              modeInfo={modeInfo}
+              disabled={isStreaming}
+            />
+          </div>
+
+          {/* Selection-to-enhance works on touch too, and the rail that carries
+              this hint on a wide screen isn't there to carry it on a phone. It
+              scrolls away rather than sticking — it is a first-run cue, not a
+              status bar. */}
+          <p
+            data-no-print
+            className="lg:hidden animate-fade-in"
             style={{
-              ...SECTION_CARD_STYLE,
-              // A section that hasn't landed keeps a neutral edge, so the
-              // accent lighting up is the signal that its content arrived.
-              borderLeft: `3px solid ${
-                ready || writing ? "var(--accent)" : "var(--border)"
-              }`,
-              // Mid-stream the cards are already mounted and fill in one by
-              // one, so the stagger is real — replaying it would just delay
-              // each card into invisibility for its share of the offset.
-              animationDelay: isStreaming ? "0ms" : `${idx * 200}ms`,
-              animationFillMode: "backwards",
+              margin: 0,
+              display: "flex",
+              alignItems: "flex-start",
+              gap: 6,
+              fontFamily: "var(--font-sans)",
+              fontSize: 11.5,
+              lineHeight: 1.5,
+              color: "var(--fg-muted)",
             }}
           >
-            <div style={SECTION_HEADER_STYLE}>
-              <div className="flex items-center gap-2.5 flex-wrap">
-                <div style={SECTION_ICON_STYLE}>
-                  <Icon
-                    style={{
-                      width: 14,
-                      height: 14,
-                      color: ready || writing ? "var(--accent)" : "var(--fg-subtle)",
-                    }}
-                  />
-                </div>
-                <h3
-                  style={{
-                    ...SECTION_TITLE_STYLE,
-                    color: ready || writing ? "var(--fg)" : "var(--fg-muted)",
-                  }}
-                >
-                  {config.label}
-                  {key === "overview" && sheet.topicEmoji && (
-                    <span className="ml-2 text-base">{sheet.topicEmoji}</span>
-                  )}
-                </h3>
-                {showEvidenceBadge && <EvidenceBadge onClick={scrollToReference} />}
-                {ready && key === "overview" && modelUsed && (
-                  <ModelBadge model={modelUsed} />
-                )}
-              </div>
-              <div className="flex items-center gap-1">
-                {ready ? (
-                  <>
-                    <Check
-                      aria-label="Section loaded"
-                      className="h-3.5 w-3.5 text-primary/50 animate-fade-in"
-                      style={{
-                        animationDelay: isStreaming ? "0ms" : `${idx * 200 + 350}ms`,
-                        animationFillMode: "backwards",
-                      }}
-                    />
-                    {!isVisualKey(key) && <CopyButton text={copyText} />}
-                  </>
-                ) : (
-                  // Marks where the next content lands. Only the dot pulses —
-                  // animating the whole card would be a distraction to read past.
-                  <span
-                    aria-label={writing ? "Writing section" : "Waiting"}
-                    className={writing ? "animate-pulse" : undefined}
-                    style={{
-                      width: 6,
-                      height: 6,
-                      borderRadius: "50%",
-                      background: writing ? "var(--accent)" : "var(--border-strong)",
-                      margin: "0 9px",
-                    }}
-                  />
-                )}
-              </div>
-            </div>
+            <Sparkles
+              style={{ width: 12, height: 12, flexShrink: 0, marginTop: 2, color: "hsl(var(--sb-accent))" }}
+            />
+            <span>Highlight any text to expand it or pull a clinical tie.</span>
+          </p>
 
-            <div style={SECTION_BODY_STYLE} data-enh-section={key}>
-              {!ready ? (
-                <SectionSkeleton variant="sheet-body" />
-              ) : key === "diagram" ? (
-                <DiagramSection
-                  sheet={sheet}
-                  topic={plannedTopic}
-                  disabled={isStreaming}
-                  ensurePlan={ensureVisualPlan}
-                />
-              ) : key === "illustration" ? (
-                <IllustrationSection
-                  sheet={sheet}
-                  topic={plannedTopic}
-                  isPro={isPro}
-                  disabled={isStreaming}
-                  ensurePlan={ensureVisualPlan}
-                  onImageResolved={handleVisualImageResolved}
-                  requestImage={requestVisualImage}
-                />
-              ) : key === "flashcards" ? (
-                <FlashcardsSection cards={sheet.flashcards ?? []} />
-              ) : key === "overview" || key === "clinicalApproach" ? (
-                <div className="text-sm text-muted-foreground leading-relaxed">
-                  {renderJsonText(
-                    (sheet[key] as string) ?? "",
-                    key,
-                    handleKeywordClick,
-                    renderInline,
-                    collapsedByAnchor,
-                    reopenEnhancement
-                  )}
-                </div>
-              ) : key === "referenceNote" ? (
-                <>
-                  <div className="text-sm text-muted-foreground leading-relaxed">
-                    {sheet.referenceNote}
-                  </div>
+          {JSON_SECTION_ORDER.map((key, idx) => {
+            const config = JSON_SECTION_CONFIG[key];
+            const Icon = config.icon;
+            const isReference = key === "referenceNote";
+            const ready = isReady(key);
+            const writing = key === writingKey;
+            const showEvidenceBadge =
+              ready && citationState === "found" && config.evidenceBacked;
 
-                  {citationState && citationState !== "idle" && citationState !== "hidden" && (
-                    <div className="mt-3">
-                      <CitationBadgeList
-                        state={citationState}
-                        citations={citations}
-                        onLockedClick={onCitationLockedClick}
-                        isLoggedIn={citationIsLoggedIn}
+            const copyText =
+              isVisualKey(key)
+                ? ""
+                : key === "flashcards"
+                ? (sheet.flashcards ?? [])
+                    .map((c) => `Q: [${c.tag}] ${c.question}\nA: ${c.answer}`)
+                    .join("\n\n")
+                : Array.isArray(sheet[key])
+                ? (sheet[key] as string[]).map((item, i) => `${i + 1}. ${item}`).join("\n")
+                : (sheet[key] as string) ?? "";
+
+            return (
+              <div
+                key={key}
+                ref={isReference ? referenceNoteRef : undefined}
+                data-section-key={key}
+                className="animate-fade-in scroll-mt-20"
+                style={{
+                  ...SECTION_CARD_STYLE,
+                  // A section that hasn't landed keeps a neutral edge, so the
+                  // accent lighting up is the signal that its content arrived.
+                  borderLeft: `3px solid ${
+                    ready || writing ? "hsl(var(--sb-accent))" : "hsl(var(--sb-border))"
+                  }`,
+                  // Mid-stream the cards are already mounted and fill in one by
+                  // one, so the stagger is real — replaying it would just delay
+                  // each card into invisibility for its share of the offset.
+                  animationDelay: isStreaming ? "0ms" : `${idx * 200}ms`,
+                  animationFillMode: "backwards",
+                }}
+              >
+                <div style={SECTION_HEADER_STYLE}>
+                  <div className="flex items-center gap-2.5 flex-wrap">
+                    <div style={SECTION_ICON_STYLE}>
+                      <Icon
+                        style={{
+                          width: 14,
+                          height: 14,
+                          color: ready || writing ? "hsl(var(--sb-accent))" : "var(--fg-subtle)",
+                        }}
                       />
                     </div>
+                    <h3
+                      style={{
+                        ...SECTION_TITLE_STYLE,
+                        color: ready || writing ? "var(--fg)" : "var(--fg-muted)",
+                      }}
+                    >
+                      {config.label}
+                      {key === "overview" && sheet.topicEmoji && (
+                        <span className="ml-2 text-base">{sheet.topicEmoji}</span>
+                      )}
+                    </h3>
+                    {showEvidenceBadge && <EvidenceBadge onClick={scrollToReference} />}
+                    {ready && key === "overview" && modelUsed && (
+                      <ModelBadge model={modelUsed} />
+                    )}
+                  </div>
+                  <div className="flex items-center gap-1">
+                    {ready ? (
+                      <>
+                        <Check
+                          aria-label="Section loaded"
+                          className="h-3.5 w-3.5 text-primary/50 animate-fade-in"
+                          style={{
+                            animationDelay: isStreaming ? "0ms" : `${idx * 200 + 350}ms`,
+                            animationFillMode: "backwards",
+                          }}
+                        />
+                        {!isVisualKey(key) && <CopyButton text={copyText} />}
+                      </>
+                    ) : (
+                      // Marks where the next content lands. Only the dot pulses —
+                      // animating the whole card would be a distraction to read past.
+                      <span
+                        aria-label={writing ? "Writing section" : "Waiting"}
+                        className={writing ? "animate-pulse" : undefined}
+                        style={{
+                          width: 6,
+                          height: 6,
+                          borderRadius: "50%",
+                          background: writing ? "hsl(var(--sb-accent))" : "var(--border-strong)",
+                          margin: "0 9px",
+                        }}
+                      />
+                    )}
+                  </div>
+                </div>
+
+                <div style={SECTION_BODY_STYLE} data-enh-section={key}>
+                  {!ready ? (
+                    <SectionSkeleton variant="sheet-body" />
+                  ) : key === "diagram" ? (
+                    <DiagramSection
+                      sheet={sheet}
+                      topic={plannedTopic}
+                      disabled={isStreaming}
+                      ensurePlan={ensureVisualPlan}
+                    />
+                  ) : key === "illustration" ? (
+                    <IllustrationSection
+                      sheet={sheet}
+                      topic={plannedTopic}
+                      isPro={isPro}
+                      disabled={isStreaming}
+                      ensurePlan={ensureVisualPlan}
+                      onImageResolved={handleVisualImageResolved}
+                      requestImage={requestVisualImage}
+                    />
+                  ) : key === "flashcards" ? (
+                    <FlashcardsSection cards={sheet.flashcards ?? []} />
+                  ) : key === "overview" || key === "clinicalApproach" ? (
+                    <div className="sheet-prose text-muted-foreground">
+                      {renderJsonText(
+                        (sheet[key] as string) ?? "",
+                        key,
+                        handleKeywordClick,
+                        renderInline,
+                        collapsedByAnchor,
+                        reopenEnhancement
+                      )}
+                    </div>
+                  ) : key === "referenceNote" ? (
+                    <>
+                      <div className="sheet-prose text-muted-foreground">
+                        {sheet.referenceNote}
+                      </div>
+
+                      {citationState && citationState !== "idle" && citationState !== "hidden" && (
+                        <div className="mt-3">
+                          <CitationBadgeList
+                            state={citationState}
+                            citations={citations}
+                            onLockedClick={onCitationLockedClick}
+                            isLoggedIn={citationIsLoggedIn}
+                          />
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    renderArraySection(
+                      sheet[key] as string[],
+                      key,
+                      renderInline,
+                      collapsedByAnchor,
+                      reopenEnhancement
+                    )
                   )}
-                </>
-              ) : (
-                renderArraySection(
-                  sheet[key] as string[],
-                  key,
-                  renderInline,
-                  collapsedByAnchor,
-                  reopenEnhancement
-                )
-              )}
-              {ready && renderInline(`${key}:end`)}
-            </div>
-          </div>
-        );
-      })}
+                  {ready && renderInline(`${key}:end`)}
+                </div>
+              </div>
+            );
+          })}
 
-      {/* Fallback: selections that couldn't be anchored to a specific line */}
-      {enhancementsByAnchor["end"]?.length ? (
-        <div className="space-y-1">{renderInline("end")}</div>
-      ) : null}
+          {/* Fallback: selections that couldn't be anchored to a specific line */}
+          {enhancementsByAnchor["end"]?.length ? (
+            <div className="space-y-1">{renderInline("end")}</div>
+          ) : null}
 
-      {/* The nudge says the sheet is ready, so it waits until it actually is. */}
-      {renderNudgeAndDisclaimer(
-        showNudge && !isStreaming,
-        setShowNudge,
-        inputText,
-        disclaimerCollapsed,
-        toggleDisclaimer,
-        navigate
-      )}
+          {/* The nudge says the sheet is ready, so it waits until it actually is. */}
+          {renderNudgeAndDisclaimer(
+            showNudge && !isStreaming,
+            setShowNudge,
+            inputText,
+            disclaimerCollapsed,
+            toggleDisclaimer,
+            navigate
+          )}
+        </div>
+      </div>
 
       {/* Anchored action menu — selection (below the highlighted text) */}
       {selection && (
@@ -1708,8 +1748,8 @@ function renderNudgeAndDisclaimer(
           <div
             style={{
               borderRadius: "var(--radius-lg)",
-              border: "1px solid var(--border)",
-              borderLeft: "3px solid var(--accent)",
+              border: "1px solid hsl(var(--sb-border))",
+              borderLeft: "3px solid hsl(var(--sb-accent))",
               background: "var(--bg-elevated)",
               padding: "20px 24px",
               textAlign: "center",
@@ -1783,7 +1823,7 @@ function renderNudgeAndDisclaimer(
                   height: 36,
                   padding: "0 16px",
                   borderRadius: "var(--radius-md)",
-                  border: "1px solid var(--border)",
+                  border: "1px solid hsl(var(--sb-border))",
                   background: "transparent",
                   color: "var(--fg-muted)",
                   fontFamily: "var(--font-sans)",
