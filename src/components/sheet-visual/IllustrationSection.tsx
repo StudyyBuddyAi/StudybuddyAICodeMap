@@ -70,7 +70,7 @@ const IllustrationSection = ({
     return (
       <figure style={{ margin: 0 }} data-sheet-visual="image">
         <figcaption style={CAPTION_STYLE}>
-          <ImageIcon style={{ width: 14, height: 14, color: "var(--accent)", flexShrink: 0 }} />
+          <ImageIcon style={{ width: 14, height: 14, color: "hsl(var(--sb-accent))", flexShrink: 0 }} />
           {illustration.title}
         </figcaption>
         <ImageVisual

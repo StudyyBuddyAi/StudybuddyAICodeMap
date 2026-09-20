@@ -34,7 +34,7 @@ export const NOTE_STYLE: React.CSSProperties = {
 export function PlanningNote({ children }: { children: ReactNode }) {
   return (
     <div role="status" aria-live="polite" className="flex items-center gap-2" style={NOTE_STYLE}>
-      <Loader2 className="h-4 w-4 animate-spin" style={{ color: "var(--accent)" }} />
+      <Loader2 className="h-4 w-4 animate-spin" style={{ color: "hsl(var(--sb-accent))" }} />
       {children}
     </div>
   );

@@ -20,7 +20,7 @@ const AXIS_TICK = { fill: "var(--fg-muted)", fontSize: 11, fontFamily: "var(--fo
 
 const TOOLTIP_STYLE: React.CSSProperties = {
   background: "var(--bg-elevated)",
-  border: "1px solid var(--border)",
+  border: "1px solid hsl(var(--sb-border))",
   borderRadius: "var(--radius-sm)",
   fontFamily: "var(--font-sans)",
   fontSize: 12,
@@ -76,7 +76,7 @@ const ChartVisual = ({ spec, title }: { spec: VisualChartSpec; title: string }) 
 
   const axes = (
     <>
-      <CartesianGrid vertical={false} stroke="var(--border)" />
+      <CartesianGrid vertical={false} stroke="hsl(var(--sb-border))" />
       <XAxis
         dataKey="x"
         tick={AXIS_TICK}
@@ -110,7 +110,7 @@ const ChartVisual = ({ spec, title }: { spec: VisualChartSpec; title: string }) 
         contentStyle={TOOLTIP_STYLE}
         labelStyle={{ color: "var(--fg)", fontWeight: 600 }}
         itemStyle={{ color: "var(--fg)" }}
-        cursor={spec.chartType === "bar" ? { fill: "var(--border)", opacity: 0.4 } : { stroke: "var(--border-strong)" }}
+        cursor={spec.chartType === "bar" ? { fill: "hsl(var(--sb-border))", opacity: 0.4 } : { stroke: "var(--border-strong)" }}
         formatter={(value: number) => formatValue(value)}
       />
       {multi && (

@@ -21,7 +21,7 @@ const KIND_META = {
 
 const FIGURE_STYLE: React.CSSProperties = {
   marginTop: 16,
-  border: "1px solid var(--border)",
+  border: "1px solid hsl(var(--sb-border))",
   borderRadius: "var(--radius-md)",
   background: "var(--bg-elevated)",
   padding: "12px 16px 10px",
@@ -48,7 +48,7 @@ const SheetVisual = ({ visual, bare }: SheetVisualProps) => {
       data-sheet-visual={visual.kind}
     >
       <figcaption className="mb-3 flex items-center gap-2">
-        <Icon style={{ width: 14, height: 14, color: "var(--accent)", flexShrink: 0 }} />
+        <Icon style={{ width: 14, height: 14, color: "hsl(var(--sb-accent))", flexShrink: 0 }} />
         <span style={{ fontFamily: "var(--font-sans)", fontSize: 13, fontWeight: 600, color: "var(--fg)" }}>
           {visual.title || meta.label}
         </span>

@@ -138,7 +138,7 @@ const ImageVisual = ({
         // Roughly the drawn image's footprint, so the page doesn't jump much when it lands.
         style={{ ...PANEL_STYLE, borderStyle: "solid", width: "100%", height: 340 }}
       >
-        <Loader2 className="h-5 w-5 animate-spin" style={{ color: "var(--accent)" }} />
+        <Loader2 className="h-5 w-5 animate-spin" style={{ color: "hsl(var(--sb-accent))" }} />
         <p style={{ fontFamily: "var(--font-sans)", fontSize: 13, color: "var(--fg-muted)" }}>
           Drawing {subject}…
         </p>
