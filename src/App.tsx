@@ -25,6 +25,11 @@ const Flashcards = lazy(() => import("./pages/Flashcards.tsx"));
 const QBank = lazy(() => import("./pages/QBank.tsx"));
 const QBankSession = lazy(() => import("./pages/QBankSession.tsx"));
 const QBankSummary = lazy(() => import("./pages/QBankSummary.tsx"));
+// Local-only fixture preview for sheet visuals. The DEV guard lets the bundler
+// drop the page entirely from production builds.
+const DevSheetVisuals = import.meta.env.DEV
+  ? lazy(() => import("./pages/DevSheetVisuals.tsx"))
+  : null;
 
 const queryClient = new QueryClient();
 
@@ -76,6 +81,7 @@ const AppRoutes = () => {
           <Route path="/library" element={<Library />} />
           <Route path="/reset-password" element={<ResetPassword />} />
           <Route path="/auth/callback" element={<AuthCallback />} />
+          {DevSheetVisuals && <Route path="/dev/sheet-visuals" element={<DevSheetVisuals />} />}
           {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
           <Route path="*" element={<NotFound />} />
         </Routes>

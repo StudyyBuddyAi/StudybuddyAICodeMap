@@ -23,3 +23,9 @@ Object.defineProperty(window, "matchMedia", {
     dispatchEvent: () => {},
   }),
 });
+
+// jsdom has no 2D canvas, and its `getContext` stub logs a "Not implemented"
+// stack for every call. Components that draw (the sheet reader's ambient field)
+// already treat a missing context as "don't draw", so returning null directly
+// keeps that path and keeps the noise out of the test output.
+HTMLCanvasElement.prototype.getContext = (() => null) as typeof HTMLCanvasElement.prototype.getContext;
