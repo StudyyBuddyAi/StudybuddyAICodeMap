@@ -1485,13 +1485,6 @@ const OutputSection = ({
       <SheetRailStrip sections={railSections} activeKey={activeKey} progress={progress} />
 
       <div className="sheet-reader-grid">
-        <SheetRail
-          sections={railSections}
-          activeKey={activeKey}
-          progress={progress}
-          field={ambientField}
-        />
-
         <div className="sheet-reader-column space-y-4">
           {/* Mode header + Save */}
           <div className="animate-fade-in flex items-center justify-between">
@@ -1706,6 +1699,13 @@ const OutputSection = ({
             navigate
           )}
         </div>
+
+        <SheetRail
+          sections={railSections}
+          activeKey={activeKey}
+          progress={progress}
+          field={ambientField}
+        />
       </div>
 
       {/* Anchored action menu — selection (below the highlighted text) */}

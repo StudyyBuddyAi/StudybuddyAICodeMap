@@ -19,8 +19,6 @@ import {
   Loader2,
   PanelLeftClose,
   PanelLeftOpen,
-  PanelRightClose,
-  PanelRightOpen,
   Play,
   Search,
   Settings2,
@@ -130,116 +128,6 @@ const PillGroup = ({ label, options, value, onChange }: PillGroupProps) => (
     </div>
   </div>
 );
-
-// ── Right-rail section navigator (lg+ only) ──────────────────────────────────
-
-const SECTION_NAV_ITEMS: { key: string; label: string }[] = [
-  { key: "overview", label: "Overview" },
-  { key: "memoryHooks", label: "Memory Hooks" },
-  { key: "clinicalApproach", label: "Clinical Approach" },
-  { key: "keyPoints", label: "Key Points" },
-  { key: "examTraps", label: "Exam Traps" },
-  { key: "flashcards", label: "Flashcards" },
-  { key: "referenceNote", label: "Reference Note" },
-];
-
-/** A section is worth listing only if it actually has content in the sheet. */
-function sectionHasContent(sheet: GeneratedSheet, key: string): boolean {
-  const v = (sheet as unknown as Record<string, unknown>)[key];
-  if (Array.isArray(v)) return v.length > 0;
-  if (typeof v === "string") return v.trim().length > 0;
-  return false;
-}
-
-/**
- * Sticky right-rail navigator. Lists the sheet's non-empty sections, smooth-
- * scrolls to a section on click, and highlights the section the reader is on
- * via an IntersectionObserver watching each `[data-section-key]` card.
- *
- * While streaming (`readyKeys` given) it lists every section up front, greying
- * the ones still to come — the rail has to hold its width from the first frame
- * or it squeezes the document out from under the reader when it appears.
- */
-const SheetSectionNav = ({
-  sheet,
-  readyKeys,
-}: {
-  sheet: GeneratedSheet;
-  readyKeys?: string[];
-}) => {
-  const streaming = readyKeys !== undefined;
-  const items = streaming
-    ? SECTION_NAV_ITEMS
-    : SECTION_NAV_ITEMS.filter((it) => sectionHasContent(sheet, it.key));
-  const [activeKey, setActiveKey] = useState<string>(items[0]?.key ?? "");
-
-  useEffect(() => {
-    const els = SECTION_NAV_ITEMS.map((it) =>
-      document.querySelector<HTMLElement>(`[data-section-key="${it.key}"]`)
-    ).filter((el): el is HTMLElement => !!el);
-    if (!els.length) return;
-
-    // A thin band near the top of the viewport acts as the "you are here" line;
-    // whichever section card crosses it (topmost, if several) becomes active.
-    const observer = new IntersectionObserver(
-      (entries) => {
-        const visible = entries.filter((e) => e.isIntersecting);
-        if (!visible.length) return;
-        const topmost = visible.reduce((a, b) =>
-          a.boundingClientRect.top < b.boundingClientRect.top ? a : b
-        );
-        const key = topmost.target.getAttribute("data-section-key");
-        if (key) setActiveKey(key);
-      },
-      { rootMargin: "-12% 0px -78% 0px", threshold: 0 }
-    );
-    els.forEach((el) => observer.observe(el));
-    return () => observer.disconnect();
-  }, [sheet]);
-
-  const scrollToSection = (key: string) => {
-    document
-      .querySelector(`[data-section-key="${key}"]`)
-      ?.scrollIntoView({ behavior: "smooth", block: "start" });
-  };
-
-  if (!items.length) return null;
-
-  return (
-    <div className="pt-1">
-      <p className="font-mono text-[11px] font-medium tracking-widest uppercase text-muted-foreground mb-3 pl-3">
-        On this sheet
-      </p>
-      <nav className="flex flex-col">
-        {items.map((it) => {
-          const pending = streaming && !readyKeys!.includes(it.key);
-          const active = !pending && activeKey === it.key;
-          return (
-            <button
-              key={it.key}
-              type="button"
-              disabled={pending}
-              onClick={() => scrollToSection(it.key)}
-              aria-current={active ? "true" : undefined}
-              className={`border-none border-l-2 bg-transparent py-1.5 pl-3 text-left text-sm transition-all duration-200 ${
-                active
-                  ? "border-l-primary text-primary font-medium"
-                  : pending
-                  ? // Not streamed in yet: dimmer than a live entry, and inert.
-                    "border-l-border text-muted-foreground/50 cursor-default"
-                  : "border-l-border text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              {it.label}
-            </button>
-          );
-        })}
-      </nav>
-      {/* TODO(Phase 1+): "Saved highlights" subsection — list collapsed
-          enhancements with their kind icon, click to jump to the gold mark. */}
-    </div>
-  );
-};
 
 // ── Empty state ──────────────────────────────────────────────────────────────
 
@@ -417,9 +305,6 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
   // The response was damaged and only part of it could be salvaged — the reader
   // is told rather than being handed a silently short sheet.
   const [sheetIncomplete, setSheetIncomplete] = useState(false);
-  // Identifies the sheet on screen, so the section navigator resets its active
-  // item per sheet rather than when `topic` happens to arrive mid-stream.
-  const [generationId, setGenerationId] = useState(0);
   // The sheet's visual is planned on demand from the Visual Aid section, by a
   // call that is the same for every tier (sheet-visual). The run counter stops a
   // visual from attaching itself to a newer sheet.
@@ -432,10 +317,9 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
   const [goProOpen, setGoProOpen] = useState(false);
   // Tablet (768–1023px) slide-out configurator drawer
   const [configDrawerOpen, setConfigDrawerOpen] = useState(false);
-  // Desktop (lg+) side panes. Both start open; the reader collapses them once
+  // Desktop (lg+) configurator pane. Starts open; the reader collapses it once
   // a sheet is on screen and the document takes the reclaimed width.
   const [configOpen, setConfigOpen] = useState(true);
-  const [navOpen, setNavOpen] = useState(true);
   // Step 2 is a disclosure like "Adjust" beneath it: closed by default, since
   // the defaults suit most sheets and the topic box is what a first visit needs.
   const [customizeOpen, setCustomizeOpen] = useState(false);
@@ -529,7 +413,6 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
     // keep describing the settings it was actually built with, even if the
     // toggle is flipped afterwards.
     const groundingRequested = useGrounding;
-    setGenerationId((id) => id + 1);
     visualRunRef.current += 1;
     setCitationState("idle");
     setCitations([]);
@@ -849,7 +732,6 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
     setConfigDrawerOpen(false);
     setDeckSaved(false);
     setSheetIncomplete(false);
-    setGenerationId((id) => id + 1);
     // A saved sheet keeps whatever visual it was saved with; it is not re-planned.
     visualRunRef.current += 1;
     setModelUsed(undefined);
@@ -1547,57 +1429,6 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
       )}
       </div>
       </div>{/* end middle pane */}
-
-      {/* ── Right pane: section navigator. Only at 2xl+ (≥1536px), where the
-          content area is wide enough that a third column doesn't squeeze the
-          document — below that we stay 2-column (config + fluid document). ── */}
-      {/* Present for the whole generation. Appearing at the end would take 240px
-          back from the document just as the reader settles into it. */}
-      {(loading || sheet) && (
-        <>
-          {/* Toggle rail sits between the document and the navigator, so the
-              navigator is the outermost column and slides off the right edge. */}
-          <div className="hidden 2xl:flex 2xl:w-9 2xl:shrink-0 2xl:flex-col 2xl:items-center 2xl:self-stretch 2xl:border-l 2xl:border-border">
-            <button
-              type="button"
-              onClick={() => setNavOpen((v) => !v)}
-              aria-expanded={navOpen}
-              aria-controls="sheet-section-nav"
-              aria-label={navOpen ? "Hide section list" : "Show section list"}
-              title={navOpen ? "Hide section list" : "Show section list"}
-              className="sticky top-6 mt-1 flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
-            >
-              {navOpen ? (
-                <PanelRightClose className="h-4 w-4" />
-              ) : (
-                <PanelRightOpen className="h-4 w-4" />
-              )}
-            </button>
-          </div>
-
-          {/* Width goes to zero and the box nudges rightward as it fades, so
-              it reads as leaving through the right edge. The inner wrapper
-              keeps a fixed width so the list doesn't reflow mid-animation. */}
-          <div
-            id="sheet-section-nav"
-            className={`hidden 2xl:block 2xl:shrink-0 2xl:sticky 2xl:top-6 2xl:self-start 2xl:overflow-hidden motion-safe:2xl:transition-[width,opacity,transform] motion-safe:2xl:duration-300 motion-safe:2xl:ease-out ${
-              navOpen
-                ? "2xl:w-[240px] 2xl:translate-x-0 2xl:opacity-100"
-                : "2xl:invisible 2xl:w-0 2xl:translate-x-6 2xl:opacity-0"
-            }`}
-          >
-            <div className="w-[240px] pl-6">
-              {/* A stable object, not a fresh literal — the observer effect keys
-                  off `sheet`, so a new identity each render would rebind it. */}
-              <SheetSectionNav
-                key={generationId}
-                sheet={sheet ?? EMPTY_SHEET}
-                readyKeys={loading ? streamedKeys : undefined}
-              />
-            </div>
-          </div>
-        </>
-      )}
     </div>
 
     {/* ── Tablet-only (768–1023px): floating configure button ── */}

@@ -867,7 +867,7 @@
 
   @media (min-width: 1024px) {
     .sheet-reader-grid {
-      grid-template-columns: 200px minmax(0, var(--reading-measure, 38rem));
+      grid-template-columns: minmax(0, var(--reading-measure, 38rem)) 200px;
       justify-content: center;
       align-items: start;
       gap: 44px;
