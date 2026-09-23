@@ -20,7 +20,7 @@ import { createClient } from "@supabase/supabase-js";
 import { loadDotEnv } from "./session.ts";
 import { parseSheetOutput } from "../../src/lib/parse-partial-sheet.ts";
 import { parseFlashcardsFromOutput } from "../../src/lib/parse-flashcards.ts";
-import { ARCHETYPES, ARCHETYPE_IDS, SECTIONS, listItems, type LengthSetting } from "../../supabase/functions/_shared/sheet-sections.ts";
+import { ARCHETYPES, ARCHETYPE_IDS, SECTIONS, listItems, proseBudget, type LengthSetting } from "../../supabase/functions/_shared/sheet-sections.ts";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 loadDotEnv(ROOT);
@@ -56,9 +56,18 @@ function inferArchetype(planKeys: string[]): string {
   return hit ?? "(unrecognised)";
 }
 
-/** The labelled sub-headings a prose section's brief specified. */
-const expectedLabels = (key: string): string[] =>
-  [...(SECTIONS[key]?.brief ?? "").matchAll(/^([A-Z][A-Za-z ,/&-]{0,30}?):[ \t]+\S/gm)].map((m) => m[1]);
+/**
+ * The labelled sub-headings a prose section's brief specified, minus any its
+ * length budget tells it to leave out — a Concise clinicalApproach is told to
+ * omit Workup, Second-line, Definitive and Avoid.
+ */
+const expectedLabels = (key: string, len: LengthSetting): string[] => {
+  const tmpl = SECTIONS[key];
+  if (!tmpl) return [];
+  const all = [...tmpl.brief.matchAll(/^([A-Z][A-Za-z ,/&-]{0,30}?):[ \t]+\S/gm)].map((m) => m[1]);
+  const omitted = /\bomit\b([^.]*)/i.exec(proseBudget(tmpl, len))?.[1] ?? "";
+  return all.filter((label) => !new RegExp(`\\b${label}\\b`, "i").test(omitted));
+};
 
 const sentences = (s: string) =>
   (s.replace(/\b(e\.g|i\.e|vs|approx|etc|Dr|mg|mEq)\./gi, "$1").replace(/(\d)\.(\d)/g, "$1$2").match(/[.!?](?=\s|$)/g) ?? []).length;
@@ -137,7 +146,7 @@ for (const c of CASES) {
       if (!ok) violations++;
       console.log(`    ${ok ? "ok " : "GATE"}      ${spec.title.padEnd(30)} ${String(body.length).padStart(2)} items (want ${lo === hi ? lo : `${lo}-${hi}`})`);
     } else {
-      const want = expectedLabels(spec.key);
+      const want = expectedLabels(spec.key, c.length);
       const found = want.filter((l) => new RegExp(`(^|\\n)\\s*${l}\\s*:`).test(body));
       const ok = found.length === want.length;
       if (!ok) violations++;

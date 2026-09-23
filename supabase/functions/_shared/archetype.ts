@@ -57,7 +57,35 @@ export interface ArchetypeResult {
   error: string | null;
 }
 
+/**
+ * Classifies, retrying once.
+ *
+ * Asked directly and repeatedly, the model is stable — six of six on each of
+ * several topics. A live run still produced one miss, where an organism was
+ * written as a condition: not the model changing its mind but the call itself
+ * failing and the caller falling open. Retrieval retries once for the same
+ * reason and the same measured cause, and the budget is there, since this runs
+ * beside retrieval rather than before it.
+ */
 export async function classifyArchetype(
+  apiKey: string,
+  model: string,
+  notes: string
+): Promise<ArchetypeResult> {
+  const startedAt = Date.now();
+  const first = await classifyOnce(apiKey, model, notes);
+  if (first.archetype) return { ...first, ms: Date.now() - startedAt };
+  const second = await classifyOnce(apiKey, model, notes);
+  return {
+    archetype: second.archetype,
+    ms: Date.now() - startedAt,
+    // Keep the first reason when the retry fails the same way, so the logs
+    // name what actually went wrong rather than only the last attempt.
+    error: second.archetype ? null : `${first.error}|${second.error}`,
+  };
+}
+
+async function classifyOnce(
   apiKey: string,
   model: string,
   notes: string

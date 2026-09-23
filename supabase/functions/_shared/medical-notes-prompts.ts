@@ -30,8 +30,21 @@ function schemaLine(section: PlannedSection): string {
   if (section.kind === "list") {
     return `  "${section.key}": [\n    "<${brief} One item per element, no leading number.>",\n    "<...>"\n  ],`;
   }
-  return `  "${section.key}": "<${brief}>",`;
+  return `  "${section.key}": "<${brief}${LABELS_ON_OWN_LINES}>",`;
 }
+
+/**
+ * Appended to every prose section's brief.
+ *
+ * Measured across topic kinds, the sections that reliably produced all their
+ * labelled lines were the two whose briefs said this outright; the archetype
+ * sections, which only said "Structure it as:", wrote the first label and then
+ * ran on in prose — Microbiology gave Morphology but not Culture or
+ * Identification, Technique gave Preparation but not Landmarks or Steps.
+ * Saying it once here beats repeating it in seventeen briefs.
+ */
+const LABELS_ON_OWN_LINES =
+  " Every label above starts on its own line, after a \\n. Write all of them. Do not merge them into a paragraph.";
 
 export interface NotesPromptInput {
   notes: string;

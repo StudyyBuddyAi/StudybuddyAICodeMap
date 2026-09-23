@@ -99,7 +99,12 @@ function resolveAll(r: RunRecord): PlannedSection[] {
  * fails a structure check it was always going to fail.
  */
 function expectedLabels(section: PlannedSection): string[] {
-  return [...section.brief.matchAll(/^([A-Z][A-Za-z ,/&-]{0,30}?):[ \t]+\S/gm)].map((m) => m[1]);
+  const all = [...section.brief.matchAll(/^([A-Z][A-Za-z ,/&-]{0,30}?):[ \t]+\S/gm)].map((m) => m[1]);
+  // A length budget may tell a section to leave some of its labels out — a
+  // Concise clinicalApproach is told to omit Workup, Second-line, Definitive
+  // and Avoid. Requiring those anyway fails the sheet for doing as it was told.
+  const omitted = /\bomit\b([^.]*)/i.exec(section.budget ?? "")?.[1] ?? "";
+  return all.filter((label) => !new RegExp(`\\b${label}\\b`, "i").test(omitted));
 }
 
 const CLINICAL_TAGS = new Set(["diagnosis", "mechanism", "next step", "complication", "association"]);
