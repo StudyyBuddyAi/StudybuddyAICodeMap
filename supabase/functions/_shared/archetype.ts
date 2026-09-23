@@ -29,6 +29,18 @@ const CLASSIFY_TIMEOUT_MS = 4_000;
 /** Long topics are pasted notes; the first lines carry the subject. */
 const MAX_INPUT_CHARS = 600;
 
+/**
+ * Budget for the whole completion, not just the answer.
+ *
+ * GPT-OSS is a reasoning model: it thinks before it replies, and the thinking
+ * is billed against max_tokens. At the 8 tokens a one-word answer appears to
+ * need, every token went to reasoning, `content` came back null and
+ * `finish_reason` was "length" — so classification silently failed on every
+ * request and every topic fell back to the condition archetype. Measured
+ * reasoning for these topics is well under this.
+ */
+const MAX_OUTPUT_TOKENS = 256;
+
 const SYSTEM_PROMPT = `You classify a medical study topic into exactly one category.
 
 Categories:
@@ -66,7 +78,7 @@ export async function classifyArchetype(
       body: JSON.stringify({
         model,
         temperature: 0,
-        max_tokens: 8,
+        max_tokens: MAX_OUTPUT_TOKENS,
         messages: [
           { role: "system", content: SYSTEM_PROMPT },
           { role: "user", content: notes.trim().slice(0, MAX_INPUT_CHARS) },
@@ -81,12 +93,17 @@ export async function classifyArchetype(
     }
 
     const body = await response.json();
-    const archetype = asArchetype(body?.choices?.[0]?.message?.content);
-    return {
-      archetype,
-      ms: Date.now() - startedAt,
-      error: archetype ? null : "unrecognised",
-    };
+    const choice = body?.choices?.[0];
+    const archetype = asArchetype(choice?.message?.content);
+    // A reasoning model that ran out of budget mid-thought returns no content
+    // at all. Naming that separately keeps it from reading as "the model
+    // answered something odd" in the logs — it answered nothing.
+    const error = archetype
+      ? null
+      : choice?.finish_reason === "length"
+      ? "truncated_before_answer"
+      : "unrecognised";
+    return { archetype, ms: Date.now() - startedAt, error };
   } catch (err: unknown) {
     return {
       archetype: null,
