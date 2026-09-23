@@ -43,6 +43,7 @@ import { useFlashcardDeck } from "@/hooks/use-flashcard-deck";
 import { parseFlashcardsFromOutput } from "@/lib/parse-flashcards";
 import { parsePartialSheet, parseSheetOutput } from "@/lib/parse-partial-sheet";
 import {
+  type Flashcard,
   type GeneratedSheet,
   type SheetSource,
   parseStoredSheet,
@@ -452,6 +453,9 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
   // when the frame never came (an edge function predating the plan), which
   // leaves the renderer on the legacy six sections.
   const planRef = useRef<SheetSectionSpec[] | null>(null);
+  // The deck, delivered in its own __meta frame at the end of the stream
+  // because it is generated alongside the sheet rather than inside it.
+  const flashcardsRef = useRef<Flashcard[] | null>(null);
 
   const { toast } = useToast();
   const navigate = useNavigate();
@@ -508,6 +512,7 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
     setSheetIncomplete(false);
     groundingResultRef.current = null;
     planRef.current = null;
+    flashcardsRef.current = null;
     // Captured per-generation rather than read at render time: the sheet must
     // keep describing the settings it was actually built with, even if the
     // toggle is flipped afterwards.
@@ -523,8 +528,14 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
     // The plan is carried on the sheet itself so it is saved with it — a
     // reloaded sheet must lay out the way it did when it was generated, not
     // the way this build's default plan would.
-    const withPlan = (s: GeneratedSheet): GeneratedSheet =>
-      planRef.current ? { ...s, plan: planRef.current } : s;
+    // The plan and the deck both ride on the sheet so they are saved with it:
+    // a reloaded sheet must lay out the way it did when it was generated, and
+    // keep the cards that were written for it.
+    const withPlan = (s: GeneratedSheet): GeneratedSheet => ({
+      ...s,
+      ...(planRef.current ? { plan: planRef.current } : {}),
+      ...(flashcardsRef.current ? { flashcards: flashcardsRef.current } : {}),
+    });
 
     try {
       const response = await callMedicalNotes({
@@ -600,6 +611,16 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
 
               if (meta.plan !== undefined) {
                 planRef.current = parsePlan(meta.plan);
+              }
+
+              // The deck, written beside the sheet rather than as its last
+              // section. It arrives as the raw card text the cards mode has
+              // always produced, so the same parser reads it.
+              if (typeof meta.flashcards === "string") {
+                flashcardsRef.current = parseFlashcardsFromOutput(
+                  meta.flashcards,
+                  activeNotes
+                ).map((c) => ({ tag: c.tag, question: c.question, answer: c.answer }));
               }
 
               if (Array.isArray(meta.sourceLabels)) {

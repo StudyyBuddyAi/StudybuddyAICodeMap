@@ -139,6 +139,61 @@ async function retrieveWithRetry(
   return { chunks: [], attempts: 2, error: lastError };
 }
 
+/** Deck size by the sheet's Length setting, as the sheet prompt used to ask. */
+const CARDS_BY_LENGTH: Record<string, number> = { Concise: 3, Moderate: 4, Detailed: 5 };
+
+/** A whole non-streaming completion from OpenRouter, or null. */
+async function openRouterComplete(
+  apiKey: string,
+  model: string,
+  messages: { role: string; content: string }[]
+): Promise<string | null> {
+  const res = await fetch(OPENROUTER_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${apiKey}`,
+      "HTTP-Referer": "https://studybuddy.app",
+      "X-Title": "StudyBuddy",
+    },
+    body: JSON.stringify({
+      model,
+      temperature: 0.7,
+      max_tokens: 2048,
+      messages,
+      provider: model.startsWith("openai/gpt-oss")
+        ? { order: ["Cerebras", "Groq"], allow_fallbacks: true }
+        : { order: ["Anthropic"], allow_fallbacks: true },
+    }),
+  });
+  if (!res.ok) return null;
+  const body = await res.json();
+  const text = body?.choices?.[0]?.message?.content;
+  return typeof text === "string" && text.trim() ? text : null;
+}
+
+/** The same, from Corti. Null on any failure so the caller can fall back. */
+async function cortiComplete(
+  model: CortiModel,
+  messages: { role: "system" | "user" | "assistant"; content: string }[]
+): Promise<string | null> {
+  try {
+    const res = await cortiChatCompletion(cortiConfigFromEnv(), {
+      model,
+      messages,
+      stream: false,
+      temperature: 0.3,
+      maxTokens: 2048,
+    });
+    if (!res.ok) return null;
+    const body = await res.json();
+    const text = body?.choices?.[0]?.message?.content;
+    return typeof text === "string" && text.trim() ? text : null;
+  } catch {
+    return null;
+  }
+}
+
 /** POSTs a streaming chat completion to OpenRouter. */
 function openRouterStream(
   apiKey: string,
@@ -407,6 +462,59 @@ export async function handleMedicalNotes(req: Request): Promise<Response> {
     // Tuned prompts won on both tiers in the round-3 eval; NOTES_PROMPTS=original reverts.
     const useTunedPrompts = Deno.env.get("NOTES_PROMPTS") !== "original";
     const notesPrompts = useTunedPrompts ? buildCortiNotesPrompts : buildNotesPrompts;
+
+    /**
+     * The deck, written beside the sheet instead of after it.
+     *
+     * Measured on a live sheet, the cards were the single largest block of
+     * wall-clock — 7.2s of 32.9s, and 7.7s of 35.9s — and they were last, so
+     * the reader waited for the one section they would read last before the
+     * document was finished. They are not a planned section (the deck is its
+     * own contract, feeding the spaced-repetition library), so nothing about
+     * the sheet depends on them.
+     *
+     * Started here, it runs concurrently with the sheet's own stream and is
+     * collected at the end of it, by which time it is long finished. It is the
+     * same tier, prompt set and retrieved context the sheet gets, so the cards
+     * are what they always were.
+     *
+     * Fails soft: on any error the frame is simply not sent and the sheet
+     * renders without a deck, exactly as it does when the model writes none.
+     */
+    const cardsForLength = CARDS_BY_LENGTH[String(body.length)] ?? CARDS_BY_LENGTH.Concise;
+    const flashcardsStartedAt = Date.now();
+    const flashcardsPromise: Promise<string | null> = !isSheetMode
+      ? Promise.resolve(null)
+      : (async () => {
+          const cardsInput: NotesPromptInput = {
+            ...promptBase,
+            cardsOnly: true,
+            cardCount: cardsForLength,
+            // The deck stands alone; prior turns would pull it off topic.
+            hasMemory: false,
+            family: routing.isPremium ? "haiku" : "gptOss",
+          };
+          const prompts = notesPrompts(cardsInput);
+          const messages = [
+            { role: "system" as const, content: prompts.systemPrompt },
+            { role: "user" as const, content: prompts.userContent },
+          ];
+          try {
+            if (routing.isPremium) {
+              const text = await cortiComplete(premiumModel, messages);
+              if (text) return text;
+            }
+            return await openRouterComplete(
+              OPENROUTER_API_KEY,
+              routing.isPremium ? FALLBACK_MODEL : STANDARD_MODEL,
+              messages
+            );
+          } catch (err: unknown) {
+            log("flashcards_failed", { err: err instanceof Error ? err.message : String(err) });
+            return null;
+          }
+        })();
+
     const preModelMs = since(startedAt);
     const callStartedAt = Date.now();
 
@@ -571,8 +679,33 @@ export async function handleMedicalNotes(req: Request): Promise<Response> {
           }
         }
 
+        // The deck, which has been writing alongside the sheet and is almost
+        // always finished well before it. The timeout is the backstop for a
+        // stalled card call, not the expected path — it must never hold the
+        // document open, since the sheet is complete without it.
+        let flashcardsMs: number | null = null;
+        if (isSheetMode) {
+          try {
+            const cards = await Promise.race([
+              flashcardsPromise,
+              new Promise<null>((resolve) => setTimeout(() => resolve(null), 5000)),
+            ]);
+            flashcardsMs = since(flashcardsStartedAt);
+            if (cards) {
+              controller.enqueue(
+                encoder.encode(`data: ${JSON.stringify({ __meta: { flashcards: cards } })}\n\n`)
+              );
+            }
+          } catch (cardsErr: unknown) {
+            log("flashcards_frame_failed", {
+              err: cardsErr instanceof Error ? cardsErr.message : String(cardsErr),
+            });
+          }
+        }
+
         controller.enqueue(encoder.encode("data: [DONE]\n\n"));
         log("generation_stream_end", {
+          flashcardsMs,
           userId: user.id,
           model: modelUsed,
           isPremium: routing.isPremium,

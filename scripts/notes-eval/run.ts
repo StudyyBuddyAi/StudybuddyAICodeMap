@@ -51,6 +51,8 @@ export interface RunRecord {
   text: string;
   modelHeader: string | null;
   retrievedChunks: number | null;
+  /** The deck, delivered in its own __meta frame beside the sheet. */
+  flashcards?: string;
   /** The section plan the server sent for this sheet, if any. */
   plan?: { key: string; title: string; kind: "prose" | "list" }[];
   eval: {
@@ -95,7 +97,7 @@ async function sharedChunks(token: string, c: EvalCase): Promise<unknown[] | nul
 
 async function runOne(token: string, arm: Arm, c: EvalCase, chunks: unknown[] | null): Promise<RunRecord> {
   const started = Date.now();
-  const base = { arm, case: c, text: "", modelHeader: null, retrievedChunks: null, plan: undefined, eval: null };
+  const base = { arm, case: c, text: "", modelHeader: null, retrievedChunks: null, plan: undefined, flashcards: undefined, eval: null };
   let res: Response;
   try {
     res = await fetch(FN_URL, {
@@ -144,6 +146,7 @@ async function runOne(token: string, arm: Arm, c: EvalCase, chunks: unknown[] | 
           if (typeof parsed.__meta?.retrievedChunks === "number") record.retrievedChunks = parsed.__meta.retrievedChunks;
           // The section plan, which is what the scorer checks the sheet against.
           if (Array.isArray(parsed.__meta?.plan)) record.plan = parsed.__meta.plan;
+          if (typeof parsed.__meta?.flashcards === "string") record.flashcards = parsed.__meta.flashcards;
           const text = parsed.choices?.[0]?.delta?.content;
           if (typeof text === "string") record.text += text;
         } catch { /* partial frame */ }

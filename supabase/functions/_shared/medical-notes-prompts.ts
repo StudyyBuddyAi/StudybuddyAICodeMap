@@ -18,18 +18,6 @@ import type { LengthSetting } from "./sheet-sections.ts";
 
 export type PromptFamily = "haiku" | "gptOss";
 
-/**
- * The deck's size and tag mix by length. Cards are not a planned section — the
- * deck is its own contract — so this is the one count the plan does not carry.
- */
-const CARD_MIX: Record<LengthSetting, string> = {
-  Concise: "exactly 3 items, mix: 1x Next Step, 1x Diagnosis, 1x Mechanism",
-  Moderate: "exactly 4 items, mix: 1x Next Step, 1x Diagnosis, 1x Mechanism, 1x Complication",
-  Detailed: "exactly 5 items, mix: 2x Next Step, 1x Diagnosis, 1x Mechanism, 1x Complication",
-};
-
-export const asGateLength = (v: string): LengthSetting =>
-  v === "Moderate" || v === "Detailed" ? v : "Concise";
 
 /**
  * One line of the JSON skeleton. A section's brief is written on a single line
@@ -215,10 +203,9 @@ HARD RULES:
     // must hit come from one place (_shared/sheet-plan.ts) instead of being
     // restated in prose here, again in the Corti checklist, and again in the
     // scorer. A sheet cannot ask for a section the plan did not choose.
-    const gateLength = asGateLength(len);
     const schemaLines = plan.map(schemaLine).join("\n");
     const gateLines = plan.map((s) => `- ${s.key}: ${sectionQuota(s)}`).join("\n");
-    const coverageKeys = [...plan.map((s) => s.key), "flashcards"].join(", ");
+    const coverageKeys = plan.map((s) => s.key).join(", ");
 
     // Identical JSON schema + length gate + emoji set appended by BOTH model
     // families. Defined once here; the only per-family difference is the
@@ -244,13 +231,6 @@ and no other keys:
   "topicEmoji": "<one emoji matching the topic>",
   "topic": "<normalized topic name, e.g. Heart Failure — plain text, no emoji>",
 ${schemaLines}
-  "flashcards": [
-    {
-      "tag": "Next Step",
-      "question": "<full vignette question text>",
-      "answer": "<1-2 sentence answer>"
-    }
-  ],
   "referenceNote": "${referenceNote}",
   "sourceCoverage": {
     "level": "full | partial | none",
@@ -270,7 +250,6 @@ LENGTH GATE — Length is "${len}". These are HARD CAPS, whatever the topic's
 complexity:
 
 ${gateLines}
-- flashcards: ${CARD_MIX[gateLength]}. All clinical vignettes.
 
 EMOJI OPTIONS:
 🫀 cardiac, 🩸 hematology, 🧠 neuro, 🫁 pulmonary, 🦴 ortho, 🩺 general,
@@ -447,7 +426,9 @@ ${sheetSchemaBlock}`;
     } else if (explainMode) {
       systemPrompt = isHaiku ? haikuExplainPrompt : gptOssExplainPrompt;
     } else if (cardsOnly) {
-      const count = Math.min(Math.max(parseInt(String(cardCount)) || 12, 5), 20);
+      // Floor is 3, not 5: a sheet's own deck is 3 cards at Concise. The
+      // standalone deck builder still only offers 5-20.
+      const count = Math.min(Math.max(parseInt(String(cardCount)) || 12, 3), 20);
       systemPrompt = isHaiku ? haikuCardsPrompt(count) : gptOssCardsPrompt(count);
     } else {
       systemPrompt = isHaiku ? haikuSheetPrompt : gptOssSheetPrompt;

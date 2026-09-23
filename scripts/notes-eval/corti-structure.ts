@@ -19,6 +19,7 @@ import { fileURLToPath } from "node:url";
 import { createClient } from "@supabase/supabase-js";
 import { loadDotEnv } from "./session.ts";
 import { parseSheetOutput } from "../../src/lib/parse-partial-sheet.ts";
+import { parseFlashcardsFromOutput } from "../../src/lib/parse-flashcards.ts";
 import { ARCHETYPES, ARCHETYPE_IDS, SECTIONS, listItems, type LengthSetting } from "../../supabase/functions/_shared/sheet-sections.ts";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -28,7 +29,8 @@ const FN = process.env.PLAN_CHECK_FN ?? "medical-notes-next";
 const URL_ = `${process.env.VITE_SUPABASE_URL}/functions/v1/${FN}`;
 
 interface Case { notes: string; examMode: string; difficulty: string; length: LengthSetting }
-const CASES: Case[] = [
+const ONLY = process.env.STRUCT_ONLY;
+const ALL_CASES: Case[] = [
   { notes: "Warfarin", examMode: "USMLE Step 1", difficulty: "Advanced", length: "Moderate" },
   { notes: "Staphylococcus aureus", examMode: "USMLE Step 1", difficulty: "Intermediate", length: "Concise" },
   { notes: "Glycolysis", examMode: "USMLE Step 1", difficulty: "Advanced", length: "Detailed" },
@@ -36,6 +38,8 @@ const CASES: Case[] = [
   { notes: "Lumbar puncture", examMode: "USMLE Step 2", difficulty: "Basic", length: "Concise" },
   { notes: "sensitivity and specificity", examMode: "USMLE Step 1", difficulty: "Intermediate", length: "Concise" },
 ];
+
+const CASES = ONLY ? ALL_CASES.filter((c) => c.notes.toLowerCase().includes(ONLY.toLowerCase())) : ALL_CASES;
 
 async function freshAnonToken(): Promise<string> {
   const supabase = createClient(process.env.VITE_SUPABASE_URL!, process.env.VITE_SUPABASE_PUBLISHABLE_KEY!, {
@@ -78,6 +82,8 @@ for (const c of CASES) {
   }
 
   let plan: { key: string; title: string; kind: string }[] = [];
+  let deckRaw: string | null = null;
+  let lastSectionAt = 0;
   let text = "";
   const decoder = new TextDecoder();
   let buffer = "";
@@ -93,8 +99,9 @@ for (const c of CASES) {
       try {
         const parsed = JSON.parse(payload);
         if (Array.isArray(parsed.__meta?.plan)) plan = parsed.__meta.plan;
+        if (typeof parsed.__meta?.flashcards === "string") deckRaw = parsed.__meta.flashcards;
         const t = parsed.choices?.[0]?.delta?.content;
-        if (typeof t === "string") text += t;
+        if (typeof t === "string") { text += t; lastSectionAt = Date.now() - started; }
       } catch { /* partial frame */ }
     }
   }
@@ -131,7 +138,7 @@ for (const c of CASES) {
       console.log(`    ${ok ? "ok " : "GATE"}      ${spec.title.padEnd(30)} ${String(body.length).padStart(2)} items (want ${lo === hi ? lo : `${lo}-${hi}`})`);
     } else {
       const want = expectedLabels(spec.key);
-      const found = want.filter((l) => new RegExp(`(^|\n)\s*${l}\s*:`).test(body));
+      const found = want.filter((l) => new RegExp(`(^|\\n)\\s*${l}\\s*:`).test(body));
       const ok = found.length === want.length;
       if (!ok) violations++;
       const missing = want.filter((l) => !found.includes(l));
@@ -141,7 +148,17 @@ for (const c of CASES) {
 
   const extra = Object.keys(sections).filter((k) => !plan.some((p) => p.key === k));
   if (extra.length) { console.log(`    EXTRA     unplanned sections: ${extra.join(", ")}`); violations++; }
-  console.log(`    --        flashcards ${s.flashcards.length}, coverage ${s.sourceCoverage?.level ?? "(none)"}`);
+  // The deck is written beside the sheet now, so it arrives in its own frame
+  // rather than as the sheet's last section. Timing both apart shows whether
+  // moving it actually bought anything.
+  const deck = deckRaw ? parseFlashcardsFromOutput(deckRaw, c.notes) : [];
+  const wantCards = { Concise: 3, Moderate: 4, Detailed: 5 }[c.length];
+  if (deck.length !== wantCards) violations++;
+  console.log(
+    `    ${deck.length === wantCards ? "ok " : "DECK"}      ${"Flashcards (own frame)".padEnd(30)} ${deck.length} cards (want ${wantCards})`
+  );
+  console.log(`    --        coverage ${s.sourceCoverage?.level ?? "(none)"}`);
+  console.log(`  timing    last section ${lastSectionAt}ms, stream end ${Date.now() - started}ms (deck tail +${Date.now() - started - lastSectionAt}ms)`);
   const leak = /<Choose|Structure it as:|One item per element|<one emoji/.test(text);
   if (leak) { console.log(`    LEAK      template placeholder text in output`); violations++; }
 }

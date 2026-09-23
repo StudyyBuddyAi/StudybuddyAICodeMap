@@ -31,12 +31,6 @@ import { resolveSheetPlan, sectionQuota, type PlannedSection } from "./sheet-pla
 
 const CARDS_FORMAT_MARKER = "OUTPUT FORMAT — copy this structure exactly:";
 
-/** Deck size by length. Every other count now comes from the plan. */
-const CARD_COUNTS: Record<string, string> = {
-  Concise: "exactly 3",
-  Moderate: "exactly 4",
-  Detailed: "exactly 5",
-};
 
 function cardsFormatBlock(count: number, topic: string): string {
   return `CARD RULES:
@@ -71,12 +65,11 @@ YOUR OUTPUT:
  */
 function sheetChecklist(plan: PlannedSection[], length: string): string {
   const quotas = plan.map((s) => `${s.key} ${sectionQuota(s)}`).join("; ");
-  const cards = CARD_COUNTS[length] ?? CARD_COUNTS.Concise;
   return `
 
 FINAL CHECK — verify each point before you write the closing }:
-- The sheet has exactly these keys, in this order: ${plan.map((s) => s.key).join(", ")}, flashcards, referenceNote, sourceCoverage. Do not add a section that is not on that list, and do not leave one out.
-- Length is "${length}": ${quotas}; flashcards ${cards} items.
+- The sheet has exactly these keys, in this order: ${plan.map((s) => s.key).join(", ")}, referenceNote, sourceCoverage. Do not add a section that is not on that list, and do not leave one out.
+- Length is "${length}": ${quotas}.
 - Write for the audience and exam the request names. A retrieved passage from a pediatrics or adult textbook does not narrow the audience.
 - sourceCoverage must agree with itself: "full" means "uncovered" is empty; "none" lists every section; "partial" lists at least one section but not all of them.
 - referenceNote is a finished sentence — never the instruction text in angle brackets.`;
@@ -107,7 +100,7 @@ export function buildCortiNotesPrompts(input: NotesPromptInput): { systemPrompt:
       );
     const at = systemPrompt.indexOf(CARDS_FORMAT_MARKER);
     if (at !== -1) {
-      const count = Math.min(Math.max(parseInt(String(input.cardCount)) || 12, 5), 20);
+      const count = Math.min(Math.max(parseInt(String(input.cardCount)) || 12, 3), 20);
       // The original block runs to the end of the cards prompt; any memory
       // instruction appended after it is carried over.
       const memoryTail = input.hasMemory ? systemPrompt.slice(systemPrompt.lastIndexOf("\n\nIMPORTANT: You have access")) : "";

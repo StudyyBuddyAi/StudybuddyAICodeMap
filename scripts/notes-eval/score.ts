@@ -159,8 +159,16 @@ function scoreSheet(r: RunRecord): Check[] {
     }
   }
 
+  // The deck is written beside the sheet now, not inside it, and arrives in
+  // its own __meta frame — so it is scored from there when the record carries
+  // one. A record from before the split has none, and the sheet's own
+  // flashcards field is checked instead.
   const cardGate = CARD_GATE[String(r.case.body.length)] ?? CARD_GATE.Concise;
-  checks.push({ name: "gate: flashcards", pass: inRange(s.flashcards.length, ...cardGate), detail: String(s.flashcards.length) });
+  const deck = r.flashcards !== undefined
+    ? parseFlashcardsFromOutput(r.flashcards ?? "", String(r.case.body.notes))
+    : s.flashcards;
+  checks.push({ name: "deck delivered", pass: deck.length > 0, detail: String(deck.length) });
+  checks.push({ name: "gate: flashcards", pass: inRange(deck.length, ...cardGate), detail: String(deck.length) });
 
   checks.push({
     name: "no template placeholder leak",
