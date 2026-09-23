@@ -28,7 +28,7 @@ Term → exact code/table/column it maps to.
   - **Premium hook** — free/anon get Claude Haiku for first N generations as conversion bait. N: anon=1, free=3. Counter `profiles.premium_used` (lifetime, never resets). Incremented server-side in edge fn via service role.
   - **Citation tier** — cited generations: anon=1/day, free=3/day, Pro unlimited. Enforced **server-side** in the `get-citations` edge fn via `consume_citation`/`refund_citation` (service-role RPCs, migration `20260808120000`); client reads `citation_usage` for display only. Anon tracked in DB under their real anon id (survives anon→account upgrade), so `sb_anon_citation` is legacy.
 - **Blueprint topic** — USMLE content taxonomy for a Question. No single column; it's the tuple `subject` → `domain` → `topic` (+ `competency`, `reasoning_order`). Note: DB `subject` is surfaced in QBank UI as **"system"** (e.g. Cardiovascular). "Blueprint"/"blueprints" appears only as marketing copy in `QBank.tsx`.
-- **Persona** — NOT on `main`. Belongs to the planned (unbuilt) Writer→Reviewers→Editor question-generation pipeline. No table, prop, or type. Treat as aspirational.
+- **Persona** — removed. A localStorage-backed sheet setting (`sb_persona_v1`, student/clinician/expert) did exist and fed a prompt preamble; it changed register only, nothing enforced it, and the eval harness could not tell whether the model had honoured it. Deleted along with the **Focus** setting for the same reason. Reader level now rides on `difficulty` alone. The separate Writer→Reviewers→Editor persona concept remains unbuilt.
 - **Model preference** — `profiles.preferred_model` (`claude|gpt-oss`, code default `gpt-oss`). Pro-only chip toggle. Type in `use-model-preference.ts`.
 
 ---
@@ -100,7 +100,7 @@ Anonymous-first. `signUp` on anon = `updateUser({email,password})` (keeps id) th
 
 ## Out of scope (not on `main`)
 
-- Multi-agent question pipeline (Writer→Reviewers→Editor) and any **persona** concept — planned, unbuilt.
+- Multi-agent question pipeline (Writer→Reviewers→Editor) and its **persona** concept — planned, unbuilt. (The sheet-generator persona setting is a different thing, and was removed — see above.)
 - `scripts/planBlock.ts` / `generateBlock.ts` — referenced in earlier planning docs, **not present** in repo. Only `scripts/rag-spike/` exists.
 - RAG spike (`scripts/rag-spike/`) — isolated experiment (own package.json/node_modules, `guideline_chunks` pgvector). Do NOT import into the app.
 - Stripe / payments — intentionally never implemented.

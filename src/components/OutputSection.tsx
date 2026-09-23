@@ -122,7 +122,7 @@ const MODE_BAR_STYLE: React.CSSProperties = {
 const ModeInfoBar = ({
   modeInfo,
 }: {
-  modeInfo: { examMode: string; difficulty: string; focus: string; length: string };
+  modeInfo: { examMode: string; difficulty: string; length: string };
 }) => {
   const dot = (
     <span style={{ margin: "0 6px", opacity: 0.3, color: "var(--fg)" }}>·</span>
@@ -134,8 +134,6 @@ const ModeInfoBar = ({
         <span style={{ color: "var(--fg)" }}>{modeInfo.examMode}</span>
         {dot}
         <span>{modeInfo.difficulty}</span>
-        {dot}
-        <span>{modeInfo.focus}</span>
         {dot}
         <span>{modeInfo.length}</span>
       </span>
@@ -166,7 +164,6 @@ interface OutputSectionProps {
   modeInfo?: {
     examMode: string;
     difficulty: string;
-    focus: string;
     length: string;
   };
   citations?: CitationResult[];

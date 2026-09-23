@@ -1,12 +1,11 @@
 /**
  * The medical-notes prompts, lifted out so another writer can run them.
  *
- * GENERATED as a verbatim copy of supabase/functions/medical-notes/index.ts
- * (personaPreamble, the grounding block, every prompt template, the user
- * message and the prompt selection) — deliberately not re-indented, because
- * the template literals' whitespace is prompt text. medical-notes itself still
- * carries its own inline copy and is not changed by this spike; the check in
- * scripts/notes-eval/check-prompts.ts fails if the two ever drift.
+ * Originally a verbatim copy of the prompts medical-notes/index.ts carried
+ * inline — deliberately not re-indented, because the template literals'
+ * whitespace is prompt text. That entrypoint is now a bare serve() over
+ * _shared/medical-notes-handler.ts, so this module is the only copy and is
+ * edited directly.
  *
  * `family` stands in for the model check the original makes
  * (`model === "anthropic/claude-haiku-4.5"`): "haiku" selects the Claude-tuned
@@ -20,10 +19,8 @@ export type PromptFamily = "haiku" | "gptOss";
 export interface NotesPromptInput {
   notes: string;
   difficulty?: string;
-  focus?: string;
   length?: string;
   examMode?: string;
-  persona?: string;
   cardsOnly?: boolean;
   // Raw req.json() value; parsed with parseInt below.
   cardCount?: unknown;
@@ -42,69 +39,29 @@ export interface NotesPromptInput {
 }
 
 /**
- * Role/tone preamble for the two sheet prompts, selected by persona tier.
- * Persona changes prompt content and register only — never model routing, and
- * never the JSON contract in `sheetSchemaBlock`. Unknown values fall back to
- * "student". (Feature 02 — Persona Tiers.)
+ * Role/tone header for the two sheet prompts.
+ *
+ * Replaces the former persona tiers (student / clinician / expert), which
+ * changed register only and were never enforced anywhere — the model was free
+ * to ignore them and the eval harness could not tell whether it had. The
+ * reader level now rides on `difficulty` alone, and the settings line is what
+ * carries the request's axes into the prompt for both model families.
  */
-function personaPreamble(p: string | undefined, mode: string, diff: string, foc: string, len: string): string {
-  const tier = p === "clinician" ? "clinician" : p === "expert" ? "expert" : "student";
+function audienceBlock(mode: string, diff: string, len: string): string {
+  return `You are a medical educator writing high-yield study material. Your goal is comprehension and retention, pitched at the difficulty level named below.
 
-  if (tier === "student") {
-    return `You are an enthusiastic and clear medical educator writing for an undergraduate medical student (Year 2–4 equivalent). Your goal is comprehension and retention.
-
-Mode: ${mode} | Difficulty: ${diff} | Focus: ${foc} | Length: ${len}
-
-STUDENT PERSONA RULES:
-- Write for someone building foundational understanding. Prioritise intuition before detail.
-- Memory hooks must be vivid, simple mnemonics or analogies — something that sticks.
-- Pathophysiology in the overview should build mechanistically from first principles (cause → effect → clinical consequence). No assumed knowledge.
-- Clinical approach: explain the reasoning behind each step ("we order this because…"), not just the step itself.
-- Exam traps should highlight common conceptual confusions, not just recall errors.
-- Flashcards should be clear vignettes with unambiguous single answers. Avoid expert-level nuance.
-- Language: plain clinical English. Define jargon on first use. Avoid passive voice.`;
-  }
-
-  if (tier === "clinician") {
-    return `You are a senior clinician writing practical, bedside-ready content for a junior doctor, intern, or final-year student on clinical placement. Your goal is safe, confident clinical decision-making.
-
-Mode: ${mode} | Difficulty: ${diff} | Focus: ${foc} | Length: ${len}
-
-CLINICIAN PERSONA RULES:
-- Lead with what matters at the bedside: recognition, triage, and first decisions.
-- The overview should connect pathophysiology directly to signs and symptoms the clinician will actually see ("this mechanism → this presentation").
-- Clinical approach must be actionable: decision thresholds, drug doses where relevant, when to escalate.
-- Memory hooks should be clinical heuristics or rule-of-thumb shortcuts that a doctor would actually use ("if the JVP is raised and the CXR shows…").
-- Exam traps should reflect real clinical traps, not just exam MCQ traps — what gets junior doctors in trouble on the ward.
-- Flashcards: vignette-style with a clinical decision or next best step as the answer. At least half should be "what do you do next?" stems.
-- Language: confident clinical register. Write as if handing over a patient. Brevity is a virtue.`;
-  }
-
-  // expert
-  return `You are a clinician-scientist writing for an advanced reader: a senior medical student, registrar, or specialist trainee who wants mechanistic depth and nuanced clinical reasoning.
-
-Mode: ${mode} | Difficulty: ${diff} | Focus: ${foc} | Length: ${len}
-
-EXPERT PERSONA RULES:
-- Assume high baseline knowledge. Do not define standard terminology.
-- Overview: pathophysiology at the cellular and molecular level where relevant (receptor subtypes, ion channels, signalling cascades). Include genetic or epidemiological context if high-yield.
-- Clinical approach: include second-line and third-line management, nuanced contraindications, special populations, and when guidelines diverge from evidence.
-- Memory hooks can be more sophisticated: mechanistic analogies, pattern-recognition heuristics, or unusual associations that reveal deeper understanding.
-- Exam traps should surface expert-level distinctions: atypical presentations, rare but important exceptions, classic "wrong answer traps" that catch people who almost know the topic.
-- Flashcards: include at least one card on a subtlety or exception the topic is known for. Vignettes may have layered reasoning.
-- Language: technical and precise. Abbreviations acceptable. Dense is fine — this reader wants substance, not scaffolding.`;
+Mode: ${mode} | Difficulty: ${diff} | Length: ${len}`;
 }
 
 export function buildNotesPrompts(input: NotesPromptInput): { systemPrompt: string; userContent: string } {
-    const { notes, difficulty, focus, length, examMode, cardsOnly, cardCount, focusCard,
+    const { notes, difficulty, length, examMode, cardsOnly, cardCount, focusCard,
             explainMode,
             enhanceMode, itemText, sectionKey, enhanceTopic,
-            persona, groundingAttempted, ragChunks } = input;
+            groundingAttempted, ragChunks } = input;
     const sectionItems = input.sectionItems as string[] | undefined;
 
     const mode = examMode || "General";
     const diff = difficulty || "Basic";
-    const foc = focus || "Quick Revision";
     const len = length || "Concise";
 
     const retrievedChunks = ragChunks.length;
@@ -212,8 +169,7 @@ HARD RULES:
     // ── SHARED SHEET OUTPUT CONTRACT ───────────────────────────────────────
     // Identical JSON schema + length gate + emoji set appended by BOTH model
     // families. Defined once here; the only per-family difference is the
-    // preamble (gptOss = terse; haiku = explicit input/mode/focus rules).
-    // (Step 1 of feature 02 — Persona Tiers.)
+    // preamble (gptOss = terse; haiku = explicit input/mode rules).
     // groundingContextBlock leads the shared contract so retrieved guideline
     // text is in front of the model before the output schema — and is an empty
     // string when grounding was never attempted, leaving the prompt unchanged.
@@ -305,9 +261,9 @@ EMOJI OPTIONS:
 
 Start your response with { and end with }. Nothing else.`;
 
-    const gptOssSheetPrompt = `${personaPreamble(persona, mode, diff, foc, len)}
+    const gptOssSheetPrompt = `${audienceBlock(mode, diff, len)}
 
-Before writing anything: identify the core medical concept from the input, reason through the highest-yield facts for this persona, then generate the full output below.
+Before writing anything: identify the core medical concept from the input, reason through the highest-yield facts for this reader, then generate the full output below.
 
 ${sheetSchemaBlock}`;
 
@@ -430,7 +386,7 @@ HARD RULES:
 - No numbering. No headers between cards. No explanations.
 - Mix clinical vignettes and concept recall cards.`;
 
-    const haikuSheetPrompt = `${personaPreamble(persona, mode, diff, foc, len)}
+    const haikuSheetPrompt = `${audienceBlock(mode, diff, len)}
 
 INPUT HANDLING:
 The user input may be one of three types:
@@ -444,11 +400,6 @@ MODE RULES:
 - USMLE Step 1: Focus on mechanisms, pathophysiology, biochemical pathways, and classic associations.
 - USMLE Step 2: Focus on diagnosis, clinical management, next best steps, and patient scenarios.
 - General: Provide a balanced clinical overview.
-
-FOCUS RULES:
-- Quick Revision: Concise high-yield facts only.
-- Deep Understanding: Brief but clear explanations of mechanisms.
-- Clinical Reasoning: Application-based scenarios and clinical decision-making.
 
 DIFFICULTY RULES:
 - Basic: simple language, minimal jargon, define key terms, suitable for early med students.

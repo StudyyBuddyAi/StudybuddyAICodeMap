@@ -39,3 +39,6 @@ CLAUDE.md
 
 # TypeScript incremental build artifacts (tsc -b)
 *.tsbuildinfo
+
+# Remotion video workspace — local only
+remotion/

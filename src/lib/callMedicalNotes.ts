@@ -14,10 +14,8 @@ const MEDICAL_NOTES_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/${M
 export interface MedicalNotesParams {
   notes: string;
   difficulty?: string;
-  focus?: string;
   length?: string;
   examMode?: string;
-  persona?: "student" | "clinician" | "expert";
   cardsOnly?: boolean;
   cardCount?: number;
   focusCard?: unknown;

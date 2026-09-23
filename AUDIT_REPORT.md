@@ -89,7 +89,7 @@ Health notes:
 - **Two UI shells coexist**: the current `DashboardLayout.tsx` (AppNav + AuthModal + AccountDashboard, wide=1280px / default 860px) and a **legacy collapsible `DashboardSidebar.tsx`** that is dead-weight duplicate navigation.
 - **`OutputSection.tsx` (1733 lines)** is the largest component — renders sheets and flashcards, owns enhance (`expand`/`clinical`), saved-highlight anchor logic, and shared nudge/disclaimer. Single-responsibility boundaries are blurry but it works and is internally consistent.
 - **Legacy duplication:** `hooks/use-qbank.ts` is dead code whose *types* are still imported by the live `QBankContext.tsx` (documented in CONTEXT.md). `src/components/NavLink.tsx` vs shadcn `nav-link` conventions. Two `timeAgo` implementations (`Library.tsx` local, `lib/utils.ts`).
-- **Persona IS on main** — `hooks/use-persona.ts` (`sb_persona_v1`, `student|clinician|expert`) is consumed by `SheetGenerator.tsx:501` to adjust generation persona. This contradicts CONTEXT.md ("Persona — NOT on main. Treat as aspirational") — see §29.
+- ~~**Persona IS on main**~~ — *resolved.* At audit time `hooks/use-persona.ts` (`sb_persona_v1`, `student|clinician|expert`) was consumed by `SheetGenerator.tsx:501`, contradicting CONTEXT.md. The setting has since been removed entirely (along with **Focus**) rather than documented, because neither changed anything an eval could check. CONTEXT.md now matches.
 - Good patterns: `Dashboard.tsx` guards animation with `prefers-reduced-motion`; `StatsStrip` respects it; `GradientBackground`/`PageLoader` are clean presentational components.
 
 ---
@@ -321,11 +321,11 @@ Flow: `QBank.tsx` (landing, marketing + count/domain meta queries) → `QBankSes
 ## 23. Client State & Persistence
 
 localStorage keys in play (two eras):
-- `sb_*`: `sb_qbank_session`, `sb_welcomed`, `sb_anon_citation`, `sb_first_sheet_seen`, `sb_first_deck_seen`, `sb_sheet_hint_dismissed`, `sb_recent_flashcard_topics_v1`, `sb_persona_v1`
+- `sb_*`: `sb_qbank_session`, `sb_welcomed`, `sb_anon_citation`, `sb_first_sheet_seen`, `sb_first_deck_seen`, `sb_sheet_hint_dismissed`, `sb_recent_flashcard_topics_v1`
 - `studybuddy_*`: `studybuddy_decks_v1`, `studybuddy_history`, `studybuddy_citations_by_topic`
 - `APP_STORAGE_KEYS` (Index.tsx) = "has used app before" set.
 
-Concerns: QBank session (answers) is localStorage-resident and tamperable (display-only, grading is server-side); anon citation count lives purely client-side; `sb_persona_v1` is fine. Supabase auth session also in localStorage (standard).
+Concerns: QBank session (answers) is localStorage-resident and tamperable (display-only, grading is server-side); anon citation count lives purely client-side. `sb_persona_v1` was dropped with the persona feature and is now an orphaned key on returning users' machines (harmless, never read). Supabase auth session also in localStorage (standard).
 
 ---
 
@@ -415,7 +415,7 @@ Issues:
 | README: "SM-2 spaced repetition" | ❌ Inaccurate — fixed `[1,3,7,21,60]` interval ladder, not SM-2 (§18) |
 | README: Claude Haiku 4.5 (Pro), GPT-OSS 20B default | ✅ Accurate |
 | CONTEXT.md: `preferred_model` migration stale (`flash` vs `claude`) | ✅ Confirmed (`20260516000000`) |
-| CONTEXT.md: "Persona — NOT on main… no table, prop, or type" | ❌ Stale — `use-persona.ts` exists and is used in `SheetGenerator.tsx:501` (`sb_persona_v1`, student/clinician/expert). The multi-agent Writer→Reviewers→Editor personas indeed don't exist, but a lightweight persona feature does |
+| CONTEXT.md: "Persona — NOT on main… no table, prop, or type" | ❌ Stale at audit time (`use-persona.ts` existed, used in `SheetGenerator.tsx:501`) — **since resolved by removing the feature**; CONTEXT.md now describes it as removed |
 | CONTEXT.md: `use-qbank.ts` is legacy dead-code, only types imported | ✅ Confirmed |
 | CONTEXT.md: QBank tables unverifiable from repo | ✅ Confirmed (dashboard-created) |
 | CONTEXT.md: `planBlock.ts`/`generateBlock.ts` absent | ✅ Confirmed absent |

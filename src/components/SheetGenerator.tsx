@@ -6,7 +6,6 @@ import {
   Activity,
   AlertTriangle,
   ArrowRight,
-  BookOpen,
   Brain,
   BrainCircuit,
   Check,
@@ -16,7 +15,6 @@ import {
   FileDown,
   HeartPulse,
   History,
-  Loader2,
   PanelLeftClose,
   PanelLeftOpen,
   PanelRightClose,
@@ -61,7 +59,6 @@ import AuthModal from "@/components/AuthModal";
 import GoProModal from "@/components/GoProModal";
 import { startTopProgress, finishTopProgress } from "@/components/TopProgressBar";
 import { useStudyHistory, type StudyHistoryItem } from "@/hooks/use-study-history";
-import { usePersona, type Persona } from "@/hooks/use-persona";
 import { useMemoryPreference } from "@/hooks/use-memory-preference";
 import { timeAgo } from "@/lib/utils";
 import { sheetToPlainText } from "@/lib/sheet-to-text";
@@ -397,7 +394,6 @@ const SheetsEmptyState = ({ onStartTopic, onSelectHistory }: SheetsEmptyStatePro
 const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
   const [notes, setNotes] = useState(prefill?.input ?? "");
   const [difficulty, setDifficulty] = useState(prefill?.modeInfo?.difficulty ?? "Basic");
-  const [focus, setFocus] = useState(prefill?.modeInfo?.focus ?? "Quick Revision");
   const [length, setLength] = useState(prefill?.modeInfo?.length ?? "Concise");
   const [examMode, setExamMode] = useState(prefill?.modeInfo?.examMode ?? "General");
   const [sheet, setSheet] = useState<GeneratedSheet | null>(
@@ -498,13 +494,9 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
     refreshCitation,
   } = useCitationUsage();
   const { saveCards } = useFlashcardDeck();
-  const { persona, setPersona } = usePersona();
 
-  // `overridePersona` lets a persona button generate with the tier just clicked —
-  // `setPersona` state won't have flushed by the time this reads the closure.
-  const generate = async (overrideNotes?: string, overridePersona?: Persona) => {
+  const generate = async (overrideNotes?: string) => {
     const activeNotes = overrideNotes ?? notes;
-    const activePersona = overridePersona ?? persona;
     if (!activeNotes.trim()) {
       toast({ title: "Please enter medical notes", variant: "destructive" });
       return;
@@ -537,10 +529,8 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
       const response = await callMedicalNotes({
         notes: activeNotes,
         difficulty,
-        focus,
         length,
         examMode,
-        persona: activePersona,
         useGrounding,
         topK: groundingTopK,
         threshold: groundingThreshold,
@@ -745,14 +735,6 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
       window.removeEventListener("studybuddy:enhancement-saved", handleEnhancementSaved);
   }, []);
 
-  // Persona buttons are the generation trigger — there is no separate submit.
-  const generateWithPersona = (p: Persona) => {
-    setPersona(p);
-    setDeckSaved(false);
-    setConfigDrawerOpen(false);
-    generate(undefined, p);
-  };
-
   const startTopic = (label: string) => {
     setNotes(label);
     setDeckSaved(false);
@@ -799,7 +781,6 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
     if (item.modeInfo) {
       setExamMode(item.modeInfo.examMode || "General");
       setDifficulty(item.modeInfo.difficulty || "Basic");
-      setFocus(item.modeInfo.focus || "Quick Revision");
       setLength(item.modeInfo.length || "Concise");
     }
     setNotes(item.input);
@@ -926,19 +907,12 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
                 value={difficulty}
                 onChange={setDifficulty}
                 options={[
+                  // The value is the word the prompt's DIFFICULTY RULES name.
+                  // It read "Medium" until this commit, so the middle setting
+                  // matched no rule and silently did nothing.
                   { value: "Basic", label: "Basic" },
-                  { value: "Medium", label: "Intermediate" },
+                  { value: "Intermediate", label: "Intermediate" },
                   { value: "Advanced", label: "Advanced" },
-                ]}
-              />
-              <PillGroup
-                label="Focus"
-                value={focus}
-                onChange={setFocus}
-                options={[
-                  { value: "Quick Revision", label: "Quick Revision" },
-                  { value: "Deep Understanding", label: "Deep Understanding" },
-                  { value: "Clinical Reasoning", label: "Clinical Reasoning" },
                 ]}
               />
               <PillGroup
@@ -1076,91 +1050,6 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
               </div>
             </div>
             )}
-          </div>
-        </div>
-
-        {/* ── Step 3: AI Perspective ── */}
-        <div className="rounded-[26px] border border-[color:var(--color-border)] bg-[color:var(--color-card)] p-5 shadow-[0_18px_40px_rgba(15,23,42,0.04)]">
-          <div className="space-y-4">
-            <div className="flex items-center gap-2.5">
-              <div className="flex h-7 w-7 items-center justify-center rounded-full bg-[color:var(--color-foreground)] text-[10px] font-bold text-[color:var(--color-background)]">3</div>
-              <h2 className="[font-family:var(--app-font-serif)] text-lg font-medium tracking-[-0.02em] text-[color:var(--color-foreground)]">AI Perspective</h2>
-            </div>
-            
-            <div className="grid grid-cols-1 gap-3">
-              {[
-                {
-                  id: "student" as Persona,
-                  label: "Student",
-                  sub: "Build intuition and memory hooks for exam prep",
-                  Icon: BookOpen,
-                  color: "blue",
-                },
-                {
-                  id: "clinician" as Persona,
-                  label: "Clinician",
-                  sub: "Apply to patient care decisions and clinical practice",
-                  Icon: Stethoscope,
-                  color: "teal",
-                },
-                {
-                  id: "expert" as Persona,
-                  label: "Expert",
-                  sub: "Deep mechanisms, nuance, and edge cases",
-                  Icon: Brain,
-                  color: "violet",
-                },
-              ].map(({ id, label, sub, Icon, color }) => {
-                const active = persona === id;
-                return (
-                  <button
-                    key={id}
-                    type="button"
-                    onClick={() => !loading && generateWithPersona(id)}
-                    disabled={loading}
-                    aria-pressed={active}
-                    className={`relative group w-full flex items-start gap-4 p-4 rounded-xl text-left transition-all duration-200 ${
-                      active
-                        ? "border-2 shadow-md " + (color === "blue" ? "border-success bg-success-soft" : color === "teal" ? "border-primary bg-primary/10" : "border-info bg-info-soft")
-                        : "border border-border bg-card hover:border-input hover:shadow-sm"
-                    } ${loading ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
-                  >
-                    {active && (
-                      <div className={`absolute -top-2 -right-2 w-6 h-6 rounded-full flex items-center justify-center ${
-                        color === "blue" ? "bg-success" : color === "teal" ? "bg-primary" : "bg-info"
-                      }`}>
-                        <Check className="w-4 h-4 text-primary-foreground" />
-                      </div>
-                    )}
-                    <span className={`flex items-center justify-center w-10 h-10 rounded-lg flex-shrink-0 transition-colors ${
-                      active
-                        ? (color === "blue" ? "bg-success" : color === "teal" ? "bg-primary" : "bg-info")
-                        : "bg-secondary"
-                    }`}>
-                      {loading && active ? (
-                        <Loader2 className="w-5 h-5 text-primary-foreground animate-spin" />
-                      ) : (
-                        <Icon className={`w-5 h-5 ${
-                          active ? "text-primary-foreground" : "text-muted-foreground"
-                        }`} />
-                      )}
-                    </span>
-                    <div className="flex-1 min-w-0">
-                      <p className={`text-sm font-semibold leading-tight mb-1 ${
-                        active
-                          ? (color === "blue" ? "text-success" : color === "teal" ? "text-primary" : "text-info")
-                          : "text-foreground"
-                      }`}>
-                        {loading && active ? "Generating…" : label}
-                      </p>
-                      <p className="text-xs text-muted-foreground leading-relaxed">
-                        {sub}
-                      </p>
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
           </div>
         </div>
 
@@ -1366,7 +1255,7 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
         <OutputSection
           output={sheet ? JSON.stringify(sheet) : legacyOutput || EMPTY_SHEET_JSON}
           inputText={notes}
-          modeInfo={{ examMode, difficulty, focus, length }}
+          modeInfo={{ examMode, difficulty, length }}
           citations={citations}
           citationState={citationState}
           modelUsed={modelUsed}

@@ -3,10 +3,10 @@
  * request bodies shaped exactly as the client sends them (SheetGenerator,
  * FlashcardsGenerator, StudyMode, OutputSection).
  *
- * Topics span systems, personas, lengths and input styles (a topic name, a
- * student's vernacular question, a pasted block of notes), and include topics
- * the guideline corpus is likely to cover and ones it likely does not, so both
- * the grounded and ungrounded prompt branches get exercised.
+ * Topics span systems, difficulty levels, lengths and input styles (a topic
+ * name, a student's vernacular question, a pasted block of notes), and include
+ * topics the guideline corpus is likely to cover and ones it likely does not, so
+ * both the grounded and ungrounded prompt branches get exercised.
  */
 
 export type Kind = "sheet" | "cards" | "explain" | "expand" | "clinical";
@@ -19,14 +19,14 @@ export interface EvalCase {
   body: Record<string, unknown>;
 }
 
-const sheet = (id: string, label: string, notes: string, persona: string, examMode: string, length: string, difficulty = "Intermediate", focus = "Deep Understanding"): EvalCase => ({
+const sheet = (id: string, label: string, notes: string, examMode: string, length: string, difficulty = "Intermediate"): EvalCase => ({
   id, kind: "sheet", label,
-  body: { notes, persona, examMode, length, difficulty, focus, useGrounding: true, topK: 8, threshold: 0.6, useMemory: false },
+  body: { notes, examMode, length, difficulty, useGrounding: true, topK: 8, threshold: 0.6, useMemory: false },
 });
 
 const cards = (id: string, label: string, notes: string, cardCount: number, examMode = "USMLE Step 1"): EvalCase => ({
   id, kind: "cards", label,
-  body: { notes, examMode, difficulty: "Basic", focus: "Quick Revision", length: "Concise", cardsOnly: true, cardCount, useGrounding: true, topK: 8, threshold: 0.6, useMemory: false },
+  body: { notes, examMode, difficulty: "Basic", length: "Concise", cardsOnly: true, cardCount, useGrounding: true, topK: 8, threshold: 0.6, useMemory: false },
 });
 
 const explain = (id: string, question: string, answer: string, topic: string): EvalCase => ({
@@ -40,15 +40,15 @@ const enhance = (id: string, mode: "expand" | "clinical", topic: string, section
 });
 
 export const CASES: EvalCase[] = [
-  sheet("sheet-hfref", "HFrEF · student · Step 1 · Concise", "Heart failure with reduced ejection fraction", "student", "USMLE Step 1", "Concise", "Basic", "Quick Revision"),
-  sheet("sheet-dka", "DKA · clinician · Step 2 · Moderate", "Diabetic ketoacidosis", "clinician", "USMLE Step 2", "Moderate", "Intermediate", "Clinical Reasoning"),
-  sheet("sheet-nephro", "Nephrotic vs nephritic · expert · General · Detailed", "Nephrotic vs nephritic syndrome", "expert", "General", "Detailed", "Advanced", "Deep Understanding"),
-  sheet("sheet-asthma-notes", "Pasted asthma notes · student · Moderate", "asthma - reversible airway obstruction, type 2 inflam (eos, IL-4/5/13), triggers allergens/cold/exercise. wheeze worse at night. spirometry FEV1/FVC low, improves >12% w/ bronchodilator. tx SABA prn, ICS mainstay, add LABA. severe exacerbation: silent chest bad sign, give O2 nebs steroids mag", "student", "General", "Moderate", "Basic", "Quick Revision"),
-  sheet("sheet-preeclampsia", "Preeclampsia · clinician · Step 2 · Concise", "Preeclampsia", "clinician", "USMLE Step 2", "Concise", "Intermediate", "Clinical Reasoning"),
+  sheet("sheet-hfref", "HFrEF · Step 1 · Basic · Concise", "Heart failure with reduced ejection fraction", "USMLE Step 1", "Concise", "Basic"),
+  sheet("sheet-dka", "DKA · Step 2 · Intermediate · Moderate", "Diabetic ketoacidosis", "USMLE Step 2", "Moderate", "Intermediate"),
+  sheet("sheet-nephro", "Nephrotic vs nephritic · General · Advanced · Detailed", "Nephrotic vs nephritic syndrome", "General", "Detailed", "Advanced"),
+  sheet("sheet-asthma-notes", "Pasted asthma notes · General · Basic · Moderate", "asthma - reversible airway obstruction, type 2 inflam (eos, IL-4/5/13), triggers allergens/cold/exercise. wheeze worse at night. spirometry FEV1/FVC low, improves >12% w/ bronchodilator. tx SABA prn, ICS mainstay, add LABA. severe exacerbation: silent chest bad sign, give O2 nebs steroids mag", "General", "Moderate", "Basic"),
+  sheet("sheet-preeclampsia", "Preeclampsia · Step 2 · Intermediate · Concise", "Preeclampsia", "USMLE Step 2", "Concise", "Intermediate"),
   // Most topics retrieve nothing at the production 0.60 threshold; this one
   // retrieves, so the grounded branch of the prompt gets exercised.
-  sheet("sheet-ida-grounded", "Iron deficiency anemia · student · Step 1 · Moderate (grounded)", "Iron deficiency anemia", "student", "USMLE Step 1", "Moderate", "Intermediate", "Deep Understanding"),
-  sheet("sheet-hyperk-vernacular", "\"why does hyperkalemia change the ECG\" · student · Concise", "i dont get why high potassium changes the ECG and what to do about it", "student", "USMLE Step 1", "Concise", "Basic", "Deep Understanding"),
+  sheet("sheet-ida-grounded", "Iron deficiency anemia · Step 1 · Intermediate · Moderate (grounded)", "Iron deficiency anemia", "USMLE Step 1", "Moderate", "Intermediate"),
+  sheet("sheet-hyperk-vernacular", "\"why does hyperkalemia change the ECG\" · Step 1 · Basic · Concise", "i dont get why high potassium changes the ECG and what to do about it", "USMLE Step 1", "Concise", "Basic"),
 
   cards("cards-sepsis", "Sepsis management · 10 cards · Step 2", "Sepsis and septic shock management", 10, "USMLE Step 2"),
   cards("cards-bb", "Beta blockers · 12 cards · Step 1", "Beta blockers pharmacology", 12),
@@ -65,13 +65,15 @@ export const CASES: EvalCase[] = [
   enhance("clinical-peaked-t", "clinical", "Hyperkalemia", "keyPoints", "Peaked T waves are the earliest ECG sign of hyperkalemia"),
   enhance("clinical-ics", "clinical", "Asthma", "clinicalApproach", "Inhaled corticosteroids are the mainstay of persistent asthma control"),
 
-  // ── Added for the configuration check (round 3): every persona × length
+  // ── Added for the configuration check (round 3): every difficulty × length
   // combination not covered above, more systems, and more of the short modes.
-  sheet("sheet-copd-expert", "COPD exacerbation · expert · Step 2 · Detailed", "Acute exacerbation of COPD", "expert", "USMLE Step 2", "Detailed", "Advanced", "Clinical Reasoning"),
-  sheet("sheet-stroke-clinician", "Acute ischemic stroke · clinician · General · Moderate", "Acute ischemic stroke: thrombolysis and thrombectomy decisions", "clinician", "General", "Moderate", "Intermediate", "Clinical Reasoning"),
-  sheet("sheet-warfarin-student", "Warfarin · student · Step 1 · Concise", "Warfarin mechanism, monitoring and reversal", "student", "USMLE Step 1", "Concise", "Basic", "Quick Revision"),
-  sheet("sheet-siadh-vernacular", "\"I keep confusing SIADH and DI\" · student · Moderate", "i keep mixing up SIADH and diabetes insipidus, how do i tell them apart", "student", "USMLE Step 1", "Moderate", "Intermediate", "Deep Understanding"),
-  sheet("sheet-meningitis-expert", "Bacterial meningitis · expert · General · Concise", "Bacterial meningitis", "expert", "General", "Concise", "Advanced", "Quick Revision"),
+  // The persona suffixes in these ids predate the setting's removal and are
+  // kept so results still line up against the runs already in out/.
+  sheet("sheet-copd-expert", "COPD exacerbation · Step 2 · Advanced · Detailed", "Acute exacerbation of COPD", "USMLE Step 2", "Detailed", "Advanced"),
+  sheet("sheet-stroke-clinician", "Acute ischemic stroke · General · Intermediate · Moderate", "Acute ischemic stroke: thrombolysis and thrombectomy decisions", "General", "Moderate", "Intermediate"),
+  sheet("sheet-warfarin-student", "Warfarin · Step 1 · Basic · Concise", "Warfarin mechanism, monitoring and reversal", "USMLE Step 1", "Concise", "Basic"),
+  sheet("sheet-siadh-vernacular", "\"I keep confusing SIADH and DI\" · Step 1 · Intermediate · Moderate", "i keep mixing up SIADH and diabetes insipidus, how do i tell them apart", "USMLE Step 1", "Moderate", "Intermediate"),
+  sheet("sheet-meningitis-expert", "Bacterial meningitis · General · Advanced · Concise", "Bacterial meningitis", "General", "Concise", "Advanced"),
 
   cards("cards-aki", "Acute kidney injury · 10 cards · Step 2", "Acute kidney injury", 10, "USMLE Step 2"),
   cards("cards-thyroid", "Thyroid disorders · 8 cards · Step 1", "Hyperthyroidism and hypothyroidism", 8),

@@ -10,7 +10,6 @@ interface SaveButtonProps {
   modeInfo?: {
     examMode: string;
     difficulty: string;
-    focus: string;
     length: string;
   };
   /** Blocks saving while the sheet is still streaming and would persist partial. */

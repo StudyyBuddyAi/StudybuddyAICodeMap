@@ -16,7 +16,6 @@ export interface StudyHistoryItem {
   modeInfo?: {
     examMode: string;
     difficulty: string;
-    focus: string;
     length: string;
   };
 }
@@ -30,7 +29,6 @@ type HistoryRow = {
   output: string;
   exam_mode: string | null;
   difficulty: string | null;
-  focus: string | null;
   length: string | null;
   created_at: string;
 };
@@ -62,7 +60,6 @@ function rowToItem(row: HistoryRow): StudyHistoryItem {
   const hasMode =
     row.exam_mode !== null ||
     row.difficulty !== null ||
-    row.focus !== null ||
     row.length !== null;
   return {
     id: row.id,
@@ -74,7 +71,6 @@ function rowToItem(row: HistoryRow): StudyHistoryItem {
       ? {
           examMode: row.exam_mode ?? "",
           difficulty: row.difficulty ?? "",
-          focus: row.focus ?? "",
           length: row.length ?? "",
         }
       : undefined,
@@ -112,7 +108,7 @@ export function useStudyHistory() {
       const { data, error } = await supabase
         .from("study_history")
         .select(
-          "id, topic, input, output, exam_mode, difficulty, focus, length, created_at"
+          "id, topic, input, output, exam_mode, difficulty, length, created_at"
         )
         .eq("user_id", userId!)
         .order("created_at", { ascending: false });
@@ -139,7 +135,10 @@ export function useStudyHistory() {
           output,
           exam_mode: modeInfo?.examMode ?? null,
           difficulty: modeInfo?.difficulty ?? null,
-          focus: modeInfo?.focus ?? null,
+          // study_history.focus still exists and still holds values for rows
+          // written before the Focus setting was retired. It is nullable, so
+          // new rows simply leave it unset rather than requiring a migration
+          // that would destroy what those older rows recorded.
           length: modeInfo?.length ?? null,
         });
         if (error) throw error;

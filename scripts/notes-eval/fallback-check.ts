@@ -22,7 +22,7 @@ const started = Date.now();
 const res = await fetch(`${process.env.VITE_SUPABASE_URL}/functions/v1/${fn}`, {
   method: "POST",
   headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}`, "x-simulate-corti-outage": "1" },
-  body: JSON.stringify({ notes: "Hypercalcemia", persona: "student", examMode: "USMLE Step 1", length: "Concise", useGrounding: false, useMemory: false }),
+  body: JSON.stringify({ notes: "Hypercalcemia", examMode: "USMLE Step 1", length: "Concise", useGrounding: false, useMemory: false }),
 });
 
 console.log("status", res.status);

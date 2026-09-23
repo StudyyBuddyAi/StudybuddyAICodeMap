@@ -2,6 +2,11 @@
 
 Branch: `feat/corti-provider-spike` · Status: evaluation (nothing in production calls the new code)
 
+> **Baselines below are no longer directly comparable.** Every number here was measured with the
+> persona tiers (student / clinician / expert) and the Focus setting in the prompt. Both have since
+> been removed, so a re-run is needed before any new arm is judged against these scores. The
+> historical description is left as measured rather than rewritten.
+
 ## 1. What calls an AI model today
 
 | Surface | Edge function | Model(s) today | Provider | Client caller |
@@ -213,8 +218,10 @@ anonymous visitor (`scripts/notes-eval/e2e-*.mjs`, screenshots in `out/e2e/`):
      token (~7 s) and undocumented.
 4. **Rollout**: fold the Corti path into `medical-notes` behind `AI_PROVIDER=openrouter|corti` plus
    the per-route model env vars (`CORTI_NOTES_PREMIUM_MODEL` / `CORTI_NOTES_STANDARD_MODEL`). Switch
-   `medical-notes` to import `_shared/medical-notes-prompts.ts` so there is one copy of the prompts
-   (`check-prompts.ts` guards drift until then). Start with the premium route, watch `X-Model-Used`,
+   `medical-notes` to import `_shared/medical-notes-prompts.ts` so there is one copy of the prompts.
+   (Done — the entrypoint is now a bare `serve()` over `_shared/medical-notes-handler.ts`, and the
+   `check-prompts.ts` drift guard was removed with the duplicate it watched.)
+   Start with the premium route, watch `X-Model-Used`,
    parse-failure and empty-deck rates, and the Corti non-2xx rate — there is no provider fallback
    the way OpenRouter has one.
 5. **Leave alone**: embeddings and retrieval (Corti's embedder is fixed at 2560-d against a 1536-d
