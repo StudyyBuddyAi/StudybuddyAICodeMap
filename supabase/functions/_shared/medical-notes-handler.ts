@@ -31,6 +31,7 @@ import {
   type MemoryTurn,
 } from "./memory.ts";
 import { buildNotesPrompts, type NotesPromptInput } from "./medical-notes-prompts.ts";
+import { resolveSheetPlan } from "./sheet-plan.ts";
 import { buildCortiNotesPrompts } from "./medical-notes-prompts-corti.ts";
 import { asCortiModel, cortiChatCompletion, cortiConfigFromEnv, type CortiModel } from "./corti.ts";
 
@@ -233,6 +234,9 @@ export async function handleMedicalNotes(req: Request): Promise<Response> {
       user.is_anonymous === true || decodeJwtPayload(token).is_anonymous === true;
     const quotaEligible = !explainMode && !enhanceMode;
     const usageKind = cardsOnly ? "cards" : "sheet";
+    // A sectioned JSON document, as opposed to a card deck or a prose reply.
+    const isSheetMode = !cardsOnly && !explainMode && !enhanceMode;
+    const sheetPlan = isSheetMode ? resolveSheetPlan() : [];
 
     // ── Pre-model work, concurrently ────────────────────────────────────────
     // Grounding: sheet/cards only; explain/enhance are single-item follow-ups.
@@ -475,6 +479,15 @@ export async function handleMedicalNotes(req: Request): Promise<Response> {
 
     const transform = new TransformStream<Uint8Array, Uint8Array>({
       start(controller) {
+        // The section plan goes out first, ahead of any model bytes, so the
+        // client can lay out the document's real shape before content arrives
+        // instead of assuming a fixed one. Sheet mode only — cards, explain
+        // and enhance are not sectioned documents.
+        if (isSheetMode) {
+          controller.enqueue(
+            encoder.encode(`data: ${JSON.stringify({ __meta: { plan: sheetPlan } })}\n\n`)
+          );
+        }
         // Retrieval count/sources go out before any model bytes. Emitted only
         // when grounding was attempted, so a no-grounding sheet renders as before.
         if (!groundingAttempted) return;

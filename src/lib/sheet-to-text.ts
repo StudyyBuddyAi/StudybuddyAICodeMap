@@ -1,16 +1,5 @@
 import type { GeneratedSheet } from "@/types/generated-sheet";
-
-/** Section order and headings, matching how OutputSection renders the document. */
-const SECTIONS: Array<{
-  key: keyof GeneratedSheet;
-  heading: string;
-}> = [
-  { key: "overview", heading: "Overview" },
-  { key: "memoryHooks", heading: "Memory Hooks" },
-  { key: "clinicalApproach", heading: "Clinical Approach" },
-  { key: "keyPoints", heading: "Key Points" },
-  { key: "examTraps", heading: "Exam Traps" },
-];
+import { resolvePlan, sectionBody } from "@/lib/sheet-plan";
 
 /**
  * Flattens a generated sheet into plain text suitable for the clipboard or the
@@ -27,15 +16,18 @@ export function sheetToPlainText(
   const title = sheet.topic?.trim() || topic.trim() || "Study sheet";
   const parts: string[] = [`${title}\n${"=".repeat(title.length)}`];
 
-  for (const { key, heading } of SECTIONS) {
-    const value = sheet[key];
+  // Headings and order come from the sheet's own plan, so an exported sheet
+  // always matches what was on screen — including archetype sections this
+  // build has no name for.
+  for (const { key, title } of resolvePlan(sheet)) {
+    const value = sectionBody(sheet, key);
     if (Array.isArray(value)) {
       if (!value.length) continue;
       parts.push(
-        `${heading}\n` + value.map((item, i) => `${i + 1}. ${item}`).join("\n")
+        `${title}\n` + value.map((item, i) => `${i + 1}. ${item}`).join("\n")
       );
     } else if (typeof value === "string" && value.trim()) {
-      parts.push(`${heading}\n${value.trim()}`);
+      parts.push(`${title}\n${value.trim()}`);
     }
   }
 

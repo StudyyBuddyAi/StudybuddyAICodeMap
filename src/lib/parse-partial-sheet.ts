@@ -1,6 +1,7 @@
 import { stripFences } from "./sanitize-json";
 import { repairLlmJson } from "./repair-llm-json";
 import { parseSourceCoverage } from "./grounding";
+import { RESERVED_SHEET_KEYS, parsePlan } from "./sheet-plan";
 import type { Flashcard, GeneratedSheet } from "@/types/generated-sheet";
 
 /**
@@ -141,11 +142,33 @@ function asFlashcards(v: unknown): Flashcard[] {
     }));
 }
 
+/**
+ * Every top-level key that isn't reserved metadata, coerced by the shape it
+ * arrived in.
+ *
+ * This is what lets a sheet carry sections the six-field interface never named.
+ * The old allowlist silently discarded them, so loosening the prompt alone
+ * would have produced sheets with sections missing and no error anywhere.
+ */
+function collectSections(raw: Record<string, unknown>): Record<string, string | string[]> {
+  const sections: Record<string, string | string[]> = {};
+  for (const [key, value] of Object.entries(raw)) {
+    if (RESERVED_SHEET_KEYS.has(key)) continue;
+    if (typeof value === "string") sections[key] = value;
+    else if (Array.isArray(value)) sections[key] = asStringArray(value);
+  }
+  return sections;
+}
+
 /** Fill every field so a partial object can't crash the renderer. */
 function normalize(raw: Record<string, unknown>): GeneratedSheet {
   return {
     topic: typeof raw.topic === "string" ? raw.topic : undefined,
     topicEmoji: typeof raw.topicEmoji === "string" ? raw.topicEmoji : undefined,
+    // A plan carried in the body is accepted, but the live path is the
+    // server's `__meta` frame — the caller merges that in afterwards.
+    plan: parsePlan(raw.plan) ?? undefined,
+    sections: collectSections(raw),
     overview: asString(raw.overview),
     memoryHooks: asStringArray(raw.memoryHooks),
     clinicalApproach: asString(raw.clinicalApproach),

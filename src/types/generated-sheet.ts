@@ -1,3 +1,51 @@
+/**
+ * How a section's body is shaped, which is what the renderer dispatches on.
+ * `prose` is one string with `\n`-separated labelled lines; `list` is an array
+ * of one-liners.
+ */
+export type SectionKind = "prose" | "list";
+
+/**
+ * Icon vocabulary shared by the server (which names one per planned section)
+ * and the renderer (which maps the name to a component). A name the renderer
+ * does not know falls back to a generic mark rather than rendering nothing, so
+ * the server can add archetype sections without a client release.
+ */
+export type SectionIconName =
+  | "overview"
+  | "memory"
+  | "clinical"
+  | "keypoints"
+  | "traps"
+  | "flashcards"
+  | "reference"
+  | "drug"
+  | "micro"
+  | "anatomy"
+  | "pathway"
+  | "procedure"
+  | "data"
+  | "compare";
+
+/**
+ * One planned section: what to call it, how to render it, and where it sits.
+ *
+ * The plan is resolved server-side from the request's settings and sent ahead
+ * of the model's first byte, so the document's shape is known before any
+ * content arrives and never reflows. The model is told to fill these keys and
+ * nothing else.
+ */
+export interface SheetSectionSpec {
+  /** Top-level JSON key the model writes this section's body under. */
+  key: string;
+  /** Heading shown to the reader, e.g. "Adverse Effects". */
+  title: string;
+  kind: SectionKind;
+  icon?: SectionIconName;
+  /** Whether a "verified sources" badge may appear on this section. */
+  evidenceBacked?: boolean;
+}
+
 export interface Flashcard {
   tag: string;        // e.g. "Next Step", "Diagnosis", "Mechanism", "Complication"
   question: string;   // full question text, tag already stripped
@@ -71,6 +119,22 @@ export interface SourceCoverage {
 
 export interface GeneratedSheet {
   topic?: string; // normalized topic name, e.g. "Heart Failure"
+  /**
+   * The sections this sheet was built to contain, in reading order. Absent on
+   * every sheet saved before the plan existed, and on any response whose
+   * `__meta` frame did not arrive — `resolvePlan` falls back to the legacy six
+   * in both cases, so an unplanned sheet renders exactly as it always did.
+   */
+  plan?: SheetSectionSpec[];
+  /**
+   * Section bodies by key. Populated by `normalize` from every top-level key
+   * that is not reserved metadata, so a section the legacy interface never
+   * named still survives parsing instead of being silently dropped.
+   *
+   * The six legacy fields below are kept in step with this map for the code
+   * that still reads them by name (export, grounding, the flashcard save).
+   */
+  sections?: Record<string, string | string[]>;
   overview: string;
   memoryHooks: string[];
   clinicalApproach: string;

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -51,6 +51,8 @@ import {
 import GroundingNotice from "@/components/GroundingNotice";
 import SheetSources from "@/components/SheetSources";
 import { reconcileGroundingLevel, resolveGroundingLevel } from "@/lib/grounding";
+import { parsePlan, renderOrder, sectionHasBody } from "@/lib/sheet-plan";
+import type { SheetSectionSpec } from "@/types/generated-sheet";
 import { applySourceLabels } from "@/lib/source-labels";
 import { fetchBestCitation, type CitationResult } from "@/lib/citation";
 import { getCitationsForTopic } from "@/lib/citation-store";
@@ -130,24 +132,6 @@ const PillGroup = ({ label, options, value, onChange }: PillGroupProps) => (
 
 // ── Right-rail section navigator (lg+ only) ──────────────────────────────────
 
-const SECTION_NAV_ITEMS: { key: string; label: string }[] = [
-  { key: "overview", label: "Overview" },
-  { key: "memoryHooks", label: "Memory Hooks" },
-  { key: "clinicalApproach", label: "Clinical Approach" },
-  { key: "keyPoints", label: "Key Points" },
-  { key: "examTraps", label: "Exam Traps" },
-  { key: "flashcards", label: "Flashcards" },
-  { key: "referenceNote", label: "Reference Note" },
-];
-
-/** A section is worth listing only if it actually has content in the sheet. */
-function sectionHasContent(sheet: GeneratedSheet, key: string): boolean {
-  const v = (sheet as unknown as Record<string, unknown>)[key];
-  if (Array.isArray(v)) return v.length > 0;
-  if (typeof v === "string") return v.trim().length > 0;
-  return false;
-}
-
 /**
  * Sticky right-rail navigator. Lists the sheet's non-empty sections, smooth-
  * scrolls to a section on click, and highlights the section the reader is on
@@ -165,15 +149,20 @@ const SheetSectionNav = ({
   readyKeys?: string[];
 }) => {
   const streaming = readyKeys !== undefined;
+  // Same list the document is laid out from, so the rail can never name a
+  // section the sheet does not have, or miss one it does. Memoized because the
+  // observer effect below re-subscribes whenever this identity changes, and a
+  // fresh array each render would tear the observer down on every frame.
+  const allItems = useMemo(() => renderOrder(sheet), [sheet]);
   const items = streaming
-    ? SECTION_NAV_ITEMS
-    : SECTION_NAV_ITEMS.filter((it) => sectionHasContent(sheet, it.key));
+    ? allItems
+    : allItems.filter((it) => sectionHasBody(sheet, it.key));
   const [activeKey, setActiveKey] = useState<string>(items[0]?.key ?? "");
 
   useEffect(() => {
-    const els = SECTION_NAV_ITEMS.map((it) =>
-      document.querySelector<HTMLElement>(`[data-section-key="${it.key}"]`)
-    ).filter((el): el is HTMLElement => !!el);
+    const els = allItems
+      .map((it) => document.querySelector<HTMLElement>(`[data-section-key="${it.key}"]`))
+      .filter((el): el is HTMLElement => !!el);
     if (!els.length) return;
 
     // A thin band near the top of the viewport acts as the "you are here" line;
@@ -192,7 +181,7 @@ const SheetSectionNav = ({
     );
     els.forEach((el) => observer.observe(el));
     return () => observer.disconnect();
-  }, [sheet]);
+  }, [allItems]);
 
   const scrollToSection = (key: string) => {
     document
@@ -227,7 +216,7 @@ const SheetSectionNav = ({
                   : "border-l-border text-muted-foreground hover:text-foreground"
               }`}
             >
-              {it.label}
+              {it.title}
             </button>
           );
         })}
@@ -458,6 +447,11 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
   const groundingResultRef = useRef<{ retrievedChunks: number; sources: SheetSource[] } | null>(
     null
   );
+  // The section plan, delivered in a __meta frame before the model's first
+  // byte so the document's shape is settled before any content arrives. Null
+  // when the frame never came (an edge function predating the plan), which
+  // leaves the renderer on the legacy six sections.
+  const planRef = useRef<SheetSectionSpec[] | null>(null);
 
   const { toast } = useToast();
   const navigate = useNavigate();
@@ -513,6 +507,7 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
     setStreamedKeys([]);
     setSheetIncomplete(false);
     groundingResultRef.current = null;
+    planRef.current = null;
     // Captured per-generation rather than read at render time: the sheet must
     // keep describing the settings it was actually built with, even if the
     // toggle is flipped afterwards.
@@ -524,6 +519,12 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
     setTimeout(() => {
       outputRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
     }, 80);
+
+    // The plan is carried on the sheet itself so it is saved with it — a
+    // reloaded sheet must lay out the way it did when it was generated, not
+    // the way this build's default plan would.
+    const withPlan = (s: GeneratedSheet): GeneratedSheet =>
+      planRef.current ? { ...s, plan: planRef.current } : s;
 
     try {
       const response = await callMedicalNotes({
@@ -589,27 +590,35 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
             // model bytes. It must be intercepted before the delta read below
             // so it never reaches fullText / parsePartialSheet.
             if (parsed.__meta) {
-              // Two frame kinds share this envelope: the retrieval result
-              // ahead of any model bytes, and the book/chapter labels that
-              // arrive at the end of the stream. The second only ever refines
-              // the sources the first delivered, so it merges rather than
-              // replaces — and every label is validated against its own chunk
-              // before it can reach the UI or a saved sheet.
-              if (Array.isArray(parsed.__meta.sourceLabels)) {
+              // Three frame kinds share this envelope: the section plan and
+              // the retrieval result, both ahead of any model bytes, and the
+              // book/chapter labels that arrive at the end of the stream.
+              // Each field is read on its own — an earlier version branched on
+              // "not sourceLabels", so any second leading frame wiped the
+              // retrieval result it had just recorded.
+              const meta = parsed.__meta;
+
+              if (meta.plan !== undefined) {
+                planRef.current = parsePlan(meta.plan);
+              }
+
+              if (Array.isArray(meta.sourceLabels)) {
+                // Only ever refines the sources the retrieval frame delivered,
+                // so it merges rather than replaces — and every label is
+                // validated against its own chunk before it can reach the UI
+                // or a saved sheet.
                 const current = groundingResultRef.current;
                 if (current) {
                   groundingResultRef.current = {
                     ...current,
-                    sources: applySourceLabels(current.sources, parsed.__meta.sourceLabels),
+                    sources: applySourceLabels(current.sources, meta.sourceLabels),
                   };
                 }
-              } else {
+              } else if (meta.retrievedChunks !== undefined || meta.sources !== undefined) {
                 groundingResultRef.current = {
                   retrievedChunks:
-                    typeof parsed.__meta.retrievedChunks === "number"
-                      ? parsed.__meta.retrievedChunks
-                      : 0,
-                  sources: Array.isArray(parsed.__meta.sources) ? parsed.__meta.sources : [],
+                    typeof meta.retrievedChunks === "number" ? meta.retrievedChunks : 0,
+                  sources: Array.isArray(meta.sources) ? meta.sources : [],
                 };
               }
               continue;
@@ -622,7 +631,7 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
               const partial = parsePartialSheet(fullText);
               if (partial && partial.completeKeys.length > revealedCount) {
                 revealedCount = partial.completeKeys.length;
-                setSheet(partial.sheet);
+                setSheet(withPlan(partial.sheet));
                 setStreamedKeys(partial.completeKeys);
               }
             }
@@ -642,9 +651,10 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
         // Reconcile the model's self-reported coverage against retrieval truth.
         // Retrieval can only ever weaken the claim, never strengthen it.
         const grounding = groundingResultRef.current;
+        const planned = withPlan(result.sheet);
         const groundedSheet: GeneratedSheet = grounding
           ? {
-              ...result.sheet,
+              ...planned,
               retrievedChunks: grounding.retrievedChunks,
               sources: grounding.sources,
               groundingLevel: reconcileGroundingLevel(
@@ -656,11 +666,11 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
           ? // Deliberately turned off. Mark it "none" but leave retrievedChunks
             // unset — that absence is what tells the notice to say "turned off"
             // rather than "we don't have this topic".
-            { ...result.sheet, groundingLevel: "none" as const }
+            { ...planned, groundingLevel: "none" as const }
           : // Grounding was on but no __meta arrived (an edge function that
             // predates this feature). Leave the sheet unmarked so it renders
             // exactly as it did before, rather than claiming a false verdict.
-            result.sheet;
+            planned;
         setSheet(groundedSheet);
         setLegacyOutput("");
         setSheetIncomplete(result.status === "partial");

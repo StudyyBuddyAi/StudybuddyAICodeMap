@@ -165,3 +165,75 @@ describe("OutputSection streaming", () => {
     ).resolves.toBeTruthy();
   });
 });
+
+describe("OutputSection section plan", () => {
+  /** A drug sheet: sections a disease template has no name for. */
+  const PLANNED: GeneratedSheet = {
+    topic: "Warfarin",
+    plan: [
+      { key: "moa", title: "Mechanism of Action", kind: "prose", icon: "drug" },
+      { key: "monitoring", title: "Monitoring", kind: "list", icon: "data" },
+      { key: "reversal", title: "Reversal", kind: "prose" },
+    ],
+    sections: {
+      moa: "Inhibits **vitamin K epoxide reductase**.",
+      monitoring: ["INR 2-3 for most indications", "Recheck at 3 days"],
+      reversal: "Vitamin K plus **four-factor PCC** for major bleeding.",
+    },
+    overview: "",
+    memoryHooks: [],
+    clinicalApproach: "",
+    keyPoints: [],
+    examTraps: [],
+    flashcards: [],
+    referenceNote: "General knowledge.",
+  };
+
+  it("lays the document out from the plan, not the legacy six", async () => {
+    await renderSheet(<OutputSection output={JSON.stringify(PLANNED)} />);
+
+    expect(heading(/Mechanism of Action/)).toBeInTheDocument();
+    expect(heading(/Monitoring/)).toBeInTheDocument();
+    expect(heading(/Reversal/)).toBeInTheDocument();
+    // The legacy sections are not in this plan, so they must not appear.
+    expect(heading(/Memory Hooks/)).not.toBeInTheDocument();
+    expect(heading(/Clinical Approach/)).not.toBeInTheDocument();
+    expect(heading(/Exam Traps/)).not.toBeInTheDocument();
+  });
+
+  it("still appends flashcards and the reference note", async () => {
+    await renderSheet(<OutputSection output={JSON.stringify(PLANNED)} />);
+    expect(heading(/Flashcards/)).toBeInTheDocument();
+    expect(heading(/Reference Note/)).toBeInTheDocument();
+  });
+
+  it("renders each section by its declared kind", async () => {
+    await renderSheet(<OutputSection output={JSON.stringify(PLANNED)} />);
+
+    expect(sectionText("moa")).toContain("vitamin K epoxide reductase");
+    // A list section numbers its items; a prose one does not.
+    expect(sectionText("monitoring")).toContain("INR 2-3 for most indications");
+    expect(sectionText("monitoring")).toContain("Recheck at 3 days");
+    expect(sectionText("reversal")).toContain("four-factor PCC");
+  });
+
+  it("falls back to the legacy layout when no plan arrived", async () => {
+    // An edge function that predates the plan frame sends no plan at all; the
+    // sheet must render exactly as it always did rather than render nothing.
+    await renderSheet(<OutputSection output={JSON.stringify(SHEET)} />);
+
+    for (const name of Object.values(HEADING)) {
+      expect(heading(name)).toBeInTheDocument();
+    }
+  });
+
+  it("tracks the in-flight section against the plan's own order", async () => {
+    await renderSheet(
+      <OutputSection output={JSON.stringify(PLANNED)} isStreaming streamedKeys={["moa"]} />
+    );
+
+    expect(screen.getAllByLabelText("Section loaded")).toHaveLength(1);
+    // monitoring is next in the plan, so it is the one being written.
+    expect(screen.getAllByLabelText("Writing section")).toHaveLength(1);
+  });
+});

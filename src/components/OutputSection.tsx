@@ -3,22 +3,30 @@ import { useNavigate, type NavigateFunction } from "react-router-dom";
 import { callMedicalNotes } from "@/lib/callMedicalNotes";
 import { useMemoryPreference } from "@/hooks/use-memory-preference";
 import {
-  BookOpen,
-  Check,
-  List,
-  HelpCircle,
-  FileText,
-  Stethoscope,
-  Settings2,
   AlertTriangle,
-  Lightbulb,
-  Layers,
-  Zap,
+  BarChart3,
+  BookOpen,
+  Bug,
+  Check,
   ChevronDown,
   ChevronUp,
-  Sparkles,
+  Columns2,
+  FileText,
+  GitBranch,
+  HelpCircle,
+  Layers,
+  Lightbulb,
+  List,
+  PersonStanding,
+  Pill,
   RotateCcw,
+  Scissors,
+  Settings2,
+  Sparkles,
+  Stethoscope,
   X,
+  Zap,
+  type LucideIcon,
 } from "lucide-react";
 import CopyButton from "@/components/CopyButton";
 import FlashcardsSection from "@/components/FlashcardsSection";
@@ -35,6 +43,7 @@ import {
   parseStoredSheet,
   isJsonSheet,
 } from "@/types/generated-sheet";
+import { renderOrder, sectionBody } from "@/lib/sheet-plan";
 
 type EnhanceKind = "enhance" | "expand" | "clinical";
 
@@ -246,17 +255,32 @@ function renderFormattedContent(content: string) {
 
 // ─── JSON renderer helpers ─────────────────────────────────────────────────
 
-const JSON_SECTION_CONFIG = {
-  overview: { icon: BookOpen, label: "📋 Overview", className: "section-summary", evidenceBacked: true },
-  memoryHooks: { icon: Lightbulb, label: "🧠 Memory Hooks", className: "section-memoryhooks", evidenceBacked: false },
-  clinicalApproach: { icon: Stethoscope, label: "🩺 Clinical Approach", className: "section-clinical", evidenceBacked: true },
-  keyPoints: { icon: List, label: "📌 Key Points", className: "section-keypoints", evidenceBacked: true },
-  examTraps: { icon: AlertTriangle, label: "⚠️ Exam Traps", className: "section-examtraps", evidenceBacked: false },
-  flashcards: { icon: HelpCircle, label: "❓ Flashcards", className: "section-flashcards", evidenceBacked: false },
-  referenceNote: { icon: FileText, label: "📚 Reference Note", className: "section-reference", evidenceBacked: false },
-} as const;
+/**
+ * Icon per `SectionIconName`. A name this build does not know falls back to
+ * the generic mark, so the server can plan an archetype section the client has
+ * never heard of and it still renders with a heading and a body.
+ */
+const SECTION_ICONS: Record<string, LucideIcon> = {
+  overview: BookOpen,
+  memory: Lightbulb,
+  clinical: Stethoscope,
+  keypoints: List,
+  traps: AlertTriangle,
+  flashcards: HelpCircle,
+  reference: FileText,
+  drug: Pill,
+  micro: Bug,
+  anatomy: PersonStanding,
+  pathway: GitBranch,
+  procedure: Scissors,
+  data: BarChart3,
+  compare: Columns2,
+};
 
-type JsonSectionKey = keyof typeof JSON_SECTION_CONFIG;
+const FALLBACK_SECTION_ICON = List;
+
+const sectionIcon = (name: string | undefined): LucideIcon =>
+  (name && SECTION_ICONS[name]) || FALLBACK_SECTION_ICON;
 
 const SECTION_LABEL_RE = /^(Mechanism|Pathophysiology|Key associations|Definition|Key Associations(?:\s*\/\s*Features)?|Diagnosis|Management|Prognosis|Complications?|Workup|Avoid|Follow[- ]?up)(\s*[:：])/i;
 
@@ -1323,24 +1347,19 @@ const OutputSection = ({
   }
 
   // ── JSON renderer ────────────────────────────────────────────────────────
-  const JSON_SECTION_ORDER: JsonSectionKey[] = [
-    "overview",
-    "memoryHooks",
-    "clinicalApproach",
-    "keyPoints",
-    "examTraps",
-    "flashcards",
-    "referenceNote",
-  ];
+  // The sheet's own plan when it has one, the legacy six otherwise. The plan
+  // arrives in a __meta frame ahead of the model's first byte, so the shape is
+  // settled before any content lands and the skeleton never reflows.
+  const sectionOrder = renderOrder(sheet);
 
   // Every section keeps its slot for the whole generation, so the document
   // never changes shape — placeholders are filled in rather than replaced.
   // A section renders its content only once its JSON has closed; before that
   // it would show half a sentence and then reflow.
-  const isReady = (key: JsonSectionKey) => !isStreaming || !!streamedKeys?.includes(key);
+  const isReady = (key: string) => !isStreaming || !!streamedKeys?.includes(key);
   // Sections arrive in order, so the first one not yet complete is in flight.
   const writingKey = isStreaming
-    ? JSON_SECTION_ORDER.find((key) => !isReady(key))
+    ? sectionOrder.find((spec) => !isReady(spec.key))?.key
     : undefined;
 
   // Group active enhancements by anchor so they can be injected inline.
@@ -1426,23 +1445,24 @@ const OutputSection = ({
         />
       </div>
 
-      {JSON_SECTION_ORDER.map((key, idx) => {
-        const config = JSON_SECTION_CONFIG[key];
-        const Icon = config.icon;
+      {sectionOrder.map((spec, idx) => {
+        const key = spec.key;
+        const Icon = sectionIcon(spec.icon);
         const isReference = key === "referenceNote";
         const ready = isReady(key);
         const writing = key === writingKey;
         const showEvidenceBadge =
-          ready && citationState === "found" && config.evidenceBacked;
+          ready && citationState === "found" && !!spec.evidenceBacked;
 
+        const body = sectionBody(sheet, key);
         const copyText =
           key === "flashcards"
             ? (sheet.flashcards ?? [])
                 .map((c) => `Q: [${c.tag}] ${c.question}\nA: ${c.answer}`)
                 .join("\n\n")
-            : Array.isArray(sheet[key])
-            ? (sheet[key] as string[]).map((item, i) => `${i + 1}. ${item}`).join("\n")
-            : (sheet[key] as string) ?? "";
+            : Array.isArray(body)
+            ? body.map((item, i) => `${i + 1}. ${item}`).join("\n")
+            : body ?? "";
 
         return (
           <div
@@ -1481,15 +1501,13 @@ const OutputSection = ({
                     color: ready || writing ? "var(--fg)" : "var(--fg-muted)",
                   }}
                 >
-                  {config.label}
-                  {key === "overview" && sheet.topicEmoji && (
+                  {spec.title}
+                  {idx === 0 && sheet.topicEmoji && (
                     <span className="ml-2 text-base">{sheet.topicEmoji}</span>
                   )}
                 </h3>
                 {showEvidenceBadge && <EvidenceBadge onClick={scrollToReference} />}
-                {ready && key === "overview" && modelUsed && (
-                  <ModelBadge model={modelUsed} />
-                )}
+                {ready && idx === 0 && modelUsed && <ModelBadge model={modelUsed} />}
               </div>
               <div className="flex items-center gap-1">
                 {ready ? (
@@ -1527,10 +1545,10 @@ const OutputSection = ({
                 <SectionSkeleton variant="sheet-body" />
               ) : key === "flashcards" ? (
                 <FlashcardsSection cards={sheet.flashcards ?? []} />
-              ) : key === "overview" || key === "clinicalApproach" ? (
+              ) : key !== "referenceNote" && spec.kind === "prose" ? (
                 <div className="text-sm text-muted-foreground leading-relaxed">
                   {renderJsonText(
-                    (sheet[key] as string) ?? "",
+                    typeof body === "string" ? body : "",
                     key,
                     handleKeywordClick,
                     renderInline,
@@ -1557,7 +1575,7 @@ const OutputSection = ({
                 </>
               ) : (
                 renderArraySection(
-                  sheet[key] as string[],
+                  Array.isArray(body) ? body : [],
                   key,
                   renderInline,
                   collapsedByAnchor,
