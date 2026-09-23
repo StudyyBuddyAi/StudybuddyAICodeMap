@@ -97,14 +97,15 @@ export interface SheetSource {
  */
 export type GroundingLevel = "full" | "partial" | "none";
 
-/** The sheet sections the model can report as uncovered by the context. */
-export type SheetSectionKey =
-  | "overview"
-  | "clinicalApproach"
-  | "keyPoints"
-  | "examTraps"
-  | "memoryHooks"
-  | "flashcards";
+/**
+ * A section key the model can report as uncovered by the context.
+ *
+ * Open rather than a union: which sections a sheet has depends on its plan, so
+ * a drug sheet reports "adverseEffects" and a pathway sheet "cofactors". The
+ * plan supplies the reader-facing label — see `sectionLabel` in
+ * src/lib/grounding.ts.
+ */
+export type SheetSectionKey = string;
 
 /**
  * The model's own declaration of which sections it had to write from general

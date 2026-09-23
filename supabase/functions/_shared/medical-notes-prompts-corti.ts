@@ -27,31 +27,15 @@
  *   Enhance — the clinical tie-in ran past its 50-word cap.
  */
 import { buildNotesPrompts, type NotesPromptInput } from "./medical-notes-prompts.ts";
+import { resolveSheetPlan, sectionQuota, type PlannedSection } from "./sheet-plan.ts";
 
 const CARDS_FORMAT_MARKER = "OUTPUT FORMAT — copy this structure exactly:";
 
-const GATES: Record<string, { hooks: string; keyPoints: string; traps: string; cards: string; clinical: string }> = {
-  Concise: {
-    hooks: "exactly 3",
-    keyPoints: "exactly 5",
-    traps: "exactly 3",
-    cards: "exactly 3",
-    clinical: "ONLY Diagnosis, Management (first-line only) and Complications (max 2). Do NOT write Workup, Second-line, Definitive or Avoid lines at all",
-  },
-  Moderate: {
-    hooks: "3 or 4",
-    keyPoints: "6 to 8",
-    traps: "exactly 4",
-    cards: "exactly 4",
-    clinical: "every subsection, at moderate depth",
-  },
-  Detailed: {
-    hooks: "exactly 5",
-    keyPoints: "8 to 10",
-    traps: "5 or 6",
-    cards: "exactly 5",
-    clinical: "every subsection, fully expanded",
-  },
+/** Deck size by length. Every other count now comes from the plan. */
+const CARD_COUNTS: Record<string, string> = {
+  Concise: "exactly 3",
+  Moderate: "exactly 4",
+  Detailed: "exactly 5",
 };
 
 function cardsFormatBlock(count: number, topic: string): string {
@@ -80,13 +64,19 @@ YOUR OUTPUT:
 - The last line of your reply is the answer of card ${count}. Do not add tag legends, notes, rule reminders or any other text after it.`;
 }
 
-function sheetChecklist(length: string): string {
-  const gate = GATES[length] ?? GATES.Concise;
+/**
+ * The counts restated as the last thing the model reads, where Corti's models
+ * attend to them. Built from the plan so it cannot drift from the schema above
+ * it — the two used to be separate lists of the same six sections.
+ */
+function sheetChecklist(plan: PlannedSection[], length: string): string {
+  const quotas = plan.map((s) => `${s.key} ${sectionQuota(s)}`).join("; ");
+  const cards = CARD_COUNTS[length] ?? CARD_COUNTS.Concise;
   return `
 
 FINAL CHECK — verify each point before you write the closing }:
-- Length is "${length}": memoryHooks ${gate.hooks} items; keyPoints ${gate.keyPoints} items; examTraps ${gate.traps} items; flashcards ${gate.cards} items.
-- clinicalApproach contains ${gate.clinical}.
+- The sheet has exactly these keys, in this order: ${plan.map((s) => s.key).join(", ")}, flashcards, referenceNote, sourceCoverage. Do not add a section that is not on that list, and do not leave one out.
+- Length is "${length}": ${quotas}; flashcards ${cards} items.
 - Write for the audience and exam the request names. A retrieved passage from a pediatrics or adult textbook does not narrow the audience.
 - sourceCoverage must agree with itself: "full" means "uncovered" is empty; "none" lists every section; "partial" lists at least one section but not all of them.
 - referenceNote is a finished sentence — never the instruction text in angle brackets.`;
@@ -124,7 +114,18 @@ export function buildCortiNotesPrompts(input: NotesPromptInput): { systemPrompt:
       systemPrompt = systemPrompt.slice(0, at) + cardsFormatBlock(count, input.notes.trim()) + memoryTail;
     }
   } else {
-    systemPrompt += sheetChecklist(input.length || "Concise");
+    const length = input.length || "Concise";
+    // Mirrors the fallback in buildNotesPrompts, so the checklist always
+    // describes the same sections the schema above it asked for.
+    const plan = input.plan?.length
+      ? input.plan
+      : resolveSheetPlan({
+          archetype: "condition",
+          examMode: input.examMode,
+          difficulty: input.difficulty,
+          length,
+        });
+    systemPrompt += sheetChecklist(plan, length);
   }
 
   return { systemPrompt, userContent: base.userContent };

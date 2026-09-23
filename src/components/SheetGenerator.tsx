@@ -51,7 +51,7 @@ import {
 import GroundingNotice from "@/components/GroundingNotice";
 import SheetSources from "@/components/SheetSources";
 import { reconcileGroundingLevel, resolveGroundingLevel } from "@/lib/grounding";
-import { parsePlan, renderOrder, sectionHasBody } from "@/lib/sheet-plan";
+import { parsePlan, renderOrder, resolvePlan, sectionHasBody } from "@/lib/sheet-plan";
 import type { SheetSectionSpec } from "@/types/generated-sheet";
 import { applySourceLabels } from "@/lib/source-labels";
 import { fetchBestCitation, type CitationResult } from "@/lib/citation";
@@ -1247,6 +1247,7 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
         <GroundingNotice
           level={resolveGroundingLevel(sheet)}
           coverage={sheet.sourceCoverage}
+          plan={resolvePlan(sheet)}
           reason={
             sheet.groundingLevel !== "none"
               ? undefined

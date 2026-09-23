@@ -54,9 +54,9 @@ const KINDS: readonly SectionKind[] = ["prose", "list"];
  */
 export const LEGACY_PLAN: readonly SheetSectionSpec[] = [
   { key: "overview", title: "Overview", kind: "prose", icon: "overview", evidenceBacked: true },
-  { key: "memoryHooks", title: "Memory Hooks", kind: "list", icon: "memory", evidenceBacked: false },
   { key: "clinicalApproach", title: "Clinical Approach", kind: "prose", icon: "clinical", evidenceBacked: true },
   { key: "keyPoints", title: "Key Points", kind: "list", icon: "keypoints", evidenceBacked: true },
+  { key: "memoryHooks", title: "Memory Hooks", kind: "list", icon: "memory", evidenceBacked: false },
   { key: "examTraps", title: "Exam Traps", kind: "list", icon: "traps", evidenceBacked: false },
 ];
 

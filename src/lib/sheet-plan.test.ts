@@ -89,12 +89,14 @@ describe("resolvePlan / renderOrder", () => {
     ]);
   });
 
-  it("lays a planless sheet out exactly as it always was", () => {
+  it("lays a planless sheet out with the legacy sections, aids last", () => {
+    // Content first, then the sections that summarise it. Memory Hooks used to
+    // sit second, ahead of the Clinical Approach it summarises.
     expect(renderOrder(empty).map((s) => s.key)).toEqual([
       "overview",
-      "memoryHooks",
       "clinicalApproach",
       "keyPoints",
+      "memoryHooks",
       "examTraps",
       "flashcards",
       "referenceNote",

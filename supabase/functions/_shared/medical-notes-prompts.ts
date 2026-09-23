@@ -13,8 +13,37 @@
  */
 import type { RagChunk } from "./rag.ts";
 import { MEMORY_FOLLOWUP_INSTRUCTION } from "./memory.ts";
+import { DEFAULT_SHEET_PLAN, resolveSheetPlan, sectionQuota, type PlannedSection } from "./sheet-plan.ts";
+import type { LengthSetting } from "./sheet-sections.ts";
 
 export type PromptFamily = "haiku" | "gptOss";
+
+/**
+ * The deck's size and tag mix by length. Cards are not a planned section — the
+ * deck is its own contract — so this is the one count the plan does not carry.
+ */
+const CARD_MIX: Record<LengthSetting, string> = {
+  Concise: "exactly 3 items, mix: 1x Next Step, 1x Diagnosis, 1x Mechanism",
+  Moderate: "exactly 4 items, mix: 1x Next Step, 1x Diagnosis, 1x Mechanism, 1x Complication",
+  Detailed: "exactly 5 items, mix: 2x Next Step, 1x Diagnosis, 1x Mechanism, 1x Complication",
+};
+
+export const asGateLength = (v: string): LengthSetting =>
+  v === "Moderate" || v === "Detailed" ? v : "Concise";
+
+/**
+ * One line of the JSON skeleton. A section's brief is written on a single line
+ * with escaped newlines, matching how the placeholder has always been given —
+ * a literal newline inside a JSON string value would break the shape the model
+ * is being shown.
+ */
+function schemaLine(section: PlannedSection): string {
+  const brief = section.brief.replace(/\n/g, "\\n").replace(/"/g, "'");
+  if (section.kind === "list") {
+    return `  "${section.key}": [\n    "<${brief} One item per element, no leading number.>",\n    "<...>"\n  ],`;
+  }
+  return `  "${section.key}": "<${brief}>",`;
+}
 
 export interface NotesPromptInput {
   notes: string;
@@ -35,6 +64,13 @@ export interface NotesPromptInput {
   ragChunks: RagChunk[];
   /** True when prior memory turns go into the messages. */
   hasMemory: boolean;
+  /**
+   * The sections this sheet must contain. Resolved by the handler from the
+   * topic's archetype and the request's settings, and sent to the client in
+   * the same shape, so the prompt and the renderer can never disagree about
+   * what the sheet holds. Empty or absent for cards, explain and enhance.
+   */
+  plan?: PlannedSection[];
   family: PromptFamily;
 }
 
@@ -63,6 +99,13 @@ export function buildNotesPrompts(input: NotesPromptInput): { systemPrompt: stri
     const mode = examMode || "General";
     const diff = difficulty || "Basic";
     const len = length || "Concise";
+    // A caller that sends no plan (an eval harness, a direct call) still gets
+    // a coherent sheet: the condition archetype at the requested settings,
+    // which is the shape a sheet has always had.
+    const plan: PlannedSection[] =
+      input.plan?.length
+        ? input.plan
+        : resolveSheetPlan({ archetype: "condition", examMode: mode, difficulty: diff, length: len });
 
     const retrievedChunks = ragChunks.length;
     const grounded = retrievedChunks > 0;
@@ -167,6 +210,16 @@ HARD RULES:
 - Mix clinical vignettes and concept recall cards.`;
 
     // ── SHARED SHEET OUTPUT CONTRACT ───────────────────────────────────────
+    // The JSON skeleton and the length gate are generated from the plan rather
+    // than written out, so the sections a topic gets and the counts each one
+    // must hit come from one place (_shared/sheet-plan.ts) instead of being
+    // restated in prose here, again in the Corti checklist, and again in the
+    // scorer. A sheet cannot ask for a section the plan did not choose.
+    const gateLength = asGateLength(len);
+    const schemaLines = plan.map(schemaLine).join("\n");
+    const gateLines = plan.map((s) => `- ${s.key}: ${sectionQuota(s)}`).join("\n");
+    const coverageKeys = [...plan.map((s) => s.key), "flashcards"].join(", ");
+
     // Identical JSON schema + length gate + emoji set appended by BOTH model
     // families. Defined once here; the only per-family difference is the
     // preamble (gptOss = terse; haiku = explicit input/mode rules).
@@ -184,26 +237,13 @@ FORMATTING RULES (non-negotiable):
 - Numbered list items inside array fields: do NOT include the leading
   number (e.g. "1."). Each array element is already one item.
 
-OUTPUT — return exactly this JSON shape:
+OUTPUT — return exactly this JSON shape. Write every key listed, in this order,
+and no other keys:
 
 {
   "topicEmoji": "<one emoji matching the topic>",
   "topic": "<normalized topic name, e.g. Heart Failure — plain text, no emoji>",
-  "overview": "<pathophysiology-first conceptual foundation. MANDATORY STRUCTURE — each sub-section on its own line using \\n before the label. Exact format:\\nMechanism: **Bold the core defect** — one sentence on the cellular or molecular trigger.\\nPathophysiology: 2-3 sentences tracing how that defect produces the clinical syndrome. Use arrows → to show flow. Bold **key mechanisms**.\\nKey associations:\\n1. **Buzzword** → why it occurs mechanistically\\n2. **Classic presentation** → the mechanism behind it\\n3. **High-yield link** → pathophysiologic explanation\\nSTRICT RULES: NO drug names. NO diagnostic criteria (no 'gold standard is...'). NO management steps. NO investigations. Those belong in Clinical Approach only. Each label starts after a \\n. Do NOT merge into one paragraph.>",
-  "memoryHooks": [
-    "<mnemonic one-liner 1>",
-    "<mnemonic one-liner 2>",
-    "<mnemonic one-liner 3>"
-  ],
-  "clinicalApproach": "<Complete clinical decision section — this is the ONLY section with diagnostic criteria, drug names, and management steps. MANDATORY STRUCTURE — each sub-section on its own line using \\n before the label. Exact format:\\nDiagnosis: Gold standard → what it shows. Key distinguishing findings.\\nWorkup: what to order and why — labs, imaging, scores.\\nManagement:\\nFirst-line → drug + dose rationale.\\nSecond-line → when and why to escalate.\\nDefinitive → surgical or specialist triggers.\\nComplications: what goes wrong if undertreated — bold **the dangerous ones**.\\nAvoid: interventions or drugs contraindicated in this condition.\\nBe complete here — do not hold back detail. This section should be the most clinically dense section on the sheet.>",
-  "keyPoints": [
-    "<If X → think Y one-liner 1>",
-    "<If X → think Y one-liner 2>"
-  ],
-  "examTraps": [
-    "<trap one-liner 1>",
-    "<trap one-liner 2>"
-  ],
+${schemaLines}
   "flashcards": [
     {
       "tag": "Next Step",
@@ -214,7 +254,7 @@ OUTPUT — return exactly this JSON shape:
   "referenceNote": "${referenceNote}",
   "sourceCoverage": {
     "level": "full | partial | none",
-    "uncovered": ["<zero or more of: overview, clinicalApproach, keyPoints, examTraps, memoryHooks, flashcards>"]
+    "uncovered": ["<zero or more of: ${coverageKeys}>"]
   }
 }
 
@@ -226,33 +266,11 @@ SOURCE COVERAGE — report honestly, after writing the rest of the sheet:
 - When in doubt, choose the weaker level. Over-claiming source backing is the worst possible error here —
   worse than under-claiming it.
 
-LENGTH GATE — apply strictly based on the Length setting "${len}":
+LENGTH GATE — Length is "${len}". These are HARD CAPS, whatever the topic's
+complexity:
 
-If Length is "Concise":
-- overview: Mechanism (1 sentence) + Pathophysiology (2 sentences) + Key associations (max 3 items). No more.
-- clinicalApproach: Diagnosis (1-2 sentences, gold standard only) + Management (first-line only, 1-2 sentences) + Complications (max 2 items). Omit Workup, Second-line, Definitive, Avoid sections entirely.
-- memoryHooks: exactly 3 items
-- keyPoints: exactly 5 items
-- examTraps: exactly 3 items
-- flashcards: exactly 3 items, mix: 1x Next Step, 1x Diagnosis, 1x Mechanism. All clinical vignettes.
-
-If Length is "Moderate":
-- overview: Mechanism (1 sentence) + Pathophysiology (2-3 sentences) + Key associations (max 4 items).
-- clinicalApproach: all subsections at moderate depth, no padding.
-- memoryHooks: 3-4 items
-- keyPoints: 6-8 items
-- examTraps: 4 items
-- flashcards: exactly 4 items, mix: 1x Next Step, 1x Diagnosis, 1x Mechanism, 1x Complication. All clinical vignettes.
-
-If Length is "Detailed":
-- overview: Mechanism (1-2 sentences) + Pathophysiology (3-4 sentences) + Key associations (5-6 items).
-- clinicalApproach: all subsections fully expanded, include edge cases and nuances.
-- memoryHooks: 5 items
-- keyPoints: 8-10 items
-- examTraps: 5-6 items
-- flashcards: exactly 5 items, mix: 2x Next Step, 1x Diagnosis, 1x Mechanism, 1x Complication. All clinical vignettes.
-
-These are HARD CAPS. Do not exceed them regardless of topic complexity.
+${gateLines}
+- flashcards: ${CARD_MIX[gateLength]}. All clinical vignettes.
 
 EMOJI OPTIONS:
 🫀 cardiac, 🩸 hematology, 🧠 neuro, 🫁 pulmonary, 🦴 ortho, 🩺 general,

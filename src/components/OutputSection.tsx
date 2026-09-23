@@ -282,7 +282,18 @@ const FALLBACK_SECTION_ICON = List;
 const sectionIcon = (name: string | undefined): LucideIcon =>
   (name && SECTION_ICONS[name]) || FALLBACK_SECTION_ICON;
 
-const SECTION_LABEL_RE = /^(Mechanism|Pathophysiology|Key associations|Definition|Key Associations(?:\s*\/\s*Features)?|Diagnosis|Management|Prognosis|Complications?|Workup|Avoid|Follow[- ]?up)(\s*[:：])/i;
+/**
+ * The bolded label at the head of a line in a prose section
+ * ("Mechanism:", "Absorption:", "Rate-limiting enzyme:").
+ *
+ * This was a fixed alternation of the labels the two disease-shaped sections
+ * used. Every archetype writes its own — a drug has Class / Target / Effect, a
+ * pathway has Purpose / Steps / Location — so matching a short capitalised
+ * phrase followed by a colon keeps them all working without the regex having
+ * to learn each new section. The length cap and the requirement that the line
+ * *start* with it are what stop an ordinary sentence being mistaken for one.
+ */
+const SECTION_LABEL_RE = /^([A-Z][A-Za-z][A-Za-z ,/&-]{0,30}?)(\s*[:：])(?=\s|$)/;
 
 type KeywordClickHandler = (keyword: string, rect: DOMRect, anchor: string) => void;
 

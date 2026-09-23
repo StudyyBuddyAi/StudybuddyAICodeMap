@@ -20,6 +20,7 @@ import { fileURLToPath } from "node:url";
 import { parseSheetOutput } from "../../src/lib/parse-partial-sheet.ts";
 import { parseFlashcardsFromOutput } from "../../src/lib/parse-flashcards.ts";
 import { PRICES } from "./cases.ts";
+import { resolveSheetPlan, type PlannedSection } from "../../supabase/functions/_shared/sheet-plan.ts";
 import type { RunRecord } from "./run.ts";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -52,11 +53,49 @@ const sentences = (s: string) =>
 const bolds = (s: string) => (s.match(/\*\*[^*]+\*\*/g) ?? []).length;
 const inRange = (n: number, lo: number, hi: number) => n >= lo && n <= hi;
 
-const LENGTH_GATE: Record<string, { hooks: [number, number]; keyPoints: [number, number]; traps: [number, number]; cards: [number, number] }> = {
-  Concise: { hooks: [3, 3], keyPoints: [5, 5], traps: [3, 3], cards: [3, 3] },
-  Moderate: { hooks: [3, 4], keyPoints: [6, 8], traps: [4, 4], cards: [4, 4] },
-  Detailed: { hooks: [5, 5], keyPoints: [8, 10], traps: [5, 6], cards: [5, 5] },
+/** Deck size by length — the one sheet count the plan does not carry. */
+const CARD_GATE: Record<string, [number, number]> = {
+  Concise: [3, 3],
+  Moderate: [4, 4],
+  Detailed: [5, 5],
 };
+
+/**
+ * The sections this sheet should have had.
+ *
+ * Taken from the plan the server sent with the response, so the check follows
+ * whatever the settings and the topic's archetype actually asked for rather
+ * than a list of six names copied into this file. A record from before the
+ * plan existed falls back to resolving one the same way the server would.
+ */
+function planFor(r: RunRecord): PlannedSection[] {
+  const sent = r.plan;
+  if (sent?.length) {
+    const byKey = new Map(resolveAll(r).map((s) => [s.key, s]));
+    // Resolve each sent key back to its template to recover the item counts,
+    // which are server-side and never cross the wire.
+    return sent.map((s) => byKey.get(s.key) ?? { ...s, brief: "", budget: "" });
+  }
+  return resolveAll(r);
+}
+
+function resolveAll(r: RunRecord): PlannedSection[] {
+  return resolveSheetPlan({
+    archetype: "condition",
+    examMode: String(r.case.body.examMode ?? "General"),
+    difficulty: String(r.case.body.difficulty ?? "Intermediate"),
+    length: String(r.case.body.length ?? "Concise"),
+  });
+}
+
+/**
+ * A prose section's internal structure: the labelled lines its brief asked
+ * for. Derived from the brief rather than hard-coded, so a section this file
+ * has never heard of is still checked for the structure it was told to use.
+ */
+function expectedLabels(section: PlannedSection): string[] {
+  return [...section.brief.matchAll(/^([A-Z][A-Za-z ,/&-]{0,30}?):/gm)].map((m) => m[1]);
+}
 
 const CLINICAL_TAGS = new Set(["diagnosis", "mechanism", "next step", "complication", "association"]);
 
@@ -70,26 +109,57 @@ function scoreSheet(r: RunRecord): Check[] {
   if (!parsed) return checks;
   const s = parsed.sheet;
 
-  for (const f of ["overview", "clinicalApproach", "referenceNote", "topic", "topicEmoji"] as const) {
+  for (const f of ["referenceNote", "topic", "topicEmoji"] as const) {
     checks.push({ name: `${f} filled`, pass: typeof s[f] === "string" && s[f]!.trim().length > 0 });
   }
 
-  const gate = LENGTH_GATE[String(r.case.body.length)] ?? LENGTH_GATE.Concise;
-  checks.push({ name: "gate: memoryHooks", pass: inRange(s.memoryHooks.length, ...gate.hooks), detail: String(s.memoryHooks.length) });
-  checks.push({ name: "gate: keyPoints", pass: inRange(s.keyPoints.length, ...gate.keyPoints), detail: String(s.keyPoints.length) });
-  checks.push({ name: "gate: examTraps", pass: inRange(s.examTraps.length, ...gate.traps), detail: String(s.examTraps.length) });
-  checks.push({ name: "gate: flashcards", pass: inRange(s.flashcards.length, ...gate.cards), detail: String(s.flashcards.length) });
+  const plan = planFor(r);
+  const sections = s.sections ?? {};
 
-  const ov = s.overview;
-  checks.push({
-    name: "overview structure",
-    pass: /(^|\n)\s*Mechanism:/.test(ov) && /\n\s*Pathophysiology:/.test(ov) && /\n\s*Key associations:/.test(ov),
-  });
-  checks.push({ name: "overview uses bold", pass: bolds(ov) > 0 });
-  checks.push({ name: "clinicalApproach structure", pass: /Diagnosis:/.test(s.clinicalApproach) && /Management:/.test(s.clinicalApproach) });
+  // Every planned section present, and nothing the plan did not ask for. Both
+  // directions matter: a missing section is a hole in the sheet, and an extra
+  // one renders under a heading the plan has no title for.
+  const planned = plan.map((p) => p.key);
+  const got = Object.keys(sections);
+  const missing = planned.filter((k) => !got.includes(k));
+  const extra = got.filter((k) => !planned.includes(k));
+  checks.push({ name: "every planned section present", pass: missing.length === 0, detail: missing.join(",") });
+  checks.push({ name: "no unplanned sections", pass: extra.length === 0, detail: extra.join(",") });
+
+  // Per-section quota, from the plan rather than a copy of the length gate.
+  for (const section of plan) {
+    const body = sections[section.key];
+    const filled = Array.isArray(body) ? body.length > 0 : typeof body === "string" && body.trim().length > 0;
+    checks.push({ name: `${section.key} filled`, pass: filled });
+    if (!filled) continue;
+
+    if (section.kind === "list" && section.items) {
+      checks.push({
+        name: `gate: ${section.key}`,
+        pass: Array.isArray(body) && inRange(body.length, ...section.items),
+        detail: `${Array.isArray(body) ? body.length : "not a list"}/${section.items.join("-")}`,
+      });
+    } else if (typeof body === "string") {
+      // The labelled sub-headings this section's brief specified.
+      const labels = expectedLabels(section);
+      if (labels.length) {
+        const found = labels.filter((l) => new RegExp(`(^|\\n)\\s*${l}\\s*:`).test(body));
+        checks.push({
+          name: `${section.key} structure`,
+          pass: found.length === labels.length,
+          detail: `${found.length}/${labels.length}`,
+        });
+      }
+      checks.push({ name: `${section.key} uses bold`, pass: bolds(body) > 0 });
+    }
+  }
+
+  const cardGate = CARD_GATE[String(r.case.body.length)] ?? CARD_GATE.Concise;
+  checks.push({ name: "gate: flashcards", pass: inRange(s.flashcards.length, ...cardGate), detail: String(s.flashcards.length) });
+
   checks.push({
     name: "no template placeholder leak",
-    pass: !/<Choose|<one emoji|<mnemonic|<If X|<trap one-liner|<full vignette|If "full":/.test(raw),
+    pass: !/<Choose|<one emoji|<mnemonic|<If X|<trap one-liner|<full vignette|One item per element|Structure it as:|If "full":/.test(raw),
   });
   checks.push({ name: "sourceCoverage valid", pass: !!s.sourceCoverage, detail: s.sourceCoverage?.level });
   if (r.retrievedChunks === 0 && s.sourceCoverage) {

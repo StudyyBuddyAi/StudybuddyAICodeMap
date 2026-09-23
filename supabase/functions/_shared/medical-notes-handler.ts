@@ -31,7 +31,9 @@ import {
   type MemoryTurn,
 } from "./memory.ts";
 import { buildNotesPrompts, type NotesPromptInput } from "./medical-notes-prompts.ts";
-import { resolveSheetPlan } from "./sheet-plan.ts";
+import { resolveSheetPlan, toWirePlan } from "./sheet-plan.ts";
+import { classifyArchetype } from "./archetype.ts";
+import { DEFAULT_ARCHETYPE } from "./sheet-sections.ts";
 import { buildCortiNotesPrompts } from "./medical-notes-prompts-corti.ts";
 import { asCortiModel, cortiChatCompletion, cortiConfigFromEnv, type CortiModel } from "./corti.ts";
 
@@ -59,6 +61,8 @@ const STANDARD_MODEL = "openai/gpt-oss-20b";
 const FALLBACK_MODEL = "anthropic/claude-haiku-4.5";
 const DEFAULT_PREMIUM_MODEL: CortiModel = "corti-s1-instant";
 const SOURCE_LABEL_MODEL = "openai/gpt-oss-20b";
+/** One word out; the cheapest model is ample and the fastest is the point. */
+const ARCHETYPE_MODEL = "openai/gpt-oss-20b";
 
 const ANON_PREMIUM_LIMIT = 1;
 const FREE_PREMIUM_LIMIT = 3;
@@ -236,7 +240,6 @@ export async function handleMedicalNotes(req: Request): Promise<Response> {
     const usageKind = cardsOnly ? "cards" : "sheet";
     // A sectioned JSON document, as opposed to a card deck or a prose reply.
     const isSheetMode = !cardsOnly && !explainMode && !enhanceMode;
-    const sheetPlan = isSheetMode ? resolveSheetPlan() : [];
 
     // ── Pre-model work, concurrently ────────────────────────────────────────
     // Grounding: sheet/cards only; explain/enhance are single-item follow-ups.
@@ -253,6 +256,14 @@ export async function handleMedicalNotes(req: Request): Promise<Response> {
       ? retrieveWithRetry(authClient, OPENROUTER_API_KEY, searchString, groundingTopK, groundingThreshold)
           .then((r) => ({ ...r, ms: since(retrievalStartedAt) }))
       : Promise.resolve({ chunks: [] as RagChunk[], attempts: 0, error: null, ms: 0 });
+
+    // Archetype: what kind of thing this is, which decides the sheet's
+    // sections. Runs beside retrieval rather than before it, so it costs no
+    // wall-clock time — retrieval is far slower — and fails open to the
+    // condition archetype, the shape a sheet has always had.
+    const archetypePromise = isSheetMode
+      ? classifyArchetype(OPENROUTER_API_KEY, ARCHETYPE_MODEL, notes)
+      : Promise.resolve({ archetype: null, ms: 0, error: null });
 
     // Memory: the shared 10-turn window. enhance reads but never writes.
     const useMemoryFlag = typeof useMemory === "boolean" ? useMemory : true;
@@ -314,7 +325,23 @@ export async function handleMedicalNotes(req: Request): Promise<Response> {
       return { isProUser, isPremium, quota, ms: since(routingStartedAt) };
     })();
 
-    const [retrieval, memory, routing] = await Promise.all([retrievalPromise, memoryPromise, routingPromise]);
+    const [retrieval, memory, routing, archetype] = await Promise.all([
+      retrievalPromise,
+      memoryPromise,
+      routingPromise,
+      archetypePromise,
+    ]);
+
+    // The sections this sheet gets: archetype chooses the spine, exam mode and
+    // difficulty add to it, length sets the counts.
+    const sheetPlan = isSheetMode
+      ? resolveSheetPlan({
+          archetype: archetype.archetype,
+          examMode: body.examMode,
+          difficulty: body.difficulty,
+          length: body.length,
+        })
+      : [];
 
     if (routing.quota === "error") return json({ error: "quota_check_failed" }, 500);
     if (routing.quota === "exceeded") return json({ error: "quota_exceeded" }, 429);
@@ -368,6 +395,7 @@ export async function handleMedicalNotes(req: Request): Promise<Response> {
       groundingAttempted,
       ragChunks,
       hasMemory: memoryTurns.length > 0,
+      plan: sheetPlan,
     };
     const messagesFor = (p: { systemPrompt: string; userContent: string }) => [
       { role: "system" as const, content: p.systemPrompt },
@@ -430,6 +458,11 @@ export async function handleMedicalNotes(req: Request): Promise<Response> {
       cardsOnly: !!cardsOnly,
       explainMode: !!explainMode,
       enhanceMode: enhanceMode ?? null,
+      archetype: archetype.archetype ?? (isSheetMode ? DEFAULT_ARCHETYPE : null),
+      archetypeFallback: isSheetMode && archetype.archetype === null,
+      archetypeError: archetype.error,
+      archetypeMs: archetype.ms,
+      sections: sheetPlan.map((s) => s.key),
       groundingAttempted,
       retrievedChunks,
       retrievalAttempts: retrieval.attempts,
@@ -485,7 +518,7 @@ export async function handleMedicalNotes(req: Request): Promise<Response> {
         // and enhance are not sectioned documents.
         if (isSheetMode) {
           controller.enqueue(
-            encoder.encode(`data: ${JSON.stringify({ __meta: { plan: sheetPlan } })}\n\n`)
+            encoder.encode(`data: ${JSON.stringify({ __meta: { plan: toWirePlan(sheetPlan) } })}\n\n`)
           );
         }
         // Retrieval count/sources go out before any model bytes. Emitted only
