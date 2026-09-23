@@ -98,7 +98,7 @@ export const SECTIONS: Record<string, SectionTemplate> = {
 Mechanism: **Bold the core defect** — one sentence on the cellular or molecular trigger.
 Pathophysiology: trace how that defect produces the clinical syndrome. Use arrows → to show flow. Bold **key mechanisms**.
 Key associations: a numbered idea per line — **Buzzword** → why it occurs mechanistically.
-STRICT: no drug names, no diagnostic criteria, no management steps, no investigations. Those belong in other sections only.`
+Never put drug names, diagnostic criteria, management steps or investigations here — they belong in other sections only.`
   ),
   clinicalApproach: prose(
     "clinicalApproach",

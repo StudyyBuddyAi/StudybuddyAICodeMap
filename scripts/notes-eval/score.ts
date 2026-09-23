@@ -92,9 +92,14 @@ function resolveAll(r: RunRecord): PlannedSection[] {
  * A prose section's internal structure: the labelled lines its brief asked
  * for. Derived from the brief rather than hard-coded, so a section this file
  * has never heard of is still checked for the structure it was told to use.
+ *
+ * A label must be followed by content on the same line. Without that the
+ * brief's own "Structure it as:" preamble — which sits at the head of a line
+ * and ends there — counts as a required label, and every section carrying one
+ * fails a structure check it was always going to fail.
  */
 function expectedLabels(section: PlannedSection): string[] {
-  return [...section.brief.matchAll(/^([A-Z][A-Za-z ,/&-]{0,30}?):/gm)].map((m) => m[1]);
+  return [...section.brief.matchAll(/^([A-Z][A-Za-z ,/&-]{0,30}?):[ \t]+\S/gm)].map((m) => m[1]);
 }
 
 const CLINICAL_TAGS = new Set(["diagnosis", "mechanism", "next step", "complication", "association"]);
