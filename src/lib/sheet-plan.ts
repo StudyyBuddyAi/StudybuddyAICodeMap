@@ -82,9 +82,15 @@ export const FLASHCARDS_SPEC: SheetSectionSpec = {
   evidenceBacked: false,
 };
 
+/**
+ * Titled "Sources": it holds everything about where the sheet came from — the
+ * reference line, the citations and the library passages — which used to be
+ * spread over a "Reference Note" card and a separate panel below the sheet.
+ * The key keeps its old name so saved sheets still find their note.
+ */
 export const REFERENCE_NOTE_SPEC: SheetSectionSpec = {
   key: "referenceNote",
-  title: "Reference Note",
+  title: "Sources",
   kind: "prose",
   icon: "reference",
   evidenceBacked: false,

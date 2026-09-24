@@ -21,7 +21,6 @@ import {
   Plus,
   RefreshCw,
   Share2,
-  Zap,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import OutputSection, { type CitationState } from "@/components/OutputSection";
@@ -31,6 +30,7 @@ import SectionSkeleton from "@/components/SectionSkeleton";
 import SheetComposer from "@/components/sheet/SheetComposer";
 import SheetSettings from "@/components/sheet/SheetSettings";
 import SheetTopicBar from "@/components/sheet/SheetTopicBar";
+import SheetFinish, { type SheetDeck } from "@/components/sheet/SheetFinish";
 import { SectionsMenu, SheetSectionRail } from "@/components/sheet/SheetSections";
 import {
   TOPIC_BAR_BUTTON,
@@ -60,7 +60,6 @@ import {
   isJsonSheet,
 } from "@/types/generated-sheet";
 import GroundingNotice from "@/components/GroundingNotice";
-import SheetSources from "@/components/SheetSources";
 import { reconcileGroundingLevel, resolveGroundingLevel } from "@/lib/grounding";
 import { parsePlan, renderOrder, resolvePlan } from "@/lib/sheet-plan";
 import type { SheetSectionSpec } from "@/types/generated-sheet";
@@ -698,6 +697,15 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
     }
   };
 
+  const deck: SheetDeck | null = hasDeck
+    ? {
+        count: deckCount,
+        saved: deckSaved,
+        onSave: () => saveDeck(),
+        onReview: () => navigate("/library"),
+      }
+    : null;
+
   /** Back to the composer, keeping the settings for the next sheet. */
   const newSheet = () => {
     if (loading) return;
@@ -960,6 +968,7 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
               level={resolveGroundingLevel(sheet)}
               coverage={sheet.sourceCoverage}
               plan={resolvePlan(sheet)}
+              onShowSources={sheet.sources?.length ? () => jumpToSection("referenceNote") : undefined}
               reason={
                 sheet.groundingLevel !== "none"
                   ? undefined
@@ -1019,36 +1028,27 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
                   streamedKeys={streamedKeys}
                   liveKey={loading ? liveKey : undefined}
                   showHeader={false}
+                  deck={deck ?? undefined}
                 />
               </m.div>
             )}
           </AnimatePresence>
 
-          {/* The library passages this sheet was built on. Self-hides when the
-              sheet has no sources. */}
-          {!loading && sheet && <SheetSources sources={sheet.sources ?? []} query={activeSettings.notes} />}
-
-          {!loading && (sheet || legacyOutput) && (
-            <div className="flex flex-wrap justify-center gap-3 pt-4">
-              <Button
-                variant="outline"
-                className="flex h-10 items-center gap-2 rounded-xl border-border px-4 text-sm font-medium hover:border-primary hover:bg-primary/10 hover:text-primary"
-                disabled={deckSaved || !hasDeck}
-                onClick={saveDeck}
-              >
-                <Zap className="h-4 w-4" />
-                {deckSaved ? "✓ Flashcards Saved" : "Save Flashcards"}
-              </Button>
-              <Button
-                variant="outline"
-                className="flex h-10 items-center gap-2 rounded-xl border-border px-4 text-sm font-medium hover:border-info hover:bg-info-soft hover:text-info"
-                onClick={() => navigate("/qbank")}
-              >
-                <Play className="h-4 w-4" />
-                Practice QBank
-              </Button>
-            </div>
-          )}
+          {/* Where the sheet ends: what to do with it now. Rises in when the
+              stream finishes, below everything, so nothing already read moves. */}
+          <AnimatePresence initial={false}>
+            {!loading && (sheet || legacyOutput) && (
+              <SheetFinish
+                key="finish"
+                topic={sheet?.topic?.trim() || firstLine(activeSettings.notes) || "this sheet"}
+                deck={deck}
+                onPractice={() => navigate("/qbank")}
+                onExport={() => window.print()}
+                onShare={handleShare}
+                onNewSheet={newSheet}
+              />
+            )}
+          </AnimatePresence>
         </div>
       </div>
 

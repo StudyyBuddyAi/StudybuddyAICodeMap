@@ -46,7 +46,7 @@ export function sheetToPlainText(
   }
 
   if (sheet.referenceNote?.trim()) {
-    parts.push(`Reference Note\n${sheet.referenceNote.trim()}`);
+    parts.push(`Sources\n${sheet.referenceNote.trim()}`);
   }
 
   parts.push("Generated with StudyBuddy AI");

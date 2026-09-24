@@ -66,11 +66,8 @@ export function useActiveSection(keys: string[], resetToken: unknown): string {
   }, [resetToken]); // eslint-disable-line react-hooks/exhaustive-deps -- reset per sheet only
 
   useEffect(() => {
-    const els = signature
-      .split("|")
-      .map((k) => document.querySelector<HTMLElement>(`[data-section-key="${k}"]`))
-      .filter((el): el is HTMLElement => !!el);
-    if (!els.length || typeof IntersectionObserver === "undefined") return;
+    const keyList = signature.split("|").filter(Boolean);
+    if (!keyList.length || typeof IntersectionObserver === "undefined") return;
 
     const observer = new IntersectionObserver(
       (entries) => {
@@ -84,8 +81,38 @@ export function useActiveSection(keys: string[], resetToken: unknown): string {
       },
       { rootMargin: "-20% 0px -70% 0px", threshold: 0 }
     );
-    els.forEach((el) => observer.observe(el));
-    return () => observer.disconnect();
+
+    // The list can arrive before its sections do: the document swaps in
+    // behind a short exit, so a single look finds an empty page and would
+    // never track anything. Observe what is there, and watch for the rest
+    // until every section is being tracked.
+    const tracked = new Set<string>();
+    const attach = () => {
+      for (const key of keyList) {
+        if (tracked.has(key)) continue;
+        const el = document.querySelector<HTMLElement>(`[data-section-key="${key}"]`);
+        if (el) {
+          observer.observe(el);
+          tracked.add(key);
+        }
+      }
+      return tracked.size === keyList.length;
+    };
+    let watcher: MutationObserver | null = null;
+    if (!attach() && typeof MutationObserver !== "undefined") {
+      watcher = new MutationObserver(() => {
+        if (attach()) {
+          watcher?.disconnect();
+          watcher = null;
+        }
+      });
+      watcher.observe(document.body, { childList: true, subtree: true });
+    }
+
+    return () => {
+      observer.disconnect();
+      watcher?.disconnect();
+    };
   }, [signature]);
 
   // At the top of the page no card has reached the band yet, and a section

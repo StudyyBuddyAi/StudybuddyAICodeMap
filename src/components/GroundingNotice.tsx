@@ -61,6 +61,8 @@ interface GroundingNoticeProps {
   reason?: NoticeReason;
   /** The sheet's plan, which names its sections for the uncovered list. */
   plan?: readonly { key: string; title: string }[];
+  /** Jumps to the sheet's Sources section. Omit when it has no passages. */
+  onShowSources?: () => void;
 }
 
 /**
@@ -69,7 +71,7 @@ interface GroundingNoticeProps {
  * "don't show again" — this is a property of the document, not a toast, and
  * it must reappear identically every time the sheet is reopened.
  */
-const GroundingNotice = ({ level, coverage, reason, plan }: GroundingNoticeProps) => {
+const GroundingNotice = ({ level, coverage, reason, plan, onShowSources }: GroundingNoticeProps) => {
   if (level === "full" || level === null) return null;
 
   const headline =
@@ -96,6 +98,18 @@ const GroundingNotice = ({ level, coverage, reason, plan }: GroundingNoticeProps
         )}
         <p style={{ ...BODY_STYLE, marginTop: headline || (level === "partial" && uncoveredLabels.length > 0) ? 4 : 0 }}>
           {VERIFY_LINE}
+          {onShowSources && (
+            <>
+              {" "}
+              <button
+                type="button"
+                onClick={onShowSources}
+                className="font-medium underline underline-offset-2 transition-colors hover:text-foreground"
+              >
+                See the sources
+              </button>
+            </>
+          )}
         </p>
       </div>
     </div>

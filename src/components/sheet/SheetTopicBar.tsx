@@ -1,6 +1,14 @@
 import { useEffect, useState, type ReactNode, type RefObject } from "react";
-import { AnimatePresence, m, useScroll, useSpring, useTransform } from "motion/react";
-import SheetProgress, { type GenerationStatus } from "@/components/SheetProgress";
+import {
+  AnimatePresence,
+  m,
+  useScroll,
+  useSpring,
+  useTransform,
+} from "motion/react";
+import SheetProgress, {
+  type GenerationStatus,
+} from "@/components/SheetProgress";
 import { SPRING_BAR, SPRING_POP, SWAP } from "@/lib/motion";
 import type { SheetSectionSpec } from "@/types/generated-sheet";
 
@@ -65,7 +73,9 @@ const SheetTopicBar = ({
   }, [streaming]);
 
   const total = progress.sections.length;
-  const ready = progress.sections.filter((s) => progress.readyKeys.includes(s.key)).length;
+  const ready = progress.sections.filter((s) =>
+    progress.readyKeys.includes(s.key),
+  ).length;
   const fraction = streaming ? (total ? ready / total : 0) : 1;
 
   // How far through the document the reader is. Measured against the page
@@ -83,7 +93,11 @@ const SheetTopicBar = ({
     if (travel <= 0) return 1;
     return Math.min(1, Math.max(0, (y - top) / travel));
   });
-  const readingProgress = useSpring(throughDocument, { stiffness: 200, damping: 30, mass: 0.4 });
+  const readingProgress = useSpring(throughDocument, {
+    stiffness: 200,
+    damping: 30,
+    mass: 0.4,
+  });
 
   return (
     <header
@@ -96,54 +110,57 @@ const SheetTopicBar = ({
       }}
     >
       <div className="relative border-b border-border pb-3 pt-3.5">
-        <div className="flex items-start gap-3">
-          <div className="min-w-0 flex-1">
-            <h1 className="flex min-w-0 items-center gap-2 [font-family:var(--app-font-serif)] text-xl font-medium leading-tight tracking-[-0.01em] text-foreground sm:text-2xl">
-              <AnimatePresence initial={false}>
-                {emoji && (
-                  <m.span
-                    key={emoji}
-                    aria-hidden
-                    className="shrink-0 text-lg sm:text-xl"
-                    initial={{ scale: 0.4, opacity: 0 }}
-                    animate={{ scale: 1, opacity: 1 }}
-                    exit={{ scale: 0.4, opacity: 0 }}
-                    transition={SPRING_POP}
-                  >
-                    {emoji}
-                  </m.span>
-                )}
-              </AnimatePresence>
-              <span className="truncate">{title}</span>
-            </h1>
-
-            {/* The second line: progress while it runs, then what the sheet is. */}
-            <div className="relative mt-1 h-4 overflow-hidden font-mono text-[11px] tracking-[0.02em]">
-              <AnimatePresence mode="wait" initial={false}>
-                {statusVisible ? (
-                  <m.div key="status" {...SWAP} className="absolute inset-0 flex items-center">
-                    <SheetProgress
-                      sections={progress.sections}
-                      readyKeys={progress.readyKeys}
-                      liveKey={progress.liveKey}
-                      status={progress.status}
-                      done={!streaming}
-                    />
-                  </m.div>
-                ) : (
-                  <m.p
-                    key="summary"
-                    {...SWAP}
-                    className="absolute inset-0 truncate leading-4 text-muted-foreground"
-                  >
-                    {[summary, ...details].join(" · ")}
-                  </m.p>
-                )}
-              </AnimatePresence>
-            </div>
-          </div>
-
+        <div className="flex items-center gap-3">
+          <h1 className="flex min-w-0 flex-1 items-center gap-2 [font-family:var(--app-font-serif)] text-xl font-medium leading-tight tracking-[-0.01em] text-foreground sm:text-2xl">
+            <AnimatePresence initial={false}>
+              {emoji && (
+                <m.span
+                  key={emoji}
+                  aria-hidden
+                  className="shrink-0 text-lg sm:text-xl"
+                  initial={{ scale: 0.4, opacity: 0 }}
+                  animate={{ scale: 1, opacity: 1 }}
+                  exit={{ scale: 0.4, opacity: 0 }}
+                  transition={SPRING_POP}
+                >
+                  {emoji}
+                </m.span>
+              )}
+            </AnimatePresence>
+            <span className="truncate">{title}</span>
+          </h1>
           <div className="flex shrink-0 items-center gap-1.5">{actions}</div>
+        </div>
+
+        {/* The second line, full width under the title and the buttons, so a
+            phone doesn't cut it short: progress while it runs, then what the
+            sheet is. */}
+        <div className="relative mt-1 h-4 overflow-hidden font-mono text-[11px] tracking-[0.02em]">
+          <AnimatePresence mode="wait" initial={false}>
+            {statusVisible ? (
+              <m.div
+                key="status"
+                {...SWAP}
+                className="absolute inset-0 flex items-center"
+              >
+                <SheetProgress
+                  sections={progress.sections}
+                  readyKeys={progress.readyKeys}
+                  liveKey={progress.liveKey}
+                  status={progress.status}
+                  done={!streaming}
+                />
+              </m.div>
+            ) : (
+              <m.p
+                key="summary"
+                {...SWAP}
+                className="absolute inset-0 truncate leading-4 text-muted-foreground"
+              >
+                {[summary, ...details].join(" · ")}
+              </m.p>
+            )}
+          </AnimatePresence>
         </div>
 
         {/* One bar, two jobs: sections written, then reading progress. */}
@@ -160,7 +177,11 @@ const SheetTopicBar = ({
           <m.div
             aria-hidden
             className="absolute -bottom-px left-0 right-0 h-[2px] origin-left"
-            style={{ scaleX: readingProgress, background: "var(--accent)", opacity: 0.55 }}
+            style={{
+              scaleX: readingProgress,
+              background: "var(--accent)",
+              opacity: 0.55,
+            }}
           />
         )}
       </div>

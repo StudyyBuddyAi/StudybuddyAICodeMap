@@ -1,5 +1,4 @@
 import { Fragment, useRef, useEffect, useState, useCallback } from "react";
-import { useNavigate, type NavigateFunction } from "react-router-dom";
 import { callMedicalNotes } from "@/lib/callMedicalNotes";
 import { useMemoryPreference } from "@/hooks/use-memory-preference";
 import {
@@ -22,13 +21,14 @@ import {
   RotateCcw,
   Scissors,
   Settings2,
+  ShieldCheck,
   Sparkles,
   Stethoscope,
   X,
-  Zap,
   type LucideIcon,
 } from "lucide-react";
 import CopyButton from "@/components/CopyButton";
+import { Button } from "@/components/ui/button";
 import FlashcardsSection from "@/components/FlashcardsSection";
 import SaveButton from "@/components/SaveButton";
 import SectionSkeleton from "@/components/SectionSkeleton";
@@ -52,8 +52,11 @@ import {
   m,
 } from "motion/react";
 import { AutoHeight, Caret, StreamingWords } from "@/components/StreamingText";
-import { ENTER, EXIT, SPRING_POP } from "@/lib/motion";
+import { ENTER, EXIT, SPRING_POP, SWAP } from "@/lib/motion";
 import EnhanceTip from "@/components/sheet/EnhanceTip";
+import type { SheetDeck } from "@/components/sheet/SheetFinish";
+import SheetSources from "@/components/SheetSources";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import RecallCheck from "@/components/RecallCheck";
 import { assignRecallCards } from "@/lib/section-recall";
 
@@ -232,6 +235,11 @@ interface OutputSectionProps {
    * off: its topic bar carries both. Library's saved-sheet dialog keeps it.
    */
   showHeader?: boolean;
+  /**
+   * The sheet's own deck, when the page can keep it: the Flashcards section
+   * offers to add it to the library.
+   */
+  deck?: SheetDeck;
 }
 
 // ─── Legacy renderer helpers (kept for old text-blob sheets) ───────────────
@@ -919,33 +927,71 @@ function ModelBadge({ model }: { model: ModelUsed }) {
   );
 }
 
+/**
+ * Marks a section the retrieved sources back. An icon rather than a labelled
+ * pill: it sat on most sections, and the same words on every heading read as
+ * noise. The tooltip carries the words; clicking goes to the sources.
+ */
 function EvidenceBadge({ onClick }: { onClick: () => void }) {
+  const label = "Evidence-backed — see the sources";
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      title="This section is backed by peer-reviewed sources — see below"
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 4,
-        padding: "2px 8px",
-        borderRadius: "var(--radius-pill)",
-        border: "1px solid var(--border)",
-        borderLeft: "2px solid var(--accent)",
-        background: "var(--accent-soft)",
-        fontFamily: "var(--font-mono)",
-        fontSize: 11,
-        fontWeight: 500,
-        color: "var(--accent)",
-        cursor: "pointer",
-        marginLeft: 8,
-        transition: "background var(--dur-micro) var(--ease-out)",
-      }}
-    >
-      <Zap style={{ width: 10, height: 10 }} />
-      Evidence-backed
-    </button>
+    // Its own provider, so the renderer works wherever it is mounted.
+    <TooltipProvider delayDuration={200}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            onClick={onClick}
+            aria-label={label}
+            className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full transition-colors duration-150"
+            style={{ color: "var(--accent)", background: "var(--accent-soft)" }}
+          >
+            <ShieldCheck style={{ width: 13, height: 13 }} />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="top">{label}</TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
+}
+
+// ─── Deck offer (Flashcards section) ─────────────────────────────────────────
+
+/**
+ * Keeps the cards written beside the sheet. It turns into its own follow-up in
+ * place once used, with the same swap as every other in-place change.
+ */
+function DeckOffer({ deck }: { deck: SheetDeck }) {
+  return (
+    <div className="mb-4 flex min-h-[52px] flex-wrap items-center justify-between gap-3 rounded-lg border border-dashed border-border px-3.5 py-2.5">
+      <AnimatePresence mode="wait" initial={false}>
+        {deck.saved ? (
+          <m.div key="saved" {...SWAP} className="flex w-full flex-wrap items-center justify-between gap-3">
+            <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <Check className="h-3.5 w-3.5 text-primary" />
+              In your deck — spaced repetition will bring each card back.
+            </p>
+            <button
+              type="button"
+              onClick={deck.onReview}
+              className="text-xs font-medium text-primary underline-offset-2 hover:underline"
+            >
+              Review in Library →
+            </button>
+          </m.div>
+        ) : (
+          <m.div key="offer" {...SWAP} className="flex w-full flex-wrap items-center justify-between gap-3">
+            <p className="text-xs text-muted-foreground">
+              Keep these {deck.count} cards: each comes back just before you'd forget it.
+            </p>
+            <Button size="sm" onClick={deck.onSave} className="h-8 gap-1.5 text-xs">
+              <Layers className="h-3.5 w-3.5" />
+              Add {deck.count} cards to my deck
+            </Button>
+          </m.div>
+        )}
+      </AnimatePresence>
+    </div>
   );
 }
 
@@ -1326,8 +1372,8 @@ const OutputSection = ({
   streamedKeys,
   liveKey,
   showHeader = true,
+  deck,
 }: OutputSectionProps) => {
-  const navigate = useNavigate();
   const ref = useRef<HTMLDivElement>(null);
   const referenceNoteRef = useRef<HTMLDivElement>(null);
 
@@ -1342,7 +1388,6 @@ const OutputSection = ({
   // Sections this mount has seen waiting. One that then lands gets a single
   // glow; a saved sheet, which never waited, opens without any.
   const seenPendingRef = useRef(new Set<string>());
-  const [showNudge, setShowNudge] = useState(() => !localStorage.getItem("sb_first_sheet_seen"));
 
   const [disclaimerCollapsed, setDisclaimerCollapsed] = useState(() =>
     sessionStorage.getItem("sb_disclaimer_collapsed") === "1"
@@ -1538,10 +1583,6 @@ const OutputSection = ({
     referenceNoteRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
-  useEffect(() => {
-    if (showNudge) localStorage.setItem("sb_first_sheet_seen", "1");
-  }, [showNudge]);
-
   // Tracks the identity of the *core* sheet content (ignoring enhancements) so
   // the disclaimer reopens only for a genuinely new sheet — not when an
   // enhancement is saved into the sheet (which also mutates `output`).
@@ -1563,6 +1604,8 @@ const OutputSection = ({
       setDisclaimerCollapsed(false);
       sessionStorage.removeItem("sb_disclaimer_collapsed");
     }
+    // The dashboard's first-deck banner waits for this: a whole sheet seen.
+    writeFlag("sb_first_sheet_seen");
   }, [output, isStreaming]);
 
   // ── Legacy renderer ──────────────────────────────────────────────────────
@@ -1676,7 +1719,7 @@ const OutputSection = ({
           </div>
         )}
 
-        {renderNudgeAndDisclaimer(showNudge, setShowNudge, inputText, disclaimerCollapsed, toggleDisclaimer, navigate)}
+        {renderDisclaimer(disclaimerCollapsed, toggleDisclaimer)}
       </div>
     );
   }
@@ -1809,7 +1852,7 @@ const OutputSection = ({
             ref={isReference ? referenceNoteRef : undefined}
             data-section-key={key}
             // Clears the app nav and the sheet's sticky topic bar on a jump.
-            className={`animate-fade-in scroll-mt-[calc(var(--nav-h,64px)+100px)]${landed ? " section-landed" : ""}`}
+            className={`group/section animate-fade-in scroll-mt-[calc(var(--nav-h,64px)+100px)]${landed ? " section-landed" : ""}`}
             style={{
               ...SECTION_CARD_STYLE,
               // A section that hasn't landed keeps a neutral edge, so the
@@ -1825,7 +1868,7 @@ const OutputSection = ({
             }}
           >
             <div style={SECTION_HEADER_STYLE}>
-              <div className="flex items-center gap-2.5 flex-wrap">
+              <div className="flex min-w-0 flex-wrap items-center gap-2.5">
                 <div style={SECTION_ICON_STYLE}>
                   <Icon
                     style={{
@@ -1849,18 +1892,25 @@ const OutputSection = ({
                 {showEvidenceBadge && <EvidenceBadge onClick={scrollToReference} />}
                 {ready && idx === 0 && modelUsed && <ModelBadge model={modelUsed} />}
               </div>
-              <div className="flex items-center gap-1">
+              <div className="flex shrink-0 items-center gap-1">
                 {ready ? (
                   <>
-                    <m.span
-                      initial={{ scale: 0.3, opacity: 0 }}
-                      animate={{ scale: 1, opacity: 1 }}
-                      transition={{ ...SPRING_POP, delay: landed ? 0 : idx * 0.2 + 0.35 }}
-                      style={{ display: "inline-flex" }}
-                    >
-                      <Check aria-label="Section loaded" className="h-3.5 w-3.5 text-primary/50" />
-                    </m.span>
-                    <CopyButton text={copyText} />
+                    {/* A check says a section has arrived — news only while
+                        the sheet is still arriving. On a finished sheet every
+                        heading would carry one. */}
+                    {isStreaming && (
+                      <m.span
+                        initial={{ scale: 0.3, opacity: 0 }}
+                        animate={{ scale: 1, opacity: 1 }}
+                        transition={SPRING_POP}
+                        style={{ display: "inline-flex" }}
+                      >
+                        <Check aria-label="Section loaded" className="h-3.5 w-3.5 text-primary/50" />
+                      </m.span>
+                    )}
+                    <span className="transition-opacity duration-200 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover/section:opacity-100 [@media(hover:hover)]:group-focus-within/section:opacity-100">
+                      <CopyButton text={copyText} compact />
+                    </span>
                   </>
                 ) : (
                   // Marks where the next content lands. Only the dot pulses —
@@ -1895,7 +1945,10 @@ const OutputSection = ({
               ) : !ready ? (
                 <SectionSkeleton variant="sheet-body" />
               ) : key === "flashcards" ? (
-                <FlashcardsSection cards={sheet.flashcards ?? []} />
+                <>
+                  {deck && deck.count > 0 && <DeckOffer deck={deck} />}
+                  <FlashcardsSection cards={sheet.flashcards ?? []} />
+                </>
               ) : key !== "referenceNote" && spec.kind === "prose" ? (
                 <div className="text-sm text-muted-foreground leading-relaxed">
                   {renderJsonText(
@@ -1921,6 +1974,14 @@ const OutputSection = ({
                         onLockedClick={onCitationLockedClick}
                         isLoggedIn={citationIsLoggedIn}
                       />
+                    </div>
+                  )}
+
+                  {/* The passages the sheet was built on, here rather than in
+                      a panel of their own after the end of the sheet. */}
+                  {!isStreaming && (sheet.sources?.length ?? 0) > 0 && (
+                    <div className="mt-5 border-t border-border pt-4">
+                      <SheetSources sources={sheet.sources ?? []} query={inputText} embedded />
                     </div>
                   )}
                 </>
@@ -1959,15 +2020,8 @@ const OutputSection = ({
         <div className="space-y-1">{renderInline("end")}</div>
       ) : null}
 
-      {/* The nudge says the sheet is ready, so it waits until it actually is. */}
-      {renderNudgeAndDisclaimer(
-        showNudge && !isStreaming,
-        setShowNudge,
-        inputText,
-        disclaimerCollapsed,
-        toggleDisclaimer,
-        navigate
-      )}
+      {/* The last line of the document, under its Sources. */}
+      {renderDisclaimer(disclaimerCollapsed, toggleDisclaimer)}
 
       <EnhanceTip show={!isStreaming && !tipSeen} onDismiss={retireTip} />
 
@@ -2002,113 +2056,15 @@ const OutputSection = ({
   );
 };
 
-// ─── Shared nudge + disclaimer (used by both renderers) ────────────────────
+// ─── Shared disclaimer (used by both renderers) ─────────────────────────────
+//
+// The first-sheet nudge that used to sit above it is gone: its "Generate
+// flashcards" opened the Flashcards page to make a new deck, beside a sheet
+// that already has one. The Sheets page ends on its own next-steps card.
 
-function renderNudgeAndDisclaimer(
-  showNudge: boolean,
-  setShowNudge: (v: boolean) => void,
-  inputText: string | undefined,
-  disclaimerCollapsed: boolean,
-  toggleDisclaimer: () => void,
-  navigate: NavigateFunction
-) {
+function renderDisclaimer(disclaimerCollapsed: boolean, toggleDisclaimer: () => void) {
   return (
     <>
-      {showNudge && (
-        <div className="mt-4 animate-fade-in">
-          <div
-            style={{
-              borderRadius: "var(--radius-lg)",
-              border: "1px solid var(--border)",
-              borderLeft: "3px solid var(--accent)",
-              background: "var(--bg-elevated)",
-              padding: "20px 24px",
-              textAlign: "center",
-            }}
-          >
-            <p
-              style={{
-                fontFamily: "var(--font-sans)",
-                fontSize: 14,
-                fontWeight: 500,
-                color: "var(--fg)",
-                marginBottom: 6,
-              }}
-            >
-              Your first sheet is ready
-            </p>
-            <p
-              style={{
-                fontFamily: "var(--font-sans)",
-                fontSize: 13,
-                color: "var(--fg-muted)",
-                lineHeight: 1.55,
-                marginBottom: 16,
-              }}
-            >
-              Now lock it in — generate a flashcard deck and start drilling with spaced
-              repetition.
-            </p>
-            <div
-              style={{
-                display: "flex",
-                flexWrap: "wrap",
-                gap: 8,
-                justifyContent: "center",
-              }}
-            >
-              <button
-                type="button"
-                onClick={() => {
-                  const topic = (inputText || "").trim();
-                  if (!topic) return;
-                  setShowNudge(false);
-                  // The `studybuddy:generate-flashcards` listener lives in
-                  // FlashcardsGenerator, which is not mounted on /sheets — the
-                  // event went nowhere. Take the user to the page that has it.
-                  navigate("/flashcards", { state: { topic } });
-                }}
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 6,
-                  height: 36,
-                  padding: "0 20px",
-                  borderRadius: "var(--radius-md)",
-                  border: "1px solid transparent",
-                  background: "var(--fg)",
-                  color: "var(--bg)",
-                  fontFamily: "var(--font-sans)",
-                  fontSize: 13,
-                  fontWeight: 500,
-                  cursor: "pointer",
-                }}
-              >
-                <Layers style={{ width: 14, height: 14 }} />
-                Generate flashcards
-              </button>
-              <button
-                type="button"
-                onClick={() => setShowNudge(false)}
-                style={{
-                  height: 36,
-                  padding: "0 16px",
-                  borderRadius: "var(--radius-md)",
-                  border: "1px solid var(--border)",
-                  background: "transparent",
-                  color: "var(--fg-muted)",
-                  fontFamily: "var(--font-sans)",
-                  fontSize: 13,
-                  cursor: "pointer",
-                }}
-              >
-                Maybe later
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       <div
         className="animate-fade-in"
         style={{

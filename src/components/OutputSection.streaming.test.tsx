@@ -55,7 +55,7 @@ const HEADING = {
   keyPoints: /Key Points/,
   examTraps: /Exam Traps/,
   flashcards: /Flashcards/,
-  referenceNote: /Reference Note/,
+  referenceNote: /Sources/,
 };
 
 const heading = (name: RegExp) => screen.queryByRole("heading", { name });
@@ -137,7 +137,10 @@ describe("OutputSection streaming", () => {
     for (const name of Object.values(HEADING)) {
       expect(heading(name)).toBeInTheDocument();
     }
-    expect(screen.getAllByLabelText("Section loaded")).toHaveLength(7);
+    // Every section can be copied; none carries the "arrived" check, which is
+    // news only while the sheet is still arriving.
+    expect(screen.getAllByRole("button", { name: "Copy section" })).toHaveLength(7);
+    expect(screen.queryByLabelText("Section loaded")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Writing section")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Waiting")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /save/i })).toBeEnabled();
@@ -303,6 +306,68 @@ describe("OutputSection table sections", () => {
   });
 });
 
+describe("OutputSection end of sheet", () => {
+  const WITH_SOURCES: GeneratedSheet = {
+    ...SHEET,
+    sources: [
+      {
+        id: "s1",
+        guidelineName: "AHA/ACC/HFSA Heart Failure Guideline",
+        sectionTitle: "Diuretics",
+        sourceUrl: null,
+        similarity: 0.82,
+        content: "Loop diuretics are recommended for patients with fluid retention.",
+      },
+    ],
+  };
+
+  it("keeps the library passages inside the Sources section", async () => {
+    await renderSheet(<OutputSection output={JSON.stringify(WITH_SOURCES)} />);
+    const sources = document.querySelector('[data-section-key="referenceNote"]')!;
+    expect(sources.textContent).toContain("From the guideline library");
+    expect(sources.textContent).toContain("AHA/ACC/HFSA Heart Failure Guideline");
+  });
+
+  it("holds the passages back while the sheet is still being written", async () => {
+    await renderSheet(
+      <OutputSection
+        output={JSON.stringify(WITH_SOURCES)}
+        isStreaming
+        streamedKeys={["overview", "memoryHooks", "clinicalApproach", "keyPoints", "examTraps", "flashcards", "referenceNote"]}
+      />
+    );
+    expect(screen.queryByText(/From the guideline library/)).not.toBeInTheDocument();
+  });
+
+  it("offers to keep the sheet's own deck, then how to review it", async () => {
+    let saved = false;
+    const deck = () => ({ count: 1, saved, onSave: () => (saved = true), onReview: () => {} });
+    const { rerender } = await renderSheet(<OutputSection output={JSON.stringify(SHEET)} deck={deck()} />);
+
+    const offer = screen.getByRole("button", { name: "Add 1 cards to my deck" });
+    await act(async () => offer.click());
+    expect(saved).toBe(true);
+
+    await act(async () => {
+      rerender(
+        <QueryClientProvider client={new QueryClient()}>
+          <MemoryRouter>
+            <AuthProvider>
+              <OutputSection output={JSON.stringify(SHEET)} deck={deck()} />
+            </AuthProvider>
+          </MemoryRouter>
+        </QueryClientProvider>
+      );
+    });
+    expect(await screen.findByRole("button", { name: /Review in Library/ })).toBeInTheDocument();
+  });
+
+  it("has no deck offer where the page can't keep one", async () => {
+    await renderSheet(<OutputSection output={JSON.stringify(SHEET)} />);
+    expect(screen.queryByRole("button", { name: /to my deck/ })).not.toBeInTheDocument();
+  });
+});
+
 describe("OutputSection recall checks", () => {
   const WITH_DECK: GeneratedSheet = {
     ...SHEET,
@@ -383,7 +448,7 @@ describe("OutputSection section plan", () => {
   it("still appends flashcards and the reference note", async () => {
     await renderSheet(<OutputSection output={JSON.stringify(PLANNED)} />);
     expect(heading(/Flashcards/)).toBeInTheDocument();
-    expect(heading(/Reference Note/)).toBeInTheDocument();
+    expect(heading(/Sources/)).toBeInTheDocument();
   });
 
   it("renders each section by its declared kind", async () => {
