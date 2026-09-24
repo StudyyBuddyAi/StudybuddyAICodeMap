@@ -39,6 +39,11 @@ interface SheetTopicBarProps {
   /** Extra facts for the settled line, e.g. "5 sources". */
   details?: string[];
   streaming: boolean;
+  /**
+   * The sheet's preparation card is up and reporting the progress itself, so
+   * the line shows what the sheet is instead of saying it twice.
+   */
+  preparing?: boolean;
   /** What the progress line counts: the reader's sections, minus the deck. */
   progress: {
     sections: SheetSectionSpec[];
@@ -58,6 +63,7 @@ const SheetTopicBar = ({
   summary,
   details = [],
   streaming,
+  preparing = false,
   progress,
   readingTarget,
   actions,
@@ -77,6 +83,8 @@ const SheetTopicBar = ({
     progress.readyKeys.includes(s.key),
   ).length;
   const fraction = streaming ? (total ? ready / total : 0) : 1;
+  // Progress hands over from the card to this line when writing starts.
+  const showStatus = statusVisible && !preparing;
 
   // How far through the document the reader is. Measured against the page
   // scroll on each change rather than handed to useScroll as a target: this
@@ -140,7 +148,7 @@ const SheetTopicBar = ({
             sheet is. */}
         <div className="relative mt-1 h-4 overflow-hidden font-mono text-[11px] tracking-[0.02em]">
           <AnimatePresence mode="wait" initial={false}>
-            {statusVisible ? (
+            {showStatus ? (
               <m.div
                 key="status"
                 {...SWAP}
@@ -167,7 +175,7 @@ const SheetTopicBar = ({
         </div>
 
         {/* One bar, two jobs: sections written, then reading progress. */}
-        {statusVisible ? (
+        {showStatus ? (
           <m.div
             aria-hidden
             initial={false}

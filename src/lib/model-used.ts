@@ -20,8 +20,17 @@ export interface ModelUsed {
 type HeaderSource = Pick<Headers, "get">;
 
 export function parseModelUsed(headers: HeaderSource): ModelUsed {
-  const raw = headers.get("X-Model-Used") ?? "";
-  const fallback = (headers.get("X-Model-Fallback") ?? "").trim() !== "";
+  return modelUsedFrom(
+    headers.get("X-Model-Used") ?? "",
+    (headers.get("X-Model-Fallback") ?? "").trim() !== ""
+  );
+}
+
+/**
+ * The same, from the values themselves. A sheet's stream opens before the
+ * writer is chosen, so the model arrives in a frame rather than a header.
+ */
+export function modelUsedFrom(raw: string, fallback: boolean): ModelUsed {
   const kind: ModelKind = raw.startsWith("corti/")
     ? "corti"
     : raw.includes("gpt-oss")

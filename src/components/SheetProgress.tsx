@@ -19,6 +19,14 @@ export interface GenerationStatus {
   /** True once the server's plan frame has arrived. */
   planned: boolean;
   sources: SourcesStatus;
+  /** What the topic was read as (the archetype), sent with the plan. */
+  archetype?: string;
+  /** Titles of the guideline books the passages came from. */
+  books?: string[];
+  /** The server has handed the sheet to its writer. */
+  writing?: boolean;
+  /** The writer is reasoning before its first words. */
+  thinking?: boolean;
 }
 
 interface SheetProgressProps {

@@ -656,25 +656,6 @@
     }
   }
 
-  /* The loading tip's countdown. Outside the reduced-motion guard on purpose:
-     it is a progress indicator, not decoration, and its end is what moves to
-     the next tip — without it the tips would never advance. */
-  .sb-tip-timer {
-    transform-origin: left center;
-    animation-name: sb-tip-timer;
-    animation-timing-function: linear;
-    animation-fill-mode: forwards;
-  }
-
-  @keyframes sb-tip-timer {
-    from {
-      transform: scaleX(0);
-    }
-    to {
-      transform: scaleX(1);
-    }
-  }
-
   /* Top progress bar — width transitions are cheap enough to keep always-on,
      but hide the bar entirely for reduced motion */
   .top-progress-bar {

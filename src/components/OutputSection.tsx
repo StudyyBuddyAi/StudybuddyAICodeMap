@@ -1860,10 +1860,10 @@ const OutputSection = ({
               borderLeft: `3px solid ${
                 ready || writing ? "var(--accent)" : "var(--border)"
               }`,
-              // Mid-stream the cards are already mounted and fill in one by
-              // one, so the stagger is real — replaying it would just delay
-              // each card into invisibility for its share of the offset.
-              animationDelay: isStreaming ? "0ms" : `${idx * 200}ms`,
+              // Mid-stream the cards mount together when the plan arrives,
+              // before any content: a short stagger lets them rise in one
+              // after another. A saved sheet opens with the longer one.
+              animationDelay: isStreaming ? `${idx * 60}ms` : `${idx * 200}ms`,
               animationFillMode: "backwards",
             }}
           >

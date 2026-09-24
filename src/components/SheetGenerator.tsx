@@ -30,7 +30,7 @@ import SectionSkeleton from "@/components/SectionSkeleton";
 import SheetComposer from "@/components/sheet/SheetComposer";
 import SheetSettings from "@/components/sheet/SheetSettings";
 import SheetTopicBar from "@/components/sheet/SheetTopicBar";
-import LoadingTips from "@/components/sheet/LoadingTips";
+import SheetPreparation from "@/components/sheet/SheetPreparation";
 import SheetFinish, { type SheetDeck } from "@/components/sheet/SheetFinish";
 import { SectionsMenu, SheetSectionRail } from "@/components/sheet/SheetSections";
 import {
@@ -45,7 +45,8 @@ import { usePremiumHook } from "@/hooks/use-premium-hook";
 import { useModelPreference } from "@/hooks/use-model-preference";
 import { useAuth } from "@/hooks/use-auth";
 import { callMedicalNotes } from "@/lib/callMedicalNotes";
-import { parseModelUsed, type ModelUsed } from "@/lib/model-used";
+import { modelUsedFrom, parseModelUsed, type ModelUsed } from "@/lib/model-used";
+import { groupSources } from "@/lib/source-display";
 import { useFlashcardDeck } from "@/hooks/use-flashcard-deck";
 import { parseFlashcardsFromOutput } from "@/lib/parse-flashcards";
 import {
@@ -72,7 +73,7 @@ import GoProModal from "@/components/GoProModal";
 import type { StudyHistoryItem } from "@/hooks/use-study-history";
 import { useMemoryPreference } from "@/hooks/use-memory-preference";
 import { sheetToPlainText } from "@/lib/sheet-to-text";
-import { RISE } from "@/lib/motion";
+import { ENTER, FOLD, RISE } from "@/lib/motion";
 
 export interface SheetGeneratorPrefill {
   input: string;
@@ -375,7 +376,11 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
       let textBuffer = "";
       let fullText = "";
 
-      while (true) {
+      // A failure the server reports after the stream has opened — it can no
+      // longer say so with a status code. Ends the generation like any error.
+      let streamError: string | null = null;
+
+      while (!streamError) {
         const { done, value } = await reader.read();
         if (done) break;
         textBuffer += decoder.decode(value, { stream: true });
@@ -406,9 +411,28 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
               // retrieval result it had just recorded.
               const meta = parsed.__meta;
 
+              if (typeof meta.error === "string") {
+                streamError = meta.error;
+                break;
+              }
+
+              // Which model is writing: a frame rather than a header, since a
+              // sheet's stream opens before the writer is chosen.
+              if (meta.model && typeof meta.model.used === "string") {
+                setModelUsed(modelUsedFrom(meta.model.used, meta.model.fallback === true));
+                setGenerationStatus((s) => ({ ...s, writing: true }));
+              }
+              if (meta.stage === "thinking") {
+                setGenerationStatus((s) => ({ ...s, thinking: true }));
+              }
+
               if (meta.plan !== undefined) {
                 planRef.current = parsePlan(meta.plan);
-                setGenerationStatus((s) => ({ ...s, planned: true }));
+                setGenerationStatus((s) => ({
+                  ...s,
+                  planned: true,
+                  archetype: typeof meta.archetype === "string" ? meta.archetype : s.archetype,
+                }));
                 // Lay the document out from the plan now, before any content,
                 // rather than from the legacy placeholder it would otherwise
                 // show until the first section closes — and then re-lay-out.
@@ -445,7 +469,8 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
                   sources: Array.isArray(meta.sources) ? meta.sources : [],
                 };
                 const found = groundingResultRef.current.sources.length;
-                setGenerationStatus((s) => ({ ...s, sources: found }));
+                const books = groupSources(groundingResultRef.current.sources).map((b) => b.title);
+                setGenerationStatus((s) => ({ ...s, sources: found, books }));
               }
               continue;
             }
@@ -466,6 +491,11 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
             break;
           }
         }
+      }
+
+      if (streamError) {
+        reader.cancel().catch(() => {});
+        throw new Error(streamError);
       }
 
       // A draft frame still queued would land on top of the final sheet below.
@@ -954,6 +984,7 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
           summary={settingsSummary(activeSettings)}
           details={sourceCount ? [`${sourceCount} source${sourceCount === 1 ? "" : "s"}`] : []}
           streaming={loading}
+          preparing={waitingForContent}
           progress={{
             sections: progressSections,
             readyKeys: streamedKeys,
@@ -997,52 +1028,59 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
             </div>
           )}
 
-          {/* The tips float over this box: the placeholders under them are the
-              document's real layout, so the card comes and goes without
-              moving anything. */}
-          <div className="relative">
-            {/* Before the plan: neutral cards, since what the sheet will hold
-                isn't known yet. Then the planned sections, laid out once and
-                filled in — never added or removed. The two swap with the shared
-                rise, so the titles arrive rather than replace other titles. */}
-            <AnimatePresence mode="wait" initial={false}>
-              {!planned && !legacyOutput ? (
+          {/* One box for the preparation card and the sections, outside the
+              spacing around it. The only gap between them is the first
+              section's own top margin, which stays put as the card folds —
+              so the sections glide up with it instead of snapping at the end. */}
+          <div>
+            {/* While the sheet is prepared, its first card says what is happening
+                and asks one question about the topic. It sits in the document's
+                flow, where the sections will be, and folds away — the sections
+                below gliding up — the moment the first words arrive. */}
+            <AnimatePresence initial={false}>
+              {waitingForContent && !legacyOutput && (
                 <m.div
-                  key="planning"
-                  {...RISE}
-                  className="space-y-4"
-                  aria-busy="true"
-                  aria-label="Planning the sheet"
+                  key="preparing"
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: "auto", transition: { ...FOLD, opacity: ENTER } }}
+                  exit={{ opacity: 0, height: 0, transition: FOLD }}
+                  style={{ overflow: "hidden" }}
                 >
-                  {[0, 1, 2].map((i) => (
-                    <SectionSkeleton key={i} variant="sheet-section" />
-                  ))}
-                </m.div>
-              ) : (
-                <m.div key="sheet" {...RISE}>
-                  <OutputSection
-                    output={sheet ? JSON.stringify(sheet) : legacyOutput || EMPTY_SHEET_JSON}
-                    inputText={activeSettings.notes}
-                    modeInfo={activeModeInfo}
-                    citations={citations}
-                    citationState={citationState}
-                    modelUsed={modelUsed}
-                    isPro={pro}
-                    userId={user?.id ?? null}
-                    isAnonymous={isAnonymous ?? false}
-                    sheetId={activeSettings.notes}
-                    onCitationLockedClick={() => (isLoggedIn ? setGoProOpen(true) : setAuthModalOpen(true))}
-                    citationIsLoggedIn={isLoggedIn}
-                    isStreaming={loading}
-                    streamedKeys={streamedKeys}
-                    liveKey={loading ? liveKey : undefined}
-                    showHeader={false}
-                    deck={deck ?? undefined}
+                  <SheetPreparation
+                    input={activeSettings.notes}
+                    status={generationStatus}
+                    plan={planned ? resolvePlan(readingSheet) : null}
+                    model={modelUsed}
                   />
                 </m.div>
               )}
             </AnimatePresence>
-            <LoadingTips active={waitingForContent} />
+
+            {/* The planned sections, laid out once and filled in — never added or
+                removed. They rise in when the plan arrives. */}
+            {(planned || legacyOutput) && (
+              <m.div key="sheet" {...RISE}>
+                <OutputSection
+                  output={sheet ? JSON.stringify(sheet) : legacyOutput || EMPTY_SHEET_JSON}
+                  inputText={activeSettings.notes}
+                  modeInfo={activeModeInfo}
+                  citations={citations}
+                  citationState={citationState}
+                  modelUsed={modelUsed}
+                  isPro={pro}
+                  userId={user?.id ?? null}
+                  isAnonymous={isAnonymous ?? false}
+                  sheetId={activeSettings.notes}
+                  onCitationLockedClick={() => (isLoggedIn ? setGoProOpen(true) : setAuthModalOpen(true))}
+                  citationIsLoggedIn={isLoggedIn}
+                  isStreaming={loading}
+                  streamedKeys={streamedKeys}
+                  liveKey={loading ? liveKey : undefined}
+                  showHeader={false}
+                  deck={deck ?? undefined}
+                />
+              </m.div>
+            )}
           </div>
 
           {/* Where the sheet ends: what to do with it now. Rises in when the

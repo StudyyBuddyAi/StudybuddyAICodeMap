@@ -34,6 +34,14 @@ export const EXIT = { duration: DURATION.micro, ease: EASE_OUT };
 /** A height or size change the eye should follow. */
 export const RESIZE = { duration: DURATION.base, ease: EASE_OUT };
 
+/**
+ * A whole block opening or closing in the page, moving everything below it.
+ * Its content fades on the quick exit while the space closes at the slow pace,
+ * so what is below glides into place rather than dropping. For `transition`
+ * on an element animating both opacity and height.
+ */
+export const FOLD = { duration: DURATION.slow, ease: EASE_OUT, opacity: EXIT };
+
 /** Small confirmations that pop in: a check, a chip. */
 export const SPRING_POP = { type: "spring", stiffness: 520, damping: 24 } as const;
 
