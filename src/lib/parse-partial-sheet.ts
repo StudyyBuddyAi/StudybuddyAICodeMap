@@ -21,6 +21,11 @@ export interface PartialSheetResult {
   sheet: GeneratedSheet;
   /** Top-level keys whose value is definitely finished, in arrival order. */
   completeKeys: string[];
+  /**
+   * The key still being written, whose value in `sheet` is a draft that will
+   * keep growing. Absent once the object has closed.
+   */
+  inFlightKey?: string;
 }
 
 interface ScanState {
@@ -197,6 +202,7 @@ function build(
   return {
     sheet: normalize(parsed),
     completeKeys: inFlight ? present.slice(0, -1) : present,
+    ...(inFlight ? { inFlightKey: present[present.length - 1] } : {}),
   };
 }
 

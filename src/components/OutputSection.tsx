@@ -44,6 +44,17 @@ import {
   isJsonSheet,
 } from "@/types/generated-sheet";
 import { renderOrder, sectionBody } from "@/lib/sheet-plan";
+import {
+  AnimatePresence,
+  LazyMotion,
+  MotionConfig,
+  domAnimation,
+  m,
+  useScroll,
+  useSpring,
+} from "motion/react";
+import { AutoHeight, Caret, StreamingWords } from "@/components/StreamingText";
+import SheetProgress, { type GenerationStatus } from "@/components/SheetProgress";
 
 type EnhanceKind = "enhance" | "expand" | "clinical";
 
@@ -189,6 +200,16 @@ interface OutputSectionProps {
   isStreaming?: boolean;
   /** Sections safe to render mid-stream. Ignored unless `isStreaming`. */
   streamedKeys?: string[];
+  /**
+   * The key the model is writing right now. When given, that section shows its
+   * draft as it arrives instead of a skeleton. Ignored unless `isStreaming`.
+   */
+  liveKey?: string;
+  /**
+   * What the live generation has reported so far. When given, the sticky bar
+   * shows generation progress while streaming, then settles back to the hint.
+   */
+  generationStatus?: GenerationStatus;
 }
 
 // ─── Legacy renderer helpers (kept for old text-blob sheets) ───────────────
@@ -571,6 +592,84 @@ function renderArraySection(
   );
 }
 
+// ─── Draft renderers (the section being written) ───────────────────────────
+//
+// Same markup and classes as renderJsonText / renderArraySection, so the swap
+// to the finished renderer when the section closes changes nothing visible —
+// the draft just gains its keyword clicks and enhancement anchors.
+
+function renderDraftProse(text: string) {
+  const lines = text.split("\n");
+  const last = lines.length - 1;
+
+  return lines.map((line, lineIdx) => {
+    const trimmed = line.trim();
+    const caret = lineIdx === last ? <Caret /> : null;
+    if (!trimmed) {
+      return (
+        <span key={lineIdx} className="block h-2">
+          {caret}
+        </span>
+      );
+    }
+
+    const labelMatch = trimmed.match(SECTION_LABEL_RE);
+    if (labelMatch) {
+      const labelPart = labelMatch[1] + labelMatch[2];
+      return (
+        <span
+          key={lineIdx}
+          className={`block text-sm leading-relaxed ${lineIdx === 0 ? "mt-0" : "mt-3"}`}
+        >
+          <span className="font-semibold text-foreground/90">{labelPart}</span>
+          <span className="text-muted-foreground">
+            <StreamingWords text={trimmed.slice(labelPart.length)} />
+            {caret}
+          </span>
+        </span>
+      );
+    }
+    return (
+      <span key={lineIdx} className="block text-sm text-muted-foreground leading-relaxed">
+        <StreamingWords text={trimmed} />
+        {caret}
+      </span>
+    );
+  });
+}
+
+function renderDraftList(items: string[]) {
+  return (
+    <ol className="space-y-2">
+      {items.map((item, i) => (
+        <li key={i} className="text-sm text-muted-foreground leading-relaxed">
+          <span className="flex gap-2.5">
+            <span
+              style={{
+                flexShrink: 0,
+                fontFamily: "var(--font-mono)",
+                fontWeight: 500,
+                fontSize: 12,
+                color: "var(--accent)",
+                opacity: 0.7,
+                width: 20,
+                textAlign: "right",
+                fontVariantNumeric: "tabular-nums",
+              }}
+            >
+              {i + 1}.
+            </span>
+            <span className="flex-1">
+              <StreamingWords text={item} />
+              {i === items.length - 1 && <Caret />}
+            </span>
+          </span>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
 /**
  * Resolve a saved enhancement (which stores only sourceText) to an inline anchor
  * by locating its source text within the sheet's sections. Returns null if the
@@ -681,14 +780,20 @@ const BubbleDivider = () => (
   />
 );
 
+// Rendered inside AnimatePresence, so it fades back out when dismissed rather
+// than vanishing. Motion owns the transform, hence `x` in place of translateX.
 const EnhanceBubble = ({ top, left, onAction, innerRef }: EnhanceBubbleProps) => (
-  <div
+  <m.div
     ref={innerRef}
+    initial={{ opacity: 0, y: 4, scale: 0.97 }}
+    animate={{ opacity: 1, y: 0, scale: 1 }}
+    exit={{ opacity: 0, y: 4, scale: 0.97, transition: { duration: 0.12 } }}
+    transition={{ duration: 0.16, ease: [0.22, 1, 0.36, 1] }}
     style={{
       position: "absolute",
       top,
       left,
-      transform: "translateX(-50%)",
+      x: "-50%",
       zIndex: 60,
       display: "flex",
       alignItems: "center",
@@ -700,7 +805,6 @@ const EnhanceBubble = ({ top, left, onAction, innerRef }: EnhanceBubbleProps) =>
       padding: "0 6px",
       boxShadow: "var(--shadow-2)",
     }}
-    className="enhance-bubble-in"
     onMouseDown={(e) => e.stopPropagation()}
   >
     <button
@@ -726,7 +830,7 @@ const EnhanceBubble = ({ top, left, onAction, innerRef }: EnhanceBubbleProps) =>
     >
       🔗 Clinical
     </button>
-  </div>
+  </m.div>
 );
 
 // ─── Inline enhancement block ──────────────────────────────────────────────
@@ -1018,10 +1122,33 @@ const OutputSection = ({
   sheetId,
   isStreaming = false,
   streamedKeys,
+  liveKey,
+  generationStatus,
 }: OutputSectionProps) => {
   const navigate = useNavigate();
   const ref = useRef<HTMLDivElement>(null);
   const referenceNoteRef = useRef<HTMLDivElement>(null);
+
+  // How far through the document the reader is, eased so the bar glides.
+  const { scrollYProgress } = useScroll({ target: ref, offset: ["start start", "end end"] });
+  const readingProgress = useSpring(scrollYProgress, { stiffness: 200, damping: 30, mass: 0.4 });
+
+  // The progress line holds its "ready" state for a moment after the stream
+  // ends, so the finish is seen, before the bar settles back to the hint.
+  const [statusVisible, setStatusVisible] = useState(isStreaming);
+  useEffect(() => {
+    if (isStreaming) {
+      setStatusVisible(true);
+      return;
+    }
+    const t = window.setTimeout(() => setStatusVisible(false), 2200);
+    return () => window.clearTimeout(t);
+  }, [isStreaming]);
+  const showStatus = !!generationStatus && statusVisible;
+
+  // Sections this mount has seen waiting. One that then lands gets a single
+  // glow; a saved sheet, which never waited, opens without any.
+  const seenPendingRef = useRef(new Set<string>());
   const [showNudge, setShowNudge] = useState(() => !localStorage.getItem("sb_first_sheet_seen"));
 
   const [disclaimerCollapsed, setDisclaimerCollapsed] = useState(() =>
@@ -1368,10 +1495,20 @@ const OutputSection = ({
   // A section renders its content only once its JSON has closed; before that
   // it would show half a sentence and then reflow.
   const isReady = (key: string) => !isStreaming || !!streamedKeys?.includes(key);
-  // Sections arrive in order, so the first one not yet complete is in flight.
+  // The parser names the key in flight when the caller passes it on. Without
+  // it, sections arrive in order, so the first one not yet complete is in flight.
+  const liveSection =
+    isStreaming && liveKey && sectionOrder.some((s) => s.key === liveKey) ? liveKey : undefined;
   const writingKey = isStreaming
-    ? sectionOrder.find((spec) => !isReady(spec.key))?.key
+    ? liveSection ?? sectionOrder.find((spec) => !isReady(spec.key))?.key
     : undefined;
+
+  // Flashcards arrive in their own frame at the end rather than as a section
+  // the parser reports, so progress is counted over everything else.
+  const progressSections = sectionOrder.filter((s) => s.key !== "flashcards");
+  const readyFraction = progressSections.length
+    ? progressSections.filter((s) => isReady(s.key)).length / progressSections.length
+    : 0;
 
   // Group active enhancements by anchor so they can be injected inline.
   // Open ones render as inline blocks; collapsed ones render as golden
@@ -1408,21 +1545,24 @@ const OutputSection = ({
   };
 
   return (
+    <LazyMotion features={domAnimation} strict>
+    <MotionConfig reducedMotion="user">
     <div
       ref={ref}
       className="print-document relative space-y-4"
       onMouseUp={handleSelectionChange}
       onTouchEnd={handleSelectionChange}
     >
-      {/* Persistent highlight-to-enhance hint — sticky below the top nav */}
+      {/* Sticky bar below the top nav. While a sheet generates it reports the
+          progress; afterwards it carries the highlight-to-enhance hint. Its
+          bottom edge is a progress bar either way: sections written, then how
+          far the reader has scrolled. */}
       <div
         className="sticky animate-fade-in"
         style={{
           top: "var(--nav-h, 64px)",
           zIndex: 20,
-          display: "flex",
-          alignItems: "center",
-          gap: 6,
+          overflow: "hidden",
           borderRadius: "var(--radius-sm)",
           border: "1px solid var(--border)",
           background: "color-mix(in srgb, var(--bg) 90%, transparent)",
@@ -1430,19 +1570,80 @@ const OutputSection = ({
           WebkitBackdropFilter: "blur(10px)",
           padding: "6px 12px",
           marginBottom: 4,
+          fontFamily: "var(--font-mono)",
+          fontSize: 11,
+          letterSpacing: "0.02em",
         }}
       >
-        <Sparkles style={{ width: 12, height: 12, color: "var(--accent)", flexShrink: 0 }} />
-        <span
-          style={{
-            fontFamily: "var(--font-mono)",
-            fontSize: 11,
-            color: "var(--fg-muted)",
-            letterSpacing: "0.02em",
-          }}
-        >
-          Highlight any text to expand or get a clinical tie
-        </span>
+        <AnimatePresence mode="wait" initial={false}>
+          {showStatus ? (
+            <m.div
+              key="status"
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -6 }}
+              transition={{ duration: 0.2 }}
+            >
+              <SheetProgress
+                sections={progressSections}
+                readyKeys={streamedKeys ?? []}
+                liveKey={liveKey}
+                status={generationStatus!}
+                done={!isStreaming}
+              />
+            </m.div>
+          ) : (
+            <m.div
+              key="hint"
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -6 }}
+              transition={{ duration: 0.2 }}
+              style={{ display: "flex", alignItems: "center", gap: 6 }}
+            >
+              <Sparkles style={{ width: 12, height: 12, color: "var(--accent)", flexShrink: 0 }} />
+              <span style={{ color: "var(--fg-muted)" }}>
+                Highlight any text to expand or get a clinical tie
+              </span>
+            </m.div>
+          )}
+        </AnimatePresence>
+
+        {showStatus ? (
+          <m.div
+            aria-hidden
+            initial={false}
+            animate={{ scaleX: isStreaming ? readyFraction : 1 }}
+            transition={{ type: "spring", stiffness: 120, damping: 24 }}
+            style={{
+              position: "absolute",
+              left: 0,
+              right: 0,
+              bottom: 0,
+              height: 2,
+              transformOrigin: "0 50%",
+              // --sb-accent, not --accent: the landing page's stylesheet
+              // redefines --accent as an HSL triplet on :root, which leaves a
+              // raw var(--accent) colour invalid once it has loaded.
+              background: "hsl(var(--sb-accent))",
+            }}
+          />
+        ) : (
+          <m.div
+            aria-hidden
+            style={{
+              position: "absolute",
+              left: 0,
+              right: 0,
+              bottom: 0,
+              height: 2,
+              transformOrigin: "0 50%",
+              scaleX: readingProgress,
+              background: "hsl(var(--sb-accent))",
+              opacity: 0.55,
+            }}
+          />
+        )}
       </div>
 
       {/* Mode header + Save */}
@@ -1464,8 +1665,23 @@ const OutputSection = ({
         const writing = key === writingKey;
         const showEvidenceBadge =
           ready && citationState === "found" && !!spec.evidenceBacked;
+        if (!ready) seenPendingRef.current.add(key);
+        const landed = ready && seenPendingRef.current.has(key);
 
         const body = sectionBody(sheet, key);
+        // The draft of the section in flight, once it has any words to show.
+        const draft =
+          !ready && key === liveSection && key !== "flashcards"
+            ? key === "referenceNote"
+              ? sheet.referenceNote || undefined
+              : Array.isArray(body)
+              ? body.length
+                ? body
+                : undefined
+              : body?.trim()
+              ? body
+              : undefined
+            : undefined;
         const copyText =
           key === "flashcards"
             ? (sheet.flashcards ?? [])
@@ -1480,7 +1696,7 @@ const OutputSection = ({
             key={key}
             ref={isReference ? referenceNoteRef : undefined}
             data-section-key={key}
-            className="animate-fade-in scroll-mt-20"
+            className={`animate-fade-in scroll-mt-20${landed ? " section-landed" : ""}`}
             style={{
               ...SECTION_CARD_STYLE,
               // A section that hasn't landed keeps a neutral edge, so the
@@ -1523,14 +1739,19 @@ const OutputSection = ({
               <div className="flex items-center gap-1">
                 {ready ? (
                   <>
-                    <Check
-                      aria-label="Section loaded"
-                      className="h-3.5 w-3.5 text-primary/50 animate-fade-in"
-                      style={{
-                        animationDelay: isStreaming ? "0ms" : `${idx * 200 + 350}ms`,
-                        animationFillMode: "backwards",
+                    <m.span
+                      initial={{ scale: 0.3, opacity: 0 }}
+                      animate={{ scale: 1, opacity: 1 }}
+                      transition={{
+                        type: "spring",
+                        stiffness: 520,
+                        damping: 20,
+                        delay: landed ? 0 : idx * 0.2 + 0.35,
                       }}
-                    />
+                      style={{ display: "inline-flex" }}
+                    >
+                      <Check aria-label="Section loaded" className="h-3.5 w-3.5 text-primary/50" />
+                    </m.span>
                     <CopyButton text={copyText} />
                   </>
                 ) : (
@@ -1551,8 +1772,17 @@ const OutputSection = ({
               </div>
             </div>
 
+            <AutoHeight>
             <div style={SECTION_BODY_STYLE} data-enh-section={key}>
-              {!ready ? (
+              {!ready && draft !== undefined ? (
+                <div aria-busy="true" className="text-sm text-muted-foreground leading-relaxed">
+                  {Array.isArray(draft)
+                    ? renderDraftList(draft)
+                    : spec.kind === "list"
+                    ? renderDraftList([draft])
+                    : renderDraftProse(draft)}
+                </div>
+              ) : !ready ? (
                 <SectionSkeleton variant="sheet-body" />
               ) : key === "flashcards" ? (
                 <FlashcardsSection cards={sheet.flashcards ?? []} />
@@ -1595,6 +1825,7 @@ const OutputSection = ({
               )}
               {ready && renderInline(`${key}:end`)}
             </div>
+            </AutoHeight>
           </div>
         );
       })}
@@ -1615,25 +1846,33 @@ const OutputSection = ({
       )}
 
       {/* Anchored action menu — selection (below the highlighted text) */}
-      {selection && (
-        <EnhanceBubble
-          innerRef={selectionTooltipRef}
-          top={selection.top}
-          left={selection.left}
-          onAction={fireSelectionEnhance}
-        />
-      )}
+      <AnimatePresence>
+        {selection && (
+          <EnhanceBubble
+            key="selection"
+            innerRef={selectionTooltipRef}
+            top={selection.top}
+            left={selection.left}
+            onAction={fireSelectionEnhance}
+          />
+        )}
+      </AnimatePresence>
 
       {/* Anchored action menu — bold keyword click (below the keyword) */}
-      {keywordPicker && !selection && (
-        <EnhanceBubble
-          innerRef={keywordPickerRef}
-          top={keywordPicker.top}
-          left={keywordPicker.left}
-          onAction={fireKeywordEnhance}
-        />
-      )}
+      <AnimatePresence>
+        {keywordPicker && !selection && (
+          <EnhanceBubble
+            key="keyword"
+            innerRef={keywordPickerRef}
+            top={keywordPicker.top}
+            left={keywordPicker.left}
+            onAction={fireKeywordEnhance}
+          />
+        )}
+      </AnimatePresence>
     </div>
+    </MotionConfig>
+    </LazyMotion>
   );
 };
 

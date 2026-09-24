@@ -450,6 +450,39 @@
     .pane-crossfade {
       animation: pane-crossfade 200ms ease-out both;
     }
+
+    /* A word arriving over the stream. Each one mounts once and keeps its
+       span, so only the newest words are ever mid-animation. */
+    .sb-word-in {
+      animation: sb-word-in 420ms ease-out both;
+    }
+
+    /* Where the next word lands, at the end of the section being written. */
+    .sb-caret {
+      animation: sb-caret-blink 1.05s steps(2, jump-none) infinite;
+    }
+
+    /* Status text that is still in progress: a band of light sweeps across. */
+    .text-shimmer {
+      color: transparent;
+      background-image: linear-gradient(
+        90deg,
+        var(--fg-muted) 0%,
+        var(--fg-muted) 40%,
+        var(--fg) 50%,
+        var(--fg-muted) 60%,
+        var(--fg-muted) 100%
+      );
+      background-size: 250% 100%;
+      -webkit-background-clip: text;
+      background-clip: text;
+      animation: sb-text-shimmer 2.2s linear infinite;
+    }
+
+    /* A section whose content just arrived: its edge glows once, then settles. */
+    .section-landed {
+      animation: sb-section-landed 1100ms ease-out both;
+    }
   }
 
   @media (prefers-reduced-motion: reduce) {
@@ -581,6 +614,44 @@
     }
     to {
       opacity: 1;
+    }
+  }
+
+  @keyframes sb-word-in {
+    from {
+      opacity: 0;
+      filter: blur(3px);
+    }
+    to {
+      opacity: 1;
+      filter: blur(0);
+    }
+  }
+
+  @keyframes sb-caret-blink {
+    0% {
+      opacity: 1;
+    }
+    100% {
+      opacity: 0;
+    }
+  }
+
+  @keyframes sb-text-shimmer {
+    from {
+      background-position: 100% 0;
+    }
+    to {
+      background-position: -150% 0;
+    }
+  }
+
+  @keyframes sb-section-landed {
+    from {
+      box-shadow: 0 0 0 1px hsl(var(--sb-accent) / 0.6), 0 0 22px -4px hsl(var(--sb-accent) / 0.55);
+    }
+    to {
+      box-shadow: 0 0 0 0 transparent, 0 0 0 0 transparent;
     }
   }
 

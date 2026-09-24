@@ -143,6 +143,67 @@ describe("OutputSection streaming", () => {
     expect(screen.getByRole("button", { name: /save/i })).toBeEnabled();
   });
 
+  it("shows the draft of the section in flight when the caller names it", async () => {
+    await renderSheet(
+      <OutputSection
+        output={JSON.stringify(SHEET)}
+        isStreaming
+        streamedKeys={["overview", "memoryHooks"]}
+        liveKey="clinicalApproach"
+      />
+    );
+
+    // The section being written shows what has arrived of it so far...
+    expect(sectionText("clinicalApproach")).toContain("Diagnosis: echo");
+    expect(screen.getAllByLabelText("Writing section")).toHaveLength(1);
+    // ...but it isn't finished, so it offers no actions yet...
+    expect(screen.getAllByLabelText("Section loaded")).toHaveLength(2);
+    // ...and sections after it still wait.
+    expect(sectionText("examTraps")).not.toContain("HFpEF is not HFrEF");
+  });
+
+  it("keeps the skeleton while the in-flight section has no words yet", async () => {
+    await renderSheet(
+      <OutputSection
+        output={JSON.stringify({ ...SHEET, clinicalApproach: "" })}
+        isStreaming
+        streamedKeys={["overview", "memoryHooks"]}
+        liveKey="clinicalApproach"
+      />
+    );
+    expect(sectionText("clinicalApproach")).toBe("Clinical Approach");
+  });
+
+  it("reports generation progress in the sticky bar while streaming", async () => {
+    await renderSheet(
+      <OutputSection
+        output={JSON.stringify(SHEET)}
+        isStreaming
+        streamedKeys={["overview", "memoryHooks"]}
+        liveKey="clinicalApproach"
+        generationStatus={{ planned: true, sources: 4 }}
+      />
+    );
+
+    const status = screen.getByRole("status");
+    expect(status).toHaveTextContent("Writing Clinical Approach");
+    expect(status).toHaveTextContent("4 sources");
+    // Six sections are counted (flashcards arrive separately); two are done.
+    expect(status).toHaveTextContent("2/6");
+    expect(screen.queryByText(/Highlight any text/)).not.toBeInTheDocument();
+  });
+
+  it("shows the highlight hint, not progress, for a sheet that isn't generating", async () => {
+    await renderSheet(
+      <OutputSection
+        output={JSON.stringify(SHEET)}
+        generationStatus={{ planned: true, sources: "off" }}
+      />
+    );
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(screen.getByText(/Highlight any text/)).toBeInTheDocument();
+  });
+
   it("survives a partial sheet whose later fields are still empty", async () => {
     const partial: GeneratedSheet = {
       ...SHEET,

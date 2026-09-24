@@ -1,4 +1,5 @@
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useLayoutEffect, useMemo, useRef } from "react";
+import { LazyMotion, domAnimation, m } from "motion/react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -31,6 +32,7 @@ import {
 import { Slider } from "@/components/ui/slider";
 import { useToast } from "@/hooks/use-toast";
 import OutputSection, { type CitationState } from "@/components/OutputSection";
+import type { GenerationStatus } from "@/components/SheetProgress";
 import { useUsageLimit, MAX_DAILY_SHEETS } from "@/hooks/use-usage-limit";
 import { useCitationUsage } from "@/hooks/use-citation-usage";
 import { usePremiumHook } from "@/hooks/use-premium-hook";
@@ -41,7 +43,11 @@ import { parseModelUsed, type ModelUsed } from "@/lib/model-used";
 import { PoweredByCorti } from "@/components/PoweredByCorti";
 import { useFlashcardDeck } from "@/hooks/use-flashcard-deck";
 import { parseFlashcardsFromOutput } from "@/lib/parse-flashcards";
-import { parsePartialSheet, parseSheetOutput } from "@/lib/parse-partial-sheet";
+import {
+  parsePartialSheet,
+  parseSheetOutput,
+  type PartialSheetResult,
+} from "@/lib/parse-partial-sheet";
 import {
   type Flashcard,
   type GeneratedSheet,
@@ -145,16 +151,20 @@ const PillGroup = ({ label, options, value, onChange }: PillGroupProps) => (
 const SheetSectionNav = ({
   sheet,
   readyKeys,
+  liveKey,
 }: {
   sheet: GeneratedSheet;
   readyKeys?: string[];
+  /** The section being written, marked as such while streaming. */
+  liveKey?: string;
 }) => {
   const streaming = readyKeys !== undefined;
   // Same list the document is laid out from, so the rail can never name a
-  // section the sheet does not have, or miss one it does. Memoized because the
-  // observer effect below re-subscribes whenever this identity changes, and a
-  // fresh array each render would tear the observer down on every frame.
-  const allItems = useMemo(() => renderOrder(sheet), [sheet]);
+  // section the sheet does not have, or miss one it does. Keyed on the plan,
+  // not the sheet: mid-stream the sheet is a new object every frame, and the
+  // observer effect below would otherwise be torn down and rebuilt each time.
+  const plan = sheet.plan;
+  const allItems = useMemo(() => renderOrder({ plan }), [plan]);
   const items = streaming
     ? allItems
     : allItems.filter((it) => sectionHasBody(sheet, it.key));
@@ -184,6 +194,21 @@ const SheetSectionNav = ({
     return () => observer.disconnect();
   }, [allItems]);
 
+  const isPending = (key: string) => streaming && !readyKeys!.includes(key);
+  const activeShown = !!activeKey && !isPending(activeKey);
+
+  // The "you are here" bar is one element that glides between entries rather
+  // than a border that blinks from one row to the next. Measured, because a
+  // long title wraps and makes its row taller.
+  const navRef = useRef<HTMLElement>(null);
+  const [indicator, setIndicator] = useState<{ top: number; height: number } | null>(null);
+  useLayoutEffect(() => {
+    const row = activeShown
+      ? navRef.current?.querySelector<HTMLElement>(`[data-nav-key="${activeKey}"]`)
+      : null;
+    setIndicator(row ? { top: row.offsetTop, height: row.offsetHeight } : null);
+  }, [activeKey, activeShown, items.length]);
+
   const scrollToSection = (key: string) => {
     document
       .querySelector(`[data-section-key="${key}"]`)
@@ -193,38 +218,68 @@ const SheetSectionNav = ({
   if (!items.length) return null;
 
   return (
-    <div className="pt-1">
-      <p className="font-mono text-[11px] font-medium tracking-widest uppercase text-muted-foreground mb-3 pl-3">
-        On this sheet
-      </p>
-      <nav className="flex flex-col">
-        {items.map((it) => {
-          const pending = streaming && !readyKeys!.includes(it.key);
-          const active = !pending && activeKey === it.key;
-          return (
-            <button
-              key={it.key}
-              type="button"
-              disabled={pending}
-              onClick={() => scrollToSection(it.key)}
-              aria-current={active ? "true" : undefined}
-              className={`border-none border-l-2 bg-transparent py-1.5 pl-3 text-left text-sm transition-all duration-200 ${
-                active
-                  ? "border-l-primary text-primary font-medium"
-                  : pending
-                  ? // Not streamed in yet: dimmer than a live entry, and inert.
-                    "border-l-border text-muted-foreground/50 cursor-default"
-                  : "border-l-border text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              {it.title}
-            </button>
-          );
-        })}
-      </nav>
-      {/* TODO(Phase 1+): "Saved highlights" subsection — list collapsed
-          enhancements with their kind icon, click to jump to the gold mark. */}
-    </div>
+    <LazyMotion features={domAnimation} strict>
+      <div className="pt-1">
+        <p className="font-mono text-[11px] font-medium tracking-widest uppercase text-muted-foreground mb-3 pl-3">
+          On this sheet
+        </p>
+        <nav ref={navRef} className="relative flex flex-col border-l-2 border-border">
+          {indicator && (
+            <m.span
+              aria-hidden
+              className="absolute -left-[2px] w-[2px] rounded-full bg-primary"
+              initial={false}
+              animate={{ y: indicator.top, height: indicator.height }}
+              transition={{ type: "spring", stiffness: 420, damping: 36 }}
+              style={{ top: 0 }}
+            />
+          )}
+          {items.map((it) => {
+            const pending = isPending(it.key);
+            const live = streaming && it.key === liveKey;
+            const active = activeShown && activeKey === it.key;
+            return (
+              <button
+                key={it.key}
+                data-nav-key={it.key}
+                type="button"
+                disabled={pending}
+                onClick={() => scrollToSection(it.key)}
+                aria-current={active ? "true" : undefined}
+                className={`flex items-center gap-2 border-none bg-transparent py-1.5 pl-3 text-left text-sm transition-colors duration-200 ${
+                  active
+                    ? "text-primary font-medium"
+                    : pending
+                    ? // Not streamed in yet: dimmer than a live entry, and inert.
+                      "text-muted-foreground/50 cursor-default"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                <span className={`min-w-0 flex-1 ${live ? "text-shimmer" : ""}`}>{it.title}</span>
+                {live ? (
+                  <span
+                    aria-hidden
+                    className="mr-1 h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-primary"
+                  />
+                ) : streaming && !pending ? (
+                  <m.span
+                    aria-hidden
+                    className="mr-1 inline-flex shrink-0"
+                    initial={{ scale: 0.3, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    transition={{ type: "spring", stiffness: 520, damping: 20 }}
+                  >
+                    <Check className="h-3 w-3 text-primary/60" />
+                  </m.span>
+                ) : null}
+              </button>
+            );
+          })}
+        </nav>
+        {/* TODO(Phase 1+): "Saved highlights" subsection — list collapsed
+            enhancements with their kind icon, click to jump to the gold mark. */}
+      </div>
+    </LazyMotion>
   );
 };
 
@@ -400,6 +455,13 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
   // Sections whose JSON has fully arrived, so the renderer knows how much of a
   // still-streaming sheet is safe to show.
   const [streamedKeys, setStreamedKeys] = useState<string[]>([]);
+  // The key the model is writing right now, so its section can show the draft.
+  const [liveKey, setLiveKey] = useState<string | undefined>(undefined);
+  // What the stream has reported so far, for the progress line.
+  const [generationStatus, setGenerationStatus] = useState<GenerationStatus>({
+    planned: false,
+    sources: "off",
+  });
   // The response was damaged and only part of it could be salvaged — the reader
   // is told rather than being handed a silently short sheet.
   const [sheetIncomplete, setSheetIncomplete] = useState(false);
@@ -509,6 +571,8 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
     setLegacyOutput("");
     setDeckSaved(false);
     setStreamedKeys([]);
+    setLiveKey(undefined);
+    setGenerationStatus({ planned: false, sources: useGrounding ? "pending" : "off" });
     setSheetIncomplete(false);
     groundingResultRef.current = null;
     planRef.current = null;
@@ -536,6 +600,22 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
       ...(planRef.current ? { plan: planRef.current } : {}),
       ...(flashcardsRef.current ? { flashcards: flashcardsRef.current } : {}),
     });
+
+    // Draft updates are coalesced to one render per animation frame: chunks
+    // can arrive far faster than the screen repaints, and each render
+    // re-lays-out the whole document. Declared out here so the error path can
+    // cancel a frame that would otherwise land after it.
+    let pendingPartial: PartialSheetResult | null = null;
+    let frame = 0;
+    const flushPartial = () => {
+      frame = 0;
+      const p = pendingPartial;
+      pendingPartial = null;
+      if (!p) return;
+      setSheet(withPlan(p.sheet));
+      setStreamedKeys(p.completeKeys);
+      setLiveKey(p.inFlightKey);
+    };
 
     try {
       const response = await callMedicalNotes({
@@ -611,6 +691,12 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
 
               if (meta.plan !== undefined) {
                 planRef.current = parsePlan(meta.plan);
+                setGenerationStatus((s) => ({ ...s, planned: true }));
+                // Lay the document out from the plan now, before any content,
+                // rather than from the legacy placeholder it would otherwise
+                // show until the first section closes — and then re-lay-out.
+                const plan = planRef.current;
+                if (plan) setSheet((prev) => prev ?? { ...EMPTY_SHEET, plan });
               }
 
               // The deck, written beside the sheet rather than as its last
@@ -641,19 +727,21 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
                     typeof meta.retrievedChunks === "number" ? meta.retrievedChunks : 0,
                   sources: Array.isArray(meta.sources) ? meta.sources : [],
                 };
+                const found = groundingResultRef.current.sources.length;
+                setGenerationStatus((s) => ({ ...s, sources: found }));
               }
               continue;
             }
             const content = parsed.choices?.[0]?.delta?.content;
             if (content) {
               fullText += content;
-              // Re-render only when another section finishes — at most once per
-              // section for the whole stream, so no mid-word reflow.
+              // Finished sections render in full; the one in flight renders as
+              // a draft that grows word by word, at most once per frame.
               const partial = parsePartialSheet(fullText);
-              if (partial && partial.completeKeys.length > revealedCount) {
-                revealedCount = partial.completeKeys.length;
-                setSheet(withPlan(partial.sheet));
-                setStreamedKeys(partial.completeKeys);
+              if (partial && (partial.completeKeys.length > 0 || partial.inFlightKey)) {
+                revealedCount = Math.max(revealedCount, partial.completeKeys.length);
+                pendingPartial = partial;
+                if (!frame) frame = requestAnimationFrame(flushPartial);
               }
             }
           } catch {
@@ -662,6 +750,11 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
           }
         }
       }
+
+      // A draft frame still queued would land on top of the final sheet below.
+      if (frame) cancelAnimationFrame(frame);
+      frame = 0;
+      setLiveKey(undefined);
 
       // Authoritative parse, degrading in steps rather than all at once: a
       // single unescaped quote from the model used to discard the whole sheet
@@ -733,6 +826,8 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
         setCitationState("hidden");
       }
     } catch (e: unknown) {
+      if (frame) cancelAnimationFrame(frame);
+      setLiveKey(undefined);
       setLoading(false);
       toast({
         title: "Error",
@@ -1301,6 +1396,8 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
           citationIsLoggedIn={isLoggedIn}
           isStreaming={loading}
           streamedKeys={streamedKeys}
+          liveKey={loading ? liveKey : undefined}
+          generationStatus={generationStatus}
         />
       )}
 
@@ -1469,6 +1566,7 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
                 key={generationId}
                 sheet={sheet ?? EMPTY_SHEET}
                 readyKeys={loading ? streamedKeys : undefined}
+                liveKey={loading ? liveKey : undefined}
               />
             </div>
           </div>
