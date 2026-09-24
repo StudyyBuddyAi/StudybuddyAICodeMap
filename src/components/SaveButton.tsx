@@ -14,9 +14,20 @@ interface SaveButtonProps {
   };
   /** Blocks saving while the sheet is still streaming and would persist partial. */
   disabled?: boolean;
+  /** Replaces the button's own styling, for a toolbar that sets its own. */
+  className?: string;
+  /** Applied to the label, e.g. to hide it on a narrow screen. */
+  labelClassName?: string;
 }
 
-const SaveButton = ({ input, output, modeInfo, disabled = false }: SaveButtonProps) => {
+const SaveButton = ({
+  input,
+  output,
+  modeInfo,
+  disabled = false,
+  className,
+  labelClassName,
+}: SaveButtonProps) => {
   const [saved, setSaved] = useState(false);
   const { toast } = useToast();
   const { saveItem } = useStudyHistory();
@@ -35,6 +46,32 @@ const SaveButton = ({ input, output, modeInfo, disabled = false }: SaveButtonPro
     }
   };
 
+  const content = saved ? (
+    <>
+      <BookmarkCheck className="h-3.5 w-3.5" />
+      <span className={labelClassName}>Saved</span>
+    </>
+  ) : (
+    <>
+      <Bookmark className="h-3.5 w-3.5" />
+      <span className={labelClassName}>Save</span>
+    </>
+  );
+
+  if (className) {
+    return (
+      <button
+        type="button"
+        className={className}
+        onClick={handleSave}
+        disabled={saved || disabled}
+        aria-label={saved ? "Saved" : "Save"}
+      >
+        {content}
+      </button>
+    );
+  }
+
   return (
     <Button
       variant="outline"
@@ -43,17 +80,7 @@ const SaveButton = ({ input, output, modeInfo, disabled = false }: SaveButtonPro
       onClick={handleSave}
       disabled={saved || disabled}
     >
-      {saved ? (
-        <>
-          <BookmarkCheck className="h-3.5 w-3.5" />
-          Saved
-        </>
-      ) : (
-        <>
-          <Bookmark className="h-3.5 w-3.5" />
-          Save
-        </>
-      )}
+      {content}
     </Button>
   );
 };

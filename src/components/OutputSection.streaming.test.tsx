@@ -174,34 +174,33 @@ describe("OutputSection streaming", () => {
     expect(sectionText("clinicalApproach")).toBe("Clinical Approach");
   });
 
-  it("reports generation progress in the sticky bar while streaming", async () => {
+  it("holds the enhance tip back while the sheet is still being written", async () => {
+    localStorage.removeItem("sb_enhance_tip_seen");
     await renderSheet(
-      <OutputSection
-        output={JSON.stringify(SHEET)}
-        isStreaming
-        streamedKeys={["overview", "memoryHooks"]}
-        liveKey="clinicalApproach"
-        generationStatus={{ planned: true, sources: 4 }}
-      />
+      <OutputSection output={JSON.stringify(SHEET)} isStreaming streamedKeys={["overview"]} />
     );
-
-    const status = screen.getByRole("status");
-    expect(status).toHaveTextContent("Writing Clinical Approach");
-    expect(status).toHaveTextContent("4 sources");
-    // Six sections are counted (flashcards arrive separately); two are done.
-    expect(status).toHaveTextContent("2/6");
-    expect(screen.queryByText(/Highlight any text/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/highlight any text/i)).not.toBeInTheDocument();
   });
 
-  it("shows the highlight hint, not progress, for a sheet that isn't generating", async () => {
-    await renderSheet(
-      <OutputSection
-        output={JSON.stringify(SHEET)}
-        generationStatus={{ planned: true, sources: "off" }}
-      />
-    );
-    expect(screen.queryByRole("status")).not.toBeInTheDocument();
-    expect(screen.getByText(/Highlight any text/)).toBeInTheDocument();
+  it("offers the enhance tip once, and remembers it was dismissed", async () => {
+    localStorage.removeItem("sb_enhance_tip_seen");
+    const first = await renderSheet(<OutputSection output={JSON.stringify(SHEET)} />);
+    expect(screen.getByText(/highlight any text/i)).toBeInTheDocument();
+
+    await act(async () => {
+      screen.getByRole("button", { name: "Got it" }).click();
+    });
+    expect(localStorage.getItem("sb_enhance_tip_seen")).toBe("1");
+    first.unmount();
+
+    // A later sheet doesn't offer it again.
+    await renderSheet(<OutputSection output={JSON.stringify(SHEET)} />);
+    expect(screen.queryByText(/highlight any text/i)).not.toBeInTheDocument();
+  });
+
+  it("leaves the settings line and Save to the page when told to", async () => {
+    await renderSheet(<OutputSection output={JSON.stringify(SHEET)} showHeader={false} />);
+    expect(screen.queryByRole("button", { name: /save/i })).not.toBeInTheDocument();
   });
 
   it("survives a partial sheet whose later fields are still empty", async () => {

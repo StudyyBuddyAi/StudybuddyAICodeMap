@@ -50,12 +50,10 @@ import {
   MotionConfig,
   domAnimation,
   m,
-  useScroll,
-  useSpring,
 } from "motion/react";
 import { AutoHeight, Caret, StreamingWords } from "@/components/StreamingText";
 import { ENTER, EXIT, SPRING_POP } from "@/lib/motion";
-import SheetProgress, { type GenerationStatus } from "@/components/SheetProgress";
+import EnhanceTip from "@/components/sheet/EnhanceTip";
 import RecallCheck from "@/components/RecallCheck";
 import { assignRecallCards } from "@/lib/section-recall";
 
@@ -181,6 +179,27 @@ function makeEnhancementKey(sourceText: string, kind: EnhanceKind): string {
 
 export type CitationState = "idle" | "loading" | "found" | "locked" | "hidden";
 
+/** Set once the reader has dismissed the enhance tip or used enhance. */
+const ENHANCE_TIP_KEY = "sb_enhance_tip_seen";
+
+// Storage can be unavailable (private mode, blocked site data); a tip that
+// shows again is the worst that should happen.
+function readFlag(key: string): boolean {
+  try {
+    return localStorage.getItem(key) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function writeFlag(key: string): void {
+  try {
+    localStorage.setItem(key, "1");
+  } catch {
+    // not persisted — see readFlag
+  }
+}
+
 interface OutputSectionProps {
   output: string;
   inputText?: string;
@@ -209,10 +228,10 @@ interface OutputSectionProps {
    */
   liveKey?: string;
   /**
-   * What the live generation has reported so far. When given, the sticky bar
-   * shows generation progress while streaming, then settles back to the hint.
+   * The settings line and Save above the sections. The Sheets page turns it
+   * off: its topic bar carries both. Library's saved-sheet dialog keeps it.
    */
-  generationStatus?: GenerationStatus;
+  showHeader?: boolean;
 }
 
 // ─── Legacy renderer helpers (kept for old text-blob sheets) ───────────────
@@ -1306,28 +1325,19 @@ const OutputSection = ({
   isStreaming = false,
   streamedKeys,
   liveKey,
-  generationStatus,
+  showHeader = true,
 }: OutputSectionProps) => {
   const navigate = useNavigate();
   const ref = useRef<HTMLDivElement>(null);
   const referenceNoteRef = useRef<HTMLDivElement>(null);
 
-  // How far through the document the reader is, eased so the bar glides.
-  const { scrollYProgress } = useScroll({ target: ref, offset: ["start start", "end end"] });
-  const readingProgress = useSpring(scrollYProgress, { stiffness: 200, damping: 30, mass: 0.4 });
-
-  // The progress line holds its "ready" state for a moment after the stream
-  // ends, so the finish is seen, before the bar settles back to the hint.
-  const [statusVisible, setStatusVisible] = useState(isStreaming);
-  useEffect(() => {
-    if (isStreaming) {
-      setStatusVisible(true);
-      return;
-    }
-    const t = window.setTimeout(() => setStatusVisible(false), 2200);
-    return () => window.clearTimeout(t);
-  }, [isStreaming]);
-  const showStatus = !!generationStatus && statusVisible;
+  // The highlight-to-enhance tip is shown until it is dismissed or the reader
+  // enhances something, then never again.
+  const [tipSeen, setTipSeen] = useState(() => readFlag(ENHANCE_TIP_KEY));
+  const retireTip = useCallback(() => {
+    setTipSeen(true);
+    writeFlag(ENHANCE_TIP_KEY);
+  }, []);
 
   // Sections this mount has seen waiting. One that then lands gets a single
   // glow; a saved sheet, which never waited, opens without any.
@@ -1407,6 +1417,8 @@ const OutputSection = ({
   }, [keywordPicker]);
 
   const addEnhancement = (sourceText: string, kind: EnhanceKind, anchor: string) => {
+    // Using the feature is the surest sign the tip has done its job.
+    retireTip();
     const key = makeEnhancementKey(sourceText, kind);
     setActiveEnhancements((prev) => ({
       ...prev,
@@ -1530,9 +1542,12 @@ const OutputSection = ({
     if (showNudge) localStorage.setItem("sb_first_sheet_seen", "1");
   }, [showNudge]);
 
-  // Tracks the identity of the *core* sheet content (ignoring enhancements) so we
-  // only scroll-to-top for a genuinely new sheet — not when an enhancement is
-  // saved into the sheet (which also mutates `output`).
+  // Tracks the identity of the *core* sheet content (ignoring enhancements) so
+  // the disclaimer reopens only for a genuinely new sheet — not when an
+  // enhancement is saved into the sheet (which also mutates `output`).
+  // Scrolling is the page's business: this used to scroll the document into
+  // view here, which under a sticky page header yanked the reader down the
+  // moment a sheet finished.
   const sheetIdentityRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -1547,7 +1562,6 @@ const OutputSection = ({
     if (isNewSheet) {
       setDisclaimerCollapsed(false);
       sessionStorage.removeItem("sb_disclaimer_collapsed");
-      ref.current?.scrollIntoView({ behavior: "smooth", block: "start" });
     }
   }, [output, isStreaming]);
 
@@ -1691,13 +1705,6 @@ const OutputSection = ({
     ? liveSection ?? sectionOrder.find((spec) => !isReady(spec.key))?.key
     : undefined;
 
-  // Flashcards arrive in their own frame at the end rather than as a section
-  // the parser reports, so progress is counted over everything else.
-  const progressSections = sectionOrder.filter((s) => s.key !== "flashcards");
-  const readyFraction = progressSections.length
-    ? progressSections.filter((s) => isReady(s.key)).length / progressSections.length
-    : 0;
-
   // Group active enhancements by anchor so they can be injected inline.
   // Open ones render as inline blocks; collapsed ones render as golden
   // highlights wrapped around their source text.
@@ -1741,106 +1748,24 @@ const OutputSection = ({
       onMouseUp={handleSelectionChange}
       onTouchEnd={handleSelectionChange}
     >
-      {/* Sticky bar below the top nav. While a sheet generates it reports the
-          progress; afterwards it carries the highlight-to-enhance hint. Its
-          bottom edge is a progress bar either way: sections written, then how
-          far the reader has scrolled. */}
-      <div
-        className="sticky animate-fade-in"
-        style={{
-          top: "var(--nav-h, 64px)",
-          zIndex: 20,
-          overflow: "hidden",
-          borderRadius: "var(--radius-sm)",
-          border: "1px solid var(--border)",
-          background: "color-mix(in srgb, var(--bg) 90%, transparent)",
-          backdropFilter: "blur(10px)",
-          WebkitBackdropFilter: "blur(10px)",
-          padding: "6px 12px",
-          marginBottom: 4,
-          fontFamily: "var(--font-mono)",
-          fontSize: 11,
-          letterSpacing: "0.02em",
-        }}
-      >
-        <AnimatePresence mode="wait" initial={false}>
-          {showStatus ? (
-            <m.div
-              key="status"
-              initial={{ opacity: 0, y: 6 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -6 }}
-              transition={{ duration: 0.2 }}
-            >
-              <SheetProgress
-                sections={progressSections}
-                readyKeys={streamedKeys ?? []}
-                liveKey={liveKey}
-                status={generationStatus!}
-                done={!isStreaming}
-              />
-            </m.div>
-          ) : (
-            <m.div
-              key="hint"
-              initial={{ opacity: 0, y: 6 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -6 }}
-              transition={{ duration: 0.2 }}
-              style={{ display: "flex", alignItems: "center", gap: 6 }}
-            >
-              <Sparkles style={{ width: 12, height: 12, color: "var(--accent)", flexShrink: 0 }} />
-              <span style={{ color: "var(--fg-muted)" }}>
-                Highlight any text to expand or get a clinical tie
-              </span>
-            </m.div>
-          )}
-        </AnimatePresence>
-
-        {showStatus ? (
-          <m.div
-            aria-hidden
-            initial={false}
-            animate={{ scaleX: isStreaming ? readyFraction : 1 }}
-            transition={{ type: "spring", stiffness: 120, damping: 24 }}
-            style={{
-              position: "absolute",
-              left: 0,
-              right: 0,
-              bottom: 0,
-              height: 2,
-              transformOrigin: "0 50%",
-              background: "var(--accent)",
-            }}
+      {showHeader ? (
+        <div className="animate-fade-in flex items-center justify-between">
+          {modeInfo && <ModeInfoBar modeInfo={modeInfo} />}
+          <SaveButton
+            input={inputText || ""}
+            output={output}
+            modeInfo={modeInfo}
+            disabled={isStreaming}
           />
-        ) : (
-          <m.div
-            aria-hidden
-            style={{
-              position: "absolute",
-              left: 0,
-              right: 0,
-              bottom: 0,
-              height: 2,
-              transformOrigin: "0 50%",
-              scaleX: readingProgress,
-              background: "var(--accent)",
-              opacity: 0.55,
-            }}
-          />
-        )}
-      </div>
-
-      {/* Mode header + Save */}
-      <div className="animate-fade-in flex items-center justify-between">
-        {modeInfo && <ModeInfoBar modeInfo={modeInfo} />}
-        <SaveButton
-          input={inputText || ""}
-          output={output}
-          modeInfo={modeInfo}
-          disabled={isStreaming}
-        />
-      </div>
+        </div>
+      ) : (
+        // The page's own header is outside the printed document, so the
+        // print carries its title here.
+        <h1 className="hidden text-xl font-semibold print:block">
+          {sheet.topicEmoji ? `${sheet.topicEmoji} ` : ""}
+          {sheet.topic || inputText}
+        </h1>
+      )}
 
       {sectionOrder.map((spec, idx) => {
         const key = spec.key;
@@ -1883,7 +1808,8 @@ const OutputSection = ({
             key={key}
             ref={isReference ? referenceNoteRef : undefined}
             data-section-key={key}
-            className={`animate-fade-in scroll-mt-20${landed ? " section-landed" : ""}`}
+            // Clears the app nav and the sheet's sticky topic bar on a jump.
+            className={`animate-fade-in scroll-mt-[calc(var(--nav-h,64px)+100px)]${landed ? " section-landed" : ""}`}
             style={{
               ...SECTION_CARD_STYLE,
               // A section that hasn't landed keeps a neutral edge, so the
@@ -2042,6 +1968,8 @@ const OutputSection = ({
         toggleDisclaimer,
         navigate
       )}
+
+      <EnhanceTip show={!isStreaming && !tipSeen} onDismiss={retireTip} />
 
       {/* Anchored action menu — selection (below the highlighted text) */}
       <AnimatePresence>
