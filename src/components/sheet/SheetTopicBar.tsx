@@ -104,7 +104,10 @@ const SheetTopicBar = ({
       className="sticky z-20 -mx-1 px-1"
       style={{
         top: "var(--nav-h, 64px)",
-        background: "color-mix(in srgb, var(--bg) 88%, transparent)",
+        // The page's own background (the layout paints bg-background), so
+        // the bar is invisible at rest in either theme and only its blur
+        // shows once content scrolls under it.
+        background: "hsl(var(--background) / 0.88)",
         backdropFilter: "blur(12px)",
         WebkitBackdropFilter: "blur(12px)",
       }}
