@@ -12,17 +12,21 @@
   --color-primary-foreground: hsl(var(--primary-foreground));
 } */
 
+/* This file loads on every route (App imports Index eagerly), so these land on
+   the whole app's :root. It must not define --accent or --border: those names
+   belong to styles/openmed-tokens.css as hex colours, used raw as
+   var(--accent) / var(--border) across the app, and an HSL triplet here
+   silently invalidates every one of them. The landing reads --color-accent and
+   --color-border instead. */
 :root {
   --background: 42 31% 95%;
   --foreground: 210 38% 16%;
-  --border: 39 20% 85%;
   --card: 43 44% 98%;
   --card-foreground: 210 38% 16%;
   --primary: 210 38% 16%;
   --primary-foreground: 42 31% 95%;
   --muted: 39 20% 89%;
   --muted-foreground: 211 15% 43%;
-  --accent: 178 89% 37%;
   --accent-foreground: 210 38% 12%;
   --ring: 178 89% 37%;
   --app-font-sans: "DM Sans", sans-serif;
@@ -50,14 +54,12 @@
 .dark {
   --background: 210 37% 10%;
   --foreground: 42 31% 95%;
-  --border: 211 22% 22%;
   --card: 210 33% 14%;
   --card-foreground: 42 31% 95%;
   --primary: 42 31% 95%;
   --primary-foreground: 210 37% 10%;
   --muted: 211 22% 19%;
   --muted-foreground: 211 13% 67%;
-  --accent: 178 82% 43%;
   --accent-foreground: 210 37% 10%;
   --ring: 178 82% 43%;
   --color-background: #101e2b;

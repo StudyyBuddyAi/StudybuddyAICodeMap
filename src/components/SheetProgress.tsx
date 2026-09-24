@@ -88,12 +88,12 @@ const SheetProgress = (props: SheetProgressProps) => {
             transition={{ type: "spring", stiffness: 520, damping: 22 }}
             style={{ display: "inline-flex" }}
           >
-            <Check style={{ width: 12, height: 12, color: "hsl(var(--sb-accent))" }} />
+            <Check style={{ width: 12, height: 12, color: "var(--accent)" }} />
           </m.span>
         ) : (
           <Sparkles
             className="animate-pulse"
-            style={{ width: 12, height: 12, color: "hsl(var(--sb-accent))" }}
+            style={{ width: 12, height: 12, color: "var(--accent)" }}
           />
         )}
       </span>
@@ -145,7 +145,7 @@ const SheetProgress = (props: SheetProgressProps) => {
           style={{
             flexShrink: 0,
             fontVariantNumeric: "tabular-nums",
-            color: done ? "hsl(var(--sb-accent))" : "var(--fg-muted)",
+            color: done ? "var(--accent)" : "var(--fg-muted)",
           }}
         >
           {readyCount}/{total}

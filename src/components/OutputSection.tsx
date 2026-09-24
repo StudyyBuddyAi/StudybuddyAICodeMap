@@ -1622,10 +1622,7 @@ const OutputSection = ({
               bottom: 0,
               height: 2,
               transformOrigin: "0 50%",
-              // --sb-accent, not --accent: the landing page's stylesheet
-              // redefines --accent as an HSL triplet on :root, which leaves a
-              // raw var(--accent) colour invalid once it has loaded.
-              background: "hsl(var(--sb-accent))",
+              background: "var(--accent)",
             }}
           />
         ) : (
@@ -1639,7 +1636,7 @@ const OutputSection = ({
               height: 2,
               transformOrigin: "0 50%",
               scaleX: readingProgress,
-              background: "hsl(var(--sb-accent))",
+              background: "var(--accent)",
               opacity: 0.55,
             }}
           />

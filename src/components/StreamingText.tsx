@@ -69,7 +69,7 @@ export function Caret() {
         marginLeft: 3,
         verticalAlign: "-0.15em",
         borderRadius: 1,
-        background: "hsl(var(--sb-accent))",
+        background: "var(--accent)",
       }}
     />
   );
