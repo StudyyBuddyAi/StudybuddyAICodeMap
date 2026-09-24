@@ -26,6 +26,8 @@ const res = await fetch(`${process.env.VITE_SUPABASE_URL}/functions/v1/${fn}`, {
 });
 
 console.log("status", res.status);
+// A sheet names its model in a __meta.model frame (its stream opens before
+// the writer is chosen), reported below; older deployments sent these headers.
 console.log("X-Model-Used", res.headers.get("x-model-used"));
 console.log("X-Model-Fallback", res.headers.get("x-model-fallback"));
 console.log("X-Is-Premium", res.headers.get("x-is-premium"));
@@ -46,7 +48,10 @@ for await (const chunk of res.body as unknown as AsyncIterable<Uint8Array>) {
     const line = ev.split("\n").find((l) => l.startsWith("data: "));
     if (!line || line.includes("[DONE]")) continue;
     try {
-      const t = JSON.parse(line.slice(6)).choices?.[0]?.delta?.content;
+      const frame = JSON.parse(line.slice(6));
+      if (frame.__meta?.model) console.log("model frame", JSON.stringify(frame.__meta.model));
+      if (frame.__meta?.error) console.log("error frame", frame.__meta.error);
+      const t = frame.choices?.[0]?.delta?.content;
       if (typeof t === "string") {
         if (ttfc === null) ttfc = Date.now() - started;
         text += t;

@@ -91,6 +91,7 @@ for (const c of CASES) {
   }
 
   let plan: { key: string; title: string; kind: string }[] = [];
+  let modelUsed: string | null = null;
   let deckRaw: string | null = null;
   let lastSectionAt = 0;
   let text = "";
@@ -109,13 +110,16 @@ for (const c of CASES) {
         const parsed = JSON.parse(payload);
         if (Array.isArray(parsed.__meta?.plan)) plan = parsed.__meta.plan;
         if (typeof parsed.__meta?.flashcards === "string") deckRaw = parsed.__meta.flashcards;
+        // A sheet names its model in a frame (its stream opens before the
+        // writer is chosen); older deployments sent only the header.
+        if (typeof parsed.__meta?.model?.used === "string") modelUsed = parsed.__meta.model.used;
         const t = parsed.choices?.[0]?.delta?.content;
         if (typeof t === "string") { text += t; lastSectionAt = Date.now() - started; }
       } catch { /* partial frame */ }
     }
   }
 
-  const model = res.headers.get("x-model-used") ?? "?";
+  const model = modelUsed ?? res.headers.get("x-model-used") ?? "?";
   const parsed = parseSheetOutput(text);
   console.log(`  model     ${model}${model.startsWith("corti/") ? "" : "   <-- NOT CORTI"}`);
   console.log(`  time      ${Date.now() - started}ms`);

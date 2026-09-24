@@ -41,6 +41,7 @@ for (const c of CASES) {
   }
 
   let plan: { key: string }[] | null = null;
+  let modelUsed: string | null = null;
   let text = "";
   const decoder = new TextDecoder();
   let buffer = "";
@@ -56,6 +57,9 @@ for (const c of CASES) {
       try {
         const parsed = JSON.parse(payload);
         if (Array.isArray(parsed.__meta?.plan)) plan = parsed.__meta.plan;
+        // A sheet names its model in a frame (its stream opens before the
+        // writer is chosen); older deployments sent only the header.
+        if (typeof parsed.__meta?.model?.used === "string") modelUsed = parsed.__meta.model.used;
         const t = parsed.choices?.[0]?.delta?.content;
         if (typeof t === "string") text += t;
       } catch { /* partial frame */ }
@@ -69,7 +73,7 @@ for (const c of CASES) {
   const extra = wrote.filter((k) => !planned.includes(k));
 
   console.log(c.label);
-  console.log(`  model used  ${res.headers.get("x-model-used")}  (${Date.now() - started}ms)`);
+  console.log(`  model used  ${modelUsed ?? res.headers.get("x-model-used")}  (${Date.now() - started}ms)`);
   console.log(`  plan        ${planned.join(", ") || "(none sent!)"}`);
   console.log(`  wrote       ${wrote.join(", ") || "(nothing parsed)"}`);
   console.log(`  match       ${missing.length === 0 && extra.length === 0 ? "OK" : `missing=[${missing}] extra=[${extra}]`}\n`);
