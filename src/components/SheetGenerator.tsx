@@ -30,6 +30,7 @@ import SectionSkeleton from "@/components/SectionSkeleton";
 import SheetComposer from "@/components/sheet/SheetComposer";
 import SheetSettings from "@/components/sheet/SheetSettings";
 import SheetTopicBar from "@/components/sheet/SheetTopicBar";
+import LoadingTips from "@/components/sheet/LoadingTips";
 import SheetFinish, { type SheetDeck } from "@/components/sheet/SheetFinish";
 import { SectionsMenu, SheetSectionRail } from "@/components/sheet/SheetSections";
 import {
@@ -813,6 +814,10 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
   // arrives there is nothing true to list or count: the placeholder sheet's
   // six legacy titles would name sections a drug or a pathway never gets.
   const planned = !!sheet;
+  // Generating, with nothing written yet: the wait the loading tips fill. The
+  // model's first tokens name a key (the emoji, the topic) before any section
+  // text, so this ends the moment it starts writing.
+  const waitingForContent = loading && !liveKey && streamedKeys.length === 0;
   const sectionEntries = planned ? listSections(readingSheet, loading, streamedKeys, liveKey) : [];
   const activeSection = useActiveSection(
     sectionEntries.map((s) => s.key),
@@ -992,47 +997,53 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
             </div>
           )}
 
-          {/* Before the plan: neutral cards, since what the sheet will hold
-              isn't known yet. Then the planned sections, laid out once and
-              filled in — never added or removed. The two swap with the shared
-              rise, so the titles arrive rather than replace other titles. */}
-          <AnimatePresence mode="wait" initial={false}>
-            {!planned && !legacyOutput ? (
-              <m.div
-                key="planning"
-                {...RISE}
-                className="space-y-4"
-                aria-busy="true"
-                aria-label="Planning the sheet"
-              >
-                {[0, 1, 2].map((i) => (
-                  <SectionSkeleton key={i} variant="sheet-section" />
-                ))}
-              </m.div>
-            ) : (
-              <m.div key="sheet" {...RISE}>
-                <OutputSection
-                  output={sheet ? JSON.stringify(sheet) : legacyOutput || EMPTY_SHEET_JSON}
-                  inputText={activeSettings.notes}
-                  modeInfo={activeModeInfo}
-                  citations={citations}
-                  citationState={citationState}
-                  modelUsed={modelUsed}
-                  isPro={pro}
-                  userId={user?.id ?? null}
-                  isAnonymous={isAnonymous ?? false}
-                  sheetId={activeSettings.notes}
-                  onCitationLockedClick={() => (isLoggedIn ? setGoProOpen(true) : setAuthModalOpen(true))}
-                  citationIsLoggedIn={isLoggedIn}
-                  isStreaming={loading}
-                  streamedKeys={streamedKeys}
-                  liveKey={loading ? liveKey : undefined}
-                  showHeader={false}
-                  deck={deck ?? undefined}
-                />
-              </m.div>
-            )}
-          </AnimatePresence>
+          {/* The tips float over this box: the placeholders under them are the
+              document's real layout, so the card comes and goes without
+              moving anything. */}
+          <div className="relative">
+            {/* Before the plan: neutral cards, since what the sheet will hold
+                isn't known yet. Then the planned sections, laid out once and
+                filled in — never added or removed. The two swap with the shared
+                rise, so the titles arrive rather than replace other titles. */}
+            <AnimatePresence mode="wait" initial={false}>
+              {!planned && !legacyOutput ? (
+                <m.div
+                  key="planning"
+                  {...RISE}
+                  className="space-y-4"
+                  aria-busy="true"
+                  aria-label="Planning the sheet"
+                >
+                  {[0, 1, 2].map((i) => (
+                    <SectionSkeleton key={i} variant="sheet-section" />
+                  ))}
+                </m.div>
+              ) : (
+                <m.div key="sheet" {...RISE}>
+                  <OutputSection
+                    output={sheet ? JSON.stringify(sheet) : legacyOutput || EMPTY_SHEET_JSON}
+                    inputText={activeSettings.notes}
+                    modeInfo={activeModeInfo}
+                    citations={citations}
+                    citationState={citationState}
+                    modelUsed={modelUsed}
+                    isPro={pro}
+                    userId={user?.id ?? null}
+                    isAnonymous={isAnonymous ?? false}
+                    sheetId={activeSettings.notes}
+                    onCitationLockedClick={() => (isLoggedIn ? setGoProOpen(true) : setAuthModalOpen(true))}
+                    citationIsLoggedIn={isLoggedIn}
+                    isStreaming={loading}
+                    streamedKeys={streamedKeys}
+                    liveKey={loading ? liveKey : undefined}
+                    showHeader={false}
+                    deck={deck ?? undefined}
+                  />
+                </m.div>
+              )}
+            </AnimatePresence>
+            <LoadingTips active={waitingForContent} />
+          </div>
 
           {/* Where the sheet ends: what to do with it now. Rises in when the
               stream finishes, below everything, so nothing already read moves. */}
