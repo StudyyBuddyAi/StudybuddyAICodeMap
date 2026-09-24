@@ -1,4 +1,4 @@
-import { useRef, useEffect, useState, useCallback } from "react";
+import { Fragment, useRef, useEffect, useState, useCallback } from "react";
 import { useNavigate, type NavigateFunction } from "react-router-dom";
 import { callMedicalNotes } from "@/lib/callMedicalNotes";
 import { useMemoryPreference } from "@/hooks/use-memory-preference";
@@ -43,7 +43,7 @@ import {
   parseStoredSheet,
   isJsonSheet,
 } from "@/types/generated-sheet";
-import { renderOrder, sectionBody } from "@/lib/sheet-plan";
+import { bodyLines, isTableRows, renderOrder, sectionBody } from "@/lib/sheet-plan";
 import {
   AnimatePresence,
   LazyMotion,
@@ -669,6 +669,186 @@ function renderDraftList(items: string[]) {
         </li>
       ))}
     </ol>
+  );
+}
+
+// ─── Table sections ────────────────────────────────────────────────────────
+//
+// Headers come from the plan, never the model, so every row is laid against
+// the same columns. On a narrow screen the table scrolls sideways under a
+// sticky first column, which is the one that says what the row is about.
+
+const TABLE_CELL_STYLE: React.CSSProperties = {
+  padding: "9px 12px",
+  verticalAlign: "top",
+  textAlign: "left",
+};
+
+/**
+ * The separator is drawn once per row, on the row, in the collapsed-border
+ * model. Drawn per cell it went out of step under the sticky first column —
+ * Chromium painted that column's borders at the wrong heights once rows had
+ * a hover background.
+ */
+const TABLE_ROW_STYLE: React.CSSProperties = { borderBottom: "1px solid var(--border)" };
+
+const TABLE_HEAD_STYLE: React.CSSProperties = {
+  ...TABLE_CELL_STYLE,
+  padding: "8px 12px",
+  borderBottom: "1px solid var(--border-strong)",
+  fontFamily: "var(--font-mono)",
+  fontSize: 11,
+  fontWeight: 500,
+  letterSpacing: "0.06em",
+  textTransform: "uppercase",
+  color: "var(--fg-muted)",
+  whiteSpace: "nowrap",
+  background: "var(--bg-elevated)",
+};
+
+/** The first column stays put while the rest scroll under it. */
+const STICKY_COLUMN_STYLE: React.CSSProperties = {
+  position: "sticky",
+  left: 0,
+  zIndex: 1,
+  background: "var(--bg-elevated)",
+};
+
+/** Rows with at least one filled cell, each cut or padded to the column count. */
+function tableRows(rows: string[][], width: number): string[][] {
+  return rows
+    .filter((row) => row.some((cell) => cell.trim()))
+    .map((row) => {
+      if (row.length <= width) return [...row, ...Array(width - row.length).fill("")];
+      // Cells past the last column are the model's overflow, not noise: keep
+      // them in the last cell rather than drop what it wrote.
+      return [...row.slice(0, width - 1), row.slice(width - 1).join("; ")];
+    });
+}
+
+function TableFrame({
+  columns,
+  width,
+  children,
+}: {
+  columns: string[];
+  width: number;
+  children: React.ReactNode;
+}) {
+  return (
+    <div style={{ overflowX: "auto", margin: "0 -4px" }}>
+      <table
+        className="text-sm leading-relaxed"
+        style={{
+          width: "100%",
+          // Wide enough that a cell holds a short phrase; past the container it
+          // scrolls sideways under the sticky first column.
+          minWidth: width * 120,
+          borderCollapse: "collapse",
+        }}
+      >
+        {columns.length > 0 && (
+          <thead>
+            <tr>
+              {columns.map((col, i) => (
+                <th
+                  key={col}
+                  scope="col"
+                  style={i === 0 ? { ...TABLE_HEAD_STYLE, ...STICKY_COLUMN_STYLE } : TABLE_HEAD_STYLE}
+                >
+                  {col}
+                </th>
+              ))}
+            </tr>
+          </thead>
+        )}
+        <tbody>{children}</tbody>
+      </table>
+    </div>
+  );
+}
+
+const tableWidth = (columns: string[], rows: string[][]) =>
+  columns.length || Math.max(1, ...rows.map((r) => r.length));
+
+function renderTableSection(
+  rawRows: string[][],
+  columns: string[],
+  sectionKey: string,
+  onKeywordClick: KeywordClickHandler,
+  renderInline: (anchor: string) => React.ReactNode,
+  collapsedByAnchor: Record<string, CollapsedRef[]>,
+  onReopen: (key: string) => void
+) {
+  const width = tableWidth(columns, rawRows);
+  const rows = tableRows(rawRows, width);
+  if (!rows.length) return null;
+
+  return (
+    <TableFrame columns={columns} width={width}>
+      {rows.map((row, r) => {
+        const anchor = `${sectionKey}:${r}`;
+        const collapsed = collapsedByAnchor[anchor] ?? [];
+        const inline = renderInline(anchor);
+        const hasInline = Array.isArray(inline) ? inline.length > 0 : !!inline;
+        return (
+          <Fragment key={r}>
+            <tr data-enh-anchor={anchor} className="transition-colors hover:bg-secondary/40" style={TABLE_ROW_STYLE}>
+              {row.map((cell, c) => (
+                <td
+                  key={c}
+                  className={c === 0 ? "font-medium text-foreground" : "text-muted-foreground"}
+                  style={c === 0 ? { ...TABLE_CELL_STYLE, ...STICKY_COLUMN_STYLE } : TABLE_CELL_STYLE}
+                >
+                  {cell.trim() ? (
+                    renderRich(cell, `${anchor}-${c}`, onKeywordClick, collapsed, onReopen)
+                  ) : (
+                    <span aria-label="Not given" style={{ color: "var(--fg-subtle)" }}>
+                      —
+                    </span>
+                  )}
+                </td>
+              ))}
+            </tr>
+            {hasInline && (
+              <tr>
+                <td colSpan={width} style={{ padding: "0 12px 8px" }}>
+                  {inline}
+                </td>
+              </tr>
+            )}
+          </Fragment>
+        );
+      })}
+    </TableFrame>
+  );
+}
+
+/** The table being written: cells fill in word by word, caret in the newest. */
+function renderDraftTable(rawRows: string[][], columns: string[]) {
+  const width = tableWidth(columns, rawRows);
+  const rows = tableRows(rawRows, width);
+  // The caret goes after the last cell with anything in it.
+  const lastRow = rows.length - 1;
+  const lastCell = lastRow >= 0 ? rows[lastRow].reduce((at, cell, i) => (cell.trim() ? i : at), 0) : -1;
+
+  return (
+    <TableFrame columns={columns} width={width}>
+      {rows.map((row, r) => (
+        <tr key={r} style={TABLE_ROW_STYLE}>
+          {row.map((cell, c) => (
+            <td
+              key={c}
+              className={c === 0 ? "font-medium text-foreground" : "text-muted-foreground"}
+              style={c === 0 ? { ...TABLE_CELL_STYLE, ...STICKY_COLUMN_STYLE } : TABLE_CELL_STYLE}
+            >
+              <StreamingWords text={cell} />
+              {r === lastRow && c === lastCell && <Caret />}
+            </td>
+          ))}
+        </tr>
+      ))}
+    </TableFrame>
   );
 }
 
@@ -1691,8 +1871,10 @@ const OutputSection = ({
             ? (sheet.flashcards ?? [])
                 .map((c) => `Q: [${c.tag}] ${c.question}\nA: ${c.answer}`)
                 .join("\n\n")
+            : isTableRows(body)
+            ? [spec.columns?.join(" | "), ...bodyLines(body)].filter(Boolean).join("\n")
             : Array.isArray(body)
-            ? body.map((item, i) => `${i + 1}. ${item}`).join("\n")
+            ? bodyLines(body).map((item, i) => `${i + 1}. ${item}`).join("\n")
             : body ?? "";
 
         return (
@@ -1780,9 +1962,11 @@ const OutputSection = ({
             <div style={SECTION_BODY_STYLE} data-enh-section={key}>
               {!ready && draft !== undefined ? (
                 <div aria-busy="true" className="text-sm text-muted-foreground leading-relaxed">
-                  {Array.isArray(draft)
-                    ? renderDraftList(draft)
-                    : spec.kind === "list"
+                  {isTableRows(draft)
+                    ? renderDraftTable(draft, spec.columns ?? [])
+                    : Array.isArray(draft)
+                    ? renderDraftList(bodyLines(draft))
+                    : spec.kind !== "prose"
                     ? renderDraftList([draft])
                     : renderDraftProse(draft)}
                 </div>
@@ -1818,9 +2002,22 @@ const OutputSection = ({
                     </div>
                   )}
                 </>
+              ) : isTableRows(body) ? (
+                // By the shape that arrived, not only the plan's kind: a model
+                // that wrote rows under a list heading still gets a table, and
+                // one that wrote items under a table heading falls to the list.
+                renderTableSection(
+                  body,
+                  spec.columns ?? [],
+                  key,
+                  handleKeywordClick,
+                  renderInline,
+                  collapsedByAnchor,
+                  reopenEnhancement
+                )
               ) : (
                 renderArraySection(
-                  Array.isArray(body) ? body : [],
+                  bodyLines(body),
                   key,
                   renderInline,
                   collapsedByAnchor,

@@ -75,6 +75,12 @@ export const CASES: EvalCase[] = [
   sheet("sheet-siadh-vernacular", "\"I keep confusing SIADH and DI\" · Step 1 · Intermediate · Moderate", "i keep mixing up SIADH and diabetes insipidus, how do i tell them apart", "USMLE Step 1", "Moderate", "Intermediate"),
   sheet("sheet-meningitis-expert", "Bacterial meningitis · General · Advanced · Concise", "Bacterial meningitis", "General", "Concise", "Advanced"),
 
+  // ── Table sections: one case per table the catalogue can plan. The Step 2
+  // condition cases above (DKA, preeclampsia, COPD) already get differentials.
+  sheet("sheet-lithium-monitoring", "Lithium · Step 2 · Intermediate · Moderate (monitoring table)", "Lithium", "USMLE Step 2", "Moderate", "Intermediate"),
+  sheet("sheet-amiodarone-interactions", "Amiodarone · General · Advanced · Moderate (interactions table)", "Amiodarone", "General", "Moderate", "Advanced"),
+  sheet("sheet-urea-cycle-tables", "Urea cycle · Step 1 · Intermediate · Moderate (cofactors + deficiencies tables)", "Urea cycle", "USMLE Step 1", "Moderate", "Intermediate"),
+
   cards("cards-aki", "Acute kidney injury · 10 cards · Step 2", "Acute kidney injury", 10, "USMLE Step 2"),
   cards("cards-thyroid", "Thyroid disorders · 8 cards · Step 1", "Hyperthyroidism and hypothyroidism", 8),
   cards("cards-anticoag", "Anticoagulants · 12 cards · Step 1", "Anticoagulant pharmacology", 12),

@@ -1,9 +1,13 @@
 /**
  * How a section's body is shaped, which is what the renderer dispatches on.
  * `prose` is one string with `\n`-separated labelled lines; `list` is an array
- * of one-liners.
+ * of one-liners; `table` is an array of rows, each an array of cells under the
+ * spec's `columns`.
  */
-export type SectionKind = "prose" | "list";
+export type SectionKind = "prose" | "list" | "table";
+
+/** A section body as it arrives: prose, list items, or table rows. */
+export type SectionBody = string | string[] | string[][];
 
 /**
  * Icon vocabulary shared by the server (which names one per planned section)
@@ -44,6 +48,8 @@ export interface SheetSectionSpec {
   icon?: SectionIconName;
   /** Whether a "verified sources" badge may appear on this section. */
   evidenceBacked?: boolean;
+  /** `table` only — the column headers, fixed by the server. */
+  columns?: string[];
 }
 
 export interface Flashcard {
@@ -135,7 +141,7 @@ export interface GeneratedSheet {
    * The six legacy fields below are kept in step with this map for the code
    * that still reads them by name (export, grounding, the flashcard save).
    */
-  sections?: Record<string, string | string[]>;
+  sections?: Record<string, SectionBody>;
   overview: string;
   memoryHooks: string[];
   clinicalApproach: string;

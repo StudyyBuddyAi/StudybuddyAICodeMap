@@ -42,6 +42,8 @@ export interface SheetSectionSpec {
   kind: SectionKind;
   icon?: string;
   evidenceBacked?: boolean;
+  /** `table` only — the column headers, fixed here rather than by the model. */
+  columns?: string[];
 }
 
 /**
@@ -50,7 +52,7 @@ export interface SheetSectionSpec {
  */
 export interface PlannedSection extends SheetSectionSpec {
   brief: string;
-  /** `list` only. */
+  /** `list` and `table` (as rows). */
   items?: [number, number];
   /** `prose` only. */
   budget?: string;
@@ -95,8 +97,9 @@ function toPlanned(template: SectionTemplate, len: LengthSetting): PlannedSectio
     evidenceBacked: template.evidenceBacked,
     brief: template.brief,
   };
-  if (template.kind === "list") spec.items = listItems(template, len);
-  else spec.budget = proseBudget(template, len);
+  if (template.kind === "prose") spec.budget = proseBudget(template, len);
+  else spec.items = listItems(template, len);
+  if (template.kind === "table") spec.columns = [...(template.columns ?? [])];
   return spec;
 }
 
@@ -141,17 +144,19 @@ export function resolveSheetPlan(req: PlanRequest = {}): PlannedSection[] {
 
 /** Strips the server-only fields before the plan goes over the wire. */
 export function toWirePlan(plan: PlannedSection[]): SheetSectionSpec[] {
-  return plan.map(({ key, title, kind, icon, evidenceBacked }) => ({
+  return plan.map(({ key, title, kind, icon, evidenceBacked, columns }) => ({
     key,
     title,
     kind,
     icon,
     evidenceBacked,
+    ...(columns ? { columns } : {}),
   }));
 }
 
 /** The count phrase for one section, as the prompt and checklist both state it. */
 export function sectionQuota(section: PlannedSection): string {
+  if (section.kind === "table" && section.items) return `${itemPhrase(section.items)} rows`;
   return section.kind === "list" && section.items
     ? `${itemPhrase(section.items)} items`
     : section.budget ?? "";

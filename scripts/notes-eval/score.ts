@@ -143,7 +143,28 @@ function scoreSheet(r: RunRecord): Check[] {
     checks.push({ name: `${section.key} filled`, pass: filled });
     if (!filled) continue;
 
-    if (section.kind === "list" && section.items) {
+    if (section.kind === "table" && section.items) {
+      // Rows, each an array with one cell per planned column. A model that
+      // wrote plain items instead still renders (as a list), but it failed
+      // the shape it was asked for, so it fails here.
+      const rows = Array.isArray(body) && body.every((r) => Array.isArray(r)) ? (body as string[][]) : null;
+      const width = section.columns?.length ?? 0;
+      checks.push({ name: `${section.key} is a table`, pass: !!rows, detail: rows ? "" : "not rows" });
+      if (!rows) continue;
+      checks.push({
+        name: `gate: ${section.key}`,
+        pass: inRange(rows.length, ...section.items),
+        detail: `${rows.length}/${section.items.join("-")}`,
+      });
+      const full = rows.filter((r) => r.length === width && r.every((c) => typeof c === "string" && c.trim()));
+      checks.push({
+        name: `${section.key} rows fill every column`,
+        pass: full.length === rows.length,
+        detail: `${full.length}/${rows.length} rows × ${width}`,
+      });
+      const echoed = rows.flat().filter((c) => /^<.*>$/.test(String(c).trim()));
+      checks.push({ name: `${section.key} no placeholder cells`, pass: echoed.length === 0, detail: echoed.slice(0, 2).join(",") });
+    } else if (section.kind === "list" && section.items) {
       checks.push({
         name: `gate: ${section.key}`,
         pass: Array.isArray(body) && inRange(body.length, ...section.items),

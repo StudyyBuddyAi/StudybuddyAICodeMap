@@ -21,7 +21,14 @@
  * exist, which the model cannot ignore and a scorer can check.
  */
 
-export type SectionKind = "prose" | "list";
+/**
+ * How a section's body is shaped. `table` is rows of cells under headers the
+ * template fixes, for sections whose items are all the same few facts about
+ * each thing — a differential by its distinguishing feature, an enzyme by its
+ * cofactor. The model writes only the rows, so it cannot rename, reorder or
+ * drop a column.
+ */
+export type SectionKind = "prose" | "list" | "table";
 export type LengthSetting = "Concise" | "Moderate" | "Detailed";
 export type ExamMode = "General" | "USMLE Step 1" | "USMLE Step 2";
 export type Difficulty = "Basic" | "Intermediate" | "Advanced";
@@ -36,8 +43,10 @@ export interface SectionTemplate {
   evidenceBacked: boolean;
   /** What the model is told to put here. */
   brief: string;
-  /** `list` only — item count range per length. */
+  /** `list` and `table` — item (or row) count range per length. */
   items?: Record<LengthSetting, [number, number]>;
+  /** `table` only — the column headers, in order. */
+  columns?: string[];
   /** `prose` only — sentence budget per length. */
   sentences?: Record<LengthSetting, string>;
 }
@@ -79,6 +88,24 @@ const list = (
   brief: string,
   extra: Partial<SectionTemplate> = {}
 ): SectionTemplate => ({ key, title, kind: "list", icon, evidenceBacked: true, brief, ...extra });
+
+const table = (
+  key: string,
+  title: string,
+  icon: string,
+  columns: string[],
+  brief: string,
+  extra: Partial<SectionTemplate> = {}
+): SectionTemplate => ({
+  key,
+  title,
+  kind: "table",
+  icon,
+  evidenceBacked: true,
+  brief,
+  columns,
+  ...extra,
+});
 
 /**
  * Every section any archetype can ask for, by key.
@@ -136,11 +163,12 @@ Be the most clinically dense section on the sheet.`,
   ),
 
   // ── Condition ─────────────────────────────────────────────────────────────
-  differentials: list(
+  differentials: table(
     "differentials",
     "Differential Diagnosis",
     "compare",
-    "What else presents this way, and the single feature that separates each one from this diagnosis."
+    ["Diagnosis", "Distinguishing feature", "Confirm with"],
+    "One row per condition that presents this way: the single feature that separates it from this diagnosis, and the test that settles it."
   ),
   complications: list(
     "complications",
@@ -180,17 +208,19 @@ Elimination: route, half-life, and what a failing organ does to it.`
     "traps",
     "Effects worth knowing, each with the mechanism that causes it. Bold **the dangerous ones**."
   ),
-  interactions: list(
+  interactions: table(
     "interactions",
     "Interactions & Contraindications",
     "traps",
-    "Interactions and absolute contraindications, each with the reason."
+    ["Drug or condition", "What happens", "Why"],
+    "One row per interacting drug or absolute contraindication. Bold **the dangerous ones**."
   ),
-  monitoring: list(
+  monitoring: table(
     "monitoring",
     "Monitoring",
     "data",
-    "What to measure, the target range, and when to check it."
+    ["Parameter", "Target", "When to check"],
+    "One row per thing to measure."
   ),
 
   // ── Organism ──────────────────────────────────────────────────────────────
@@ -276,17 +306,19 @@ Rate-limiting enzyme: **the enzyme** and what controls it.
 Activators: what turns it up, and the signal behind it.
 Inhibitors: what turns it down.`
   ),
-  cofactors: list(
+  cofactors: table(
     "cofactors",
     "Enzymes & Cofactors",
     "pathway",
-    "Each enzyme with its cofactor or vitamin, and what fails without it."
+    ["Enzyme", "Cofactor", "Without it"],
+    "One row per enzyme: its cofactor or vitamin, and what fails without it."
   ),
-  deficiencies: list(
+  deficiencies: table(
     "deficiencies",
     "Deficiency States",
     "traps",
-    "Each enzyme or cofactor deficiency, the metabolite that accumulates, and the resulting disease."
+    ["Deficiency", "Accumulates", "Disease"],
+    "One row per enzyme or cofactor deficiency: the metabolite that builds up, and the disease that results."
   ),
 
   // ── Physiology ────────────────────────────────────────────────────────────

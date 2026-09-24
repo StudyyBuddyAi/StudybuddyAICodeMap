@@ -227,6 +227,83 @@ describe("OutputSection streaming", () => {
   });
 });
 
+describe("OutputSection table sections", () => {
+  const TABLED: GeneratedSheet = {
+    ...SHEET,
+    plan: [
+      { key: "overview", title: "Overview", kind: "prose" },
+      {
+        key: "differentials",
+        title: "Differential Diagnosis",
+        kind: "table",
+        columns: ["Diagnosis", "Distinguishing feature", "Confirm with"],
+      },
+    ],
+    sections: {
+      overview: "Mechanism: reduced output",
+      differentials: [
+        ["Pheochromocytoma", "Episodic **headache**", "Plasma metanephrines"],
+        ["Thyroid storm", "Fever, AF"],
+      ],
+    },
+  };
+
+  const table = () =>
+    document.querySelector('[data-section-key="differentials"] table') as HTMLTableElement;
+
+  it("lays rows under the plan's own column headers", async () => {
+    await renderSheet(<OutputSection output={JSON.stringify(TABLED)} />);
+
+    const headers = [...table().querySelectorAll("th")].map((th) => th.textContent);
+    expect(headers).toEqual(["Diagnosis", "Distinguishing feature", "Confirm with"]);
+    const rows = [...table().querySelectorAll("tbody tr")];
+    expect(rows).toHaveLength(2);
+    expect(rows[0].textContent).toContain("Plasma metanephrines");
+    // Bold keywords stay bold (and clickable) inside a cell.
+    expect(rows[0].querySelector(".font-semibold")?.textContent).toBe("headache");
+  });
+
+  it("marks a cell the model left out instead of shifting the row", async () => {
+    await renderSheet(<OutputSection output={JSON.stringify(TABLED)} />);
+    const second = table().querySelectorAll("tbody tr")[1];
+    expect(second.querySelectorAll("td")).toHaveLength(3);
+    expect(second.querySelector('[aria-label="Not given"]')).toBeInTheDocument();
+  });
+
+  it("makes each row an anchor for enhancements", async () => {
+    await renderSheet(<OutputSection output={JSON.stringify(TABLED)} />);
+    expect(table().querySelector('tr[data-enh-anchor="differentials:1"]')).toBeInTheDocument();
+  });
+
+  it("draws the table while it is still being written", async () => {
+    await renderSheet(
+      <OutputSection
+        output={JSON.stringify(TABLED)}
+        isStreaming
+        streamedKeys={["overview"]}
+        liveKey="differentials"
+      />
+    );
+    expect(table()).toBeInTheDocument();
+    expect(table().textContent).toContain("Thyroid storm");
+    // A draft is inert: no enhancement anchors until the section closes.
+    expect(table().querySelector("[data-enh-anchor]")).not.toBeInTheDocument();
+  });
+
+  it("falls back to a list when the model wrote items instead of rows", async () => {
+    await renderSheet(
+      <OutputSection
+        output={JSON.stringify({
+          ...TABLED,
+          sections: { ...TABLED.sections, differentials: ["Pheochromocytoma", "Thyroid storm"] },
+        })}
+      />
+    );
+    expect(table()).toBeNull();
+    expect(sectionText("differentials")).toContain("Thyroid storm");
+  });
+});
+
 describe("OutputSection recall checks", () => {
   const WITH_DECK: GeneratedSheet = {
     ...SHEET,

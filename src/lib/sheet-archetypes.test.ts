@@ -31,14 +31,33 @@ describe("the section catalogue", () => {
     }
   });
 
-  it("gives every list section a count and every prose section a budget", () => {
+  it("gives every list or table section a count and every prose section a budget", () => {
     for (const id of ARCHETYPE_IDS) {
       for (const section of resolveSheetPlan({ archetype: id, length: "Moderate" })) {
-        if (section.kind === "list") expect(section.items).toBeDefined();
-        else expect(section.budget).toBeTruthy();
+        if (section.kind === "prose") expect(section.budget).toBeTruthy();
+        else expect(section.items).toBeDefined();
         expect(sectionQuota(section)).not.toBe("");
       }
     }
+  });
+
+  it("fixes two to four columns on every table template", () => {
+    for (const template of Object.values(SECTIONS)) {
+      if (template.kind !== "table") continue;
+      expect(template.columns?.length, template.key).toBeGreaterThanOrEqual(2);
+      expect(template.columns?.length, template.key).toBeLessThanOrEqual(4);
+    }
+  });
+
+  it("sends a table's columns over the wire and counts it in rows", () => {
+    const plan = resolveSheetPlan({ archetype: "pathway", examMode: "USMLE Step 1", length: "Moderate" });
+    const cofactors = plan.find((s) => s.key === "cofactors")!;
+    expect(cofactors.kind).toBe("table");
+    expect(sectionQuota(cofactors)).toMatch(/rows$/);
+    const wire = toWirePlan(plan).find((s) => s.key === "cofactors")!;
+    expect(wire.columns).toEqual(["Enzyme", "Cofactor", "Without it"]);
+    // Only tables carry columns; a prose or list spec stays as it was.
+    expect(toWirePlan(plan).filter((s) => s.kind !== "table").every((s) => !("columns" in s))).toBe(true);
   });
 
   it("produces a usable plan for every archetype", () => {

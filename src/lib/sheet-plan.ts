@@ -1,5 +1,6 @@
 import type {
   GeneratedSheet,
+  SectionBody,
   SectionIconName,
   SectionKind,
   SheetSectionSpec,
@@ -45,7 +46,19 @@ export const RESERVED_SHEET_KEYS: ReadonlySet<string> = new Set([
   "retrievedChunks",
 ]);
 
-const KINDS: readonly SectionKind[] = ["prose", "list"];
+const KINDS: readonly SectionKind[] = ["prose", "list", "table"];
+
+/** A table needs at least two columns to be one, and past four it won't fit a phone. */
+const MIN_COLUMNS = 2;
+const MAX_COLUMNS = 4;
+
+/** The columns of a table spec, or null when they aren't usable. */
+function parseColumns(raw: unknown): string[] | null {
+  if (!Array.isArray(raw)) return null;
+  const cols = raw.filter((c): c is string => typeof c === "string" && c.trim().length > 0);
+  if (cols.length !== raw.length) return null;
+  return cols.length >= MIN_COLUMNS && cols.length <= MAX_COLUMNS ? cols : null;
+}
 
 /**
  * The six sections every sheet had before the plan existed. Used for sheets
@@ -97,18 +110,22 @@ export function parsePlan(raw: unknown): SheetSectionSpec[] | null {
 
   for (const entry of raw) {
     if (!isPlainObject(entry)) continue;
-    const { key, title, kind, icon, evidenceBacked } = entry;
+    const { key, title, kind, icon, evidenceBacked, columns } = entry;
     if (typeof key !== "string" || !key.trim()) continue;
     if (typeof title !== "string" || !title.trim()) continue;
     if (typeof kind !== "string" || !KINDS.includes(kind as SectionKind)) continue;
     if (RESERVED_SHEET_KEYS.has(key) || seen.has(key)) continue;
     seen.add(key);
+    // A table whose columns are unusable is still a section with rows in it.
+    // Rendered as a list it keeps its content; dropped, it would leave a hole.
+    const cols = kind === "table" ? parseColumns(columns) : null;
     specs.push({
       key,
       title,
-      kind: kind as SectionKind,
+      kind: kind === "table" && !cols ? "list" : (kind as SectionKind),
       icon: typeof icon === "string" ? (icon as SectionIconName) : undefined,
       evidenceBacked: evidenceBacked === true,
+      ...(cols ? { columns: cols } : {}),
     });
   }
 
@@ -136,7 +153,7 @@ export function renderOrder(sheet: Pick<GeneratedSheet, "plan">): SheetSectionSp
 export function sectionBody(
   sheet: GeneratedSheet,
   key: string
-): string | string[] | undefined {
+): SectionBody | undefined {
   const fromMap = sheet.sections?.[key];
   if (fromMap !== undefined) return fromMap;
   const legacy = (sheet as unknown as Record<string, unknown>)[key];
@@ -151,4 +168,20 @@ export function sectionHasBody(sheet: GeneratedSheet, key: string): boolean {
   const body = sectionBody(sheet, key);
   if (Array.isArray(body)) return body.length > 0;
   return typeof body === "string" && body.trim().length > 0;
+}
+
+/** True for a table body: rows, each an array of cells. */
+export function isTableRows(body: SectionBody | undefined): body is string[][] {
+  return Array.isArray(body) && body.length > 0 && body.every((row) => Array.isArray(row));
+}
+
+/**
+ * One line per item, whatever the body's shape — a table row reads as its
+ * cells joined. For the places that need a section as plain text: the
+ * exporter, the copy button, the recall matcher.
+ */
+export function bodyLines(body: SectionBody | undefined): string[] {
+  if (body === undefined) return [];
+  if (typeof body === "string") return body.trim() ? [body] : [];
+  return body.map((item) => (Array.isArray(item) ? item.join(" | ") : item));
 }

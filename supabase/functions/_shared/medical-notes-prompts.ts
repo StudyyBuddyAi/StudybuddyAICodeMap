@@ -14,37 +14,11 @@
 import type { RagChunk } from "./rag.ts";
 import { MEMORY_FOLLOWUP_INSTRUCTION } from "./memory.ts";
 import { DEFAULT_SHEET_PLAN, resolveSheetPlan, sectionQuota, type PlannedSection } from "./sheet-plan.ts";
+import { schemaLine, tableRulesBlock } from "./sheet-schema.ts";
 import type { LengthSetting } from "./sheet-sections.ts";
 
 export type PromptFamily = "haiku" | "gptOss";
 
-
-/**
- * One line of the JSON skeleton. A section's brief is written on a single line
- * with escaped newlines, matching how the placeholder has always been given —
- * a literal newline inside a JSON string value would break the shape the model
- * is being shown.
- */
-function schemaLine(section: PlannedSection): string {
-  const brief = section.brief.replace(/\n/g, "\\n").replace(/"/g, "'");
-  if (section.kind === "list") {
-    return `  "${section.key}": [\n    "<${brief} One item per element, no leading number.>",\n    "<...>"\n  ],`;
-  }
-  return `  "${section.key}": "<${brief}${LABELS_ON_OWN_LINES}>",`;
-}
-
-/**
- * Appended to every prose section's brief.
- *
- * Measured across topic kinds, the sections that reliably produced all their
- * labelled lines were the two whose briefs said this outright; the archetype
- * sections, which only said "Structure it as:", wrote the first label and then
- * ran on in prose — Microbiology gave Morphology but not Culture or
- * Identification, Technique gave Preparation but not Landmarks or Steps.
- * Saying it once here beats repeating it in seventeen briefs.
- */
-const LABELS_ON_OWN_LINES =
-  " Every label above starts on its own line, after a \\n. Write all of them. Do not merge them into a paragraph.";
 
 export interface NotesPromptInput {
   notes: string;
@@ -235,7 +209,7 @@ FORMATTING RULES (non-negotiable):
   overview and clinicalApproach fields. The renderer handles this.
 - Use arrows (→) inside string values to show clinical flow.
 - Numbered list items inside array fields: do NOT include the leading
-  number (e.g. "1."). Each array element is already one item.
+  number (e.g. "1."). Each array element is already one item.${tableRulesBlock(plan)}
 
 OUTPUT — return exactly this JSON shape. Write every key listed, in this order,
 and no other keys:

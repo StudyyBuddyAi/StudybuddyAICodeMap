@@ -44,9 +44,26 @@ describe("parsePlan", () => {
       spec("good", "Good"),
       { key: "", title: "Empty key", kind: "prose" },
       { key: "noTitle", title: "   ", kind: "prose" },
-      { key: "badKind", title: "Bad kind", kind: "table" },
+      { key: "badKind", title: "Bad kind", kind: "chart" },
     ]);
     expect(out?.map((s) => s.key)).toEqual(["good"]);
+  });
+
+  it("accepts a table with its columns", () => {
+    const out = parsePlan([
+      { key: "ddx", title: "Differentials", kind: "table", columns: ["Diagnosis", "Feature", "Test"] },
+    ]);
+    expect(out?.[0]).toMatchObject({ kind: "table", columns: ["Diagnosis", "Feature", "Test"] });
+  });
+
+  it("keeps a table with unusable columns, as a list", () => {
+    // Missing, too few, too many, or a blank header: the rows can't be laid
+    // under headers, but the section still has content worth showing.
+    for (const columns of [undefined, ["Only one"], ["a", "b", "c", "d", "e"], ["a", " "]]) {
+      const out = parsePlan([{ key: "ddx", title: "Differentials", kind: "table", columns }]);
+      expect(out?.[0].kind, JSON.stringify(columns)).toBe("list");
+      expect(out?.[0]).not.toHaveProperty("columns");
+    }
   });
 
   it("rejects reserved keys, so a section can't collide with the deck or metadata", () => {

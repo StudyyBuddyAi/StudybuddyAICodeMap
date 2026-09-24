@@ -65,11 +65,15 @@ YOUR OUTPUT:
  */
 function sheetChecklist(plan: PlannedSection[], length: string): string {
   const quotas = plan.map((s) => `${s.key} ${sectionQuota(s)}`).join("; ");
+  const tables = plan.filter((s) => s.kind === "table" && s.columns?.length);
+  const tableCheck = tables.length
+    ? `\n- Every row of ${tables.map((s) => `${s.key} has exactly ${s.columns!.length} strings`).join(", and every row of ")}. No header row.`
+    : "";
   return `
 
 FINAL CHECK — verify each point before you write the closing }:
 - The sheet has exactly these keys, in this order: ${plan.map((s) => s.key).join(", ")}, referenceNote, sourceCoverage. Do not add a section that is not on that list, and do not leave one out.
-- Length is "${length}": ${quotas}.
+- Length is "${length}": ${quotas}.${tableCheck}
 - Write for the audience and exam the request names. A retrieved passage from a pediatrics or adult textbook does not narrow the audience.
 - sourceCoverage must agree with itself: "full" means "uncovered" is empty; "none" lists every section; "partial" lists at least one section but not all of them.
 - referenceNote is a finished sentence — never the instruction text in angle brackets.`;

@@ -1,5 +1,5 @@
 import type { Flashcard, GeneratedSheet } from "@/types/generated-sheet";
-import { resolvePlan, sectionBody } from "@/lib/sheet-plan";
+import { bodyLines, resolvePlan, sectionBody } from "@/lib/sheet-plan";
 
 /**
  * Which flashcard to ask at the foot of which section.
@@ -70,7 +70,7 @@ export function assignRecallCards(sheet: GeneratedSheet): Map<string, Flashcard>
   const candidates: { key: string; card: number; score: number }[] = [];
   for (const spec of resolvePlan(sheet)) {
     const body = sectionBody(sheet, spec.key);
-    const text = Array.isArray(body) ? body.join("\n") : body ?? "";
+    const text = bodyLines(body).join("\n");
     if (!text.trim()) continue;
     const weights = sectionWeights(text);
     cards.forEach((card, i) => {
