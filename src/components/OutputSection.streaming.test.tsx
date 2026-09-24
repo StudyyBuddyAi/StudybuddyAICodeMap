@@ -227,6 +227,48 @@ describe("OutputSection streaming", () => {
   });
 });
 
+describe("OutputSection recall checks", () => {
+  const WITH_DECK: GeneratedSheet = {
+    ...SHEET,
+    clinicalApproach:
+      "Diagnosis: **BNP** first, then **echocardiography** to measure ejection fraction.",
+    flashcards: [
+      {
+        tag: "Next Step",
+        question: "Suspected heart failure: which blood test comes first?",
+        answer: "BNP, then echocardiography to measure the ejection fraction.",
+      },
+    ],
+  };
+
+  it("asks a question under the section it tests, answer hidden", async () => {
+    await renderSheet(<OutputSection output={JSON.stringify(WITH_DECK)} />);
+
+    const section = document.querySelector('[data-section-key="clinicalApproach"]')!;
+    expect(section.textContent).toContain("Check yourself");
+    expect(section.textContent).toContain("which blood test comes first?");
+    const answer = section.querySelector(".recall-answer")!;
+    expect(answer).toHaveAttribute("aria-hidden", "true");
+
+    await act(async () => {
+      screen.getByRole("button", { name: /show answer/i }).click();
+    });
+    expect(answer).toHaveAttribute("aria-hidden", "false");
+    expect(screen.getByRole("button", { name: /hide/i })).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("holds the questions back until the sheet has finished", async () => {
+    await renderSheet(
+      <OutputSection
+        output={JSON.stringify(WITH_DECK)}
+        isStreaming
+        streamedKeys={["overview", "memoryHooks", "clinicalApproach"]}
+      />
+    );
+    expect(screen.queryByText("Check yourself")).not.toBeInTheDocument();
+  });
+});
+
 describe("OutputSection section plan", () => {
   /** A drug sheet: sections a disease template has no name for. */
   const PLANNED: GeneratedSheet = {

@@ -804,6 +804,12 @@
       display: none !important;
     }
 
+    /* A recall answer can't be revealed on paper, so print it readable. */
+    .print-document .recall-answer {
+      filter: none !important;
+      opacity: 1 !important;
+    }
+
     /* Don't split a section card across pages if it can be helped. */
     .print-document [data-section-key] {
       break-inside: avoid;

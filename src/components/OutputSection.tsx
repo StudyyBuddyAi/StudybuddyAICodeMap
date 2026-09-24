@@ -55,6 +55,8 @@ import {
 } from "motion/react";
 import { AutoHeight, Caret, StreamingWords } from "@/components/StreamingText";
 import SheetProgress, { type GenerationStatus } from "@/components/SheetProgress";
+import RecallCheck from "@/components/RecallCheck";
+import { assignRecallCards } from "@/lib/section-recall";
 
 type EnhanceKind = "enhance" | "expand" | "clinical";
 
@@ -1490,6 +1492,11 @@ const OutputSection = ({
   // settled before any content lands and the skeleton never reflows.
   const sectionOrder = renderOrder(sheet);
 
+  // One recall question per section, drawn from the deck. The deck arrives at
+  // the end of the stream, so these appear once the sheet is whole — which is
+  // also when a reader is ready to be asked.
+  const recallCards = isStreaming ? null : assignRecallCards(sheet);
+
   // Every section keeps its slot for the whole generation, so the document
   // never changes shape — placeholders are filled in rather than replaced.
   // A section renders its content only once its JSON has closed; before that
@@ -1821,6 +1828,7 @@ const OutputSection = ({
                 )
               )}
               {ready && renderInline(`${key}:end`)}
+              {recallCards?.has(key) && <RecallCheck card={recallCards.get(key)!} />}
             </div>
             </AutoHeight>
           </div>
