@@ -1,6 +1,7 @@
 import { AnimatePresence, m } from "motion/react";
 import { Check, Sparkles } from "lucide-react";
 import type { SheetSectionSpec } from "@/types/generated-sheet";
+import { ENTER, EXIT, SPRING_POP } from "@/lib/motion";
 
 /**
  * Where a generation has got to, in one line.
@@ -48,7 +49,7 @@ const Chip = ({ children }: { children: React.ReactNode }) => (
   <m.span
     initial={{ opacity: 0, scale: 0.9 }}
     animate={{ opacity: 1, scale: 1 }}
-    transition={{ type: "spring", stiffness: 420, damping: 28 }}
+    transition={SPRING_POP}
     className="hidden sm:inline-flex"
     style={{
       alignItems: "center",
@@ -85,7 +86,7 @@ const SheetProgress = (props: SheetProgressProps) => {
           <m.span
             initial={{ scale: 0.3, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
-            transition={{ type: "spring", stiffness: 520, damping: 22 }}
+            transition={SPRING_POP}
             style={{ display: "inline-flex" }}
           >
             <Check style={{ width: 12, height: 12, color: "var(--accent)" }} />
@@ -115,9 +116,8 @@ const SheetProgress = (props: SheetProgressProps) => {
           <m.span
             key={label}
             initial={{ y: 14, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            exit={{ y: -14, opacity: 0 }}
-            transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
+            animate={{ y: 0, opacity: 1, transition: ENTER }}
+            exit={{ y: -14, opacity: 0, transition: EXIT }}
             className={done ? undefined : "text-shimmer"}
             style={{
               position: "absolute",

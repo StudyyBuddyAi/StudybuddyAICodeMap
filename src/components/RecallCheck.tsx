@@ -2,6 +2,7 @@ import { useState } from "react";
 import { m } from "motion/react";
 import { Brain, Eye, EyeOff } from "lucide-react";
 import type { Flashcard } from "@/types/generated-sheet";
+import { ENTER } from "@/lib/motion";
 
 /**
  * One question at the foot of a section, answer hidden until asked for.
@@ -64,7 +65,7 @@ const RecallCheck = ({ card }: { card: Flashcard }) => {
             filter: revealed ? "blur(0px)" : "blur(6px)",
             opacity: revealed ? 1 : 0.7,
           }}
-          transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
+          transition={ENTER}
           style={{
             flex: 1,
             margin: 0,

@@ -454,7 +454,7 @@
     /* A word arriving over the stream. Each one mounts once and keeps its
        span, so only the newest words are ever mid-animation. */
     .sb-word-in {
-      animation: sb-word-in 420ms ease-out both;
+      animation: sb-word-in var(--dur-slow) var(--ease-out) both;
     }
 
     /* Where the next word lands, at the end of the section being written. */
@@ -481,7 +481,7 @@
 
     /* A section whose content just arrived: its edge glows once, then settles. */
     .section-landed {
-      animation: sb-section-landed 1100ms ease-out both;
+      animation: sb-section-landed 1100ms var(--ease-out) both;
     }
   }
 
@@ -802,6 +802,12 @@
     .print-document [role="button"],
     .print-document [data-no-print] {
       display: none !important;
+    }
+
+    /* Heights measured on screen would clip text reflowed at page width. */
+    .print-document [data-autoheight] {
+      height: auto !important;
+      overflow: visible !important;
     }
 
     /* A recall answer can't be revealed on paper, so print it readable. */

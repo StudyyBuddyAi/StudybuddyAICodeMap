@@ -1,6 +1,7 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import { m } from "motion/react";
 import { closeOpenBold } from "@/lib/close-open-bold";
+import { RESIZE } from "@/lib/motion";
 
 /**
  * Pieces for text that is still arriving.
@@ -100,8 +101,11 @@ export function AutoHeight({ children }: { children: React.ReactNode }) {
     <m.div
       initial={false}
       animate={{ height }}
-      transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
+      transition={RESIZE}
       style={{ overflow: "hidden" }}
+      // The height is measured on screen; print lets it go, since text
+      // reflows at page width and a screen height would cut it off.
+      data-autoheight=""
     >
       <div ref={innerRef}>{children}</div>
     </m.div>

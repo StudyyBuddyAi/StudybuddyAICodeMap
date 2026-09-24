@@ -54,6 +54,7 @@ import {
   useSpring,
 } from "motion/react";
 import { AutoHeight, Caret, StreamingWords } from "@/components/StreamingText";
+import { ENTER, EXIT, SPRING_POP } from "@/lib/motion";
 import SheetProgress, { type GenerationStatus } from "@/components/SheetProgress";
 import RecallCheck from "@/components/RecallCheck";
 import { assignRecallCards } from "@/lib/section-recall";
@@ -969,8 +970,8 @@ const EnhanceBubble = ({ top, left, onAction, innerRef }: EnhanceBubbleProps) =>
     ref={innerRef}
     initial={{ opacity: 0, y: 4, scale: 0.97 }}
     animate={{ opacity: 1, y: 0, scale: 1 }}
-    exit={{ opacity: 0, y: 4, scale: 0.97, transition: { duration: 0.12 } }}
-    transition={{ duration: 0.16, ease: [0.22, 1, 0.36, 1] }}
+    exit={{ opacity: 0, y: 4, scale: 0.97, transition: EXIT }}
+    transition={ENTER}
     style={{
       position: "absolute",
       top,
@@ -1928,12 +1929,7 @@ const OutputSection = ({
                     <m.span
                       initial={{ scale: 0.3, opacity: 0 }}
                       animate={{ scale: 1, opacity: 1 }}
-                      transition={{
-                        type: "spring",
-                        stiffness: 520,
-                        damping: 20,
-                        delay: landed ? 0 : idx * 0.2 + 0.35,
-                      }}
+                      transition={{ ...SPRING_POP, delay: landed ? 0 : idx * 0.2 + 0.35 }}
                       style={{ display: "inline-flex" }}
                     >
                       <Check aria-label="Section loaded" className="h-3.5 w-3.5 text-primary/50" />
