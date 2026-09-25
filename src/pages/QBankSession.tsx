@@ -26,6 +26,7 @@ import { useToast } from "@/hooks/use-toast";
 import { ruleLabel } from "@/lib/qbank-rule-labels";
 import { renderMarkdown } from "@/lib/render-markdown";
 import type { OptionKey, PlayMode, QuestionMedia } from "@/lib/qbank-types";
+import { useBackdropScene } from "@/components/backdrop/backdrop-scene";
 
 type AnswerState =
   | { status: "unanswered" }
@@ -718,6 +719,9 @@ const QBankSession = () => {
     endBlockStats,
     saveState,
   } = useQBankContext();
+
+  // Answering questions: the backdrop all but stops, and the molecule leaves.
+  useBackdropScene({ mode: "focus" });
 
   const [searchParams] = useSearchParams();
   const sessionIdParam = searchParams.get("session");

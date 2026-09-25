@@ -114,8 +114,39 @@ describe("the settings change the sections, not just the wording", () => {
     expect(concise.map((s) => s.key)).toEqual(detailed.map((s) => s.key));
 
     const traps = (p: typeof concise) => p.find((s) => s.key === "examTraps")!.items!;
-    expect(traps(concise)).toEqual([3, 3]);
-    expect(traps(detailed)).toEqual([5, 6]);
+    expect(traps(concise)).toEqual([2, 3]);
+    expect(traps(detailed)).toEqual([3, 6]);
+  });
+});
+
+describe("no two sections are briefed for the same content", () => {
+  const brief = (req: Parameters<typeof resolveSheetPlan>[0], key: string) =>
+    resolveSheetPlan(req).find((s) => s.key === key)!.brief;
+
+  it("names only text its brief actually contains, so an edit cannot silently stop the hand-off", () => {
+    for (const template of Object.values(SECTIONS)) {
+      for (const [key, text] of Object.entries(template.yieldsTo ?? {})) {
+        expect(SECTIONS[key], `${template.key} yields to unknown section "${key}"`).toBeDefined();
+        expect(template.brief, `${template.key} → ${key}`).toContain(text);
+      }
+    }
+  });
+
+  it("drops Clinical Approach's complications when the sheet has a Complications section", () => {
+    const advanced = { archetype: "condition" as const, difficulty: "Advanced" };
+    expect(keys(advanced)).toContain("complications");
+    expect(brief(advanced, "clinicalApproach")).not.toContain("Complications:");
+    expect(brief({ archetype: "condition", difficulty: "Intermediate" }, "clinicalApproach")).toContain("Complications:");
+  });
+
+  it("drops the distinguishing findings when a differential table covers them", () => {
+    expect(brief({ archetype: "condition", examMode: "USMLE Step 2" }, "clinicalApproach")).not.toContain("distinguishing");
+    expect(brief({ archetype: "condition", examMode: "General" }, "clinicalApproach")).toContain("Key distinguishing findings.");
+  });
+
+  it("keeps every other label of the brief intact", () => {
+    const both = brief({ archetype: "condition", examMode: "USMLE Step 2", difficulty: "Advanced" }, "clinicalApproach");
+    for (const label of ["Diagnosis:", "Workup:", "Management:", "Avoid:"]) expect(both).toContain(label);
   });
 });
 
@@ -126,7 +157,7 @@ describe("plan assembly", () => {
     expect(k.filter((x) => x === "deficiencies")).toHaveLength(1);
   });
 
-  it("sorts study aids after the content they summarise", () => {
+  it("sorts study aids after the content they build on", () => {
     const k = keys({ archetype: "drug", examMode: "USMLE Step 1", difficulty: "Advanced" });
     const lastContent = Math.max(k.indexOf("moa"), k.indexOf("pharmacokinetics"), k.indexOf("interactions"));
     expect(k.indexOf("memoryHooks")).toBeGreaterThan(lastContent);

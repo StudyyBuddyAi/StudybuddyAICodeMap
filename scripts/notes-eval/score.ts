@@ -21,6 +21,7 @@ import { parseSheetOutput } from "../../src/lib/parse-partial-sheet.ts";
 import { parseFlashcardsFromOutput } from "../../src/lib/parse-flashcards.ts";
 import { PRICES } from "./cases.ts";
 import { resolveSheetPlan, type PlannedSection } from "../../supabase/functions/_shared/sheet-plan.ts";
+import { bodyToLines, sheetRedundancy } from "./redundancy.ts";
 import type { RunRecord } from "./run.ts";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -44,6 +45,8 @@ export interface Scored {
   costUsd: number | null;
   finishReason: string | null;
   retrievedChunks: number | null;
+  /** Sheets only: share of lines repeating an earlier section (redundancy.ts). */
+  repeatShare: number | null;
 }
 
 const words = (s: string) => s.trim().split(/\s+/).filter(Boolean).length;
@@ -260,6 +263,19 @@ function scoreEnhance(r: RunRecord, kind: "expand" | "clinical"): Check[] {
       ];
 }
 
+/**
+ * Each fact has one home. Before the prompt said so, about a fifth of a
+ * sheet's lines repeated an earlier section, and the closing study aids — Key
+ * Points above all — were mostly restatement. It is a proxy, meaningful as an
+ * arm's average and too noisy to pass or fail a single sheet, so it is a
+ * column in the table rather than a check.
+ */
+function repeatShare(r: RunRecord): number | null {
+  const sections = parseSheetOutput(r.text.trim())?.sheet.sections;
+  if (!sections) return null;
+  return sheetRedundancy(planFor(r).map((p) => ({ key: p.key, lines: bodyToLines(sections[p.key]) }))).share;
+}
+
 export function scoreRecord(r: RunRecord): Scored {
   const kind = r.case.kind;
   const checks = !r.ok
@@ -297,6 +313,7 @@ export function scoreRecord(r: RunRecord): Scored {
     costUsd,
     finishReason: r.eval?.finishReason ?? null,
     retrievedChunks: r.retrievedChunks,
+    repeatShare: r.ok && kind === "sheet" ? repeatShare(r) : null,
   };
 }
 
@@ -322,8 +339,8 @@ if (import.meta.url === `file:///${process.argv[1].replace(/\\/g, "/")}`) {
 
   const arms = [...new Set(scored.map((s) => s.armId))].sort();
   const kinds = ["sheet", "cards", "explain", "expand", "clinical"];
-  console.log(`| arm | ok | ${kinds.join(" | ")} | all checks | median TTFC | median total (sheet) | out tok (sheet) | $/100 sheets |`);
-  console.log(`|---|---|${kinds.map(() => "---").join("|")}|---|---|---|---|---|`);
+  console.log(`| arm | ok | ${kinds.join(" | ")} | all checks | median TTFC | median total (sheet) | out tok (sheet) | $/100 sheets | sheet lines repeated |`);
+  console.log(`|---|---|${kinds.map(() => "---").join("|")}|---|---|---|---|---|---|`);
   for (const arm of arms) {
     const rows = scored.filter((s) => s.armId === arm);
     const pct = (xs: Scored[]) => {
@@ -332,11 +349,13 @@ if (import.meta.url === `file:///${process.argv[1].replace(/\\/g, "/")}`) {
     };
     const sheets = rows.filter((r) => r.kind === "sheet" && r.ok);
     const sheetCost = sheets.map((s) => s.costUsd).filter((c): c is number => c != null);
+    const repeats = sheets.map((s) => s.repeatShare).filter((x): x is number => x != null);
     console.log(
       `| ${arm} | ${rows.filter((r) => r.ok).length}/${rows.length} | ${kinds.map((k) => pct(rows.filter((r) => r.kind === k))).join(" | ")} | ${pct(rows)} | ` +
         `${median(rows.map((r) => r.ttfcMs).filter((x): x is number => x != null))}ms | ${median(sheets.map((r) => r.totalMs!))}ms | ` +
         `${median(sheets.map((r) => r.outTokens).filter((x): x is number => x != null))} | ` +
-        `${sheetCost.length ? "$" + ((100 * sheetCost.reduce((a, b) => a + b, 0)) / sheetCost.length).toFixed(2) : "-"} |`
+        `${sheetCost.length ? "$" + ((100 * sheetCost.reduce((a, b) => a + b, 0)) / sheetCost.length).toFixed(2) : "-"} | ` +
+        `${repeats.length ? `${((100 * repeats.reduce((a, b) => a + b, 0)) / repeats.length).toFixed(1)}%` : "-"} |`
     );
   }
 

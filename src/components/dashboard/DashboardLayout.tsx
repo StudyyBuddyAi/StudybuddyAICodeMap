@@ -2,6 +2,7 @@ import { ReactNode, useState } from "react";
 import AppNav from "@/components/dashboard/AppNav";
 import AuthModal from "@/components/AuthModal";
 import AccountDashboard from "@/components/AccountDashboard";
+import { useBackdropScene } from "@/components/backdrop/backdrop-scene";
 
 interface DashboardLayoutProps {
   children: ReactNode;
@@ -11,9 +12,13 @@ interface DashboardLayoutProps {
 const DashboardLayout = ({ children, wide = false }: DashboardLayoutProps) => {
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [accountModalOpen, setAccountModalOpen] = useState(false);
+  // Every app page gets the living backdrop; a page with its own scene (a
+  // sheet, a QBank session) outranks this calm default.
+  useBackdropScene({ mode: "ambient" }, 0);
 
   return (
-    <div className="min-h-screen bg-background">
+    // Transparent: the app backdrop behind it paints the page colour.
+    <div className="min-h-screen">
       <AppNav
         onOpenAuth={() => setAuthModalOpen(true)}
         onOpenAccount={() => setAccountModalOpen(true)}

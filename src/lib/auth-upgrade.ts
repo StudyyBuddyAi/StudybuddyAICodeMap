@@ -1,6 +1,9 @@
 import { supabase } from "@/integrations/supabase/client";
+import type { Json } from "@/integrations/supabase/types";
 import { toast } from "@/hooks/use-toast";
 import { normalizeStoredCard, type Card } from "@/hooks/use-flashcard-deck";
+import { loadLocalLayers, removeLocalLayer, saveLocalLayer } from "@/lib/sheet-layer-store";
+import { isEmptyLayer, parseLayer } from "@/lib/sheet-layer";
 
 // ── Anonymous → permanent account upgrade ───────────────────────────────────
 //
@@ -143,7 +146,11 @@ export async function migrateLocalStudyHistoryToServer(userId: string): Promise<
   }
   if (!items.length) return;
 
-  const rows = items.map((item) => ({
+  // Each sheet gets its server id here rather than from the insert, so its
+  // personal layer — kept locally under the old id — can follow it.
+  const newIds = items.map(() => crypto.randomUUID());
+  const rows = items.map((item, i) => ({
+    id: newIds[i],
     user_id: userId,
     topic: item.topic,
     input: item.input,
@@ -163,6 +170,37 @@ export async function migrateLocalStudyHistoryToServer(userId: string): Promise<
   } catch {
     // ignore
   }
+
+  await migrateLocalLayersToServer(
+    userId,
+    new Map(items.map((item, i) => [item.id, newIds[i]]))
+  );
+}
+
+/**
+ * Moves the personal layers of the sheets just migrated. Best effort: the
+ * sheets themselves are already safe, and a layer that fails to move stays in
+ * localStorage under its sheet's new id rather than being lost.
+ */
+async function migrateLocalLayersToServer(userId: string, idMap: Map<string, string>): Promise<void> {
+  const local = loadLocalLayers();
+  const rows = [...idMap]
+    .filter(([oldId]) => local[oldId] && !isEmptyLayer(parseLayer(local[oldId])))
+    .map(([oldId, newId]) => ({
+      sheet_id: newId,
+      user_id: userId,
+      layer: parseLayer(local[oldId]) as unknown as Json,
+    }));
+  if (!rows.length) return;
+
+  const { error } = await supabase.from("sheet_layers").upsert(rows, { onConflict: "sheet_id" });
+  for (const [oldId, newId] of idMap) {
+    if (!local[oldId]) continue;
+    const layer = parseLayer(local[oldId]);
+    removeLocalLayer(oldId);
+    if (error) saveLocalLayer(newId, layer);
+  }
+  if (error) console.error("sheet layer migration failed", error);
 }
 
 /** Runs both local→server migrations, toasting (not throwing) on failure. */

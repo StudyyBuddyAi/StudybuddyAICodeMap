@@ -49,12 +49,24 @@ export interface SectionTemplate {
   columns?: string[];
   /** `prose` only — sentence budget per length. */
   sentences?: Record<LengthSetting, string>;
+  /**
+   * Parts of the brief another section takes over when the plan has it:
+   * section key → the exact text to leave out. Without this a plan with its
+   * own Complications section also asked Clinical Approach for complications,
+   * and the sheet said them twice.
+   */
+  yieldsTo?: Record<string, string>;
 }
 
+/**
+ * Item ranges are ceilings with a floor, not quotas. Exact counts made the
+ * model pad: once a topic's distinct facts ran out, it filled the remaining
+ * slots by restating what earlier sections had said.
+ */
 const LIST_DEFAULT: Record<LengthSetting, [number, number]> = {
-  Concise: [3, 3],
-  Moderate: [4, 5],
-  Detailed: [6, 8],
+  Concise: [2, 3],
+  Moderate: [3, 5],
+  Detailed: [4, 8],
 };
 
 const PROSE_DEFAULT: Record<LengthSetting, string> = {
@@ -68,6 +80,13 @@ export const listItems = (t: SectionTemplate, len: LengthSetting): [number, numb
 
 export const proseBudget = (t: SectionTemplate, len: LengthSetting): string =>
   (t.sentences ?? PROSE_DEFAULT)[len];
+
+/** The brief as this plan needs it: minus what the plan's other sections cover. */
+export const briefFor = (t: SectionTemplate, planKeys: readonly string[]): string =>
+  Object.entries(t.yieldsTo ?? {}).reduce(
+    (brief, [key, text]) => (planKeys.includes(key) ? brief.replace(text, "") : brief),
+    t.brief
+  );
 
 /** Renders an item range as the phrase the prompt and the checklist both use. */
 export const itemPhrase = ([lo, hi]: [number, number]): string =>
@@ -112,8 +131,15 @@ const table = (
  *
  * `overview`, `clinicalApproach`, `memoryHooks`, `keyPoints` and `examTraps`
  * keep the keys, titles and internal structure they have always had, so the
- * condition archetype — the best-tested path by far — produces what it
- * produced before rather than a redesign nobody asked for.
+ * condition archetype — the best-tested path by far — keeps its shape.
+ *
+ * The three closing study aids are not summaries of the sheet. Briefed as
+ * "high-yield one-liners" and "things that stick", they restated it: measured
+ * across topic kinds, over half of Key Points repeated an earlier section, and
+ * a fifth to a third of Memory Hooks and Exam Traps. Each now asks for what
+ * the sheet has not yet said, except that a Memory Hook may encode a central
+ * fact — the device itself is the new thing, and that is the repetition worth
+ * keeping.
  */
 export const SECTIONS: Record<string, SectionTemplate> = {
   // ── Shared ────────────────────────────────────────────────────────────────
@@ -124,7 +150,7 @@ export const SECTIONS: Record<string, SectionTemplate> = {
     `Pathophysiology-first conceptual foundation. Each sub-section on its own line, starting with a \\n before the label:
 Mechanism: **Bold the core defect** — one sentence on the cellular or molecular trigger.
 Pathophysiology: trace how that defect produces the clinical syndrome. Use arrows → to show flow. Bold **key mechanisms**.
-Key associations: a numbered idea per line — **Buzzword** → why it occurs mechanistically.
+Key associations: a numbered idea per line — **Buzzword** → why it occurs mechanistically. Mechanistic links only; differentials and clinical pearls belong to later sections.
 Never put drug names, diagnostic criteria, management steps or investigations here — they belong in other sections only.`
   ),
   clinicalApproach: prose(
@@ -138,28 +164,34 @@ Management: first-line → drug and rationale. Second-line → when and why to e
 Complications: what goes wrong if undertreated — bold **the dangerous ones**.
 Avoid: interventions or drugs contraindicated here.
 Be the most clinically dense section on the sheet.`,
-    { sentences: { Concise: "Diagnosis and first-line Management only — omit Workup, Second-line, Definitive and Avoid entirely", Moderate: "every sub-section at moderate depth", Detailed: "every sub-section fully expanded, with edge cases" } }
+    {
+      sentences: { Concise: "Diagnosis and first-line Management only — omit Workup, Second-line, Definitive and Avoid entirely", Moderate: "every sub-section at moderate depth", Detailed: "every sub-section fully expanded, with edge cases" },
+      yieldsTo: {
+        complications: "\nComplications: what goes wrong if undertreated — bold **the dangerous ones**.",
+        differentials: " Key distinguishing findings.",
+      },
+    }
   ),
   memoryHooks: list(
     "memoryHooks",
     "Memory Hooks",
     "memory",
-    "Mnemonics, analogies or heuristics that actually stick. One line each.",
-    { evidenceBacked: false, items: { Concise: [3, 3], Moderate: [3, 4], Detailed: [5, 5] } }
+    "One memory device per line — a mnemonic, an analogy or a vivid image — each encoding one of the sheet's most central facts. The device is the content: a line that only restates a fact is not a hook.",
+    { evidenceBacked: false, items: { Concise: [2, 3], Moderate: [2, 4], Detailed: [3, 5] } }
   ),
   keyPoints: list(
     "keyPoints",
     "Key Points",
     "keypoints",
-    'High-yield "If X → think Y" one-liners.',
-    { items: { Concise: [5, 5], Moderate: [6, 8], Detailed: [8, 10] } }
+    'High-yield "If X → think Y" one-liners the sections above did not state — thresholds and numbers, discriminators between look-alikes, next best steps, classic presentations. Never a restatement of an earlier line.',
+    { items: { Concise: [3, 5], Moderate: [4, 8], Detailed: [5, 10] } }
   ),
   examTraps: list(
     "examTraps",
     "Exam Traps",
     "traps",
-    "The classic wrong turns — what examiners test and what people who almost know this get wrong.",
-    { evidenceBacked: false, items: { Concise: [3, 3], Moderate: [4, 4], Detailed: [5, 6] } }
+    "Each trap: the tempting wrong answer or misconception → why it is wrong → what is right. Only mistakes the sheet has not already warned about.",
+    { evidenceBacked: false, items: { Concise: [2, 3], Moderate: [3, 4], Detailed: [3, 6] } }
   ),
 
   // ── Condition ─────────────────────────────────────────────────────────────
@@ -302,7 +334,7 @@ Location: the cell and compartment it runs in.`
     "Regulation",
     "pathway",
     `Structure it as:
-Rate-limiting enzyme: **the enzyme** and what controls it.
+Rate-limiting enzyme: **the enzyme**, named once — its controls go under Activators and Inhibitors.
 Activators: what turns it up, and the signal behind it.
 Inhibitors: what turns it down.`
   ),
@@ -311,7 +343,7 @@ Inhibitors: what turns it down.`
     "Enzymes & Cofactors",
     "pathway",
     ["Enzyme", "Cofactor", "Without it"],
-    "One row per enzyme: its cofactor or vitamin, and what fails without it."
+    "One row per enzyme: its cofactor or vitamin, and what fails without it. Name the enzymes briefly; the cofactor and the failure are the point."
   ),
   deficiencies: table(
     "deficiencies",

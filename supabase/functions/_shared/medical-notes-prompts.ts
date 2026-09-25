@@ -14,8 +14,9 @@
 import type { RagChunk } from "./rag.ts";
 import { MEMORY_FOLLOWUP_INSTRUCTION } from "./memory.ts";
 import { DEFAULT_SHEET_PLAN, resolveSheetPlan, sectionQuota, type PlannedSection } from "./sheet-plan.ts";
-import { schemaLine, tableRulesBlock } from "./sheet-schema.ts";
+import { ONE_HOME_PER_FACT, schemaLine, tableRulesBlock } from "./sheet-schema.ts";
 import type { LengthSetting } from "./sheet-sections.ts";
+import { buildPersonalizePrompt, type PersonalizeRequest } from "./personalize.ts";
 
 export type PromptFamily = "haiku" | "gptOss";
 
@@ -47,6 +48,8 @@ export interface NotesPromptInput {
    */
   plan?: PlannedSection[];
   family: PromptFamily;
+  /** An AI action on the student's own sheet (_shared/personalize.ts). */
+  personalize?: PersonalizeRequest | null;
 }
 
 /**
@@ -65,6 +68,12 @@ Mode: ${mode} | Difficulty: ${diff} | Length: ${len}`;
 }
 
 export function buildNotesPrompts(input: NotesPromptInput): { systemPrompt: string; userContent: string } {
+    // One family for both tiers: the action is Pro-only and always runs on
+    // the premium writer, and it never touches memory or grounding.
+    if (input.personalize) {
+      return buildPersonalizePrompt(input.personalize, { examMode: input.examMode, difficulty: input.difficulty });
+    }
+
     const { notes, difficulty, length, examMode, cardsOnly, cardCount, focusCard,
             explainMode,
             enhanceMode, itemText, sectionKey, enhanceTopic,
@@ -233,8 +242,10 @@ SOURCE COVERAGE — report honestly, after writing the rest of the sheet:
 - When in doubt, choose the weaker level. Over-claiming source backing is the worst possible error here —
   worse than under-claiming it.
 
-LENGTH GATE — Length is "${len}". These are HARD CAPS, whatever the topic's
-complexity:
+${ONE_HOME_PER_FACT}
+
+LENGTH GATE — Length is "${len}". These are MAXIMUMS, whatever the topic's
+complexity. Stop short of a count rather than reach it with a fact the sheet already gave:
 
 ${gateLines}
 

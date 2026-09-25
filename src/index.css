@@ -752,6 +752,58 @@
     text-align: center;
   }
 
+  /* ─── Sheet: a student's own highlights. The colour is the reason —
+     key, confusing, to memorise — so the three read apart in both themes. ─── */
+  .sb-hl {
+    color: inherit;
+    border-radius: 2px;
+    cursor: pointer;
+    -webkit-box-decoration-break: clone;
+    box-decoration-break: clone;
+    transition: background-color 120ms ease;
+  }
+  .sb-hl-key {
+    background: hsl(var(--warning) / 0.24);
+  }
+  .sb-hl-confusing {
+    background: hsl(var(--danger) / 0.16);
+    box-shadow: inset 0 -1.5px 0 hsl(var(--danger) / 0.6);
+  }
+  .sb-hl-memorize {
+    background: hsl(var(--info) / 0.18);
+  }
+  .sb-hl:focus-visible {
+    outline: 2px solid hsl(var(--ring));
+    outline-offset: 1px;
+  }
+  /* The enhancement mark's star, drawn by CSS so it is never part of the
+     line's text — a selection's offsets are measured against that text. */
+  .sb-enh-end::after {
+    content: "✦";
+    font-size: 0.6em;
+    vertical-align: super;
+    margin-left: 1px;
+    color: rgba(234, 179, 8, 0.95);
+  }
+
+  /* ─── The app backdrop: still paper grain over the page colour, under
+     the living field. A few percent, multiplied on paper and screened at
+     night, so it textures the page without greying it. ─── */
+  .sb-grain {
+    background-size: 128px 128px;
+    opacity: 0.045;
+    mix-blend-mode: multiply;
+  }
+  .dark .sb-grain {
+    opacity: 0.035;
+    mix-blend-mode: screen;
+  }
+  @media print {
+    .sb-backdrop {
+      display: none !important;
+    }
+  }
+
   /* ─── Print: "Export PDF" is window.print() into the browser's own
      Save-as-PDF, so the page has to reduce to just the sheet document. ─── */
   @media print {
@@ -802,6 +854,11 @@
     .print-document [role="button"],
     .print-document [data-no-print] {
       display: none !important;
+    }
+    /* A mark is text, clickable or not: hiding it with the buttons above
+       dropped the words of every enhanced passage from the PDF. */
+    .print-document mark[role="button"] {
+      display: inline !important;
     }
 
     /* Heights measured on screen would clip text reflowed at page width. */

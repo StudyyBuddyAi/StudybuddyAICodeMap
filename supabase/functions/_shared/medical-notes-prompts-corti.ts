@@ -76,10 +76,13 @@ FINAL CHECK — verify each point before you write the closing }:
 - Length is "${length}": ${quotas}.${tableCheck}
 - Write for the audience and exam the request names. A retrieved passage from a pediatrics or adult textbook does not narrow the audience.
 - sourceCoverage must agree with itself: "full" means "uncovered" is empty; "none" lists every section; "partial" lists at least one section but not all of them.
-- referenceNote is a finished sentence — never the instruction text in angle brackets.`;
+- referenceNote is a finished sentence — never the instruction text in angle brackets.
+- No fact appears in two sections, except a Memory Hook that encodes one of the two or three central facts.`;
 }
 
 export function buildCortiNotesPrompts(input: NotesPromptInput): { systemPrompt: string; userContent: string } {
+  // Written for Corti already, and it must not collect the sheet's checklist.
+  if (input.personalize) return buildNotesPrompts(input);
   const base = buildNotesPrompts(input);
   let systemPrompt = base.systemPrompt;
 

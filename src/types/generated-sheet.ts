@@ -165,6 +165,18 @@ export interface GeneratedSheet {
   // sheet can still distinguish "nothing retrieved" from "retrieved but the
   // model judged it not relevant" (both reconcile to groundingLevel "none").
   retrievedChunks?: number;
+  /**
+   * Written by the premium writer (X-Is-Premium). A premium sheet is
+   * personalizable whatever the student's plan — the free premium generation
+   * is the Pro experience. Unlocks the manual parts only: see `premiumGrant`.
+   */
+  premium?: boolean;
+  /**
+   * The server's proof that this sheet was streamed as premium to a student
+   * without Pro (premium_sheet_grants). The AI actions send it, and the server
+   * checks it; a client flag alone unlocks nothing that costs anything.
+   */
+  premiumGrant?: string;
 }
 
 // Lightweight type used when loading a saved sheet from study_history.
