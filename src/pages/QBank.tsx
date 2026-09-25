@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import {
   LogIn,
   History,
@@ -181,7 +181,13 @@ const QBank = () => {
   const [isDiscarding, setIsDiscarding] = useState(false);
   const [resumingId, setResumingId] = useState<string | null>(null);
 
-  const [topic, setTopic] = useState("");
+  // A sheet hands its topic over (and what the student marked on it), as the
+  // Roadmap hands one to Sheets. The student still chooses the set and starts it.
+  const location = useLocation();
+  const [topic, setTopic] = useState(() => {
+    const handed = (location.state as { topic?: unknown } | null)?.topic;
+    return typeof handed === "string" ? handed.slice(0, 300) : "";
+  });
   const [setSize, setSetSize] = useState(MIN_SET_SIZE);
   const [challenge, setChallenge] = useState<ChallengeLevel>("balanced");
   const [examMode, setExamMode] = useState<ExamMode>("step1");

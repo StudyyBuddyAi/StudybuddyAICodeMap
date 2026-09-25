@@ -16,6 +16,7 @@ import StudyMode from "@/components/StudyMode";
 import OutputSection from "@/components/OutputSection";
 import { useFlashcardDeck } from "@/hooks/use-flashcard-deck";
 import { useStudyHistory, type StudyHistoryItem } from "@/hooks/use-study-history";
+import { useSavedSheetLayer } from "@/hooks/use-sheet-layer";
 import { timeAgo } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 
@@ -29,6 +30,8 @@ const Library = () => {
   const [studyOpen, setStudyOpen] = useState(false);
   const [studyFilter, setStudyFilter] = useState<StudyFilter>({ mode: "deck" });
   const [activeSheet, setActiveSheet] = useState<StudyHistoryItem | null>(null);
+  // The open sheet's personal layer: its highlights, edits and notes show here.
+  const activeLayer = useSavedSheetLayer(activeSheet?.id ?? null);
   const [deckSearch, setDeckSearch] = useState("");
   const [sheetSearch, setSheetSearch] = useState("");
   const [visibleDecks, setVisibleDecks] = useState(10);
@@ -318,6 +321,20 @@ const Library = () => {
                 output={activeSheet.output}
                 inputText={activeSheet.input}
                 modeInfo={activeSheet.modeInfo}
+                personal={
+                  activeLayer
+                    ? {
+                        // Shown, not changed: the sheet opens on the Sheets page for that.
+                        layer: activeLayer,
+                        entitled: false,
+                        ready: true,
+                        readOnly: true,
+                        update: () => {},
+                        onLocked: () => {},
+                        context: { topic: activeSheet.topic },
+                      }
+                    : undefined
+                }
               />
             </ScrollArea>
           )}

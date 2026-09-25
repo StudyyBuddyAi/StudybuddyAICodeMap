@@ -59,6 +59,29 @@ import SheetSources from "@/components/SheetSources";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import RecallCheck from "@/components/RecallCheck";
 import { assignRecallCards } from "@/lib/section-recall";
+import {
+  addHighlight,
+  anchorSection,
+  highlightRanges,
+  occurrenceBefore,
+  originalLine,
+  removeHighlight,
+  setHighlightIntent,
+  type HighlightIntent,
+  type LayerAddition,
+  type LayerHighlight,
+  type LayerSource,
+} from "@/lib/sheet-layer";
+import { PersonalProvider, usePersonal, type PersonalApi, type PersonalProps } from "@/components/sheet/personal/personal-context";
+import {
+  AdditionRow,
+  EditedMark,
+  ItemMenu,
+  PersonalExtras,
+  SectionFooter,
+} from "@/components/sheet/personal/PersonalItem";
+import { HighlightMenu, SelectionToolbar, type AiChoice } from "@/components/sheet/personal/SelectionToolbar";
+import { LayerBar } from "@/components/sheet/personal/LayerBar";
 
 type EnhanceKind = "enhance" | "expand" | "clinical";
 
@@ -77,6 +100,41 @@ interface CollapsedRef {
   key: string;
   sourceText: string;
 }
+
+/**
+ * How the student's layer shows on each line, item and row. Built once per
+ * render from the personal context; absent, the document renders as it always
+ * has.
+ */
+interface PersonalRender {
+  /** The line as the student sees it: their edit, or what was generated. */
+  text: (anchor: string, original: string) => string;
+  /** Who rewrote the line, or null when it reads as generated. */
+  edited: (anchor: string) => LayerSource | null;
+  /** Left out: removed by the student, or known while known lines are hidden. */
+  skip: (anchor: string) => boolean;
+  /** Removed by the student, but shown struck through while "Original" is on. */
+  removed: (anchor: string) => boolean;
+  known: (anchor: string) => boolean;
+  highlights: (anchor: string) => LayerHighlight[];
+  onHighlightClick?: (id: string, el: HTMLElement) => void;
+  menu: (anchor: string, effective: string, canEdit: boolean) => React.ReactNode;
+  extras: (anchor: string, original: string, effective: string) => React.ReactNode;
+  additions: (section: string) => LayerAddition[];
+}
+
+/** Classes for a line or item's state in the student's layer. */
+function layerLineClass(pr: PersonalRender | undefined, anchor: string): string {
+  if (!pr) return "";
+  if (pr.removed(anchor)) return " line-through opacity-50";
+  if (pr.known(anchor)) return " opacity-60";
+  return "";
+}
+
+/** A ✓ before a line the student has marked as known. */
+const KnownTick = () => (
+  <Check aria-label="You know this" className="mr-1 inline h-3.5 w-3.5 -translate-y-px text-primary" />
+);
 
 /** Golden highlight styling for the source text of a collapsed enhancement. */
 const ENH_MARK_STYLE: React.CSSProperties = {
@@ -240,6 +298,12 @@ interface OutputSectionProps {
    * offers to add it to the library.
    */
   deck?: SheetDeck;
+  /**
+   * The student's own layer over the sheet — highlights, edits, notes, what
+   * they know — and what they may do with it. Absent, the sheet renders as
+   * generated and offers nothing personal.
+   */
+  personal?: PersonalProps;
 }
 
 // ─── Legacy renderer helpers (kept for old text-blob sheets) ───────────────
@@ -348,6 +412,47 @@ const SECTION_LABEL_RE = /^([A-Z][A-Za-z][A-Za-z ,/&-]{0,30}?)(\s*[:：])(?=\s|$
 
 type KeywordClickHandler = (keyword: string, rect: DOMRect, anchor: string) => void;
 
+/** Where a selection would be highlighted: one line's anchor, its text, which occurrence. */
+interface MarkTarget {
+  anchor: string;
+  quote: string;
+  occurrence: number;
+}
+
+/**
+ * The part of a selection that falls inside the line (or table cell) it starts
+ * in, as a highlight would store it. The line's text element holds exactly its
+ * visible words — the enhancement star and the "edited" chip sit outside it —
+ * so what is measured here is what renderRich will later search.
+ */
+function markTarget(range: Range): MarkTarget | null {
+  const startEl =
+    range.startContainer instanceof Element ? range.startContainer : range.startContainer.parentElement;
+  const lineEl = startEl?.closest("[data-enh-anchor]");
+  const anchor = lineEl?.getAttribute("data-enh-anchor") ?? "";
+  if (!lineEl || !/:\d+$/.test(anchor)) return null;
+  const textEl = startEl!.closest("[data-layer-text]") ?? lineEl.querySelector("[data-layer-text]");
+  if (!textEl || !lineEl.contains(textEl)) return null;
+
+  const clipped = document.createRange();
+  clipped.selectNodeContents(textEl);
+  if (range.compareBoundaryPoints(Range.START_TO_START, clipped) > 0) {
+    clipped.setStart(range.startContainer, range.startOffset);
+  }
+  if (range.compareBoundaryPoints(Range.END_TO_END, clipped) < 0) {
+    clipped.setEnd(range.endContainer, range.endOffset);
+  }
+  const raw = clipped.toString();
+  const quote = raw.trim();
+  if (quote.length < 2) return null;
+
+  const before = document.createRange();
+  before.selectNodeContents(textEl);
+  before.setEnd(clipped.startContainer, clipped.startOffset);
+  const lead = raw.length - raw.trimStart().length;
+  return { anchor, quote, occurrence: occurrenceBefore(before.toString() + raw.slice(0, lead), quote) };
+}
+
 function anchorFromElement(el: Element | null): string {
   const anchorEl = el?.closest("[data-enh-anchor]");
   if (anchorEl) return anchorEl.getAttribute("data-enh-anchor") ?? "end";
@@ -409,112 +514,178 @@ function findNeedleMatch(
   return null;
 }
 
+/** Opens the menu for one of the student's own highlights. */
+type HighlightClickHandler = (id: string, el: HTMLElement) => void;
+
+/** One marked stretch of a line's visible text. */
+interface MarkSpan {
+  start: number;
+  end: number;
+  /** An enhancement's golden mark, or a highlight's reason. */
+  kind: "enh" | HighlightIntent;
+  key: string;
+}
+
+const HIGHLIGHT_TITLES: Record<HighlightIntent, string> = {
+  key: "Your highlight: key",
+  confusing: "Your highlight: confusing",
+  memorize: "Your highlight: to memorize",
+};
+
 /**
- * Render a line of text with `**bold**` keywords AND a golden highlight wrapped
- * around the source text of the first matching collapsed enhancement. Clicking
- * the highlight re-opens the enhancement inline.
+ * Render a line of text with `**bold**` keywords, the golden mark of the first
+ * collapsed enhancement it contains, and the student's own highlights.
+ *
+ * Marks can overlap — a highlight inside an enhanced passage, two highlights
+ * sharing words — so the line is cut at every mark's edges and each piece goes
+ * to the narrowest mark covering it; neighbouring pieces of one mark share one
+ * <mark>. A bold keyword cut by a mark's edge loses its click, not its weight.
+ * The enhancement's ✦ is drawn in CSS (sb-enh-end) so the line's text — what a
+ * selection is measured against — is exactly its visible words.
  */
 function renderRich(
   text: string,
   baseKey: string,
   onKeywordClick: KeywordClickHandler | undefined,
   collapsed: CollapsedRef[],
-  onReopen: ((key: string) => void) | undefined
+  onReopen: ((key: string) => void) | undefined,
+  highlights: LayerHighlight[] = [],
+  onHighlightClick?: HighlightClickHandler
 ): React.ReactNode {
   const rawParts = text.split(/(\*\*[^*]+\*\*)/g).filter((p) => p !== "");
   const tokens = rawParts.map((part) => {
     const isBold = part.startsWith("**") && part.endsWith("**");
     return { isBold, visible: isBold ? part.slice(2, -2) : part };
   });
+  const visible = tokens.map((t) => t.visible).join("");
 
-  const renderToken = (
-    tok: { isBold: boolean; visible: string },
-    key: string
-  ): React.ReactNode =>
-    tok.isBold ? (
-      renderBoldKeyword(tok.visible, key as unknown as number, onKeywordClick)
-    ) : (
-      <span key={key}>{tok.visible}</span>
-    );
-
-  // Find the first collapsed source text present in this line.
-  let range: { start: number; end: number; key: string } | null = null;
+  const spans: MarkSpan[] = [];
+  // The first collapsed source text present in this line.
   if (collapsed.length && onReopen) {
-    const visible = tokens.map((t) => t.visible).join("");
     const lower = visible.toLowerCase();
     for (const c of collapsed) {
       const m = findNeedleMatch(lower, c.sourceText.toLowerCase());
       if (m) {
-        range = { start: m.idx, end: m.idx + m.len, key: c.key };
+        spans.push({ start: m.idx, end: m.idx + m.len, kind: "enh", key: c.key });
         break;
       }
     }
   }
-
-  if (!range) {
-    return tokens.map((t, i) => renderToken(t, `${baseKey}-${i}`));
+  for (const r of highlightRanges(visible, highlights)) {
+    spans.push({ start: r.start, end: r.end, kind: r.intent, key: r.id });
   }
 
-  const before: React.ReactNode[] = [];
-  const inside: React.ReactNode[] = [];
-  const after: React.ReactNode[] = [];
+  if (!spans.length) {
+    return tokens.map((tok, i) =>
+      tok.isBold ? (
+        renderBoldKeyword(tok.visible, `${baseKey}-${i}` as unknown as number, onKeywordClick)
+      ) : (
+        <span key={`${baseKey}-${i}`}>{tok.visible}</span>
+      )
+    );
+  }
+
+  // Cut every token at every mark edge, and give each piece its narrowest mark.
+  const edges = new Set<number>();
+  for (const s of spans) {
+    edges.add(s.start);
+    edges.add(s.end);
+  }
+  const pieces: { text: string; bold: boolean; wholeBold: boolean; mark: MarkSpan | null }[] = [];
   let offset = 0;
-  tokens.forEach((tok, i) => {
+  for (const tok of tokens) {
     const tStart = offset;
     const tEnd = offset + tok.visible.length;
     offset = tEnd;
-    if (tEnd <= range!.start) {
-      before.push(renderToken(tok, `${baseKey}-b${i}`));
-      return;
+    const cuts = [tStart, ...[...edges].filter((e) => e > tStart && e < tEnd).sort((a, b) => a - b), tEnd];
+    for (let i = 0; i < cuts.length - 1; i++) {
+      const [a, b] = [cuts[i], cuts[i + 1]];
+      if (a === b) continue;
+      const covering = spans.filter((s) => s.start <= a && s.end >= b);
+      const mark = covering.sort((x, y) => x.end - x.start - (y.end - y.start))[0] ?? null;
+      pieces.push({
+        text: tok.visible.slice(a - tStart, b - tStart),
+        bold: tok.isBold,
+        wholeBold: tok.isBold && cuts.length === 2,
+        mark,
+      });
     }
-    if (tStart >= range!.end) {
-      after.push(renderToken(tok, `${baseKey}-a${i}`));
-      return;
-    }
-    if (tok.isBold) {
-      // Keep bold tokens atomic — drop them whole inside the highlight.
-      inside.push(
-        <strong key={`${baseKey}-i${i}`} className="font-semibold text-foreground">
-          {tok.visible}
-        </strong>
-      );
-      return;
-    }
-    const ls = Math.max(0, range!.start - tStart);
-    const le = Math.min(tok.visible.length, range!.end - tStart);
-    const pre = tok.visible.slice(0, ls);
-    const mid = tok.visible.slice(ls, le);
-    const post = tok.visible.slice(le);
-    if (pre) before.push(<span key={`${baseKey}-bp${i}`}>{pre}</span>);
-    if (mid) inside.push(<span key={`${baseKey}-m${i}`}>{mid}</span>);
-    if (post) after.push(<span key={`${baseKey}-ap${i}`}>{post}</span>);
-  });
+  }
 
-  return (
-    <>
-      {before}
-      <mark
-        style={ENH_MARK_STYLE}
-        className="sb-enh-mark text-foreground"
-        role="button"
-        tabIndex={0}
-        title="Re-open enhancement"
-        onClick={(e) => {
-          e.stopPropagation();
-          onReopen!(range!.key);
-        }}
-      >
-        {inside}
-        <sup
-          aria-hidden
-          style={{ fontSize: "0.6em", color: "rgba(234,179,8,0.95)", marginLeft: "1px" }}
+  const renderPiece = (p: (typeof pieces)[number], key: string) =>
+    p.bold ? (
+      p.wholeBold && !p.mark ? (
+        renderBoldKeyword(p.text, key as unknown as number, onKeywordClick)
+      ) : (
+        <strong key={key} className="font-semibold text-foreground">
+          {p.text}
+        </strong>
+      )
+    ) : (
+      <span key={key}>{p.text}</span>
+    );
+
+  // Group neighbouring pieces that share a mark.
+  const out: React.ReactNode[] = [];
+  for (let i = 0; i < pieces.length; ) {
+    const mark = pieces[i].mark;
+    let j = i;
+    while (j < pieces.length && pieces[j].mark === mark) j++;
+    const children = pieces.slice(i, j).map((p, k) => renderPiece(p, `${baseKey}-p${i + k}`));
+    if (!mark) {
+      out.push(...children);
+    } else if (mark.kind === "enh") {
+      const isEnd = !pieces.slice(j).some((p) => p.mark === mark);
+      out.push(
+        <mark
+          key={`${baseKey}-m${i}`}
+          style={ENH_MARK_STYLE}
+          className={`sb-enh-mark text-foreground${isEnd ? " sb-enh-end" : ""}`}
+          role="button"
+          tabIndex={0}
+          title="Re-open enhancement"
+          onClick={(e) => {
+            e.stopPropagation();
+            onReopen!(mark.key);
+          }}
         >
-          ✦
-        </sup>
-      </mark>
-      {after}
-    </>
-  );
+          {children}
+        </mark>
+      );
+    } else {
+      out.push(
+        <mark
+          key={`${baseKey}-m${i}`}
+          data-highlight-id={mark.key}
+          className={`sb-hl sb-hl-${mark.kind}`}
+          title={HIGHLIGHT_TITLES[mark.kind]}
+          tabIndex={onHighlightClick ? 0 : undefined}
+          onClick={
+            onHighlightClick
+              ? (e) => {
+                  e.stopPropagation();
+                  onHighlightClick(mark.key, e.currentTarget);
+                }
+              : undefined
+          }
+          onKeyDown={
+            onHighlightClick
+              ? (e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    onHighlightClick(mark.key, e.currentTarget);
+                  }
+                }
+              : undefined
+          }
+        >
+          {children}
+        </mark>
+      );
+    }
+    i = j;
+  }
+  return out;
 }
 
 function renderJsonText(
@@ -523,19 +694,27 @@ function renderJsonText(
   onKeywordClick?: KeywordClickHandler,
   renderInline?: (anchor: string) => React.ReactNode,
   collapsedByAnchor?: Record<string, CollapsedRef[]>,
-  onReopen?: (key: string) => void
+  onReopen?: (key: string) => void,
+  pr?: PersonalRender
 ) {
   const lines = text.split("\n");
 
-  return lines.map((line, lineIdx) => {
-    const trimmed = line.trim();
-    if (!trimmed) {
+  const rendered = lines.map((line, lineIdx) => {
+    const original = line.trim();
+    if (!original) {
       return <span key={lineIdx} className="block h-2" />;
     }
 
     const anchor = `${anchorPrefix}:${lineIdx}`;
+    if (pr?.skip(anchor)) return null;
+    // The student's rewrite of the line, when there is one, is what renders.
+    const trimmed = pr ? pr.text(anchor, original) : original;
     const collapsed = collapsedByAnchor?.[anchor] ?? [];
+    const highlights = pr?.highlights(anchor) ?? [];
+    const edited = pr?.edited(anchor);
     const labelMatch = trimmed.match(SECTION_LABEL_RE);
+    const state = layerLineClass(pr, anchor);
+    const tick = pr?.known(anchor) ? <KnownTick /> : null;
 
     let lineNode: React.ReactNode;
     if (labelMatch) {
@@ -545,79 +724,130 @@ function renderJsonText(
       lineNode = (
         <span
           data-enh-anchor={anchor}
-          className={`block text-sm leading-relaxed ${lineIdx === 0 ? "mt-0" : "mt-3"}`}
+          className={`block text-sm leading-relaxed ${lineIdx === 0 ? "mt-0" : "mt-3"}${state}`}
         >
+          {tick}
           <span className="font-semibold text-foreground/90">{labelPart}</span>
-          <span className="text-muted-foreground">
-            {renderRich(rest, `${anchor}-r`, onKeywordClick, collapsed, onReopen)}
+          <span className="text-muted-foreground" data-layer-text>
+            {renderRich(rest, `${anchor}-r`, onKeywordClick, collapsed, onReopen, highlights, pr?.onHighlightClick)}
           </span>
+          {edited && <EditedMark source={edited} />}
         </span>
       );
     } else {
       lineNode = (
         <span
           data-enh-anchor={anchor}
-          className="block text-sm text-muted-foreground leading-relaxed"
+          className={`block text-sm text-muted-foreground leading-relaxed${state}`}
         >
-          {renderRich(trimmed, anchor, onKeywordClick, collapsed, onReopen)}
+          {tick}
+          <span data-layer-text>
+            {renderRich(trimmed, anchor, onKeywordClick, collapsed, onReopen, highlights, pr?.onHighlightClick)}
+          </span>
+          {edited && <EditedMark source={edited} />}
         </span>
       );
     }
 
     return (
       <span key={lineIdx} className="block">
-        {lineNode}
+        {pr ? (
+          <span className="group/item relative block pr-7">
+            {lineNode}
+            <span className="absolute right-0 top-0">{pr.menu(anchor, trimmed, true)}</span>
+          </span>
+        ) : (
+          lineNode
+        )}
         {renderInline?.(anchor)}
+        {pr?.extras(anchor, original, trimmed)}
       </span>
     );
   });
+
+  // Points the student added to this section, after its own lines.
+  const added = pr?.additions(anchorPrefix) ?? [];
+  if (!added.length) return rendered;
+  return [
+    ...rendered,
+    ...added.map((a) => (
+      <span key={`add-${a.id}`} className="mt-3 block text-sm leading-relaxed text-muted-foreground">
+        <AdditionRow addition={a} />
+      </span>
+    )),
+  ];
 }
 
 // Render an array section (memoryHooks, keyPoints, examTraps)
+const LIST_NUMBER_STYLE: React.CSSProperties = {
+  flexShrink: 0,
+  fontFamily: "var(--font-mono)",
+  fontWeight: 500,
+  fontSize: 12,
+  color: "var(--accent)",
+  opacity: 0.7,
+  width: 20,
+  textAlign: "right",
+  fontVariantNumeric: "tabular-nums",
+};
+
 function renderArraySection(
   items: string[],
   sectionKey?: string,
   renderInline?: (anchor: string) => React.ReactNode,
   collapsedByAnchor?: Record<string, CollapsedRef[]>,
-  onReopen?: (key: string) => void
+  onReopen?: (key: string) => void,
+  pr?: PersonalRender
 ) {
-  if (!Array.isArray(items) || items.length === 0) return null;
+  const added = (sectionKey && pr?.additions(sectionKey)) || [];
+  if ((!Array.isArray(items) || items.length === 0) && !added.length) return null;
 
+  // Numbered as shown, so an item the student removed leaves no gap.
+  let shown = 0;
   return (
     <ol className="space-y-2">
-      {items.map((item, i) => {
+      {(items ?? []).map((item, i) => {
         const anchor = sectionKey ? `${sectionKey}:${i}` : "";
+        if (sectionKey && pr?.skip(anchor)) return null;
+        shown++;
         const collapsed = (sectionKey && collapsedByAnchor?.[anchor]) || [];
+        const text = sectionKey && pr ? pr.text(anchor, item) : item;
+        const edited = sectionKey ? pr?.edited(anchor) : null;
         return (
           <li
             key={i}
             data-enh-anchor={sectionKey ? anchor : undefined}
-            className="text-sm text-muted-foreground leading-relaxed"
+            className={`group/item text-sm text-muted-foreground leading-relaxed${sectionKey ? layerLineClass(pr, anchor) : ""}`}
           >
             <span className="flex gap-2.5">
-              <span
-                style={{
-                  flexShrink: 0,
-                  fontFamily: "var(--font-mono)",
-                  fontWeight: 500,
-                  fontSize: 12,
-                  color: "var(--accent)",
-                  opacity: 0.7,
-                  width: 20,
-                  textAlign: "right",
-                  fontVariantNumeric: "tabular-nums",
-                }}
-              >
-                {i + 1}.
-              </span>
+              <span style={LIST_NUMBER_STYLE}>{shown}.</span>
               <span className="flex-1">
-                {renderRich(item, `${sectionKey ?? "arr"}-${i}`, undefined, collapsed, onReopen)}
+                {sectionKey && pr?.known(anchor) && <KnownTick />}
+                <span data-layer-text>
+                  {renderRich(
+                    text,
+                    `${sectionKey ?? "arr"}-${i}`,
+                    undefined,
+                    collapsed,
+                    onReopen,
+                    sectionKey ? pr?.highlights(anchor) : [],
+                    pr?.onHighlightClick
+                  )}
+                </span>
+                {edited && <EditedMark source={edited} />}
               </span>
+              {sectionKey && pr && <span className="shrink-0">{pr.menu(anchor, text, true)}</span>}
             </span>
             {sectionKey && renderInline?.(anchor)}
+            {sectionKey && pr?.extras(anchor, item, text)}
           </li>
         );
       })}
+      {added.map((a) => (
+        <li key={`add-${a.id}`} className="text-sm leading-relaxed text-muted-foreground">
+          <AdditionRow addition={a} index={++shown} />
+        </li>
+      ))}
     </ol>
   );
 }
@@ -799,6 +1029,8 @@ function TableFrame({
 const tableWidth = (columns: string[], rows: string[][]) =>
   columns.length || Math.max(1, ...rows.map((r) => r.length));
 
+const hasNodes = (n: React.ReactNode) => (Array.isArray(n) ? n.some(Boolean) : !!n);
+
 function renderTableSection(
   rawRows: string[][],
   columns: string[],
@@ -806,7 +1038,8 @@ function renderTableSection(
   onKeywordClick: KeywordClickHandler,
   renderInline: (anchor: string) => React.ReactNode,
   collapsedByAnchor: Record<string, CollapsedRef[]>,
-  onReopen: (key: string) => void
+  onReopen: (key: string) => void,
+  pr?: PersonalRender
 ) {
   const width = tableWidth(columns, rawRows);
   const rows = tableRows(rawRows, width);
@@ -816,32 +1049,44 @@ function renderTableSection(
     <TableFrame columns={columns} width={width}>
       {rows.map((row, r) => {
         const anchor = `${sectionKey}:${r}`;
+        if (pr?.skip(anchor)) return null;
         const collapsed = collapsedByAnchor[anchor] ?? [];
-        const inline = renderInline(anchor);
-        const hasInline = Array.isArray(inline) ? inline.length > 0 : !!inline;
+        const rowText = row.join(" | ");
+        // A row is not edited in place — its cells are the table's shape — so
+        // under it go only what the student asked for: an explanation, a card,
+        // a note.
+        const below = [renderInline(anchor), pr?.extras(anchor, rowText, rowText)];
         return (
           <Fragment key={r}>
-            <tr data-enh-anchor={anchor} className="transition-colors hover:bg-secondary/40" style={TABLE_ROW_STYLE}>
+            <tr
+              data-enh-anchor={anchor}
+              className={`group/item transition-colors hover:bg-secondary/40${layerLineClass(pr, anchor)}`}
+              style={TABLE_ROW_STYLE}
+            >
               {row.map((cell, c) => (
                 <td
                   key={c}
                   className={c === 0 ? "font-medium text-foreground" : "text-muted-foreground"}
                   style={c === 0 ? { ...TABLE_CELL_STYLE, ...STICKY_COLUMN_STYLE } : TABLE_CELL_STYLE}
                 >
+                  {c === 0 && pr?.known(anchor) && <KnownTick />}
                   {cell.trim() ? (
-                    renderRich(cell, `${anchor}-${c}`, onKeywordClick, collapsed, onReopen)
+                    <span data-layer-text>
+                      {renderRich(cell, `${anchor}-${c}`, onKeywordClick, collapsed, onReopen, pr?.highlights(anchor), pr?.onHighlightClick)}
+                    </span>
                   ) : (
                     <span aria-label="Not given" style={{ color: "var(--fg-subtle)" }}>
                       —
                     </span>
                   )}
+                  {c === row.length - 1 && pr && <span className="ml-1 inline-block align-middle">{pr.menu(anchor, rowText, false)}</span>}
                 </td>
               ))}
             </tr>
-            {hasInline && (
+            {below.some(hasNodes) && (
               <tr>
                 <td colSpan={width} style={{ padding: "0 12px 8px" }}>
-                  {inline}
+                  {below}
                 </td>
               </tr>
             )}
@@ -1355,7 +1600,17 @@ const InlineEnhancement = ({
 
 // ─── Main component ───────────────────────────────────────────────────────
 
-const OutputSection = ({
+/** The personal layer's state is the provider's, so the body can read it. */
+const OutputSection = (props: OutputSectionProps) =>
+  props.personal ? (
+    <PersonalProvider value={props.personal}>
+      <OutputSectionBody {...props} />
+    </PersonalProvider>
+  ) : (
+    <OutputSectionBody {...props} />
+  );
+
+const OutputSectionBody = ({
   output,
   inputText,
   modeInfo,
@@ -1375,6 +1630,7 @@ const OutputSection = ({
   deck,
 }: OutputSectionProps) => {
   const ref = useRef<HTMLDivElement>(null);
+  const personal = usePersonal();
   const referenceNoteRef = useRef<HTMLDivElement>(null);
 
   // The highlight-to-enhance tip is shown until it is dismissed or the reader
@@ -1478,8 +1734,17 @@ const OutputSection = ({
   };
 
   // Selection-to-enhance state. `top`/`left` are container-relative (see above).
-  const [selection, setSelection] = useState<{ text: string; anchor: string; top: number; left: number } | null>(null);
+  // `mark` is where a highlight of it would anchor, when the student has a
+  // layer and the selection starts inside one line.
+  const [selection, setSelection] = useState<{
+    text: string;
+    anchor: string;
+    top: number;
+    left: number;
+    mark: MarkTarget | null;
+  } | null>(null);
   const selectionTooltipRef = useRef<HTMLDivElement>(null);
+  const personalOn = !!personal && !isStreaming && !personal.readOnly;
 
   const handleSelectionChange = useCallback(() => {
     const sel = window.getSelection();
@@ -1488,7 +1753,8 @@ const OutputSection = ({
       return;
     }
     const text = sel.toString().trim();
-    if (text.split(/\s+/).length < 3) {
+    // Enhancing wants a phrase; a highlight can be a single term.
+    if (personalOn ? text.length < 2 : text.split(/\s+/).length < 3) {
       setSelection(null);
       return;
     }
@@ -1503,14 +1769,55 @@ const OutputSection = ({
         ? range.startContainer
         : range.startContainer.parentElement;
     const rect = range.getBoundingClientRect();
-    setSelection({ text, anchor: anchorFromElement(startEl), ...anchorMenuPos(rect) });
-  }, [anchorMenuPos]);
+    setSelection({
+      text,
+      anchor: anchorFromElement(startEl),
+      ...anchorMenuPos(rect),
+      mark: personalOn ? markTarget(range) : null,
+    });
+  }, [anchorMenuPos, personalOn]);
 
   const fireSelectionEnhance = (kind: EnhanceKind) => {
     if (!selection) return;
     addEnhancement(selection.text, kind, selection.anchor);
     setSelection(null);
     window.getSelection()?.removeAllRanges();
+  };
+
+  const clearSelection = () => {
+    setSelection(null);
+    window.getSelection()?.removeAllRanges();
+  };
+
+  // ── The student's own layer: highlights, and AI on a line ─────────────────
+  const [highlightMenu, setHighlightMenu] = useState<{ id: string; top: number; left: number } | null>(null);
+  const highlightMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!highlightMenu) return;
+    const onDown = (e: MouseEvent) => {
+      if (highlightMenuRef.current && !highlightMenuRef.current.contains(e.target as Node)) setHighlightMenu(null);
+    };
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setHighlightMenu(null);
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [highlightMenu]);
+
+  /** The line at an anchor as the student currently sees it. */
+  const effectiveAt = (p: PersonalApi, s: GeneratedSheet, anchor: string) => {
+    const original = originalLine(s, anchor) ?? "";
+    return p.showOriginal ? original : p.layer.edits[anchor]?.text ?? original;
+  };
+
+  const markSelection = (intent: HighlightIntent) => {
+    const target = selection?.mark;
+    if (!target || !personal) return;
+    personal.guard(() => personal.update((l) => addHighlight(l, { ...target, intent })));
+    clearSelection();
   };
 
   useEffect(() => {
@@ -1782,6 +2089,72 @@ const OutputSection = ({
       ));
   };
 
+  // ── The student's layer, as each line needs it ──────────────────────────
+  // Not while the sheet is still arriving: its lines are still being written.
+  const titleOf = (anchor: string) => sectionOrder.find((s) => s.key === anchorSection(anchor))?.title ?? "";
+  const isTableAnchor = (anchor: string) => isTableRows(sectionBody(sheet, anchorSection(anchor)));
+  const p = personal && !isStreaming ? personal : null;
+  const highlightsByAnchor: Record<string, LayerHighlight[]> = {};
+  for (const h of p?.layer.highlights ?? []) (highlightsByAnchor[h.anchor] ??= []).push(h);
+  const pr: PersonalRender | undefined = p
+    ? {
+        text: (a, o) => (p.showOriginal ? o : p.layer.edits[a]?.text ?? o),
+        edited: (a) => (p.showOriginal ? null : p.layer.edits[a]?.source ?? null),
+        skip: (a) =>
+          (p.layer.hidden.includes(a) && !p.showOriginal) || (p.hideKnown && p.layer.known.includes(a)),
+        removed: (a) => p.showOriginal && p.layer.hidden.includes(a),
+        known: (a) => p.layer.known.includes(a),
+        highlights: (a) => highlightsByAnchor[a] ?? [],
+        onHighlightClick: p.readOnly
+          ? undefined
+          : (id, el) => setHighlightMenu({ id, ...anchorMenuPos(el.getBoundingClientRect()) }),
+        menu: (a, eff, canEdit) =>
+          p.readOnly ? null : <ItemMenu anchor={a} effective={eff} sectionTitle={titleOf(a)} canEdit={canEdit} />,
+        extras: (a, o, eff) =>
+          p.layer.notes.some((n) => n.anchor === a) ||
+          p.suggestion?.anchor === a ||
+          p.editing === a ||
+          p.noting === a ||
+          p.asking === a ? (
+            <PersonalExtras anchor={a} original={o} effective={eff} sectionTitle={titleOf(a)} />
+          ) : null,
+        additions: (s) => (p.showOriginal ? [] : p.layer.additions.filter((x) => x.section === s)),
+      }
+    : undefined;
+
+  const aiOnSelection = (choice: AiChoice) => {
+    const target = selection?.mark;
+    if (!target || !p) return;
+    p.runSuggestion({
+      anchor: target.anchor,
+      action: choice.action,
+      label: choice.label,
+      style: choice.action === "rewrite" ? choice.style : undefined,
+      original: effectiveAt(p, sheet, target.anchor),
+      // The whole line is what's rewritten; the selection is where to look.
+      focus: target.quote,
+      sectionTitle: titleOf(target.anchor),
+    });
+    clearSelection();
+  };
+
+  const menuHighlight = highlightMenu ? p?.layer.highlights.find((h) => h.id === highlightMenu.id) ?? null : null;
+  const highlightAi = (action: "explain" | "card") => {
+    if (!menuHighlight || !p) return;
+    p.runSuggestion({
+      anchor: menuHighlight.anchor,
+      action,
+      label: action === "card" ? "New flashcard" : "Explained",
+      original: effectiveAt(p, sheet, menuHighlight.anchor),
+      focus: menuHighlight.quote,
+      sectionTitle: titleOf(menuHighlight.anchor),
+    });
+    setHighlightMenu(null);
+  };
+
+  // The cards the student made from this sheet, after the ones written with it.
+  const myCards = p && !p.showOriginal ? p.layer.cards.map((c) => ({ tag: "Mine", question: c.question, answer: c.answer })) : [];
+
   return (
     <LazyMotion features={domAnimation} strict>
     <MotionConfig reducedMotion="user">
@@ -1809,6 +2182,8 @@ const OutputSection = ({
           {sheet.topic || inputText}
         </h1>
       )}
+
+      {p && <LayerBar />}
 
       {sectionOrder.map((spec, idx) => {
         const key = spec.key;
@@ -1947,7 +2322,7 @@ const OutputSection = ({
               ) : key === "flashcards" ? (
                 <>
                   {deck && deck.count > 0 && <DeckOffer deck={deck} />}
-                  <FlashcardsSection cards={sheet.flashcards ?? []} />
+                  <FlashcardsSection cards={[...(sheet.flashcards ?? []), ...myCards]} />
                 </>
               ) : key !== "referenceNote" && spec.kind === "prose" ? (
                 <div className="text-sm text-muted-foreground leading-relaxed">
@@ -1957,7 +2332,8 @@ const OutputSection = ({
                     handleKeywordClick,
                     renderInline,
                     collapsedByAnchor,
-                    reopenEnhancement
+                    reopenEnhancement,
+                    pr
                   )}
                 </div>
               ) : key === "referenceNote" ? (
@@ -1996,7 +2372,8 @@ const OutputSection = ({
                   handleKeywordClick,
                   renderInline,
                   collapsedByAnchor,
-                  reopenEnhancement
+                  reopenEnhancement,
+                  pr
                 )
               ) : (
                 renderArraySection(
@@ -2004,10 +2381,18 @@ const OutputSection = ({
                   key,
                   renderInline,
                   collapsedByAnchor,
-                  reopenEnhancement
+                  reopenEnhancement,
+                  pr
                 )
               )}
               {ready && renderInline(`${key}:end`)}
+              {ready && p && key !== "flashcards" && key !== "referenceNote" && (
+                <SectionFooter
+                  sectionKey={key}
+                  canAdd={!isTableRows(body)}
+                  knownHidden={p.hideKnown ? p.layer.known.filter((a) => anchorSection(a) === key).length : 0}
+                />
+              )}
               {recallCards?.has(key) && <RecallCheck card={recallCards.get(key)!} />}
             </div>
             </AutoHeight>
@@ -2025,15 +2410,54 @@ const OutputSection = ({
 
       <EnhanceTip show={!isStreaming && !tipSeen} onDismiss={retireTip} />
 
-      {/* Anchored action menu — selection (below the highlighted text) */}
+      {/* Anchored action menu — selection (below the highlighted text). With a
+          personal layer it also marks the passage and runs AI on its line. */}
       <AnimatePresence>
-        {selection && (
-          <EnhanceBubble
-            key="selection"
-            innerRef={selectionTooltipRef}
-            top={selection.top}
-            left={selection.left}
-            onAction={fireSelectionEnhance}
+        {selection &&
+          (p && !p.readOnly ? (
+            <SelectionToolbar
+              key="selection"
+              innerRef={selectionTooltipRef}
+              top={selection.top}
+              left={selection.left}
+              onEnhance={fireSelectionEnhance}
+              canMark={!!selection.mark}
+              canRewrite={!!selection.mark && !isTableAnchor(selection.mark.anchor)}
+              locked={!p.entitled}
+              onHighlight={markSelection}
+              onAi={aiOnSelection}
+            />
+          ) : (
+            <EnhanceBubble
+              key="selection"
+              innerRef={selectionTooltipRef}
+              top={selection.top}
+              left={selection.left}
+              onAction={fireSelectionEnhance}
+            />
+          ))}
+      </AnimatePresence>
+
+      {/* What clicking one of the student's own highlights offers. */}
+      <AnimatePresence>
+        {highlightMenu && menuHighlight && p && (
+          <HighlightMenu
+            key="highlight"
+            innerRef={highlightMenuRef}
+            top={highlightMenu.top}
+            left={highlightMenu.left}
+            intent={menuHighlight.intent}
+            editable={p.editable}
+            onIntent={(intent) => {
+              p.update((l) => setHighlightIntent(l, menuHighlight.id, intent));
+              setHighlightMenu(null);
+            }}
+            onExplain={() => highlightAi("explain")}
+            onCard={() => highlightAi("card")}
+            onRemove={() => {
+              p.update((l) => removeHighlight(l, menuHighlight.id));
+              setHighlightMenu(null);
+            }}
           />
         )}
       </AnimatePresence>

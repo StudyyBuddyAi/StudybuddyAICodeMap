@@ -18,6 +18,14 @@ interface SaveButtonProps {
   className?: string;
   /** Applied to the label, e.g. to hide it on a narrow screen. */
   labelClassName?: string;
+  /**
+   * The sheet's saved id when the page already knows it — it was opened from
+   * history, or saved itself when the student first personalized it — so the
+   * button never offers to save it twice.
+   */
+  savedId?: string | null;
+  /** Told the new row's id, so the page can key the sheet's layer by it. */
+  onSaved?: (id: string) => void;
 }
 
 const SaveButton = ({
@@ -27,15 +35,19 @@ const SaveButton = ({
   disabled = false,
   className,
   labelClassName,
+  savedId,
+  onSaved,
 }: SaveButtonProps) => {
-  const [saved, setSaved] = useState(false);
+  const [savedHere, setSavedHere] = useState(false);
+  const saved = savedHere || !!savedId;
   const { toast } = useToast();
   const { saveItem } = useStudyHistory();
 
   const handleSave = async () => {
     try {
-      await saveItem(input, output, modeInfo);
-      setSaved(true);
+      const id = await saveItem(input, output, modeInfo);
+      setSavedHere(true);
+      onSaved?.(id);
       toast({ title: "Saved to Study History" });
     } catch (e: unknown) {
       toast({

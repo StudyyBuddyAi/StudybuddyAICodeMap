@@ -74,12 +74,22 @@ import type { StudyHistoryItem } from "@/hooks/use-study-history";
 import { useMemoryPreference } from "@/hooks/use-memory-preference";
 import { sheetToPlainText } from "@/lib/sheet-to-text";
 import { ENTER, FOLD, RISE } from "@/lib/motion";
+import { useStudyHistory } from "@/hooks/use-study-history";
+import { useSheetLayer } from "@/hooks/use-sheet-layer";
+import { applyLayer, isEmptyLayer, layerNotesText, type SheetLayer } from "@/lib/sheet-layer";
+import type { PersonalProps } from "@/components/sheet/personal/personal-context";
 
 export interface SheetGeneratorPrefill {
   input: string;
   output: string;
   modeInfo?: StudyHistoryItem["modeInfo"];
+  /** Set when the prefill is a saved sheet, so its personal layer loads with it. */
+  id?: string;
 }
+
+/** A QBank set's topic line: the sheet's topic, and what the student marked. */
+const qbankTopic = (topic: string, focus = "") =>
+  (focus ? `${topic} — focus on: ${focus}` : topic).slice(0, 300);
 
 interface SheetGeneratorProps {
   prefill?: SheetGeneratorPrefill | null;
@@ -225,6 +235,15 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
   // The deck, delivered in its own __meta frame at the end of the stream
   // because it is generated alongside the sheet rather than inside it.
   const flashcardsRef = useRef<Flashcard[] | null>(null);
+  // Whether the premium writer wrote this sheet (X-Is-Premium), and the grant
+  // the server recorded for it when the student has no Pro. Both ride on the
+  // sheet: a premium sheet is personalizable like a Pro one.
+  const premiumRef = useRef<{ premium: boolean; grant?: string }>({ premium: false });
+
+  // The saved row the sheet on screen is, once it is one: opened from
+  // history, saved with Save, or saved on the student's first personal touch.
+  // Its personal layer is keyed by it.
+  const [savedSheetId, setSavedSheetId] = useState<string | null>(prefill?.id ?? null);
 
   const { toast } = useToast();
   const navigate = useNavigate();
@@ -261,6 +280,8 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
     refreshCitation,
   } = useCitationUsage();
   const { saveCards } = useFlashcardDeck();
+  const { saveItem } = useStudyHistory();
+  const layerState = useSheetLayer(generationId, savedSheetId);
 
   const generate = async (overrideNotes?: string) => {
     const activeNotes = overrideNotes ?? notes;
@@ -294,9 +315,11 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
     setLiveKey(undefined);
     setGenerationStatus({ planned: false, sources: useGrounding ? "pending" : "off" });
     setSheetIncomplete(false);
+    setSavedSheetId(null);
     groundingResultRef.current = null;
     planRef.current = null;
     flashcardsRef.current = null;
+    premiumRef.current = { premium: false };
     // Captured per-generation rather than read at render time: the sheet must
     // keep describing the settings it was actually built with, even if the
     // toggle is flipped afterwards.
@@ -315,6 +338,8 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
       ...s,
       ...(planRef.current ? { plan: planRef.current } : {}),
       ...(flashcardsRef.current ? { flashcards: flashcardsRef.current } : {}),
+      ...(premiumRef.current.premium ? { premium: true } : {}),
+      ...(premiumRef.current.grant ? { premiumGrant: premiumRef.current.grant } : {}),
     });
 
     // Draft updates are coalesced to one render per animation frame: chunks
@@ -364,6 +389,7 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
       }
 
       setModelUsed(parseModelUsed(response.headers));
+      premiumRef.current.premium = response.headers.get("x-is-premium") === "true";
 
       // Usage was incremented server-side; refresh the displayed counts.
       refreshUsage();
@@ -424,6 +450,11 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
               }
               if (meta.stage === "thinking") {
                 setGenerationStatus((s) => ({ ...s, thinking: true }));
+              }
+              // Proof, for the AI actions later, that this premium sheet may
+              // be personalized without Pro.
+              if (typeof meta.premiumGrant === "string") {
+                premiumRef.current.grant = meta.premiumGrant;
               }
 
               if (meta.plan !== undefined) {
@@ -616,7 +647,16 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
    * clipboard everywhere else.
    */
   const handleShare = async () => {
-    const text = sheetToPlainText(sheet, legacyOutput, activeSettings.notes);
+    // The sheet as the student has made it: their edits and points in place,
+    // what they removed gone, their notes at the end.
+    const layer = layerState.layer;
+    const mine = sheet && !isEmptyLayer(layer);
+    const text = sheetToPlainText(
+      mine ? applyLayer(sheet, layer) : sheet,
+      legacyOutput,
+      activeSettings.notes,
+      mine ? [layerNotesText(sheet, layer)] : []
+    );
     if (!text.trim()) {
       toast({ title: "Nothing to share yet", variant: "destructive" });
       return;
@@ -658,6 +698,7 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
     setActiveSettings((prev) => ({ ...prev, ...loaded, notes: item.input }));
     setDeckSaved(false);
     setSheetIncomplete(false);
+    setSavedSheetId(item.id);
     setGenerationId((id) => id + 1);
     setModelUsed(undefined);
     setCitationState("idle");
@@ -737,6 +778,89 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
       }
     : null;
 
+  // ── The student's own layer ────────────────────────────────────────────
+  // Pro, or a sheet the premium writer wrote: the free premium generation is
+  // the Pro experience, whatever the student's plan.
+  const entitled = pro || sheet?.premium === true;
+  const sheetTopic = sheet?.topic?.trim() || firstLine(activeSettings.notes) || "this topic";
+
+  // The sheet saves itself on the first personal touch — a layer needs a row
+  // to belong to — and only once, however fast the touches come.
+  const savingRef = useRef<Promise<string> | null>(null);
+  const ensureSaved = () => {
+    if (savedSheetId || !sheet) return;
+    savingRef.current ??= saveItem(activeSettings.notes, JSON.stringify(sheet), {
+      examMode: activeSettings.examMode,
+      difficulty: activeSettings.difficulty,
+      length: activeSettings.length,
+    })
+      .then((id) => {
+        setSavedSheetId(id);
+        return id;
+      })
+      .catch((e) => {
+        toast({
+          title: "Couldn't save this sheet",
+          description: "Your changes will stay until you leave the page.",
+          variant: "destructive",
+        });
+        throw e;
+      })
+      .finally(() => {
+        savingRef.current = null;
+      });
+    savingRef.current.catch(() => {});
+  };
+
+  const updateLayer = (fn: (layer: SheetLayer) => SheetLayer) => {
+    layerState.update(fn);
+    ensureSaved();
+  };
+
+  /** A card made from the sheet, straight into this sheet's deck. */
+  const addPersonalCard = async (card: { question: string; answer: string }) => {
+    try {
+      await saveCards([
+        {
+          question: card.question,
+          answer: card.answer,
+          tag: "Mine",
+          grounded: false,
+          topic: activeSettings.notes.trim().slice(0, 60),
+          topicEmoji: sheet?.topicEmoji,
+        },
+      ]);
+      toast({ title: "Card added to your deck" });
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  /** A QBank set on this sheet, focused on what the student marked. */
+  const practiceInQBank = (focus = "") => navigate("/qbank", { state: { topic: qbankTopic(sheetTopic, focus) } });
+
+  const personal: PersonalProps | undefined =
+    sheet && !legacyOutput
+      ? {
+          layer: layerState.layer,
+          entitled,
+          ready: layerState.status === "ready" && !loading,
+          unsaved: layerState.unsaved,
+          saveFailed: layerState.saveFailed,
+          update: updateLayer,
+          onLocked: () => setGoProOpen(true),
+          context: {
+            topic: sheetTopic,
+            examMode: activeSettings.examMode,
+            difficulty: activeSettings.difficulty,
+            grant: sheet.premiumGrant,
+          },
+          onAddCard: addPersonalCard,
+          onPractice: practiceInQBank,
+        }
+      : undefined;
+
   /** Back to the composer, keeping the settings for the next sheet. */
   const newSheet = () => {
     if (loading) return;
@@ -745,6 +869,8 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
     setNotes("");
     setDeckSaved(false);
     setSheetIncomplete(false);
+    setSavedSheetId(null);
+    setGenerationId((id) => id + 1);
     setModelUsed(undefined);
     setCitationState("idle");
     setCitations([]);
@@ -935,6 +1061,8 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
         disabled={loading}
         className={TOPIC_BAR_BUTTON}
         labelClassName="hidden sm:inline"
+        savedId={savedSheetId}
+        onSaved={setSavedSheetId}
       />
 
       <DropdownMenu>
@@ -957,7 +1085,7 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
               ? `Add ${deckCount} cards to my deck`
               : "Add the cards to my deck"}
           </DropdownMenuItem>
-          <DropdownMenuItem onSelect={() => navigate("/qbank")}>
+          <DropdownMenuItem onSelect={() => practiceInQBank()}>
             <Play className="mr-2 h-4 w-4" />
             Practice QBank
           </DropdownMenuItem>
@@ -1078,6 +1206,7 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
                   liveKey={loading ? liveKey : undefined}
                   showHeader={false}
                   deck={deck ?? undefined}
+                  personal={personal}
                 />
               </m.div>
             )}
@@ -1091,7 +1220,7 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
                 key="finish"
                 topic={sheet?.topic?.trim() || firstLine(activeSettings.notes) || "this sheet"}
                 deck={deck}
-                onPractice={() => navigate("/qbank")}
+                onPractice={() => practiceInQBank()}
                 onExport={() => window.print()}
                 onShare={handleShare}
                 onNewSheet={newSheet}
