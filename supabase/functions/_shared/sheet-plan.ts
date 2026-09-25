@@ -22,6 +22,7 @@ import {
   ARCHETYPES,
   DEFAULT_ARCHETYPE,
   SECTIONS,
+  briefFor,
   itemPhrase,
   listItems,
   proseBudget,
@@ -67,8 +68,9 @@ export const MAX_SECTIONS = 7;
 
 /**
  * Sections that are study aids rather than content, always sorted to the end
- * in this order. They summarise the sheet, so they cannot precede the material
- * they summarise.
+ * in this order. They build on the material — a trap needs the fact it trips
+ * over, a hook the fact it encodes — so they cannot precede it. They do not
+ * summarise it: each is briefed to add what the sections above did not say.
  */
 const TRAILING_SECTIONS = ["keyPoints", "memoryHooks", "examTraps"];
 
@@ -88,14 +90,14 @@ const asDifficulty = (v: string | undefined): Difficulty =>
 const asLength = (v: string | undefined): LengthSetting =>
   v === "Moderate" || v === "Detailed" ? v : "Concise";
 
-function toPlanned(template: SectionTemplate, len: LengthSetting): PlannedSection {
+function toPlanned(template: SectionTemplate, len: LengthSetting, planKeys: string[]): PlannedSection {
   const spec: PlannedSection = {
     key: template.key,
     title: template.title,
     kind: template.kind,
     icon: template.icon,
     evidenceBacked: template.evidenceBacked,
-    brief: template.brief,
+    brief: briefFor(template, planKeys),
   };
   if (template.kind === "prose") spec.budget = proseBudget(template, len);
   else spec.items = listItems(template, len);
@@ -139,7 +141,8 @@ export function resolveSheetPlan(req: PlanRequest = {}): PlannedSection[] {
     ...TRAILING_SECTIONS.filter((k) => keys.includes(k)),
   ];
 
-  return ordered.slice(0, MAX_SECTIONS).map((key) => toPlanned(SECTIONS[key], len));
+  const planKeys = ordered.slice(0, MAX_SECTIONS);
+  return planKeys.map((key) => toPlanned(SECTIONS[key], len, planKeys));
 }
 
 /** Strips the server-only fields before the plan goes over the wire. */

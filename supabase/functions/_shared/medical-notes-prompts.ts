@@ -14,7 +14,7 @@
 import type { RagChunk } from "./rag.ts";
 import { MEMORY_FOLLOWUP_INSTRUCTION } from "./memory.ts";
 import { DEFAULT_SHEET_PLAN, resolveSheetPlan, sectionQuota, type PlannedSection } from "./sheet-plan.ts";
-import { schemaLine, tableRulesBlock } from "./sheet-schema.ts";
+import { ONE_HOME_PER_FACT, schemaLine, tableRulesBlock } from "./sheet-schema.ts";
 import type { LengthSetting } from "./sheet-sections.ts";
 
 export type PromptFamily = "haiku" | "gptOss";
@@ -233,8 +233,10 @@ SOURCE COVERAGE — report honestly, after writing the rest of the sheet:
 - When in doubt, choose the weaker level. Over-claiming source backing is the worst possible error here —
   worse than under-claiming it.
 
-LENGTH GATE — Length is "${len}". These are HARD CAPS, whatever the topic's
-complexity:
+${ONE_HOME_PER_FACT}
+
+LENGTH GATE — Length is "${len}". These are MAXIMUMS, whatever the topic's
+complexity. Stop short of a count rather than reach it with a fact the sheet already gave:
 
 ${gateLines}
 

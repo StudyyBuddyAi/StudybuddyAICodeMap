@@ -20,7 +20,7 @@ import { createClient } from "@supabase/supabase-js";
 import { loadDotEnv } from "./session.ts";
 import { parseSheetOutput } from "../../src/lib/parse-partial-sheet.ts";
 import { parseFlashcardsFromOutput } from "../../src/lib/parse-flashcards.ts";
-import { ARCHETYPES, ARCHETYPE_IDS, SECTIONS, listItems, proseBudget, type LengthSetting } from "../../supabase/functions/_shared/sheet-sections.ts";
+import { ARCHETYPES, ARCHETYPE_IDS, SECTIONS, briefFor, listItems, proseBudget, type LengthSetting } from "../../supabase/functions/_shared/sheet-sections.ts";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 loadDotEnv(ROOT);
@@ -59,12 +59,13 @@ function inferArchetype(planKeys: string[]): string {
 /**
  * The labelled sub-headings a prose section's brief specified, minus any its
  * length budget tells it to leave out — a Concise clinicalApproach is told to
- * omit Workup, Second-line, Definitive and Avoid.
+ * omit Workup, Second-line, Definitive and Avoid — and any another planned
+ * section took over, as a Complications section takes Clinical Approach's.
  */
-const expectedLabels = (key: string, len: LengthSetting): string[] => {
+const expectedLabels = (key: string, len: LengthSetting, planKeys: string[]): string[] => {
   const tmpl = SECTIONS[key];
   if (!tmpl) return [];
-  const all = [...tmpl.brief.matchAll(/^([A-Z][A-Za-z ,/&-]{0,30}?):[ \t]+\S/gm)].map((m) => m[1]);
+  const all = [...briefFor(tmpl, planKeys).matchAll(/^([A-Z][A-Za-z ,/&-]{0,30}?):[ \t]+\S/gm)].map((m) => m[1]);
   const omitted = /\bomit\b([^.]*)/i.exec(proseBudget(tmpl, len))?.[1] ?? "";
   return all.filter((label) => !new RegExp(`\\b${label}\\b`, "i").test(omitted));
 };
@@ -150,7 +151,7 @@ for (const c of CASES) {
       if (!ok) violations++;
       console.log(`    ${ok ? "ok " : "GATE"}      ${spec.title.padEnd(30)} ${String(body.length).padStart(2)} items (want ${lo === hi ? lo : `${lo}-${hi}`})`);
     } else {
-      const want = expectedLabels(spec.key, c.length);
+      const want = expectedLabels(spec.key, c.length, plan.map((p) => p.key));
       const found = want.filter((l) => new RegExp(`(^|\\n)\\s*${l}\\s*:`).test(body));
       const ok = found.length === want.length;
       if (!ok) violations++;
