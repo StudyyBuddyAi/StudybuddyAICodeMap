@@ -81,6 +81,8 @@ FINAL CHECK — verify each point before you write the closing }:
 }
 
 export function buildCortiNotesPrompts(input: NotesPromptInput): { systemPrompt: string; userContent: string } {
+  // Written for Corti already, and it must not collect the sheet's checklist.
+  if (input.personalize) return buildNotesPrompts(input);
   const base = buildNotesPrompts(input);
   let systemPrompt = base.systemPrompt;
 

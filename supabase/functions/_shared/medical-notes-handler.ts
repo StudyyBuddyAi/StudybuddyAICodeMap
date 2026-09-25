@@ -39,6 +39,7 @@ import { classifyArchetype } from "./archetype.ts";
 import { DEFAULT_ARCHETYPE } from "./sheet-sections.ts";
 import { buildCortiNotesPrompts } from "./medical-notes-prompts-corti.ts";
 import { asCortiModel, cortiChatCompletion, cortiConfigFromEnv, type CortiModel } from "./corti.ts";
+import { PERSONALIZE_MAX_TOKENS, isGrantId, parsePersonalizeRequest } from "./personalize.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -140,6 +141,38 @@ async function retrieveWithRetry(
   return { chunks: [], attempts: 2, error: lastError };
 }
 
+/**
+ * Records that this user was handed a premium sheet without Pro, and returns
+ * the grant's id for the sheet to carry. Personalizing that sheet later is
+ * then proven against this row rather than a flag the client could set. Null
+ * on any failure: the sheet still streams, it just can't be AI-personalized.
+ */
+async function recordPremiumGrant(client: SupabaseClient, userId: string): Promise<string | null> {
+  const { data, error } = await client
+    .from("premium_sheet_grants")
+    .insert({ user_id: userId })
+    .select("id")
+    .single();
+  if (error || !data?.id) {
+    log("premium_grant_failed", { userId, err: error });
+    return null;
+  }
+  return data.id as string;
+}
+
+/** Whether this grant exists and belongs to this user. */
+async function hasPremiumGrant(client: SupabaseClient, userId: string, grant: string | undefined): Promise<boolean> {
+  if (!isGrantId(grant)) return false;
+  const { data, error } = await client
+    .from("premium_sheet_grants")
+    .select("id")
+    .eq("id", grant)
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (error) log("premium_grant_check_failed", { userId, err: error });
+  return !error && !!data;
+}
+
 /** Deck size by the sheet's Length setting, as the sheet prompt used to ask. */
 const CARDS_BY_LENGTH: Record<string, number> = { Concise: 3, Moderate: 4, Detailed: 5 };
 
@@ -199,7 +232,8 @@ async function cortiComplete(
 function openRouterStream(
   apiKey: string,
   model: string,
-  messages: { role: string; content: string }[]
+  messages: { role: string; content: string }[],
+  maxTokens = 8192
 ): Promise<Response> {
   return fetch(OPENROUTER_URL, {
     method: "POST",
@@ -213,7 +247,7 @@ function openRouterStream(
       model,
       stream: true,
       temperature: 0.7,
-      max_tokens: 8192,
+      max_tokens: maxTokens,
       messages,
       provider: model.startsWith("openai/gpt-oss")
         ? { order: ["Cerebras", "Groq"], allow_fallbacks: true }
@@ -229,7 +263,8 @@ function openRouterStream(
  */
 async function cortiStream(
   model: CortiModel,
-  messages: { role: "system" | "user" | "assistant"; content: string }[]
+  messages: { role: "system" | "user" | "assistant"; content: string }[],
+  maxTokens = 8192
 ): Promise<{ response: Response | null; reason: string | null }> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), CORTI_HEADERS_TIMEOUT_MS);
@@ -241,7 +276,7 @@ async function cortiStream(
       stream: true,
       // Round-3 eval: 0.3 judged better than 0.7 (13.7 vs 13.3 /15) and is slightly faster.
       temperature: 0.3,
-      maxTokens: 8192,
+      maxTokens,
       signal: controller.signal,
     });
     if (!response.ok || !response.body) {
@@ -290,16 +325,25 @@ export async function handleMedicalNotes(req: Request): Promise<Response> {
     const OPENROUTER_API_KEY = Deno.env.get("OPENROUTER_API_KEY");
     if (!OPENROUTER_API_KEY) throw new Error("OPENROUTER_API_KEY is not configured");
 
+    // An AI action on the student's own sheet: Pro (or a premium sheet's
+    // grant), uncapped, and nothing else a request does — no grounding, no
+    // memory, no quota, no premium hook. See _shared/personalize.ts.
+    const personalize = body.personalize == null ? null : parsePersonalizeRequest(body.personalize);
+    if (body.personalize != null && !personalize) {
+      return json({ error: "invalid_personalize_request" }, 400);
+    }
+    const isPersonalize = personalize !== null;
+
     const isAnonymous =
       user.is_anonymous === true || decodeJwtPayload(token).is_anonymous === true;
-    const quotaEligible = !explainMode && !enhanceMode;
+    const quotaEligible = !explainMode && !enhanceMode && !isPersonalize;
     const usageKind = cardsOnly ? "cards" : "sheet";
     // A sectioned JSON document, as opposed to a card deck or a prose reply.
-    const isSheetMode = !cardsOnly && !explainMode && !enhanceMode;
+    const isSheetMode = !cardsOnly && !explainMode && !enhanceMode && !isPersonalize;
 
     // ── Pre-model work, concurrently ────────────────────────────────────────
-    // Grounding: sheet/cards only; explain/enhance are single-item follow-ups.
-    const groundingEligible = !enhanceMode && !explainMode;
+    // Grounding: sheet/cards only; explain/enhance/personalize are single-item follow-ups.
+    const groundingEligible = !enhanceMode && !explainMode && !isPersonalize;
     const useGroundingFlag = typeof useGrounding === "boolean" ? useGrounding : true;
     const groundingAttempted = groundingEligible && useGroundingFlag;
     const groundingTopK = Math.min(Math.max(Math.round(typeof topK === "number" ? topK : 8), 1), 10);
@@ -322,8 +366,9 @@ export async function handleMedicalNotes(req: Request): Promise<Response> {
       ? classifyArchetype(notes)
       : Promise.resolve({ archetype: null, ms: 0, error: null });
 
-    // Memory: the shared 10-turn window. enhance reads but never writes.
-    const useMemoryFlag = typeof useMemory === "boolean" ? useMemory : true;
+    // Memory: the shared 10-turn window. enhance reads but never writes;
+    // personalize neither reads nor writes — it is about one line, not a turn.
+    const useMemoryFlag = !isPersonalize && (typeof useMemory === "boolean" ? useMemory : true);
     const memoryWritable = useMemoryFlag && !enhanceMode;
     const memoryStartedAt = Date.now();
     const memoryPromise = (async () => {
@@ -348,7 +393,14 @@ export async function handleMedicalNotes(req: Request): Promise<Response> {
       // Pro users choose between the premium model (default) and "fastest".
       const proWantsFastest = profile?.preferred_model === "gpt-oss";
 
-      const hookPromise: Promise<boolean> = isProUser
+      // A personalize action always runs on the premium writer, whatever a
+      // Pro user picked for their sheets. Without Pro it needs the grant the
+      // server recorded for a premium sheet; it never spends the hook.
+      const hookPromise: Promise<boolean> = isPersonalize
+        ? isProUser
+          ? Promise.resolve(true)
+          : hasPremiumGrant(authClient, user.id, personalize!.grant)
+        : isProUser
         ? Promise.resolve(!proWantsFastest)
         : enhanceMode
         ? Promise.resolve(false)
@@ -397,6 +449,7 @@ export async function handleMedicalNotes(req: Request): Promise<Response> {
     const routing = await routingPromise;
     if (routing.quota === "error") return json({ error: "quota_check_failed" }, 500);
     if (routing.quota === "exceeded") return json({ error: "quota_exceeded" }, 429);
+    if (isPersonalize && !routing.isPremium) return json({ error: "pro_required" }, 403);
     const quotaConsumed = routing.quota === "ok";
     let refunded = false;
     const refund = async () => {
@@ -490,7 +543,11 @@ export async function handleMedicalNotes(req: Request): Promise<Response> {
         ragChunks,
         hasMemory: memoryTurns.length > 0,
         plan: sheetPlan,
+        // The validated request, never the raw body field.
+        personalize,
       };
+      // A personalize reply is a line or a card, not a document.
+      const maxTokens = isPersonalize ? PERSONALIZE_MAX_TOKENS : 8192;
       const messagesFor = (p: { systemPrompt: string; userContent: string }) => [
         { role: "system" as const, content: p.systemPrompt },
         ...memoryTurns,
@@ -568,7 +625,7 @@ export async function handleMedicalNotes(req: Request): Promise<Response> {
             OUTAGE_SIMULATION_USER_IDS.includes(user.id) && req.headers.get("x-simulate-corti-outage") === "1";
           const corti = simulateOutage
             ? { response: null, reason: "simulated_outage" }
-            : await cortiStream(premiumModel, messagesFor(cortiPrompts));
+            : await cortiStream(premiumModel, messagesFor(cortiPrompts), maxTokens);
           if (corti.response) {
             response = corti.response;
             modelUsed = `corti/${premiumModel}`;
@@ -579,7 +636,8 @@ export async function handleMedicalNotes(req: Request): Promise<Response> {
             response = await openRouterStream(
               OPENROUTER_API_KEY,
               FALLBACK_MODEL,
-              messagesFor(buildNotesPrompts({ ...promptBase, family: "haiku" }))
+              messagesFor(buildNotesPrompts({ ...promptBase, family: "haiku" })),
+              maxTokens
             );
           }
         } else {
@@ -587,7 +645,8 @@ export async function handleMedicalNotes(req: Request): Promise<Response> {
           response = await openRouterStream(
             OPENROUTER_API_KEY,
             STANDARD_MODEL,
-            messagesFor(notesPrompts({ ...promptBase, family: "gptOss" }))
+            messagesFor(notesPrompts({ ...promptBase, family: "gptOss" })),
+            maxTokens
           );
         }
       } catch (fetchErr) {
@@ -605,6 +664,8 @@ export async function handleMedicalNotes(req: Request): Promise<Response> {
         cardsOnly: !!cardsOnly,
         explainMode: !!explainMode,
         enhanceMode: enhanceMode ?? null,
+        // The action and style only — never the student's text.
+        personalize: personalize ? `${personalize.action}${personalize.style ? `:${personalize.style}` : ""}` : null,
         archetype: archetype.archetype ?? (isSheetMode ? DEFAULT_ARCHETYPE : null),
         archetypeFallback: isSheetMode && archetype.archetype === null,
         archetypeError: archetype.error,
@@ -847,8 +908,29 @@ export async function handleMedicalNotes(req: Request): Promise<Response> {
         };
 
         let relayed = false;
+        // A premium sheet without Pro is personalizable like a Pro one. The
+        // grant proving it is written beside the preparation — an insert
+        // settles long before retrieval does — and sent before any content.
+        // Never fails the sheet: without it the sheet simply isn't personalizable.
+        const grantSent =
+          routing.isPremium && !routing.isProUser
+            ? recordPremiumGrant(authClient, user.id)
+                .then((grant) => {
+                  if (grant) emit({ premiumGrant: grant });
+                })
+                .catch(() => {})
+            : Promise.resolve();
         try {
           const ctx = await prepare(emit);
+          await grantSent;
+          // The student left while the sheet was being prepared. `cancel`
+          // below only reaches a writer that is already being read, so the
+          // one just started would otherwise be read to the end — a whole
+          // sheet written and paid for with nobody there.
+          if (!clientOpen) {
+            ctx.response?.body?.cancel().catch(() => {});
+            return;
+          }
           emit({ model: { used: ctx.modelUsed, fallback: ctx.fallbackReason !== null } });
           if (!ctx.response || !ctx.response.ok || !ctx.response.body) {
             fail((await upstreamFailure(ctx)).error);

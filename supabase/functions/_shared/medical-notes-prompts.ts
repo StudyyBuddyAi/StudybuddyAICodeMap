@@ -16,6 +16,7 @@ import { MEMORY_FOLLOWUP_INSTRUCTION } from "./memory.ts";
 import { DEFAULT_SHEET_PLAN, resolveSheetPlan, sectionQuota, type PlannedSection } from "./sheet-plan.ts";
 import { ONE_HOME_PER_FACT, schemaLine, tableRulesBlock } from "./sheet-schema.ts";
 import type { LengthSetting } from "./sheet-sections.ts";
+import { buildPersonalizePrompt, type PersonalizeRequest } from "./personalize.ts";
 
 export type PromptFamily = "haiku" | "gptOss";
 
@@ -47,6 +48,8 @@ export interface NotesPromptInput {
    */
   plan?: PlannedSection[];
   family: PromptFamily;
+  /** An AI action on the student's own sheet (_shared/personalize.ts). */
+  personalize?: PersonalizeRequest | null;
 }
 
 /**
@@ -65,6 +68,12 @@ Mode: ${mode} | Difficulty: ${diff} | Length: ${len}`;
 }
 
 export function buildNotesPrompts(input: NotesPromptInput): { systemPrompt: string; userContent: string } {
+    // One family for both tiers: the action is Pro-only and always runs on
+    // the premium writer, and it never touches memory or grounding.
+    if (input.personalize) {
+      return buildPersonalizePrompt(input.personalize, { examMode: input.examMode, difficulty: input.difficulty });
+    }
+
     const { notes, difficulty, length, examMode, cardsOnly, cardCount, focusCard,
             explainMode,
             enhanceMode, itemText, sectionKey, enhanceTopic,
