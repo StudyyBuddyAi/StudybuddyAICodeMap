@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
+import { removeLocalLayer } from "@/lib/sheet-layer-store";
 
 const STORAGE_KEY = "studybuddy_history";
 const HISTORY_CHANGE_EVENT = "studybuddy:history-changed";
@@ -123,29 +124,34 @@ export function useStudyHistory() {
 
   const isLoading = useServer ? serverQuery.isLoading : false;
 
+  /** Saves a sheet and resolves to its id, which its personal layer is keyed by. */
   const saveItem = useCallback(
-    async (input: string, output: string, modeInfo?: ModeInfo) => {
+    async (input: string, output: string, modeInfo?: ModeInfo): Promise<string> => {
       const topic = extractTopic(input);
 
       if (useServer) {
-        const { error } = await supabase.from("study_history").insert({
-          user_id: userId!,
-          topic,
-          input,
-          output,
-          exam_mode: modeInfo?.examMode ?? null,
-          difficulty: modeInfo?.difficulty ?? null,
-          // study_history.focus still exists and still holds values for rows
-          // written before the Focus setting was retired. It is nullable, so
-          // new rows simply leave it unset rather than requiring a migration
-          // that would destroy what those older rows recorded.
-          length: modeInfo?.length ?? null,
-        });
+        const { data, error } = await supabase
+          .from("study_history")
+          .insert({
+            user_id: userId!,
+            topic,
+            input,
+            output,
+            exam_mode: modeInfo?.examMode ?? null,
+            difficulty: modeInfo?.difficulty ?? null,
+            // study_history.focus still exists and still holds values for rows
+            // written before the Focus setting was retired. It is nullable, so
+            // new rows simply leave it unset rather than requiring a migration
+            // that would destroy what those older rows recorded.
+            length: modeInfo?.length ?? null,
+          })
+          .select("id")
+          .single();
         if (error) throw error;
         await queryClient.invalidateQueries({
           queryKey: ["study-history", userId],
         });
-        return;
+        return data.id;
       }
 
       const current = loadLocal();
@@ -158,9 +164,14 @@ export function useStudyHistory() {
         modeInfo,
       };
       current.unshift(item);
-      if (current.length > MAX_ITEMS) current.length = MAX_ITEMS;
+      if (current.length > MAX_ITEMS) {
+        // A sheet pushed out of local history takes its layer with it.
+        for (const dropped of current.slice(MAX_ITEMS)) removeLocalLayer(dropped.id);
+        current.length = MAX_ITEMS;
+      }
       persistLocal(current);
       setLocalItems(current);
+      return item.id;
     },
     [useServer, userId, queryClient]
   );
@@ -183,6 +194,8 @@ export function useStudyHistory() {
       const next = loadLocal().filter((h) => h.id !== id);
       persistLocal(next);
       setLocalItems(next);
+      // A server sheet's layer goes with it by cascade; a local one by hand.
+      removeLocalLayer(id);
     },
     [useServer, userId, queryClient]
   );

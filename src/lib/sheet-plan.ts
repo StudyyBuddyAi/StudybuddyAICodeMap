@@ -44,6 +44,8 @@ export const RESERVED_SHEET_KEYS: ReadonlySet<string> = new Set([
   "sources",
   "groundingLevel",
   "retrievedChunks",
+  "premium",
+  "premiumGrant",
 ]);
 
 const KINDS: readonly SectionKind[] = ["prose", "list", "table"];

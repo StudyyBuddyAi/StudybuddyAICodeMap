@@ -9,7 +9,9 @@ import { bodyLines, isTableRows, resolvePlan, sectionBody } from "@/lib/sheet-pl
 export function sheetToPlainText(
   sheet: GeneratedSheet | null,
   legacyOutput: string,
-  topic: string
+  topic: string,
+  /** More sections, before the footer — the student's notes. */
+  extra: string[] = []
 ): string {
   if (!sheet) return legacyOutput ?? "";
 
@@ -49,6 +51,7 @@ export function sheetToPlainText(
     parts.push(`Sources\n${sheet.referenceNote.trim()}`);
   }
 
+  parts.push(...extra.filter((s) => s.trim()));
   parts.push("Generated with StudyBuddy AI");
 
   return parts.join("\n\n");
