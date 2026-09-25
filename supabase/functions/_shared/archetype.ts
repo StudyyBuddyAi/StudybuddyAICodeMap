@@ -15,14 +15,28 @@
  * return null, and the caller falls back to the condition archetype — which is
  * the sheet's long-standing shape. A sheet must never fail to generate because
  * the thing that chooses its headings had a bad minute.
+ *
+ * Every tier is classified by Corti, whichever model then writes the sheet. It
+ * was GPT-OSS through OpenRouter; the sections a sheet gets are now decided on
+ * the same provider as the premium writer, and a free sheet's plan no longer
+ * depends on OpenRouter at all.
  */
+import { asCortiModel, cortiChatCompletion, cortiConfigFromEnv, type CortiModel } from "./corti.ts";
 import { ARCHETYPES, ARCHETYPE_IDS, asArchetype, type ArchetypeId } from "./sheet-sections.ts";
 
-const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
+/**
+ * The strongest non-reasoning model, as the QBank router uses for the same
+ * kind of call: a misclassification gives the whole sheet the wrong sections,
+ * and `-instant` answers a one-word prompt in about a second. Overridable with
+ * CORTI_ARCHETYPE_MODEL, so a regression is an env rollback, not a redeploy.
+ */
+const DEFAULT_ARCHETYPE_MODEL: CortiModel = "corti-s1-instant";
 
 /**
  * Generous enough that it never trips while retrieval is still running, short
- * enough that a hung classifier cannot delay the writer.
+ * enough that a hung classifier cannot delay the writer. It bounds the whole
+ * attempt, the Corti token exchange included — that request carries no signal
+ * of its own.
  */
 const CLASSIFY_TIMEOUT_MS = 4_000;
 
@@ -30,16 +44,11 @@ const CLASSIFY_TIMEOUT_MS = 4_000;
 const MAX_INPUT_CHARS = 600;
 
 /**
- * Budget for the whole completion, not just the answer.
- *
- * GPT-OSS is a reasoning model: it thinks before it replies, and the thinking
- * is billed against max_tokens. At the 8 tokens a one-word answer appears to
- * need, every token went to reasoning, `content` came back null and
- * `finish_reason` was "length" — so classification silently failed on every
- * request and every topic fell back to the condition archetype. Measured
- * reasoning for these topics is well under this.
+ * A one-word answer. `-instant` models do not reason before replying, so none
+ * of the budget goes to hidden thinking; the headroom is for stray punctuation
+ * or whitespace, which asArchetype strips.
  */
-const MAX_OUTPUT_TOKENS = 256;
+const MAX_OUTPUT_TOKENS = 16;
 
 const SYSTEM_PROMPT = `You classify a medical study topic into exactly one category.
 
@@ -67,15 +76,12 @@ export interface ArchetypeResult {
  * reason and the same measured cause, and the budget is there, since this runs
  * beside retrieval rather than before it.
  */
-export async function classifyArchetype(
-  apiKey: string,
-  model: string,
-  notes: string
-): Promise<ArchetypeResult> {
+export async function classifyArchetype(notes: string): Promise<ArchetypeResult> {
   const startedAt = Date.now();
-  const first = await classifyOnce(apiKey, model, notes);
+  const model = asCortiModel(Deno.env.get("CORTI_ARCHETYPE_MODEL"), DEFAULT_ARCHETYPE_MODEL);
+  const first = await classifyOnce(model, notes);
   if (first.archetype) return { ...first, ms: Date.now() - startedAt };
-  const second = await classifyOnce(apiKey, model, notes);
+  const second = await classifyOnce(model, notes);
   return {
     archetype: second.archetype,
     ms: Date.now() - startedAt,
@@ -85,34 +91,26 @@ export async function classifyArchetype(
   };
 }
 
-async function classifyOnce(
-  apiKey: string,
-  model: string,
-  notes: string
-): Promise<ArchetypeResult> {
+async function classifyOnce(model: CortiModel, notes: string): Promise<ArchetypeResult> {
   const startedAt = Date.now();
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), CLASSIFY_TIMEOUT_MS);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timedOut = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      controller.abort();
+      reject(new Error("timeout"));
+    }, CLASSIFY_TIMEOUT_MS);
+  });
 
-  try {
-    const response = await fetch(OPENROUTER_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${apiKey}`,
-        "HTTP-Referer": "https://studybuddy.app",
-        "X-Title": "StudyBuddy",
-      },
-      body: JSON.stringify({
-        model,
-        temperature: 0,
-        max_tokens: MAX_OUTPUT_TOKENS,
-        messages: [
-          { role: "system", content: SYSTEM_PROMPT },
-          { role: "user", content: notes.trim().slice(0, MAX_INPUT_CHARS) },
-        ],
-        provider: { order: ["Cerebras", "Groq"], allow_fallbacks: true },
-      }),
+  const attempt = async (): Promise<ArchetypeResult> => {
+    const response = await cortiChatCompletion(cortiConfigFromEnv(), {
+      model,
+      temperature: 0,
+      maxTokens: MAX_OUTPUT_TOKENS,
+      messages: [
+        { role: "system", content: SYSTEM_PROMPT },
+        { role: "user", content: notes.trim().slice(0, MAX_INPUT_CHARS) },
+      ],
       signal: controller.signal,
     });
 
@@ -123,15 +121,23 @@ async function classifyOnce(
     const body = await response.json();
     const choice = body?.choices?.[0];
     const archetype = asArchetype(choice?.message?.content);
-    // A reasoning model that ran out of budget mid-thought returns no content
-    // at all. Naming that separately keeps it from reading as "the model
-    // answered something odd" in the logs — it answered nothing.
+    // Out of budget before a recognisable word is a different failure from
+    // "the model answered something odd", so the logs name it separately.
     const error = archetype
       ? null
       : choice?.finish_reason === "length"
       ? "truncated_before_answer"
       : "unrecognised";
     return { archetype, ms: Date.now() - startedAt, error };
+  };
+
+  // The loser of the race still settles later — an aborted fetch rejects —
+  // and an unhandled rejection can take the isolate down with it.
+  const work = attempt();
+  work.catch(() => {});
+
+  try {
+    return await Promise.race([work, timedOut]);
   } catch (err: unknown) {
     return {
       archetype: null,

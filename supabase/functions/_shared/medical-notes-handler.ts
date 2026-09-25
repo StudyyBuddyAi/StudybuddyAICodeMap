@@ -13,6 +13,9 @@
  *     Haiku 4.5 answers it instead, and the response says so
  *     (X-Model-Fallback: corti_unavailable) so the client can show it.
  *
+ * Whatever the tier, which sections a sheet gets is decided by Corti: a
+ * one-word archetype classification (_shared/archetype.ts).
+ *
  * The provider comparison behind these choices is docs/corti-provider-spike.md.
  *
  * Everything that must happen before the writer is called — retrieval,
@@ -61,8 +64,6 @@ const STANDARD_MODEL = "openai/gpt-oss-20b";
 const FALLBACK_MODEL = "anthropic/claude-haiku-4.5";
 const DEFAULT_PREMIUM_MODEL: CortiModel = "corti-s1-instant";
 const SOURCE_LABEL_MODEL = "openai/gpt-oss-20b";
-/** One word out; the cheapest model is ample and the fastest is the point. */
-const ARCHETYPE_MODEL = "openai/gpt-oss-20b";
 
 const ANON_PREMIUM_LIMIT = 1;
 const FREE_PREMIUM_LIMIT = 3;
@@ -313,11 +314,12 @@ export async function handleMedicalNotes(req: Request): Promise<Response> {
       : Promise.resolve({ chunks: [] as RagChunk[], attempts: 0, error: null, ms: 0 });
 
     // Archetype: what kind of thing this is, which decides the sheet's
-    // sections. Runs beside retrieval rather than before it, so it costs no
-    // wall-clock time — retrieval is far slower — and fails open to the
-    // condition archetype, the shape a sheet has always had.
+    // sections. Classified by Corti for every tier. Runs beside retrieval
+    // rather than before it, so it costs no wall-clock time — retrieval is far
+    // slower — and fails open to the condition archetype, the shape a sheet
+    // has always had.
     const archetypePromise = isSheetMode
-      ? classifyArchetype(OPENROUTER_API_KEY, ARCHETYPE_MODEL, notes)
+      ? classifyArchetype(notes)
       : Promise.resolve({ archetype: null, ms: 0, error: null });
 
     // Memory: the shared 10-turn window. enhance reads but never writes.
