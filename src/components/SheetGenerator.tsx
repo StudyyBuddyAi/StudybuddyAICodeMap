@@ -78,6 +78,7 @@ import { useStudyHistory } from "@/hooks/use-study-history";
 import { useSheetLayer } from "@/hooks/use-sheet-layer";
 import { applyLayer, isEmptyLayer, layerNotesText, type SheetLayer } from "@/lib/sheet-layer";
 import type { PersonalProps } from "@/components/sheet/personal/personal-context";
+import { useBackdropScene } from "@/components/backdrop/backdrop-scene";
 
 export interface SheetGeneratorPrefill {
   input: string;
@@ -1252,6 +1253,15 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
       onOpenSaved={loadHistoryItem}
     />
   );
+
+  // The app backdrop, told what this page is doing: the molecule has the
+  // margin while a sheet is started, forms as it is written, and waits beside
+  // it while it is read — in this topic's own fold.
+  useBackdropScene({
+    mode: loading ? "generating" : reading ? "reading" : "compose",
+    progress: progressSections.length ? streamedKeys.length / progressSections.length : 0,
+    seed: reading ? sheetTopic : "",
+  });
 
   return (
     <LazyMotion features={domAnimation} strict>

@@ -786,6 +786,24 @@
     color: rgba(234, 179, 8, 0.95);
   }
 
+  /* ─── The app backdrop: still paper grain over the page colour, under
+     the living field. A few percent, multiplied on paper and screened at
+     night, so it textures the page without greying it. ─── */
+  .sb-grain {
+    background-size: 128px 128px;
+    opacity: 0.045;
+    mix-blend-mode: multiply;
+  }
+  .dark .sb-grain {
+    opacity: 0.035;
+    mix-blend-mode: screen;
+  }
+  @media print {
+    .sb-backdrop {
+      display: none !important;
+    }
+  }
+
   /* ─── Print: "Export PDF" is window.print() into the browser's own
      Save-as-PDF, so the page has to reduce to just the sheet document. ─── */
   @media print {

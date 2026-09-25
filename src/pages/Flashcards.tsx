@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useBackdropScene } from "@/components/backdrop/backdrop-scene";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { ArrowRight, BookOpen, BrainCircuit, Clock, Layers, PanelLeftClose, PanelLeftOpen, PenLine, Play, Repeat, Settings2, Shuffle, SkipForward, X, Sparkles, Check, ChevronRight, RotateCcw, AlertTriangle, CheckCircle2, SlidersHorizontal } from "lucide-react";
 import DashboardLayout from "@/components/dashboard/DashboardLayout";
@@ -152,6 +153,8 @@ const Flashcards = () => {
 
   // ── Split-pane state ──────────────────────────────────────────────────
   const [rightPhase, setRightPhase] = useState<RightPhase>("idle");
+  // Reviewing cards is answering: the backdrop all but stops while it happens.
+  useBackdropScene(rightPhase === "reviewing" ? { mode: "focus" } : null);
   const [genTopic, setGenTopic] = useState("");
   const [configDrawerOpen, setConfigDrawerOpen] = useState(false);
   // Desktop (lg+) left pane. Starts open; the reader collapses it once a deck
