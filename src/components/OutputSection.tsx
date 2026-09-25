@@ -1,26 +1,34 @@
-import { useRef, useEffect, useState, useCallback } from "react";
-import { useNavigate, type NavigateFunction } from "react-router-dom";
+import { Fragment, useRef, useEffect, useState, useCallback } from "react";
 import { callMedicalNotes } from "@/lib/callMedicalNotes";
 import { useMemoryPreference } from "@/hooks/use-memory-preference";
 import {
-  BookOpen,
-  Check,
-  List,
-  HelpCircle,
-  FileText,
-  Stethoscope,
-  Settings2,
   AlertTriangle,
-  Lightbulb,
-  Layers,
-  Zap,
+  BarChart3,
+  BookOpen,
+  Bug,
+  Check,
   ChevronDown,
   ChevronUp,
-  Sparkles,
+  Columns2,
+  FileText,
+  GitBranch,
+  HelpCircle,
+  Layers,
+  Lightbulb,
+  List,
+  PersonStanding,
+  Pill,
   RotateCcw,
+  Scissors,
+  Settings2,
+  ShieldCheck,
+  Sparkles,
+  Stethoscope,
   X,
+  type LucideIcon,
 } from "lucide-react";
 import CopyButton from "@/components/CopyButton";
+import { Button } from "@/components/ui/button";
 import FlashcardsSection from "@/components/FlashcardsSection";
 import SaveButton from "@/components/SaveButton";
 import SectionSkeleton from "@/components/SectionSkeleton";
@@ -35,6 +43,22 @@ import {
   parseStoredSheet,
   isJsonSheet,
 } from "@/types/generated-sheet";
+import { bodyLines, isTableRows, renderOrder, sectionBody } from "@/lib/sheet-plan";
+import {
+  AnimatePresence,
+  LazyMotion,
+  MotionConfig,
+  domAnimation,
+  m,
+} from "motion/react";
+import { AutoHeight, Caret, StreamingWords } from "@/components/StreamingText";
+import { ENTER, EXIT, SPRING_POP, SWAP } from "@/lib/motion";
+import EnhanceTip from "@/components/sheet/EnhanceTip";
+import type { SheetDeck } from "@/components/sheet/SheetFinish";
+import SheetSources from "@/components/SheetSources";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import RecallCheck from "@/components/RecallCheck";
+import { assignRecallCards } from "@/lib/section-recall";
 
 type EnhanceKind = "enhance" | "expand" | "clinical";
 
@@ -122,7 +146,7 @@ const MODE_BAR_STYLE: React.CSSProperties = {
 const ModeInfoBar = ({
   modeInfo,
 }: {
-  modeInfo: { examMode: string; difficulty: string; focus: string; length: string };
+  modeInfo: { examMode: string; difficulty: string; length: string };
 }) => {
   const dot = (
     <span style={{ margin: "0 6px", opacity: 0.3, color: "var(--fg)" }}>·</span>
@@ -134,8 +158,6 @@ const ModeInfoBar = ({
         <span style={{ color: "var(--fg)" }}>{modeInfo.examMode}</span>
         {dot}
         <span>{modeInfo.difficulty}</span>
-        {dot}
-        <span>{modeInfo.focus}</span>
         {dot}
         <span>{modeInfo.length}</span>
       </span>
@@ -160,13 +182,33 @@ function makeEnhancementKey(sourceText: string, kind: EnhanceKind): string {
 
 export type CitationState = "idle" | "loading" | "found" | "locked" | "hidden";
 
+/** Set once the reader has dismissed the enhance tip or used enhance. */
+const ENHANCE_TIP_KEY = "sb_enhance_tip_seen";
+
+// Storage can be unavailable (private mode, blocked site data); a tip that
+// shows again is the worst that should happen.
+function readFlag(key: string): boolean {
+  try {
+    return localStorage.getItem(key) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function writeFlag(key: string): void {
+  try {
+    localStorage.setItem(key, "1");
+  } catch {
+    // not persisted — see readFlag
+  }
+}
+
 interface OutputSectionProps {
   output: string;
   inputText?: string;
   modeInfo?: {
     examMode: string;
     difficulty: string;
-    focus: string;
     length: string;
   };
   citations?: CitationResult[];
@@ -183,6 +225,21 @@ interface OutputSectionProps {
   isStreaming?: boolean;
   /** Sections safe to render mid-stream. Ignored unless `isStreaming`. */
   streamedKeys?: string[];
+  /**
+   * The key the model is writing right now. When given, that section shows its
+   * draft as it arrives instead of a skeleton. Ignored unless `isStreaming`.
+   */
+  liveKey?: string;
+  /**
+   * The settings line and Save above the sections. The Sheets page turns it
+   * off: its topic bar carries both. Library's saved-sheet dialog keeps it.
+   */
+  showHeader?: boolean;
+  /**
+   * The sheet's own deck, when the page can keep it: the Flashcards section
+   * offers to add it to the library.
+   */
+  deck?: SheetDeck;
 }
 
 // ─── Legacy renderer helpers (kept for old text-blob sheets) ───────────────
@@ -249,19 +306,45 @@ function renderFormattedContent(content: string) {
 
 // ─── JSON renderer helpers ─────────────────────────────────────────────────
 
-const JSON_SECTION_CONFIG = {
-  overview: { icon: BookOpen, label: "📋 Overview", className: "section-summary", evidenceBacked: true },
-  memoryHooks: { icon: Lightbulb, label: "🧠 Memory Hooks", className: "section-memoryhooks", evidenceBacked: false },
-  clinicalApproach: { icon: Stethoscope, label: "🩺 Clinical Approach", className: "section-clinical", evidenceBacked: true },
-  keyPoints: { icon: List, label: "📌 Key Points", className: "section-keypoints", evidenceBacked: true },
-  examTraps: { icon: AlertTriangle, label: "⚠️ Exam Traps", className: "section-examtraps", evidenceBacked: false },
-  flashcards: { icon: HelpCircle, label: "❓ Flashcards", className: "section-flashcards", evidenceBacked: false },
-  referenceNote: { icon: FileText, label: "📚 Reference Note", className: "section-reference", evidenceBacked: false },
-} as const;
+/**
+ * Icon per `SectionIconName`. A name this build does not know falls back to
+ * the generic mark, so the server can plan an archetype section the client has
+ * never heard of and it still renders with a heading and a body.
+ */
+const SECTION_ICONS: Record<string, LucideIcon> = {
+  overview: BookOpen,
+  memory: Lightbulb,
+  clinical: Stethoscope,
+  keypoints: List,
+  traps: AlertTriangle,
+  flashcards: HelpCircle,
+  reference: FileText,
+  drug: Pill,
+  micro: Bug,
+  anatomy: PersonStanding,
+  pathway: GitBranch,
+  procedure: Scissors,
+  data: BarChart3,
+  compare: Columns2,
+};
 
-type JsonSectionKey = keyof typeof JSON_SECTION_CONFIG;
+const FALLBACK_SECTION_ICON = List;
 
-const SECTION_LABEL_RE = /^(Mechanism|Pathophysiology|Key associations|Definition|Key Associations(?:\s*\/\s*Features)?|Diagnosis|Management|Prognosis|Complications?|Workup|Avoid|Follow[- ]?up)(\s*[:：])/i;
+const sectionIcon = (name: string | undefined): LucideIcon =>
+  (name && SECTION_ICONS[name]) || FALLBACK_SECTION_ICON;
+
+/**
+ * The bolded label at the head of a line in a prose section
+ * ("Mechanism:", "Absorption:", "Rate-limiting enzyme:").
+ *
+ * This was a fixed alternation of the labels the two disease-shaped sections
+ * used. Every archetype writes its own — a drug has Class / Target / Effect, a
+ * pathway has Purpose / Steps / Location — so matching a short capitalised
+ * phrase followed by a colon keeps them all working without the regex having
+ * to learn each new section. The length cap and the requirement that the line
+ * *start* with it are what stop an ordinary sentence being mistaken for one.
+ */
+const SECTION_LABEL_RE = /^([A-Z][A-Za-z][A-Za-z ,/&-]{0,30}?)(\s*[:：])(?=\s|$)/;
 
 type KeywordClickHandler = (keyword: string, rect: DOMRect, anchor: string) => void;
 
@@ -539,6 +622,264 @@ function renderArraySection(
   );
 }
 
+// ─── Draft renderers (the section being written) ───────────────────────────
+//
+// Same markup and classes as renderJsonText / renderArraySection, so the swap
+// to the finished renderer when the section closes changes nothing visible —
+// the draft just gains its keyword clicks and enhancement anchors.
+
+function renderDraftProse(text: string) {
+  const lines = text.split("\n");
+  const last = lines.length - 1;
+
+  return lines.map((line, lineIdx) => {
+    const trimmed = line.trim();
+    const caret = lineIdx === last ? <Caret /> : null;
+    if (!trimmed) {
+      return (
+        <span key={lineIdx} className="block h-2">
+          {caret}
+        </span>
+      );
+    }
+
+    const labelMatch = trimmed.match(SECTION_LABEL_RE);
+    if (labelMatch) {
+      const labelPart = labelMatch[1] + labelMatch[2];
+      return (
+        <span
+          key={lineIdx}
+          className={`block text-sm leading-relaxed ${lineIdx === 0 ? "mt-0" : "mt-3"}`}
+        >
+          <span className="font-semibold text-foreground/90">{labelPart}</span>
+          <span className="text-muted-foreground">
+            <StreamingWords text={trimmed.slice(labelPart.length)} />
+            {caret}
+          </span>
+        </span>
+      );
+    }
+    return (
+      <span key={lineIdx} className="block text-sm text-muted-foreground leading-relaxed">
+        <StreamingWords text={trimmed} />
+        {caret}
+      </span>
+    );
+  });
+}
+
+function renderDraftList(items: string[]) {
+  return (
+    <ol className="space-y-2">
+      {items.map((item, i) => (
+        <li key={i} className="text-sm text-muted-foreground leading-relaxed">
+          <span className="flex gap-2.5">
+            <span
+              style={{
+                flexShrink: 0,
+                fontFamily: "var(--font-mono)",
+                fontWeight: 500,
+                fontSize: 12,
+                color: "var(--accent)",
+                opacity: 0.7,
+                width: 20,
+                textAlign: "right",
+                fontVariantNumeric: "tabular-nums",
+              }}
+            >
+              {i + 1}.
+            </span>
+            <span className="flex-1">
+              <StreamingWords text={item} />
+              {i === items.length - 1 && <Caret />}
+            </span>
+          </span>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+// ─── Table sections ────────────────────────────────────────────────────────
+//
+// Headers come from the plan, never the model, so every row is laid against
+// the same columns. On a narrow screen the table scrolls sideways under a
+// sticky first column, which is the one that says what the row is about.
+
+const TABLE_CELL_STYLE: React.CSSProperties = {
+  padding: "9px 12px",
+  verticalAlign: "top",
+  textAlign: "left",
+};
+
+/**
+ * The separator is drawn once per row, on the row, in the collapsed-border
+ * model. Drawn per cell it went out of step under the sticky first column —
+ * Chromium painted that column's borders at the wrong heights once rows had
+ * a hover background.
+ */
+const TABLE_ROW_STYLE: React.CSSProperties = { borderBottom: "1px solid var(--border)" };
+
+const TABLE_HEAD_STYLE: React.CSSProperties = {
+  ...TABLE_CELL_STYLE,
+  padding: "8px 12px",
+  borderBottom: "1px solid var(--border-strong)",
+  fontFamily: "var(--font-mono)",
+  fontSize: 11,
+  fontWeight: 500,
+  letterSpacing: "0.06em",
+  textTransform: "uppercase",
+  color: "var(--fg-muted)",
+  whiteSpace: "nowrap",
+  background: "var(--bg-elevated)",
+};
+
+/** The first column stays put while the rest scroll under it. */
+const STICKY_COLUMN_STYLE: React.CSSProperties = {
+  position: "sticky",
+  left: 0,
+  zIndex: 1,
+  background: "var(--bg-elevated)",
+};
+
+/** Rows with at least one filled cell, each cut or padded to the column count. */
+function tableRows(rows: string[][], width: number): string[][] {
+  return rows
+    .filter((row) => row.some((cell) => cell.trim()))
+    .map((row) => {
+      if (row.length <= width) return [...row, ...Array(width - row.length).fill("")];
+      // Cells past the last column are the model's overflow, not noise: keep
+      // them in the last cell rather than drop what it wrote.
+      return [...row.slice(0, width - 1), row.slice(width - 1).join("; ")];
+    });
+}
+
+function TableFrame({
+  columns,
+  width,
+  children,
+}: {
+  columns: string[];
+  width: number;
+  children: React.ReactNode;
+}) {
+  return (
+    <div style={{ overflowX: "auto", margin: "0 -4px" }}>
+      <table
+        className="text-sm leading-relaxed"
+        style={{
+          width: "100%",
+          // Wide enough that a cell holds a short phrase; past the container it
+          // scrolls sideways under the sticky first column.
+          minWidth: width * 120,
+          borderCollapse: "collapse",
+        }}
+      >
+        {columns.length > 0 && (
+          <thead>
+            <tr>
+              {columns.map((col, i) => (
+                <th
+                  key={col}
+                  scope="col"
+                  style={i === 0 ? { ...TABLE_HEAD_STYLE, ...STICKY_COLUMN_STYLE } : TABLE_HEAD_STYLE}
+                >
+                  {col}
+                </th>
+              ))}
+            </tr>
+          </thead>
+        )}
+        <tbody>{children}</tbody>
+      </table>
+    </div>
+  );
+}
+
+const tableWidth = (columns: string[], rows: string[][]) =>
+  columns.length || Math.max(1, ...rows.map((r) => r.length));
+
+function renderTableSection(
+  rawRows: string[][],
+  columns: string[],
+  sectionKey: string,
+  onKeywordClick: KeywordClickHandler,
+  renderInline: (anchor: string) => React.ReactNode,
+  collapsedByAnchor: Record<string, CollapsedRef[]>,
+  onReopen: (key: string) => void
+) {
+  const width = tableWidth(columns, rawRows);
+  const rows = tableRows(rawRows, width);
+  if (!rows.length) return null;
+
+  return (
+    <TableFrame columns={columns} width={width}>
+      {rows.map((row, r) => {
+        const anchor = `${sectionKey}:${r}`;
+        const collapsed = collapsedByAnchor[anchor] ?? [];
+        const inline = renderInline(anchor);
+        const hasInline = Array.isArray(inline) ? inline.length > 0 : !!inline;
+        return (
+          <Fragment key={r}>
+            <tr data-enh-anchor={anchor} className="transition-colors hover:bg-secondary/40" style={TABLE_ROW_STYLE}>
+              {row.map((cell, c) => (
+                <td
+                  key={c}
+                  className={c === 0 ? "font-medium text-foreground" : "text-muted-foreground"}
+                  style={c === 0 ? { ...TABLE_CELL_STYLE, ...STICKY_COLUMN_STYLE } : TABLE_CELL_STYLE}
+                >
+                  {cell.trim() ? (
+                    renderRich(cell, `${anchor}-${c}`, onKeywordClick, collapsed, onReopen)
+                  ) : (
+                    <span aria-label="Not given" style={{ color: "var(--fg-subtle)" }}>
+                      —
+                    </span>
+                  )}
+                </td>
+              ))}
+            </tr>
+            {hasInline && (
+              <tr>
+                <td colSpan={width} style={{ padding: "0 12px 8px" }}>
+                  {inline}
+                </td>
+              </tr>
+            )}
+          </Fragment>
+        );
+      })}
+    </TableFrame>
+  );
+}
+
+/** The table being written: cells fill in word by word, caret in the newest. */
+function renderDraftTable(rawRows: string[][], columns: string[]) {
+  const width = tableWidth(columns, rawRows);
+  const rows = tableRows(rawRows, width);
+  // The caret goes after the last cell with anything in it.
+  const lastRow = rows.length - 1;
+  const lastCell = lastRow >= 0 ? rows[lastRow].reduce((at, cell, i) => (cell.trim() ? i : at), 0) : -1;
+
+  return (
+    <TableFrame columns={columns} width={width}>
+      {rows.map((row, r) => (
+        <tr key={r} style={TABLE_ROW_STYLE}>
+          {row.map((cell, c) => (
+            <td
+              key={c}
+              className={c === 0 ? "font-medium text-foreground" : "text-muted-foreground"}
+              style={c === 0 ? { ...TABLE_CELL_STYLE, ...STICKY_COLUMN_STYLE } : TABLE_CELL_STYLE}
+            >
+              <StreamingWords text={cell} />
+              {r === lastRow && c === lastCell && <Caret />}
+            </td>
+          ))}
+        </tr>
+      ))}
+    </TableFrame>
+  );
+}
+
 /**
  * Resolve a saved enhancement (which stores only sourceText) to an inline anchor
  * by locating its source text within the sheet's sections. Returns null if the
@@ -586,33 +927,71 @@ function ModelBadge({ model }: { model: ModelUsed }) {
   );
 }
 
+/**
+ * Marks a section the retrieved sources back. An icon rather than a labelled
+ * pill: it sat on most sections, and the same words on every heading read as
+ * noise. The tooltip carries the words; clicking goes to the sources.
+ */
 function EvidenceBadge({ onClick }: { onClick: () => void }) {
+  const label = "Evidence-backed — see the sources";
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      title="This section is backed by peer-reviewed sources — see below"
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 4,
-        padding: "2px 8px",
-        borderRadius: "var(--radius-pill)",
-        border: "1px solid var(--border)",
-        borderLeft: "2px solid var(--accent)",
-        background: "var(--accent-soft)",
-        fontFamily: "var(--font-mono)",
-        fontSize: 11,
-        fontWeight: 500,
-        color: "var(--accent)",
-        cursor: "pointer",
-        marginLeft: 8,
-        transition: "background var(--dur-micro) var(--ease-out)",
-      }}
-    >
-      <Zap style={{ width: 10, height: 10 }} />
-      Evidence-backed
-    </button>
+    // Its own provider, so the renderer works wherever it is mounted.
+    <TooltipProvider delayDuration={200}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            onClick={onClick}
+            aria-label={label}
+            className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full transition-colors duration-150"
+            style={{ color: "var(--accent)", background: "var(--accent-soft)" }}
+          >
+            <ShieldCheck style={{ width: 13, height: 13 }} />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="top">{label}</TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
+}
+
+// ─── Deck offer (Flashcards section) ─────────────────────────────────────────
+
+/**
+ * Keeps the cards written beside the sheet. It turns into its own follow-up in
+ * place once used, with the same swap as every other in-place change.
+ */
+function DeckOffer({ deck }: { deck: SheetDeck }) {
+  return (
+    <div className="mb-4 flex min-h-[52px] flex-wrap items-center justify-between gap-3 rounded-lg border border-dashed border-border px-3.5 py-2.5">
+      <AnimatePresence mode="wait" initial={false}>
+        {deck.saved ? (
+          <m.div key="saved" {...SWAP} className="flex w-full flex-wrap items-center justify-between gap-3">
+            <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <Check className="h-3.5 w-3.5 text-primary" />
+              In your deck — spaced repetition will bring each card back.
+            </p>
+            <button
+              type="button"
+              onClick={deck.onReview}
+              className="text-xs font-medium text-primary underline-offset-2 hover:underline"
+            >
+              Review in Library →
+            </button>
+          </m.div>
+        ) : (
+          <m.div key="offer" {...SWAP} className="flex w-full flex-wrap items-center justify-between gap-3">
+            <p className="text-xs text-muted-foreground">
+              Keep these {deck.count} cards: each comes back just before you'd forget it.
+            </p>
+            <Button size="sm" onClick={deck.onSave} className="h-8 gap-1.5 text-xs">
+              <Layers className="h-3.5 w-3.5" />
+              Add {deck.count} cards to my deck
+            </Button>
+          </m.div>
+        )}
+      </AnimatePresence>
+    </div>
   );
 }
 
@@ -649,14 +1028,20 @@ const BubbleDivider = () => (
   />
 );
 
+// Rendered inside AnimatePresence, so it fades back out when dismissed rather
+// than vanishing. Motion owns the transform, hence `x` in place of translateX.
 const EnhanceBubble = ({ top, left, onAction, innerRef }: EnhanceBubbleProps) => (
-  <div
+  <m.div
     ref={innerRef}
+    initial={{ opacity: 0, y: 4, scale: 0.97 }}
+    animate={{ opacity: 1, y: 0, scale: 1 }}
+    exit={{ opacity: 0, y: 4, scale: 0.97, transition: EXIT }}
+    transition={ENTER}
     style={{
       position: "absolute",
       top,
       left,
-      transform: "translateX(-50%)",
+      x: "-50%",
       zIndex: 60,
       display: "flex",
       alignItems: "center",
@@ -668,7 +1053,6 @@ const EnhanceBubble = ({ top, left, onAction, innerRef }: EnhanceBubbleProps) =>
       padding: "0 6px",
       boxShadow: "var(--shadow-2)",
     }}
-    className="enhance-bubble-in"
     onMouseDown={(e) => e.stopPropagation()}
   >
     <button
@@ -694,7 +1078,7 @@ const EnhanceBubble = ({ top, left, onAction, innerRef }: EnhanceBubbleProps) =>
     >
       🔗 Clinical
     </button>
-  </div>
+  </m.div>
 );
 
 // ─── Inline enhancement block ──────────────────────────────────────────────
@@ -986,11 +1370,24 @@ const OutputSection = ({
   sheetId,
   isStreaming = false,
   streamedKeys,
+  liveKey,
+  showHeader = true,
+  deck,
 }: OutputSectionProps) => {
-  const navigate = useNavigate();
   const ref = useRef<HTMLDivElement>(null);
   const referenceNoteRef = useRef<HTMLDivElement>(null);
-  const [showNudge, setShowNudge] = useState(() => !localStorage.getItem("sb_first_sheet_seen"));
+
+  // The highlight-to-enhance tip is shown until it is dismissed or the reader
+  // enhances something, then never again.
+  const [tipSeen, setTipSeen] = useState(() => readFlag(ENHANCE_TIP_KEY));
+  const retireTip = useCallback(() => {
+    setTipSeen(true);
+    writeFlag(ENHANCE_TIP_KEY);
+  }, []);
+
+  // Sections this mount has seen waiting. One that then lands gets a single
+  // glow; a saved sheet, which never waited, opens without any.
+  const seenPendingRef = useRef(new Set<string>());
 
   const [disclaimerCollapsed, setDisclaimerCollapsed] = useState(() =>
     sessionStorage.getItem("sb_disclaimer_collapsed") === "1"
@@ -1065,6 +1462,8 @@ const OutputSection = ({
   }, [keywordPicker]);
 
   const addEnhancement = (sourceText: string, kind: EnhanceKind, anchor: string) => {
+    // Using the feature is the surest sign the tip has done its job.
+    retireTip();
     const key = makeEnhancementKey(sourceText, kind);
     setActiveEnhancements((prev) => ({
       ...prev,
@@ -1184,13 +1583,12 @@ const OutputSection = ({
     referenceNoteRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
-  useEffect(() => {
-    if (showNudge) localStorage.setItem("sb_first_sheet_seen", "1");
-  }, [showNudge]);
-
-  // Tracks the identity of the *core* sheet content (ignoring enhancements) so we
-  // only scroll-to-top for a genuinely new sheet — not when an enhancement is
-  // saved into the sheet (which also mutates `output`).
+  // Tracks the identity of the *core* sheet content (ignoring enhancements) so
+  // the disclaimer reopens only for a genuinely new sheet — not when an
+  // enhancement is saved into the sheet (which also mutates `output`).
+  // Scrolling is the page's business: this used to scroll the document into
+  // view here, which under a sticky page header yanked the reader down the
+  // moment a sheet finished.
   const sheetIdentityRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -1205,8 +1603,9 @@ const OutputSection = ({
     if (isNewSheet) {
       setDisclaimerCollapsed(false);
       sessionStorage.removeItem("sb_disclaimer_collapsed");
-      ref.current?.scrollIntoView({ behavior: "smooth", block: "start" });
     }
+    // The dashboard's first-deck banner waits for this: a whole sheet seen.
+    writeFlag("sb_first_sheet_seen");
   }, [output, isStreaming]);
 
   // ── Legacy renderer ──────────────────────────────────────────────────────
@@ -1320,30 +1719,33 @@ const OutputSection = ({
           </div>
         )}
 
-        {renderNudgeAndDisclaimer(showNudge, setShowNudge, inputText, disclaimerCollapsed, toggleDisclaimer, navigate)}
+        {renderDisclaimer(disclaimerCollapsed, toggleDisclaimer)}
       </div>
     );
   }
 
   // ── JSON renderer ────────────────────────────────────────────────────────
-  const JSON_SECTION_ORDER: JsonSectionKey[] = [
-    "overview",
-    "memoryHooks",
-    "clinicalApproach",
-    "keyPoints",
-    "examTraps",
-    "flashcards",
-    "referenceNote",
-  ];
+  // The sheet's own plan when it has one, the legacy six otherwise. The plan
+  // arrives in a __meta frame ahead of the model's first byte, so the shape is
+  // settled before any content lands and the skeleton never reflows.
+  const sectionOrder = renderOrder(sheet);
+
+  // One recall question per section, drawn from the deck. The deck arrives at
+  // the end of the stream, so these appear once the sheet is whole — which is
+  // also when a reader is ready to be asked.
+  const recallCards = isStreaming ? null : assignRecallCards(sheet);
 
   // Every section keeps its slot for the whole generation, so the document
   // never changes shape — placeholders are filled in rather than replaced.
   // A section renders its content only once its JSON has closed; before that
   // it would show half a sentence and then reflow.
-  const isReady = (key: JsonSectionKey) => !isStreaming || !!streamedKeys?.includes(key);
-  // Sections arrive in order, so the first one not yet complete is in flight.
+  const isReady = (key: string) => !isStreaming || !!streamedKeys?.includes(key);
+  // The parser names the key in flight when the caller passes it on. Without
+  // it, sections arrive in order, so the first one not yet complete is in flight.
+  const liveSection =
+    isStreaming && liveKey && sectionOrder.some((s) => s.key === liveKey) ? liveKey : undefined;
   const writingKey = isStreaming
-    ? JSON_SECTION_ORDER.find((key) => !isReady(key))
+    ? liveSection ?? sectionOrder.find((spec) => !isReady(spec.key))?.key
     : undefined;
 
   // Group active enhancements by anchor so they can be injected inline.
@@ -1381,78 +1783,76 @@ const OutputSection = ({
   };
 
   return (
+    <LazyMotion features={domAnimation} strict>
+    <MotionConfig reducedMotion="user">
     <div
       ref={ref}
       className="print-document relative space-y-4"
       onMouseUp={handleSelectionChange}
       onTouchEnd={handleSelectionChange}
     >
-      {/* Persistent highlight-to-enhance hint — sticky below the top nav */}
-      <div
-        className="sticky animate-fade-in"
-        style={{
-          top: "var(--nav-h, 64px)",
-          zIndex: 20,
-          display: "flex",
-          alignItems: "center",
-          gap: 6,
-          borderRadius: "var(--radius-sm)",
-          border: "1px solid var(--border)",
-          background: "color-mix(in srgb, var(--bg) 90%, transparent)",
-          backdropFilter: "blur(10px)",
-          WebkitBackdropFilter: "blur(10px)",
-          padding: "6px 12px",
-          marginBottom: 4,
-        }}
-      >
-        <Sparkles style={{ width: 12, height: 12, color: "var(--accent)", flexShrink: 0 }} />
-        <span
-          style={{
-            fontFamily: "var(--font-mono)",
-            fontSize: 11,
-            color: "var(--fg-muted)",
-            letterSpacing: "0.02em",
-          }}
-        >
-          Highlight any text to expand or get a clinical tie
-        </span>
-      </div>
+      {showHeader ? (
+        <div className="animate-fade-in flex items-center justify-between">
+          {modeInfo && <ModeInfoBar modeInfo={modeInfo} />}
+          <SaveButton
+            input={inputText || ""}
+            output={output}
+            modeInfo={modeInfo}
+            disabled={isStreaming}
+          />
+        </div>
+      ) : (
+        // The page's own header is outside the printed document, so the
+        // print carries its title here.
+        <h1 className="hidden text-xl font-semibold print:block">
+          {sheet.topicEmoji ? `${sheet.topicEmoji} ` : ""}
+          {sheet.topic || inputText}
+        </h1>
+      )}
 
-      {/* Mode header + Save */}
-      <div className="animate-fade-in flex items-center justify-between">
-        {modeInfo && <ModeInfoBar modeInfo={modeInfo} />}
-        <SaveButton
-          input={inputText || ""}
-          output={output}
-          modeInfo={modeInfo}
-          disabled={isStreaming}
-        />
-      </div>
-
-      {JSON_SECTION_ORDER.map((key, idx) => {
-        const config = JSON_SECTION_CONFIG[key];
-        const Icon = config.icon;
+      {sectionOrder.map((spec, idx) => {
+        const key = spec.key;
+        const Icon = sectionIcon(spec.icon);
         const isReference = key === "referenceNote";
         const ready = isReady(key);
         const writing = key === writingKey;
         const showEvidenceBadge =
-          ready && citationState === "found" && config.evidenceBacked;
+          ready && citationState === "found" && !!spec.evidenceBacked;
+        if (!ready) seenPendingRef.current.add(key);
+        const landed = ready && seenPendingRef.current.has(key);
 
+        const body = sectionBody(sheet, key);
+        // The draft of the section in flight, once it has any words to show.
+        const draft =
+          !ready && key === liveSection && key !== "flashcards"
+            ? key === "referenceNote"
+              ? sheet.referenceNote || undefined
+              : Array.isArray(body)
+              ? body.length
+                ? body
+                : undefined
+              : body?.trim()
+              ? body
+              : undefined
+            : undefined;
         const copyText =
           key === "flashcards"
             ? (sheet.flashcards ?? [])
                 .map((c) => `Q: [${c.tag}] ${c.question}\nA: ${c.answer}`)
                 .join("\n\n")
-            : Array.isArray(sheet[key])
-            ? (sheet[key] as string[]).map((item, i) => `${i + 1}. ${item}`).join("\n")
-            : (sheet[key] as string) ?? "";
+            : isTableRows(body)
+            ? [spec.columns?.join(" | "), ...bodyLines(body)].filter(Boolean).join("\n")
+            : Array.isArray(body)
+            ? bodyLines(body).map((item, i) => `${i + 1}. ${item}`).join("\n")
+            : body ?? "";
 
         return (
           <div
             key={key}
             ref={isReference ? referenceNoteRef : undefined}
             data-section-key={key}
-            className="animate-fade-in scroll-mt-20"
+            // Clears the app nav and the sheet's sticky topic bar on a jump.
+            className={`group/section animate-fade-in scroll-mt-[calc(var(--nav-h,64px)+100px)]${landed ? " section-landed" : ""}`}
             style={{
               ...SECTION_CARD_STYLE,
               // A section that hasn't landed keeps a neutral edge, so the
@@ -1460,15 +1860,15 @@ const OutputSection = ({
               borderLeft: `3px solid ${
                 ready || writing ? "var(--accent)" : "var(--border)"
               }`,
-              // Mid-stream the cards are already mounted and fill in one by
-              // one, so the stagger is real — replaying it would just delay
-              // each card into invisibility for its share of the offset.
-              animationDelay: isStreaming ? "0ms" : `${idx * 200}ms`,
+              // Mid-stream the cards mount together when the plan arrives,
+              // before any content: a short stagger lets them rise in one
+              // after another. A saved sheet opens with the longer one.
+              animationDelay: isStreaming ? `${idx * 60}ms` : `${idx * 200}ms`,
               animationFillMode: "backwards",
             }}
           >
             <div style={SECTION_HEADER_STYLE}>
-              <div className="flex items-center gap-2.5 flex-wrap">
+              <div className="flex min-w-0 flex-wrap items-center gap-2.5">
                 <div style={SECTION_ICON_STYLE}>
                   <Icon
                     style={{
@@ -1484,28 +1884,33 @@ const OutputSection = ({
                     color: ready || writing ? "var(--fg)" : "var(--fg-muted)",
                   }}
                 >
-                  {config.label}
-                  {key === "overview" && sheet.topicEmoji && (
+                  {spec.title}
+                  {idx === 0 && sheet.topicEmoji && (
                     <span className="ml-2 text-base">{sheet.topicEmoji}</span>
                   )}
                 </h3>
                 {showEvidenceBadge && <EvidenceBadge onClick={scrollToReference} />}
-                {ready && key === "overview" && modelUsed && (
-                  <ModelBadge model={modelUsed} />
-                )}
+                {ready && idx === 0 && modelUsed && <ModelBadge model={modelUsed} />}
               </div>
-              <div className="flex items-center gap-1">
+              <div className="flex shrink-0 items-center gap-1">
                 {ready ? (
                   <>
-                    <Check
-                      aria-label="Section loaded"
-                      className="h-3.5 w-3.5 text-primary/50 animate-fade-in"
-                      style={{
-                        animationDelay: isStreaming ? "0ms" : `${idx * 200 + 350}ms`,
-                        animationFillMode: "backwards",
-                      }}
-                    />
-                    <CopyButton text={copyText} />
+                    {/* A check says a section has arrived — news only while
+                        the sheet is still arriving. On a finished sheet every
+                        heading would carry one. */}
+                    {isStreaming && (
+                      <m.span
+                        initial={{ scale: 0.3, opacity: 0 }}
+                        animate={{ scale: 1, opacity: 1 }}
+                        transition={SPRING_POP}
+                        style={{ display: "inline-flex" }}
+                      >
+                        <Check aria-label="Section loaded" className="h-3.5 w-3.5 text-primary/50" />
+                      </m.span>
+                    )}
+                    <span className="transition-opacity duration-200 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover/section:opacity-100 [@media(hover:hover)]:group-focus-within/section:opacity-100">
+                      <CopyButton text={copyText} compact />
+                    </span>
                   </>
                 ) : (
                   // Marks where the next content lands. Only the dot pulses —
@@ -1525,15 +1930,29 @@ const OutputSection = ({
               </div>
             </div>
 
+            <AutoHeight>
             <div style={SECTION_BODY_STYLE} data-enh-section={key}>
-              {!ready ? (
+              {!ready && draft !== undefined ? (
+                <div aria-busy="true" className="text-sm text-muted-foreground leading-relaxed">
+                  {isTableRows(draft)
+                    ? renderDraftTable(draft, spec.columns ?? [])
+                    : Array.isArray(draft)
+                    ? renderDraftList(bodyLines(draft))
+                    : spec.kind !== "prose"
+                    ? renderDraftList([draft])
+                    : renderDraftProse(draft)}
+                </div>
+              ) : !ready ? (
                 <SectionSkeleton variant="sheet-body" />
               ) : key === "flashcards" ? (
-                <FlashcardsSection cards={sheet.flashcards ?? []} />
-              ) : key === "overview" || key === "clinicalApproach" ? (
+                <>
+                  {deck && deck.count > 0 && <DeckOffer deck={deck} />}
+                  <FlashcardsSection cards={sheet.flashcards ?? []} />
+                </>
+              ) : key !== "referenceNote" && spec.kind === "prose" ? (
                 <div className="text-sm text-muted-foreground leading-relaxed">
                   {renderJsonText(
-                    (sheet[key] as string) ?? "",
+                    typeof body === "string" ? body : "",
                     key,
                     handleKeywordClick,
                     renderInline,
@@ -1557,10 +1976,31 @@ const OutputSection = ({
                       />
                     </div>
                   )}
+
+                  {/* The passages the sheet was built on, here rather than in
+                      a panel of their own after the end of the sheet. */}
+                  {!isStreaming && (sheet.sources?.length ?? 0) > 0 && (
+                    <div className="mt-5 border-t border-border pt-4">
+                      <SheetSources sources={sheet.sources ?? []} query={inputText} embedded />
+                    </div>
+                  )}
                 </>
+              ) : isTableRows(body) ? (
+                // By the shape that arrived, not only the plan's kind: a model
+                // that wrote rows under a list heading still gets a table, and
+                // one that wrote items under a table heading falls to the list.
+                renderTableSection(
+                  body,
+                  spec.columns ?? [],
+                  key,
+                  handleKeywordClick,
+                  renderInline,
+                  collapsedByAnchor,
+                  reopenEnhancement
+                )
               ) : (
                 renderArraySection(
-                  sheet[key] as string[],
+                  bodyLines(body),
                   key,
                   renderInline,
                   collapsedByAnchor,
@@ -1568,7 +2008,9 @@ const OutputSection = ({
                 )
               )}
               {ready && renderInline(`${key}:end`)}
+              {recallCards?.has(key) && <RecallCheck card={recallCards.get(key)!} />}
             </div>
+            </AutoHeight>
           </div>
         );
       })}
@@ -1578,146 +2020,51 @@ const OutputSection = ({
         <div className="space-y-1">{renderInline("end")}</div>
       ) : null}
 
-      {/* The nudge says the sheet is ready, so it waits until it actually is. */}
-      {renderNudgeAndDisclaimer(
-        showNudge && !isStreaming,
-        setShowNudge,
-        inputText,
-        disclaimerCollapsed,
-        toggleDisclaimer,
-        navigate
-      )}
+      {/* The last line of the document, under its Sources. */}
+      {renderDisclaimer(disclaimerCollapsed, toggleDisclaimer)}
+
+      <EnhanceTip show={!isStreaming && !tipSeen} onDismiss={retireTip} />
 
       {/* Anchored action menu — selection (below the highlighted text) */}
-      {selection && (
-        <EnhanceBubble
-          innerRef={selectionTooltipRef}
-          top={selection.top}
-          left={selection.left}
-          onAction={fireSelectionEnhance}
-        />
-      )}
+      <AnimatePresence>
+        {selection && (
+          <EnhanceBubble
+            key="selection"
+            innerRef={selectionTooltipRef}
+            top={selection.top}
+            left={selection.left}
+            onAction={fireSelectionEnhance}
+          />
+        )}
+      </AnimatePresence>
 
       {/* Anchored action menu — bold keyword click (below the keyword) */}
-      {keywordPicker && !selection && (
-        <EnhanceBubble
-          innerRef={keywordPickerRef}
-          top={keywordPicker.top}
-          left={keywordPicker.left}
-          onAction={fireKeywordEnhance}
-        />
-      )}
+      <AnimatePresence>
+        {keywordPicker && !selection && (
+          <EnhanceBubble
+            key="keyword"
+            innerRef={keywordPickerRef}
+            top={keywordPicker.top}
+            left={keywordPicker.left}
+            onAction={fireKeywordEnhance}
+          />
+        )}
+      </AnimatePresence>
     </div>
+    </MotionConfig>
+    </LazyMotion>
   );
 };
 
-// ─── Shared nudge + disclaimer (used by both renderers) ────────────────────
+// ─── Shared disclaimer (used by both renderers) ─────────────────────────────
+//
+// The first-sheet nudge that used to sit above it is gone: its "Generate
+// flashcards" opened the Flashcards page to make a new deck, beside a sheet
+// that already has one. The Sheets page ends on its own next-steps card.
 
-function renderNudgeAndDisclaimer(
-  showNudge: boolean,
-  setShowNudge: (v: boolean) => void,
-  inputText: string | undefined,
-  disclaimerCollapsed: boolean,
-  toggleDisclaimer: () => void,
-  navigate: NavigateFunction
-) {
+function renderDisclaimer(disclaimerCollapsed: boolean, toggleDisclaimer: () => void) {
   return (
     <>
-      {showNudge && (
-        <div className="mt-4 animate-fade-in">
-          <div
-            style={{
-              borderRadius: "var(--radius-lg)",
-              border: "1px solid var(--border)",
-              borderLeft: "3px solid var(--accent)",
-              background: "var(--bg-elevated)",
-              padding: "20px 24px",
-              textAlign: "center",
-            }}
-          >
-            <p
-              style={{
-                fontFamily: "var(--font-sans)",
-                fontSize: 14,
-                fontWeight: 500,
-                color: "var(--fg)",
-                marginBottom: 6,
-              }}
-            >
-              Your first sheet is ready
-            </p>
-            <p
-              style={{
-                fontFamily: "var(--font-sans)",
-                fontSize: 13,
-                color: "var(--fg-muted)",
-                lineHeight: 1.55,
-                marginBottom: 16,
-              }}
-            >
-              Now lock it in — generate a flashcard deck and start drilling with spaced
-              repetition.
-            </p>
-            <div
-              style={{
-                display: "flex",
-                flexWrap: "wrap",
-                gap: 8,
-                justifyContent: "center",
-              }}
-            >
-              <button
-                type="button"
-                onClick={() => {
-                  const topic = (inputText || "").trim();
-                  if (!topic) return;
-                  setShowNudge(false);
-                  // The `studybuddy:generate-flashcards` listener lives in
-                  // FlashcardsGenerator, which is not mounted on /sheets — the
-                  // event went nowhere. Take the user to the page that has it.
-                  navigate("/flashcards", { state: { topic } });
-                }}
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 6,
-                  height: 36,
-                  padding: "0 20px",
-                  borderRadius: "var(--radius-md)",
-                  border: "1px solid transparent",
-                  background: "var(--fg)",
-                  color: "var(--bg)",
-                  fontFamily: "var(--font-sans)",
-                  fontSize: 13,
-                  fontWeight: 500,
-                  cursor: "pointer",
-                }}
-              >
-                <Layers style={{ width: 14, height: 14 }} />
-                Generate flashcards
-              </button>
-              <button
-                type="button"
-                onClick={() => setShowNudge(false)}
-                style={{
-                  height: 36,
-                  padding: "0 16px",
-                  borderRadius: "var(--radius-md)",
-                  border: "1px solid var(--border)",
-                  background: "transparent",
-                  color: "var(--fg-muted)",
-                  fontFamily: "var(--font-sans)",
-                  fontSize: 13,
-                  cursor: "pointer",
-                }}
-              >
-                Maybe later
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       <div
         className="animate-fade-in"
         style={{

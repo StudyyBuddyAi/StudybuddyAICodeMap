@@ -86,8 +86,11 @@ const AppNav = ({ onNavigate, onOpenAuth, onOpenAccount }: AppNavProps) => {
     if (onNavigate) onNavigate();
   };
 
+  // A prefix only counts at a path-segment boundary, so /qbank/session keeps
+  // QBank lit but "/" doesn't match every route and light Home with it.
   const isActive = (to: string) =>
-    location.pathname === to || (to !== "/dashboard" && location.pathname.startsWith(to));
+    location.pathname === to ||
+    (to !== "/" && location.pathname.startsWith(`${to}/`));
 
   return (
     <>

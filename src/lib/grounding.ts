@@ -6,24 +6,31 @@ import type {
 } from "@/types/generated-sheet";
 
 const LEVELS: readonly GroundingLevel[] = ["full", "partial", "none"];
-const SECTION_KEYS: readonly SheetSectionKey[] = [
-  "overview",
-  "clinicalApproach",
-  "keyPoints",
-  "examTraps",
-  "memoryHooks",
-  "flashcards",
-];
 
-/** Human-readable labels for `SourceCoverage.uncovered`, used in GroundingNotice. */
-export const SECTION_LABELS: Record<SheetSectionKey, string> = {
-  overview: "Overview",
-  clinicalApproach: "Clinical approach",
-  keyPoints: "Key points",
-  examTraps: "Exam traps",
-  memoryHooks: "Memory hooks",
+/** Sections that exist on every sheet regardless of which plan it got. */
+const FIXED_SECTION_LABELS: Record<string, string> = {
   flashcards: "Flashcards",
+  referenceNote: "Reference note",
 };
+
+/**
+ * Label for one `SourceCoverage.uncovered` entry, used in GroundingNotice.
+ *
+ * The sheet's sections vary by topic now, so there is no fixed list to look
+ * them up in. The plan carries the reader-facing title, and a key with no plan
+ * entry is de-camel-cased rather than dropped — a sheet must not silently stop
+ * reporting a section as ungrounded just because this build cannot name it.
+ */
+export function sectionLabel(
+  key: string,
+  plan?: readonly { key: string; title: string }[]
+): string {
+  const planned = plan?.find((s) => s.key === key);
+  if (planned) return planned.title;
+  if (FIXED_SECTION_LABELS[key]) return FIXED_SECTION_LABELS[key];
+  const spaced = key.replace(/([a-z0-9])([A-Z])/g, "$1 $2");
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1).toLowerCase();
+}
 
 /** Fixed referenceNote string for level "none" — no variation permitted. */
 export const REFERENCE_NOTE_NONE =
@@ -40,8 +47,12 @@ export function parseSourceCoverage(raw: unknown): SourceCoverage | null {
   const level = obj.level;
   if (typeof level !== "string" || !LEVELS.includes(level as GroundingLevel)) return null;
   const uncoveredRaw = Array.isArray(obj.uncovered) ? obj.uncovered : [];
+  // Any non-empty string key is kept. This used to be filtered against the six
+  // legacy section names, which would now silently drop a drug sheet reporting
+  // "adverseEffects" as ungrounded — turning an honest partial claim into a
+  // stronger one than the model made.
   const uncovered = uncoveredRaw.filter(
-    (k): k is SheetSectionKey => typeof k === "string" && SECTION_KEYS.includes(k as SheetSectionKey)
+    (k): k is SheetSectionKey => typeof k === "string" && k.trim().length > 0
   );
   return { level: level as GroundingLevel, uncovered };
 }

@@ -38,6 +38,11 @@ describe("parsePartialSheet", () => {
     );
     expect(result!.completeKeys).toEqual(["topicEmoji", "topic"]);
     expect(result!.sheet.overview).toBe("Mechanism: **Reduced");
+    expect(result!.inFlightKey).toBe("overview");
+  });
+
+  it("names no key in flight once the object closes", () => {
+    expect(parsePartialSheet(FULL_SHEET)!.inFlightKey).toBeUndefined();
   });
 
   it("closes an array cut between elements", () => {

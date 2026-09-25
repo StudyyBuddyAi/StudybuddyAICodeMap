@@ -106,7 +106,9 @@ export default {
       animation: {
         "accordion-down": "accordion-down 0.2s ease-out",
         "accordion-up": "accordion-up 0.2s ease-out",
-        "fade-in": "fade-in 0.4s ease-out",
+        // On the design system's own curve and duration (--ease-out,
+        // --dur-slow), so CSS entrances and Motion ones move alike.
+        "fade-in": "fade-in var(--dur-slow) var(--ease-out)",
       },
     },
   },
