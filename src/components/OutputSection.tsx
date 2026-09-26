@@ -40,6 +40,8 @@ import type { CitationResult } from "@/lib/citation";
 import {
   type GeneratedSheet,
   type EnhancementResult,
+  type SectionBody,
+  type SheetSectionSpec,
   parseStoredSheet,
   isJsonSheet,
 } from "@/types/generated-sheet";
@@ -71,7 +73,10 @@ import {
   type LayerAddition,
   type LayerHighlight,
   type LayerSource,
+  withLayerSections,
 } from "@/lib/sheet-layer";
+import { REGEN_CHOICES, STUDY_AIDS, baseKey, hasBody, isMoreKey, moreKey, type RegenStyle } from "@/lib/sheet-depth";
+import { CustomRewrite, DepthBlock, DepthPrompt, SectionMenu, type SectionJob } from "@/components/sheet/SectionDepth";
 import { PersonalProvider, usePersonal, type PersonalApi, type PersonalProps } from "@/components/sheet/personal/personal-context";
 import {
   AdditionRow,
@@ -304,7 +309,43 @@ interface OutputSectionProps {
    * generated and offers nothing personal.
    */
   personal?: PersonalProps;
+  /**
+   * Each section's depth and what can be done to one section: show or hide
+   * its depth, ask for it, rewrite it. Absent, sections render without depth
+   * controls (Library's saved-sheet dialog).
+   */
+  depth?: DepthControls;
 }
+
+/** What the page lets a section do about its depth and its wording. */
+export interface DepthControls {
+  /** Whether a section's depth is on screen. */
+  shown: (key: string) => boolean;
+  setShown: (key: string, on: boolean) => void;
+  /** Asks for one section's depth. */
+  deepen: (key: string) => void;
+  rewrite: (key: string, style: RegenStyle, instruction?: string) => void;
+  /** Back to the section as generated. */
+  undoRewrite: (key: string) => void;
+  /** Takes away depth the student asked for. */
+  removeDepth: (key: string) => void;
+  /** What is running, by section key. */
+  jobs: Record<string, SectionJob>;
+  /** Drafts arriving, by the key they will be written under. */
+  drafts: Record<string, SectionBody>;
+  /** Section requests can run: the sheet is finished and its layer loaded. */
+  enabled: boolean;
+  /** The sheet was asked for comprehensive and its depth did not arrive. */
+  depthFailed: boolean;
+  /** Asks for every content section's depth at once. */
+  deepenAll: () => void;
+  /** A comprehensive sheet is in its depth phase: the content sections' depth is on its way. */
+  deepeningPhase: boolean;
+}
+
+/** Lines in a body, as a reader counts them: prose by line, a list by item, a table by row. */
+const bodyCount = (body: SectionBody | undefined) =>
+  typeof body === "string" ? body.split("\n").filter((l) => l.trim()).length : body?.length ?? 0;
 
 // ─── Legacy renderer helpers (kept for old text-blob sheets) ───────────────
 
@@ -1628,10 +1669,13 @@ const OutputSectionBody = ({
   liveKey,
   showHeader = true,
   deck,
+  depth,
 }: OutputSectionProps) => {
   const ref = useRef<HTMLDivElement>(null);
   const personal = usePersonal();
   const referenceNoteRef = useRef<HTMLDivElement>(null);
+  // The section asking, in the student's own words, how it should be rewritten.
+  const [customFor, setCustomFor] = useState<string | null>(null);
 
   // The highlight-to-enhance tip is shown until it is dismissed or the reader
   // enhances something, then never again.
@@ -1675,10 +1719,14 @@ const OutputSectionBody = ({
     );
   });
 
-  const sheet: GeneratedSheet | null = isJsonSheet(output) ? parseStoredSheet(output) : null;
-  if (sheet && sheet.overview === undefined && (sheet as { summary?: string }).summary !== undefined) {
-    sheet.overview = (sheet as { summary?: string }).summary as string;
+  const generated: GeneratedSheet | null = isJsonSheet(output) ? parseStoredSheet(output) : null;
+  if (generated && generated.overview === undefined && (generated as { summary?: string }).summary !== undefined) {
+    generated.overview = (generated as { summary?: string }).summary as string;
   }
+  // The student's depth and rewrites in place, unless they are looking at the
+  // original. Everything below — lines, anchors, edits — reads this sheet.
+  const sheet: GeneratedSheet | null =
+    generated && personal && !personal.showOriginal ? withLayerSections(generated, personal.layer) : generated;
   const isJson = sheet !== null;
 
   // Keyword-click menu state — only used in JSON renderer. `top`/`left` are
@@ -2051,7 +2099,10 @@ const OutputSectionBody = ({
   // it, sections arrive in order, so the first one not yet complete is in flight.
   const liveSection =
     isStreaming && liveKey && sectionOrder.some((s) => s.key === liveKey) ? liveKey : undefined;
-  const writingKey = isStreaming
+  // A comprehensive sheet's depth phase names "<key>_more": every core is
+  // written, so no section heading is the one being written.
+  const writingDepth = isStreaming && liveKey && isMoreKey(liveKey) ? liveKey : undefined;
+  const writingKey = isStreaming && !writingDepth
     ? liveSection ?? sectionOrder.find((spec) => !isReady(spec.key))?.key
     : undefined;
 
@@ -2091,7 +2142,9 @@ const OutputSectionBody = ({
 
   // ── The student's layer, as each line needs it ──────────────────────────
   // Not while the sheet is still arriving: its lines are still being written.
-  const titleOf = (anchor: string) => sectionOrder.find((s) => s.key === anchorSection(anchor))?.title ?? "";
+  // A depth line belongs to its section: "keyPoints_more:2" is Key Points.
+  const titleOf = (anchor: string) =>
+    sectionOrder.find((s) => s.key === baseKey(anchorSection(anchor)))?.title ?? "";
   const isTableAnchor = (anchor: string) => isTableRows(sectionBody(sheet, anchorSection(anchor)));
   const p = personal && !isStreaming ? personal : null;
   const highlightsByAnchor: Record<string, LayerHighlight[]> = {};
@@ -2155,6 +2208,82 @@ const OutputSectionBody = ({
   // The cards the student made from this sheet, after the ones written with it.
   const myCards = p && !p.showOriginal ? p.layer.cards.map((c) => ({ tag: "Mine", question: c.question, answer: c.answer })) : [];
 
+  // ── Depth and rewrites ─────────────────────────────────────────────────
+  const isContentKey = (key: string) => key !== "flashcards" && key !== "referenceNote";
+
+  /** A body mid-write, in the draft renderers. */
+  const renderDraftBody = (spec: SheetSectionSpec, body: SectionBody) =>
+    isTableRows(body)
+      ? renderDraftTable(body, spec.columns ?? [])
+      : Array.isArray(body)
+      ? renderDraftList(bodyLines(body))
+      : spec.kind !== "prose"
+      ? renderDraftList([body])
+      : renderDraftProse(body);
+
+  /** A section's depth, finished: the section's own renderers, anchored under "<key>_more". */
+  const renderDepthBody = (spec: SheetSectionSpec, key: string, body: SectionBody) =>
+    isTableRows(body) ? (
+      renderTableSection(body, spec.columns ?? [], key, handleKeywordClick, renderInline, collapsedByAnchor, reopenEnhancement, pr)
+    ) : typeof body === "string" ? (
+      <div className="text-sm text-muted-foreground leading-relaxed">
+        {renderJsonText(body, key, handleKeywordClick, renderInline, collapsedByAnchor, reopenEnhancement, pr)}
+      </div>
+    ) : (
+      renderArraySection(bodyLines(body), key, renderInline, collapsedByAnchor, reopenEnhancement, pr)
+    );
+
+  /**
+   * Under each content section: its depth, or the way to it. Shown depth sits
+   * in its own block; hidden depth is a count to open; no depth is "Go deeper".
+   */
+  const renderDepth = (spec: SheetSectionSpec) => {
+    const key = spec.key;
+    if (!depth || !isContentKey(key)) return null;
+    const mk = moreKey(key);
+    const job = depth.jobs[key];
+    const shown = depth.shown(key);
+    const body = sectionBody(sheet, mk);
+
+    // Being written: the comprehensive sheet's depth phase, or a request.
+    const deepening = isStreaming ? writingDepth === mk : job?.status === "running" && job.action !== "regenerate";
+    if (deepening) {
+      const draftBody = isStreaming ? body : depth.drafts[mk];
+      return shown ? (
+        <DepthBlock streaming>{hasBody(draftBody) ? renderDraftBody(spec, draftBody!) : <SectionSkeleton variant="sheet-body" />}</DepthBlock>
+      ) : null;
+    }
+    if (isStreaming) {
+      if (hasBody(body)) return shown ? <DepthBlock>{renderDepthBody(spec, mk, body!)}</DepthBlock> : null;
+      // Its depth is coming: the slot is held, as every planned section's is,
+      // rather than appearing from nothing once the writer gets to it.
+      return shown && depth.deepeningPhase && !STUDY_AIDS.includes(key) ? (
+        <DepthBlock streaming>
+          <SectionSkeleton variant="sheet-body" />
+        </DepthBlock>
+      ) : null;
+    }
+
+    if (hasBody(body)) {
+      if (!shown) return <DepthPrompt kind="show" count={bodyCount(body)} onClick={() => depth.setShown(key, true)} />;
+      // Depth the student asked for can be taken away; depth written with the sheet is the sheet's.
+      const asked = !!p && !p.showOriginal && p.layer.sections[mk]?.kind === "depth";
+      return (
+        <DepthBlock onHide={() => depth.setShown(key, false)} onRemove={asked ? () => depth.removeDepth(key) : undefined}>
+          {renderDepthBody(spec, mk, body!)}
+        </DepthBlock>
+      );
+    }
+    if (job?.status === "error" && job.action !== "regenerate") {
+      return <DepthPrompt kind="retry" onClick={() => depth.deepen(key)} />;
+    }
+    return depth.enabled ? <DepthPrompt kind="deepen" onClick={() => depth.deepen(key)} /> : null;
+  };
+
+  /** The label on a rewritten section. */
+  const rewriteLabel = (style?: string) =>
+    style === "custom" ? "your way" : REGEN_CHOICES.find((c) => c.style === style)?.label.toLowerCase() ?? "rewritten";
+
   return (
     <LazyMotion features={domAnimation} strict>
     <MotionConfig reducedMotion="user">
@@ -2184,6 +2313,16 @@ const OutputSectionBody = ({
       )}
 
       {p && <LayerBar />}
+
+      {/* Asked for comprehensive, and the depth didn't come through. */}
+      {!isStreaming && depth?.depthFailed && depth.enabled && (
+        <div className="flex items-center gap-3 rounded-xl border border-border border-l-[3px] border-l-warning bg-card px-4 py-3">
+          <p className="flex-1 text-[13px] leading-relaxed text-muted-foreground">
+            The depth for this sheet didn't come through — here is its high-yield version.
+          </p>
+          <DepthPrompt kind="retry" onClick={depth.deepenAll} />
+        </div>
+      )}
 
       {sectionOrder.map((spec, idx) => {
         const key = spec.key;
@@ -2220,6 +2359,14 @@ const OutputSectionBody = ({
             : Array.isArray(body)
             ? bodyLines(body).map((item, i) => `${i + 1}. ${item}`).join("\n")
             : body ?? "";
+
+        // A rewrite: running (its draft stands in for the section), or kept
+        // (the heading says so, and the menu can take it back).
+        const job = depth?.jobs[key];
+        const rewriting = job?.action === "regenerate" && job.status === "running";
+        const rewriteDraft = rewriting ? depth?.drafts[key] : undefined;
+        const kept = p && !p.showOriginal ? p.layer.sections[key] : undefined;
+        const rewritten = kept?.kind === "rewrite" ? kept : undefined;
 
         return (
           <div
@@ -2266,6 +2413,11 @@ const OutputSectionBody = ({
                 </h3>
                 {showEvidenceBadge && <EvidenceBadge onClick={scrollToReference} />}
                 {ready && idx === 0 && modelUsed && <ModelBadge model={modelUsed} />}
+                {rewritten && (
+                  <span className="rounded-full bg-secondary px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+                    Rewritten · {rewriteLabel(rewritten.style)}
+                  </span>
+                )}
               </div>
               <div className="flex shrink-0 items-center gap-1">
                 {ready ? (
@@ -2286,6 +2438,15 @@ const OutputSectionBody = ({
                     <span className="transition-opacity duration-200 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover/section:opacity-100 [@media(hover:hover)]:group-focus-within/section:opacity-100">
                       <CopyButton text={copyText} compact />
                     </span>
+                    {!isStreaming && depth && isContentKey(key) && (
+                      <SectionMenu
+                        title={spec.title}
+                        disabled={!depth.enabled || !!job && job.status === "running"}
+                        onRewrite={(style) => depth.rewrite(key, style)}
+                        onCustom={() => setCustomFor(key)}
+                        onUndo={rewritten ? () => depth.undoRewrite(key) : undefined}
+                      />
+                    )}
                   </>
                 ) : (
                   // Marks where the next content lands. Only the dot pulses —
@@ -2307,7 +2468,23 @@ const OutputSectionBody = ({
 
             <AutoHeight>
             <div style={SECTION_BODY_STYLE} data-enh-section={key}>
-              {!ready && draft !== undefined ? (
+              {customFor === key && depth && (
+                <CustomRewrite
+                  onSubmit={(instruction) => {
+                    setCustomFor(null);
+                    depth.rewrite(key, "custom", instruction);
+                  }}
+                  onCancel={() => setCustomFor(null)}
+                />
+              )}
+              {rewriting ? (
+                <div aria-busy="true" className="text-sm text-muted-foreground leading-relaxed">
+                  <p className="mb-2 font-mono text-[10px] font-medium uppercase tracking-widest text-muted-foreground">
+                    Rewriting — {job?.label ?? "your way"}…
+                  </p>
+                  {hasBody(rewriteDraft) ? renderDraftBody(spec, rewriteDraft!) : <SectionSkeleton variant="sheet-body" />}
+                </div>
+              ) : !ready && draft !== undefined ? (
                 <div aria-busy="true" className="text-sm text-muted-foreground leading-relaxed">
                   {isTableRows(draft)
                     ? renderDraftTable(draft, spec.columns ?? [])
@@ -2386,6 +2563,7 @@ const OutputSectionBody = ({
                 )
               )}
               {ready && renderInline(`${key}:end`)}
+              {ready && !rewriting && renderDepth(spec)}
               {ready && p && key !== "flashcards" && key !== "referenceNote" && (
                 <SectionFooter
                   sectionKey={key}
