@@ -119,10 +119,35 @@ describe("buildSectionPrompts", () => {
     expect(systemPrompt).toContain('"clinicalApproach_more":');
     expect(systemPrompt).not.toContain('"clinicalApproach": ');
     expect(systemPrompt).toContain('The only keys are "clinicalApproach_more", "covered".');
-    expect(systemPrompt).toContain("WHAT DEPTH IS NOT");
-    // The whole sheet goes with it, so the depth can avoid what it says.
+    // The whole sheet goes with it: the lines the passage explains.
     expect(userContent).toContain("If K < 3.3 → hold insulin");
-    expect(userContent).toContain("## Clinical Approach (THE SECTION YOU ARE DEEPENING)");
+    expect(userContent).toContain("## Clinical Approach (THE SECTION YOU ARE EXPLAINING)");
+  });
+
+  it("writes a content section's depth as a passage that explains it", () => {
+    const req = parseSectionRequest({ ...base, action: "expand" })!;
+    const { systemPrompt } = buildSectionPrompts({ request: req, examMode: "USMLE Step 2", difficulty: "Basic", ragChunks: [] });
+    expect(systemPrompt).toContain("WHAT AN IN-DEPTH PASSAGE IS");
+    expect(systemPrompt).toContain("clinicalApproach_more: an array of 1 to 3 paragraphs, one paragraph per string");
+    expect(systemPrompt).toContain("bold run-in head");
+    // Pitched at the student, and aimed at what the exam reasons about.
+    expect(systemPrompt).toContain("Define each technical term");
+    expect(systemPrompt).toContain("why this test or step comes next");
+    // Explaining a line means naming it, so the sheet's no-repeat rules — and
+    // the high-yield bar, which a passage is not held to — stay out.
+    expect(systemPrompt).not.toContain("ONE HOME PER FACT");
+    expect(systemPrompt).not.toContain("WHAT COUNTS AS HIGH-YIELD");
+    expect(systemPrompt).not.toContain("WHAT DEPTH IS NOT");
+    // The depth the core left out comes in as reasoning, not labelled lines.
+    expect(systemPrompt).toContain("second-line, definitive");
+  });
+
+  it("pitches a passage by difficulty", () => {
+    const req = parseSectionRequest({ ...base, action: "expand" })!;
+    const at = (difficulty: string) => buildSectionPrompts({ request: req, difficulty, ragChunks: [] }).systemPrompt;
+    expect(at("Advanced")).toContain("Dense is fine.");
+    expect(at("Advanced")).not.toContain("Define each technical term");
+    expect(at("Intermediate")).toContain("without re-teaching the basics");
   });
 
   it("deepens every content section in one call, and none of the study aids", () => {
@@ -136,6 +161,9 @@ describe("buildSectionPrompts", () => {
     expect(systemPrompt).toContain('"sourceCoverage": {');
     // A section with nothing worth adding may say so.
     expect(systemPrompt).toContain("or none");
+    // One format line for every passage, and a check against explaining a thing twice.
+    expect(systemPrompt).toContain("- overview_more, clinicalApproach_more: each an array of");
+    expect(systemPrompt).toContain("check the passages you have already written");
   });
 
   it("skips, deepening the whole sheet, a section already deepened on its own", () => {
@@ -149,10 +177,13 @@ describe("buildSectionPrompts", () => {
     expect(parseSectionRequest({ ...base, action: "expandAll", sections: all })).toBeNull();
   });
 
-  it("lets one study aid be deepened on its own", () => {
+  it("lets one study aid be deepened on its own, with more of its kind rather than a passage", () => {
     const req = parseSectionRequest({ ...base, action: "expand", key: "examTraps" })!;
     const { systemPrompt } = buildSectionPrompts({ request: req, ragChunks: [] });
     expect(systemPrompt).toContain('"examTraps_more":');
+    expect(systemPrompt).toContain("WHAT DEPTH IS NOT");
+    expect(systemPrompt).not.toContain("WHAT AN IN-DEPTH PASSAGE IS");
+    expect(systemPrompt).toContain("- examTraps_more: one fact per item");
   });
 
   it("lists every section's scope, so a fact can be sent to its one home", () => {
@@ -179,6 +210,9 @@ describe("buildSectionPrompts", () => {
     }).systemPrompt;
     expect(custom).toContain('"focus on potassium"');
     expect(custom).toContain('"clinicalApproach_more":');
+    // The rewritten core still keeps to the sheet's rules; its depth is a passage.
+    expect(custom).toContain("ONE HOME PER FACT");
+    expect(custom).toContain("is the in-depth passage under it");
   });
 
   it("keeps a rewritten core to its own labels", () => {

@@ -1,5 +1,6 @@
 import type { GeneratedSheet } from "@/types/generated-sheet";
 import { bodyLines, isTableRows, resolvePlan, sectionBody } from "@/lib/sheet-plan";
+import { isPassageKey } from "@/lib/sheet-depth";
 
 /**
  * Flattens a generated sheet into plain text suitable for the clipboard or the
@@ -34,6 +35,9 @@ export function sheetToPlainText(
         // and as a table into anything that reads Markdown.
         const header = columns?.length ? [columns.join(" | ")] : [];
         parts.push(`${heading}\n` + [...header, ...bodyLines(value)].join("\n"));
+      } else if (Array.isArray(value) && isPassageKey(bodyKey)) {
+        // A passage reads as paragraphs, not a numbered list.
+        if (value.length) parts.push(`${heading}\n${bodyLines(value).join("\n\n")}`);
       } else if (Array.isArray(value)) {
         if (!value.length) continue;
         parts.push(

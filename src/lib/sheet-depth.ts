@@ -29,6 +29,18 @@ export const baseKey = (key: string) => (isMoreKey(key) ? key.slice(0, -MORE_SUF
 export const STUDY_AIDS: readonly string[] = ["keyPoints", "memoryHooks", "examTraps"];
 
 /**
+ * Whether a depth key holds a passage — paragraphs explaining its section, as
+ * a textbook would — rather than more items of its section's kind. Every
+ * content section's depth is one; a study aid's is more hooks, traps or
+ * one-liners. The server's isPassage.
+ */
+export const isPassageKey = (key: string) => isMoreKey(key) && !STUDY_AIDS.includes(baseKey(key));
+
+/** About how long a passage takes to read, in whole minutes, at a study pace. */
+export const readingMinutes = (paragraphs: string[]) =>
+  Math.max(1, Math.round(paragraphs.join(" ").split(/\s+/).filter(Boolean).length / 200));
+
+/**
  * The depth a sheet was made at. Saved sheets from before depth carry a
  * length instead; only Detailed asked for more than a high-yield sheet.
  */

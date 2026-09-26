@@ -243,11 +243,98 @@ ${plan.map((s) => `- ${s.title}: ${s.scope}`).join("\n")}`;
 }
 
 /**
- * What depth is. Each "not" is a failure seen in the pilot: a DKA depth padded
- * with a pediatric screening rule from a Nelson passage, an HFrEF depth with
- * comorbidity by continent, case-fatality by race and a trial's regional
- * results — all true, all in the passages, none of it what a student going
- * deeper on the topic needs.
+ * A content section's depth is a passage that explains it; a study aid's is
+ * more of its own kind — more hooks, traps or one-liners.
+ *
+ * Depth began as more lines in the core's own shape, and read as a second,
+ * smaller sheet: a warfarin sheet deepened its Indications with two further
+ * indications and its Mechanism with enantiomer trivia, none of it explaining
+ * why the lines above were true. What a student opens "in depth" for is what
+ * a textbook gives and a review sheet cannot: the reasons that connect the
+ * facts. Causal explanation is also what makes clinical facts stick — students
+ * taught why a disease's features arise remember them and diagnose with them
+ * better than students given the features alone (Woods, Brooks & Norman) —
+ * and it lives in the connecting words ("because", "which is why") that a list
+ * strips out.
+ */
+export const isPassage = (s: PlannedSection) => !STUDY_AIDS.includes(s.key);
+
+/** A passage's size: paragraphs, each with a run-in head and a few sentences. */
+const PASSAGE_BUDGET = "1 to 3 paragraphs";
+const PARAGRAPH_WORDS = 90;
+
+/** What a passage explains, by the shape of the section it sits under. */
+const PASSAGE_LENS: Record<PlannedSection["kind"], string> = {
+  prose: "the chain its lines describe, one level below them — each step, and why it follows from the one before",
+  list: "why each item is so — the mechanism or reasoning behind it — and what ties the items together",
+  table: "the underlying difference that produces each distinguishing feature, so the rows can be told apart by reasoning rather than recall",
+};
+
+function passageFocus(s: PlannedSection): string {
+  const past = s.moreLabels?.length
+    ? ` Where the topic needs it, it also takes the student past the core — ${s.moreLabels.join(", ").toLowerCase()} — each with its reason.`
+    : "";
+  return `- ${s.title} (${s.scope}): explains ${PASSAGE_LENS[s.kind]}.${past}`;
+}
+
+/**
+ * What a passage is. Its "leave out" list is DEPTH_RULES' — the pilot's
+ * failures — and the reason for it: interesting detail that does not serve
+ * the explanation lowers what is learned from the rest (the seductive-details
+ * effect; Rey 2012, Sundararajan & Adesope 2020).
+ */
+export const PASSAGE_RULES = `WHAT AN IN-DEPTH PASSAGE IS
+The sheet gives the student the facts. The passage under a section is what a good textbook says about them: it explains them, so the section's lines stop being things to memorise and become things the student could reason out.
+- Start from what the section states. Take its central lines and explain them: the mechanism one level below, why each is true, how they connect to each other, and what follows for the patient — the "so what".
+- Answer the questions a thoughtful student asks on reading the section: why is it this way; why not the obvious alternative; what happens when it fails; how is it told apart from its look-alike.
+- Write connected prose: whole sentences joined by because, so, which is why, whereas, unless, until. The links between the facts are the point, so no lists, no labels, and no arrow chains in place of sentences.
+- Name a fact the section already states only to explain it, inside a sentence that adds the why. A sentence that only restates the sheet is cut.
+- A fact the sheet does not have comes in only as part of the explanation — the finer threshold, the exception, the second-line option, the special population — each with its reason. Never a fact tacked on for its own sake.
+- Where a concrete case makes a principle click, use one short one: a patient, a number, a time course.
+- Every sentence must be correct. Where a passage below speaks, follow it; where you are unsure of a number or a detail, leave it out rather than guess.
+- If a line of the sheet is wrong or leaves out a rule that changes management, do not explain it as though it were complete: explain what is right.
+LEAVE OUT, even when a passage says it — detail that does not serve the explanation makes the rest harder to learn:
+- Epidemiology by region, country, race or sex; trial names and results; history and discovery; guideline disagreements; research classifications.
+- What a source says about another population, setting or neighbouring topic.
+- Filler: "it is important to note", "in summary", a restatement of the heading, a closing moral.
+- The same explanation twice. Each mechanism is explained once, in the passage of the section it belongs to; another passage may refer back to it in a clause.`;
+
+/** How deep a passage starts, by the student's difficulty — explicit for a novice, dense for an expert. */
+const PASSAGE_PITCH: Record<string, string> = {
+  Basic:
+    "The student is meeting this for the first time. Define each technical term the first time it appears, take one step at a time, and leave no step for them to fill in.",
+  Intermediate:
+    "The student knows core physiology and pharmacology. Explain the steps specific to this topic without re-teaching the basics.",
+  Advanced:
+    "The student knows the basics and the high-yield facts. Skip both: go to the finer mechanism, the exceptions and the reasoning an expert uses. Dense is fine.",
+};
+
+/** What a passage reasons toward, by the exam. */
+const PASSAGE_EXAM: Record<ReturnType<typeof asExamMode>, string> = {
+  "USMLE Step 1":
+    "Explain down to the molecule, cell and tissue, and tie each mechanism to the finding, lab value or adverse effect it produces.",
+  "USMLE Step 2":
+    "Explain the clinical reasoning: why this test or step comes next, why this drug over its alternative, what changes the decision, and what to do when first-line fails.",
+  General:
+    "Explain the reasoning a clinician uses: why each step is taken, what to watch for, and what changes management.",
+};
+
+function passageBlock(sections: PlannedSection[], exam: ReturnType<typeof asExamMode>, diff: string): string {
+  return `${PASSAGE_RULES}
+
+PITCH — ${diff}: ${PASSAGE_PITCH[diff] ?? PASSAGE_PITCH.Intermediate}
+${exam === "General" ? "" : `${exam}: `}${PASSAGE_EXAM[exam]}
+
+WHAT EACH PASSAGE EXPLAINS:
+${sections.map(passageFocus).join("\n")}`;
+}
+
+/**
+ * What depth is for a study aid. Each "not" is a failure seen in the pilot: a
+ * DKA depth padded with a pediatric screening rule from a Nelson passage, an
+ * HFrEF depth with comorbidity by continent, case-fatality by race and a
+ * trial's regional results — all true, all in the passages, none of it what a
+ * student going deeper on the topic needs.
  */
 export const DEPTH_RULES = `WHAT DEPTH IS — every line does one of these, for this topic, at this exam and difficulty:
 - Explains the mechanism behind a fact the sheet states: the why.
@@ -271,6 +358,18 @@ ${chunks
 ---
 Use a passage for what it says about this topic; it outranks your own knowledge on any conflict. Add well-established general knowledge where it is silent, and never invent a guideline name, number or citation.`;
 }
+
+/**
+ * How the passages are shaped, said once for all of them. A bold run-in head
+ * on each paragraph keeps a passage skimmable without breaking it into a list.
+ * The example head is from no pilot topic, so it cannot be copied into one.
+ *
+ * A paragraph is one array item rather than a line of one string: asked for
+ * paragraphs split by \n\n inside a string, Corti closed the string between
+ * two of them, and the reply stopped being JSON.
+ */
+const passageFormat = (keys: string[]) =>
+  `- ${keys.join(", ")}: ${keys.length > 1 ? "each " : ""}an array of ${PASSAGE_BUDGET}, one paragraph per string. Each paragraph opens with a bold run-in head of 3 to 8 words naming what it explains, the full stop inside the bold (e.g. "**Why the cough is dry.** "), then 2 to 5 sentences of connected prose — at most ${PARAGRAPH_WORDS} words a paragraph. At most one more bold term per paragraph. No lists, labels or arrows.`;
 
 /** How one key's body is shaped, for the format block. */
 function formatRule(section: PlannedSection, key: string, part: "core" | "more"): string {
@@ -309,14 +408,22 @@ export function buildSectionPrompts(input: SectionPromptInput): { systemPrompt: 
       : [[target!, "core"], ...(req.depth === "comprehensive" ? [[target!, "more"] as [PlannedSection, "more"]] : [])];
   const keyOf = ([s, part]: [PlannedSection, "core" | "more"]) => (part === "core" ? s.key : moreKey(s.key));
   const keys = writes.map(keyOf);
+  const passageOf = ([s, part]: [PlannedSection, "core" | "more"]) => part === "more" && isPassage(s);
+  const passageSections = writes.filter(passageOf).map(([s]) => s);
   // Deepening the whole sheet, a section may have nothing worth adding, and
   // says so with an empty value rather than filling a floor.
-  const quota = ([s, part]: [PlannedSection, "core" | "more"]) => {
-    const q = sectionQuota(s, part);
+  const quota = (w: [PlannedSection, "core" | "more"]) => {
+    const q = passageOf(w) ? PASSAGE_BUDGET : sectionQuota(w[0], w[1]);
     return req.action === "expandAll" ? `${q.replace(/^\d+ to (\d+)/, "up to $1")}, or none` : q;
   };
   const counts = writes.map((w) => `${keyOf(w)}: ${quota(w)}`).join("; ");
-  const skeleton = writes.map(([s, part]) => schemaLine(s, part)).join("\n");
+  const skeleton = writes
+    .map((w) =>
+      passageOf(w)
+        ? `  "${keyOf(w)}": [\n    "<**Run-in head.** The first paragraph of the passage explaining ${w[0].title}.>",\n    "<...>"\n  ],`
+        : schemaLine(w[0], w[1])
+    )
+    .join("\n");
   // The sheet's own coverage shape, so the page reads it with the parser it
   // already has — and a bare "uncovered" list is not mistaken for a section.
   const coverageKey = req.action === "expandAll" ? "sourceCoverage" : "covered";
@@ -329,12 +436,19 @@ export function buildSectionPrompts(input: SectionPromptInput): { systemPrompt: 
       ? `"sourceCoverage": "full" when the Context above supports every key you wrote; "partial" when some keys were written mainly from your own knowledge — list those in "uncovered"; "none" when the Context was empty or irrelevant — list them all. When in doubt, the weaker level.`
       : `"covered" is true only if the Context above supports what you wrote, and false if you wrote it mainly from your own knowledge. With no Context, false.`;
 
+  // A study aid deepened on its own gets more of its kind; every other depth is a passage.
+  const aidDepth = writes.some((w) => w[1] === "more" && !passageOf(w));
+  const allPassages = writes.every(passageOf);
   const task =
     req.action === "expandAll"
-      ? `The student has this high-yield sheet and wants the comprehensive one. Write the "_more" of each section listed below: what a comprehensive sheet adds to that section, in the order shown.
-- Every core stays exactly as it is. You add to the sheet; you never restate it.
-- Share the new facts out across the sections by scope — one home each.
-- A section with nothing worth adding gets an empty value: "" or [].`
+      ? `The student has this high-yield sheet and wants the comprehensive one: under each section listed below, in the order shown, the in-depth passage that explains it.
+- Every section stays exactly as it is. The passage sits under it and explains it.
+- Explain each thing once, under the first section it belongs to. Before each paragraph, check the passages you have already written: if one of them explained this, refer back to it in a clause and spend the paragraph on something else.
+- A section whose lines need no explaining gets [].`
+      : req.action === "expand" && allPassages
+      ? `The student has the high-yield version of "${target!.title}" and wants it in depth. Write "${moreKey(target!.key)}": the passage under it that explains it.
+- The section stays exactly as it is. The passage sits under it and explains it.
+- It explains "${target!.title}" only: what belongs to another section's passage stays out, even though that section has none yet. What another section's passage already explains, refer back to in a clause rather than explain again.`
       : req.action === "expand"
       ? `The student has the high-yield version of "${target!.title}" and wants the comprehensive one. Write "${moreKey(target!.key)}": what a comprehensive sheet adds to this section.
 - The section's core stays exactly as it is. You add to it; you never restate it.
@@ -347,31 +461,52 @@ export function buildSectionPrompts(input: SectionPromptInput): { systemPrompt: 
 - The rewrite must visibly take that direction: every line serves it. A version that reads like the current one with new wording has failed.
 - Keep what is right in the current version and fix what is wrong. Keep its numbers unless they are wrong.
 - "${target!.key}" is the high-yield core: only facts that pass the high-yield test above.${
-          req.depth === "comprehensive" ? `\n- "${moreKey(target!.key)}" is what a comprehensive sheet adds to it, and never restates it.` : ""
+          req.depth === "comprehensive"
+            ? passageSections.length
+              ? `\n- "${moreKey(target!.key)}" is the in-depth passage under it, explaining the rewritten lines, in the same direction.`
+              : `\n- "${moreKey(target!.key)}" is what a comprehensive sheet adds to it, and never restates it.`
+            : ""
         }
 - The other sections stay as they are: say nothing they already say.`;
 
-  const writesDepth = writes.some(([, part]) => part === "more");
+  const rules = [
+    passageSections.length ? passageBlock(passageSections, exam, diff) : "",
+    aidDepth ? DEPTH_RULES : "",
+  ].filter(Boolean);
+  const finalChecks = [
+    `The only keys are ${[...keys, coverageKey].map((k) => `"${k}"`).join(", ")}.`,
+    counts,
+    allPassages
+      ? "Every sentence explains, connects, or adds a fact with its reason; none only restates a line of the sheet, and no passage holds a list, a label or an arrow."
+      : "No fact from the sheet you are given appears again, reworded or not, and no line is about another population or topic.",
+    ...(passageSections.length && !allPassages
+      ? ["Every passage sentence explains, connects, or adds a fact with its reason, and no passage holds a list, a label or an arrow."]
+      : []),
+  ];
   const systemPrompt = `You are a medical educator ${
-    req.action === "regenerate" ? "rewriting one section of" : "deepening"
-  } a student's study sheet. Pitch it at the difficulty level named below.
+    req.action === "regenerate"
+      ? "rewriting one section of"
+      : allPassages
+      ? "writing the in-depth explanations for"
+      : "deepening"
+  } a student's study sheet${allPassages ? " — the way a good textbook explains what a review sheet lists" : ""}. Pitch it at the difficulty level named below.
 
 Mode: ${input.examMode || "General"} | Difficulty: ${diff}
-
-${highYieldTest(exam)}
-
+${allPassages ? "" : `\n${highYieldTest(exam)}\n`}
 ${scopeMap(plan)}
-${writesDepth ? `\n${DEPTH_RULES}\n` : ""}
+${rules.map((r) => `\n${r}\n`).join("")}
 ${passages(ragChunks)}
-
-${ONE_HOME_PER_FACT}
-
+${allPassages ? "" : `\n${ONE_HOME_PER_FACT}\n`}
 YOUR TASK:
 ${task}
 
 FORMAT:
-${writes.map(([s, part], i) => formatRule(s, keys[i], part)).join("\n")}
-- Use **double asterisks** to bold the key term where it helps, and arrows → for flow.
+${[
+  ...writes.flatMap((w, i) => (passageOf(w) ? [] : [formatRule(w[0], keys[i], w[1])])),
+  ...(passageSections.length ? [passageFormat(keys.filter((_, i) => passageOf(writes[i])))] : []),
+].join("\n")}${
+    allPassages ? "" : "\n- Use **double asterisks** to bold the key term where it helps, and arrows → for flow."
+  }
 
 COUNTS — maximums; stop short rather than pad: ${counts}.
 
@@ -383,17 +518,23 @@ ${coverageLine}
 ${coverageRule}
 
 FINAL CHECK — before the closing }:
-- The only keys are ${[...keys, coverageKey].map((k) => `"${k}"`).join(", ")}.
-- ${counts}.
-- No fact from the sheet you are given appears again, reworded or not, and no line is about another population or topic.
+${finalChecks.map((c) => `- ${c}`).join("\n")}
 Start your response with { and end with }. Nothing else.`;
 
   const mark = target
-    ? { key: target.key, note: req.action === "regenerate" ? "CURRENT VERSION — the one you are rewriting" : "THE SECTION YOU ARE DEEPENING" }
+    ? {
+        key: target.key,
+        note:
+          req.action === "regenerate"
+            ? "CURRENT VERSION — the one you are rewriting"
+            : allPassages
+            ? "THE SECTION YOU ARE EXPLAINING"
+            : "THE SECTION YOU ARE DEEPENING",
+      }
     : undefined;
   const userContent = `Topic: ${req.topic}
 
-THE SHEET AS IT STANDS — every fact in it already has its home:
+THE SHEET AS IT STANDS — ${allPassages ? "the lines your passages explain" : "every fact in it already has its home"}:
 ---
 ${sheetAsText(plan, req.sections, mark)}
 ---`;

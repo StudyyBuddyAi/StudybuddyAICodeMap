@@ -75,7 +75,17 @@ import {
   type LayerSource,
   withLayerSections,
 } from "@/lib/sheet-layer";
-import { REGEN_CHOICES, STUDY_AIDS, baseKey, hasBody, isMoreKey, moreKey, type RegenStyle } from "@/lib/sheet-depth";
+import {
+  REGEN_CHOICES,
+  STUDY_AIDS,
+  baseKey,
+  hasBody,
+  isMoreKey,
+  isPassageKey,
+  moreKey,
+  readingMinutes,
+  type RegenStyle,
+} from "@/lib/sheet-depth";
 import { CustomRewrite, DepthBlock, DepthPrompt, SectionMenu, type SectionJob } from "@/components/sheet/SectionDepth";
 import { PersonalProvider, usePersonal, type PersonalApi, type PersonalProps } from "@/components/sheet/personal/personal-context";
 import {
@@ -893,6 +903,65 @@ function renderArraySection(
   );
 }
 
+/**
+ * A section's in-depth passage: paragraphs, not a numbered list. Each is its
+ * own anchor, so a highlight, note or tick lands on one paragraph the way it
+ * lands on one list item.
+ */
+function renderPassageSection(
+  paragraphs: string[],
+  sectionKey: string,
+  renderInline?: (anchor: string) => React.ReactNode,
+  collapsedByAnchor?: Record<string, CollapsedRef[]>,
+  onReopen?: (key: string) => void,
+  pr?: PersonalRender
+) {
+  const added = pr?.additions(sectionKey) ?? [];
+  return (
+    <div className="space-y-3">
+      {paragraphs.map((paragraph, i) => {
+        const anchor = `${sectionKey}:${i}`;
+        if (pr?.skip(anchor)) return null;
+        const text = pr ? pr.text(anchor, paragraph) : paragraph;
+        const edited = pr?.edited(anchor);
+        return (
+          <div
+            key={i}
+            data-enh-anchor={anchor}
+            className={`group/item text-sm leading-relaxed text-muted-foreground${layerLineClass(pr, anchor)}`}
+          >
+            <span className="flex gap-2">
+              <span className="flex-1">
+                {pr?.known(anchor) && <KnownTick />}
+                <span data-layer-text>
+                  {renderRich(
+                    text,
+                    `${sectionKey}-${i}`,
+                    undefined,
+                    collapsedByAnchor?.[anchor] ?? [],
+                    onReopen,
+                    pr?.highlights(anchor) ?? [],
+                    pr?.onHighlightClick
+                  )}
+                </span>
+                {edited && <EditedMark source={edited} />}
+              </span>
+              {pr && <span className="shrink-0">{pr.menu(anchor, text, true)}</span>}
+            </span>
+            {renderInline?.(anchor)}
+            {pr?.extras(anchor, paragraph, text)}
+          </div>
+        );
+      })}
+      {added.map((a) => (
+        <div key={`add-${a.id}`} className="text-sm leading-relaxed text-muted-foreground">
+          <AdditionRow addition={a} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // ─── Draft renderers (the section being written) ───────────────────────────
 //
 // Same markup and classes as renderJsonText / renderArraySection, so the swap
@@ -937,6 +1006,19 @@ function renderDraftProse(text: string) {
       </span>
     );
   });
+}
+
+function renderDraftPassage(paragraphs: string[]) {
+  return (
+    <div className="space-y-3">
+      {paragraphs.map((paragraph, i) => (
+        <div key={i} className="text-sm leading-relaxed text-muted-foreground">
+          <StreamingWords text={paragraph} />
+          {i === paragraphs.length - 1 && <Caret />}
+        </div>
+      ))}
+    </div>
+  );
 }
 
 function renderDraftList(items: string[]) {
@@ -2211,20 +2293,27 @@ const OutputSectionBody = ({
   // ── Depth and rewrites ─────────────────────────────────────────────────
   const isContentKey = (key: string) => key !== "flashcards" && key !== "referenceNote";
 
-  /** A body mid-write, in the draft renderers. */
-  const renderDraftBody = (spec: SheetSectionSpec, body: SectionBody) =>
+  /** A body mid-write, in the draft renderers. A passage streams as paragraphs. */
+  const renderDraftBody = (spec: SheetSectionSpec, body: SectionBody, passage = false) =>
     isTableRows(body)
       ? renderDraftTable(body, spec.columns ?? [])
       : Array.isArray(body)
-      ? renderDraftList(bodyLines(body))
-      : spec.kind !== "prose"
+      ? passage
+        ? renderDraftPassage(bodyLines(body))
+        : renderDraftList(bodyLines(body))
+      : spec.kind !== "prose" && !passage
       ? renderDraftList([body])
       : renderDraftProse(body);
 
-  /** A section's depth, finished: the section's own renderers, anchored under "<key>_more". */
+  /**
+   * A section's depth, finished, anchored under "<key>_more": a passage as
+   * paragraphs, a study aid's depth with its section's own renderers.
+   */
   const renderDepthBody = (spec: SheetSectionSpec, key: string, body: SectionBody) =>
     isTableRows(body) ? (
       renderTableSection(body, spec.columns ?? [], key, handleKeywordClick, renderInline, collapsedByAnchor, reopenEnhancement, pr)
+    ) : Array.isArray(body) && isPassageKey(key) ? (
+      renderPassageSection(bodyLines(body), key, renderInline, collapsedByAnchor, reopenEnhancement, pr)
     ) : typeof body === "string" ? (
       <div className="text-sm text-muted-foreground leading-relaxed">
         {renderJsonText(body, key, handleKeywordClick, renderInline, collapsedByAnchor, reopenEnhancement, pr)}
@@ -2250,7 +2339,9 @@ const OutputSectionBody = ({
     if (deepening) {
       const draftBody = isStreaming ? body : depth.drafts[mk];
       return shown ? (
-        <DepthBlock streaming>{hasBody(draftBody) ? renderDraftBody(spec, draftBody!) : <SectionSkeleton variant="sheet-body" />}</DepthBlock>
+        <DepthBlock streaming>
+          {hasBody(draftBody) ? renderDraftBody(spec, draftBody!, isPassageKey(mk)) : <SectionSkeleton variant="sheet-body" />}
+        </DepthBlock>
       ) : null;
     }
     if (isStreaming) {
@@ -2265,7 +2356,10 @@ const OutputSectionBody = ({
     }
 
     if (hasBody(body)) {
-      if (!shown) return <DepthPrompt kind="show" count={bodyCount(body)} onClick={() => depth.setShown(key, true)} />;
+      if (!shown) {
+        const minutes = Array.isArray(body) && isPassageKey(mk) ? readingMinutes(bodyLines(body)) : undefined;
+        return <DepthPrompt kind="show" count={bodyCount(body)} minutes={minutes} onClick={() => depth.setShown(key, true)} />;
+      }
       // Depth the student asked for can be taken away; depth written with the sheet is the sheet's.
       const asked = !!p && !p.showOriginal && p.layer.sections[mk]?.kind === "depth";
       return (

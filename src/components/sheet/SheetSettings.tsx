@@ -41,7 +41,7 @@ const DIFFICULTY_CHOICES: Choice[] = [
 // section's depth, which can also be added later, one section at a time.
 const DEPTH_CHOICES: Choice<Depth>[] = [
   { value: "highYield", label: "High-yield", hint: "What the exam tests most — nothing else" },
-  { value: "comprehensive", label: "Comprehensive", hint: "High-yield, plus the depth behind each section" },
+  { value: "comprehensive", label: "Comprehensive", hint: "High-yield, plus a textbook-style explanation under each section" },
 ];
 
 const SOURCE_CHOICES: Choice<"on" | "off">[] = [

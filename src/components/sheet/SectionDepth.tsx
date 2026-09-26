@@ -82,15 +82,17 @@ interface DepthPromptProps {
   kind: "show" | "deepen" | "retry";
   /** How many lines the hidden depth holds. */
   count?: number;
+  /** For a passage: about how long it takes to read, which says more than a paragraph count. */
+  minutes?: number;
   busy?: boolean;
   onClick: () => void;
 }
 
-export function DepthPrompt({ kind, count, busy, onClick }: DepthPromptProps) {
+export function DepthPrompt({ kind, count, minutes, busy, onClick }: DepthPromptProps) {
   const Icon = busy ? Loader2 : kind === "show" ? ChevronsDown : kind === "retry" ? RotateCcw : Layers;
   const label =
     kind === "show"
-      ? `Show in depth${count ? ` · ${count} more` : ""}`
+      ? `Show in depth${minutes ? ` · ${minutes} min read` : count ? ` · ${count} more` : ""}`
       : kind === "retry"
       ? "Couldn't go deeper — try again"
       : busy

@@ -5,7 +5,9 @@ import {
   baseKey,
   depthOf,
   hasBody,
+  isPassageKey,
   moreKey,
+  readingMinutes,
   runSectionRequest,
   weakenCoverage,
 } from "./sheet-depth";
@@ -61,6 +63,17 @@ describe("depth keys and settings", () => {
     expect(depthOf("Detailed")).toBe("comprehensive");
     expect(depthOf("Moderate")).toBe("highYield");
     expect(depthOf(undefined)).toBe("highYield");
+  });
+
+  it("knows a passage: a content section's depth, never a study aid's", () => {
+    expect(isPassageKey("overview_more")).toBe(true);
+    expect(isPassageKey("examTraps_more")).toBe(false);
+    expect(isPassageKey("overview")).toBe(false);
+  });
+
+  it("says how long a passage takes to read, never under a minute", () => {
+    expect(readingMinutes(["one two three"])).toBe(1);
+    expect(readingMinutes([Array(500).fill("word").join(" ")])).toBe(3);
   });
 
   it("knows an empty body", () => {
@@ -142,6 +155,13 @@ describe("depth and rewrites in the layer", () => {
     const text = sheetToPlainText(applyLayer(SHEET, layer), "", "DKA", [], (key) => key === "overview");
     expect(text).toContain("Overview — in depth\nMechanism: counterregulatory hormones.");
     expect(text).not.toContain("Key Points — in depth");
+  });
+
+  it("exports a passage as paragraphs, and a study aid's depth as its list", () => {
+    const layer = addDepth(emptyLayer(), { overview_more: ["**Why ketones.** Lipolysis feeds the liver.", "**Why the gap.** Ketoacids are anions."] });
+    const text = sheetToPlainText(applyLayer(SHEET, layer), "", "DKA", [], () => true);
+    expect(text).toContain("Overview — in depth\n**Why ketones.** Lipolysis feeds the liver.\n\n**Why the gap.** Ketoacids are anions.");
+    expect(text).toContain("Key Points — in depth\n1. Low-dose insulin halts ketogenesis");
   });
 });
 
