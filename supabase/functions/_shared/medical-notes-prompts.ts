@@ -13,17 +13,22 @@
  */
 import type { RagChunk } from "./rag.ts";
 import { MEMORY_FOLLOWUP_INSTRUCTION } from "./memory.ts";
-import { DEFAULT_SHEET_PLAN, resolveSheetPlan, sectionQuota, type PlannedSection } from "./sheet-plan.ts";
-import { ONE_HOME_PER_FACT, schemaLine, tableRulesBlock } from "./sheet-schema.ts";
-import type { LengthSetting } from "./sheet-sections.ts";
+import { asExamMode, resolveSheetPlan, sectionQuota, type PlannedSection } from "./sheet-plan.ts";
+import { HIGH_YIELD_ONLY, ONE_HOME_PER_FACT, highYieldTest, schemaLine, tableRulesBlock } from "./sheet-schema.ts";
 import { buildPersonalizePrompt, type PersonalizeRequest } from "./personalize.ts";
 
 export type PromptFamily = "haiku" | "gptOss";
 
-
 export interface NotesPromptInput {
   notes: string;
   difficulty?: string;
+  /**
+   * The sheet's depth. The sheet prompt is the same for both — a
+   * comprehensive sheet's depth is a second call (sheet-section-prompts.ts) —
+   * so this only sets the deck size the handler asks for.
+   */
+  depth?: string;
+  /** Legacy — sent by a client from before depth; ignored by the prompts. */
   length?: string;
   examMode?: string;
   cardsOnly?: boolean;
@@ -61,10 +66,12 @@ export interface NotesPromptInput {
  * reader level now rides on `difficulty` alone, and the settings line is what
  * carries the request's axes into the prompt for both model families.
  */
-function audienceBlock(mode: string, diff: string, len: string): string {
-  return `You are a medical educator writing high-yield study material. Your goal is comprehension and retention, pitched at the difficulty level named below.
+function audienceBlock(mode: string, diff: string): string {
+  // Every sheet is written high-yield — a comprehensive one adds its depth in
+  // a second call — and "high-yield" is now defined, per exam, below.
+  return `You are a medical educator writing a high-yield review sheet: only what the exam tests most, and nothing else. Your goal is comprehension and retention, pitched at the difficulty level named below.
 
-Mode: ${mode} | Difficulty: ${diff} | Length: ${len}`;
+Mode: ${mode} | Difficulty: ${diff}`;
 }
 
 export function buildNotesPrompts(input: NotesPromptInput): { systemPrompt: string; userContent: string } {
@@ -74,7 +81,7 @@ export function buildNotesPrompts(input: NotesPromptInput): { systemPrompt: stri
       return buildPersonalizePrompt(input.personalize, { examMode: input.examMode, difficulty: input.difficulty });
     }
 
-    const { notes, difficulty, length, examMode, cardsOnly, cardCount, focusCard,
+    const { notes, difficulty, examMode, cardsOnly, cardCount, focusCard,
             explainMode,
             enhanceMode, itemText, sectionKey, enhanceTopic,
             groundingAttempted, ragChunks } = input;
@@ -82,14 +89,13 @@ export function buildNotesPrompts(input: NotesPromptInput): { systemPrompt: stri
 
     const mode = examMode || "General";
     const diff = difficulty || "Basic";
-    const len = length || "Concise";
     // A caller that sends no plan (an eval harness, a direct call) still gets
     // a coherent sheet: the condition archetype at the requested settings,
     // which is the shape a sheet has always had.
     const plan: PlannedSection[] =
       input.plan?.length
         ? input.plan
-        : resolveSheetPlan({ archetype: "condition", examMode: mode, difficulty: diff, length: len });
+        : resolveSheetPlan({ archetype: "condition", examMode: mode, difficulty: diff });
 
     const retrievedChunks = ragChunks.length;
     const grounded = retrievedChunks > 0;
@@ -194,16 +200,19 @@ HARD RULES:
 - Mix clinical vignettes and concept recall cards.`;
 
     // ── SHARED SHEET OUTPUT CONTRACT ───────────────────────────────────────
-    // The JSON skeleton and the length gate are generated from the plan rather
+    // The JSON skeleton and the depth gate are generated from the plan rather
     // than written out, so the sections a topic gets and the counts each one
     // must hit come from one place (_shared/sheet-plan.ts) instead of being
     // restated in prose here, again in the Corti checklist, and again in the
     // scorer. A sheet cannot ask for a section the plan did not choose.
-    const schemaLines = plan.map(schemaLine).join("\n");
+    const schemaLines = plan.map((s) => schemaLine(s)).join("\n");
     const gateLines = plan.map((s) => `- ${s.key}: ${sectionQuota(s)}`).join("\n");
     const coverageKeys = plan.map((s) => s.key).join(", ");
+    const depthRules = `${highYieldTest(asExamMode(mode))}
 
-    // Identical JSON schema + length gate + emoji set appended by BOTH model
+${HIGH_YIELD_ONLY}`;
+
+    // Identical JSON schema + depth gate + emoji set appended by BOTH model
     // families. Defined once here; the only per-family difference is the
     // preamble (gptOss = terse; haiku = explicit input/mode rules).
     // groundingContextBlock leads the shared contract so retrieved guideline
@@ -219,6 +228,8 @@ FORMATTING RULES (non-negotiable):
 - Use arrows (→) inside string values to show clinical flow.
 - Numbered list items inside array fields: do NOT include the leading
   number (e.g. "1."). Each array element is already one item.${tableRulesBlock(plan)}
+
+${depthRules}
 
 OUTPUT — return exactly this JSON shape. Write every key listed, in this order,
 and no other keys:
@@ -244,8 +255,8 @@ SOURCE COVERAGE — report honestly, after writing the rest of the sheet:
 
 ${ONE_HOME_PER_FACT}
 
-LENGTH GATE — Length is "${len}". These are MAXIMUMS, whatever the topic's
-complexity. Stop short of a count rather than reach it with a fact the sheet already gave:
+COUNT GATE — these are MAXIMUMS, whatever the topic's complexity. Stop short of a
+count rather than reach it with a fact the sheet already gave:
 
 ${gateLines}
 
@@ -256,9 +267,9 @@ EMOJI OPTIONS:
 
 Start your response with { and end with }. Nothing else.`;
 
-    const gptOssSheetPrompt = `${audienceBlock(mode, diff, len)}
+    const gptOssSheetPrompt = `${audienceBlock(mode, diff)}
 
-Before writing anything: identify the core medical concept from the input, reason through the highest-yield facts for this reader, then generate the full output below.
+Before writing anything: identify the core medical concept from the input, work out which facts pass the high-yield test below for this exam, then generate the full output below.
 
 ${sheetSchemaBlock}`;
 
@@ -381,7 +392,7 @@ HARD RULES:
 - No numbering. No headers between cards. No explanations.
 - Mix clinical vignettes and concept recall cards.`;
 
-    const haikuSheetPrompt = `${audienceBlock(mode, diff, len)}
+    const haikuSheetPrompt = `${audienceBlock(mode, diff)}
 
 INPUT HANDLING:
 The user input may be one of three types:
@@ -400,11 +411,6 @@ DIFFICULTY RULES:
 - Basic: simple language, minimal jargon, define key terms, suitable for early med students.
 - Intermediate: assume Year 3-4 medical student level, standard terminology.
 - Advanced: clinician-level depth, full technical terminology, include nuanced distinctions.
-
-LENGTH RULES:
-- Concise: minimum viable information, ultra-scannable, shortest possible output.
-- Moderate: balanced detail, cover all sections adequately.
-- Detailed: expand every section fully, include edge cases and nuances.
 
 ${sheetSchemaBlock}`;
 

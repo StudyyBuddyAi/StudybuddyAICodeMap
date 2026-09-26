@@ -63,7 +63,7 @@ YOUR OUTPUT:
  * attend to them. Built from the plan so it cannot drift from the schema above
  * it — the two used to be separate lists of the same six sections.
  */
-function sheetChecklist(plan: PlannedSection[], length: string): string {
+function sheetChecklist(plan: PlannedSection[]): string {
   const quotas = plan.map((s) => `${s.key} ${sectionQuota(s)}`).join("; ");
   const tables = plan.filter((s) => s.kind === "table" && s.columns?.length);
   const tableCheck = tables.length
@@ -73,7 +73,7 @@ function sheetChecklist(plan: PlannedSection[], length: string): string {
 
 FINAL CHECK — verify each point before you write the closing }:
 - The sheet has exactly these keys, in this order: ${plan.map((s) => s.key).join(", ")}, referenceNote, sourceCoverage. Do not add a section that is not on that list, and do not leave one out.
-- Length is "${length}": ${quotas}.${tableCheck}
+- Counts: ${quotas}. Every item passes the high-yield test for the exam named above; nothing is there only for completeness.${tableCheck}
 - Write for the audience and exam the request names. A retrieved passage from a pediatrics or adult textbook does not narrow the audience.
 - sourceCoverage must agree with itself: "full" means "uncovered" is empty; "none" lists every section; "partial" lists at least one section but not all of them.
 - referenceNote is a finished sentence — never the instruction text in angle brackets.
@@ -114,7 +114,6 @@ export function buildCortiNotesPrompts(input: NotesPromptInput): { systemPrompt:
       systemPrompt = systemPrompt.slice(0, at) + cardsFormatBlock(count, input.notes.trim()) + memoryTail;
     }
   } else {
-    const length = input.length || "Concise";
     // Mirrors the fallback in buildNotesPrompts, so the checklist always
     // describes the same sections the schema above it asked for.
     const plan = input.plan?.length
@@ -123,9 +122,8 @@ export function buildCortiNotesPrompts(input: NotesPromptInput): { systemPrompt:
           archetype: "condition",
           examMode: input.examMode,
           difficulty: input.difficulty,
-          length,
         });
-    systemPrompt += sheetChecklist(plan, length);
+    systemPrompt += sheetChecklist(plan);
   }
 
   return { systemPrompt, userContent: base.userContent };

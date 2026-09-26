@@ -31,12 +31,19 @@ describe("the section catalogue", () => {
     }
   });
 
-  it("gives every list or table section a count and every prose section a budget", () => {
+  it("gives every section a count or budget for its core and for its depth", () => {
     for (const id of ARCHETYPE_IDS) {
-      for (const section of resolveSheetPlan({ archetype: id, length: "Moderate" })) {
-        if (section.kind === "prose") expect(section.budget).toBeTruthy();
-        else expect(section.items).toBeDefined();
+      for (const section of resolveSheetPlan({ archetype: id })) {
+        if (section.kind === "prose") {
+          expect(section.budget).toBeTruthy();
+          expect(section.moreBudget).toBeTruthy();
+        } else {
+          expect(section.items).toBeDefined();
+          expect(section.moreItems).toBeDefined();
+        }
         expect(sectionQuota(section)).not.toBe("");
+        expect(sectionQuota(section, "more")).not.toBe("");
+        expect(section.moreBrief, section.key).toBeTruthy();
       }
     }
   });
@@ -50,7 +57,7 @@ describe("the section catalogue", () => {
   });
 
   it("sends a table's columns over the wire and counts it in rows", () => {
-    const plan = resolveSheetPlan({ archetype: "pathway", examMode: "USMLE Step 1", length: "Moderate" });
+    const plan = resolveSheetPlan({ archetype: "pathway", examMode: "USMLE Step 1" });
     const cofactors = plan.find((s) => s.key === "cofactors")!;
     expect(cofactors.kind).toBe("table");
     expect(sectionQuota(cofactors)).toMatch(/rows$/);
@@ -108,35 +115,57 @@ describe("the settings change the sections, not just the wording", () => {
     expect(basic).not.toContain("interactions");
   });
 
-  it("length changes the counts, not the sections", () => {
-    const concise = resolveSheetPlan({ archetype: "condition", length: "Concise" });
-    const detailed = resolveSheetPlan({ archetype: "condition", length: "Detailed" });
-    expect(concise.map((s) => s.key)).toEqual(detailed.map((s) => s.key));
-
-    const traps = (p: typeof concise) => p.find((s) => s.key === "examTraps")!.items!;
-    expect(traps(concise)).toEqual([2, 3]);
-    expect(traps(detailed)).toEqual([3, 6]);
+  it("depth is not a plan setting: both depths share one outline", () => {
+    // The plan request has no depth; a comprehensive sheet is the same
+    // sections with each one's "_more" written after the cores.
+    const plan = resolveSheetPlan({ archetype: "condition" });
+    const traps = plan.find((s) => s.key === "examTraps")!;
+    expect(traps.items).toEqual([2, 3]);
+    expect(traps.moreItems).toEqual([1, 3]);
   });
 });
 
 describe("no two sections are briefed for the same content", () => {
   const brief = (req: Parameters<typeof resolveSheetPlan>[0], key: string) =>
     resolveSheetPlan(req).find((s) => s.key === key)!.brief;
+  const moreBrief = (req: Parameters<typeof resolveSheetPlan>[0], key: string) =>
+    resolveSheetPlan(req).find((s) => s.key === key)!.moreBrief;
 
   it("names only text its brief actually contains, so an edit cannot silently stop the hand-off", () => {
     for (const template of Object.values(SECTIONS)) {
+      // A labelled prose brief is its lead plus its labelled lines.
+      const full = [template.brief, ...(template.labels ?? []).map((l) => `${l.label}: ${l.line}`)].join("\n");
       for (const [key, text] of Object.entries(template.yieldsTo ?? {})) {
         expect(SECTIONS[key], `${template.key} yields to unknown section "${key}"`).toBeDefined();
-        expect(template.brief, `${template.key} → ${key}`).toContain(text);
+        expect(full, `${template.key} → ${key}`).toContain(text);
+      }
+      for (const label of template.labels ?? []) {
+        if (label.droppedBy) expect(SECTIONS[label.droppedBy], `${template.key}: ${label.label}`).toBeDefined();
       }
     }
   });
 
   it("drops Clinical Approach's complications when the sheet has a Complications section", () => {
     const advanced = { archetype: "condition" as const, difficulty: "Advanced" };
+    const intermediate = { archetype: "condition" as const, difficulty: "Intermediate" };
     expect(keys(advanced)).toContain("complications");
-    expect(brief(advanced, "clinicalApproach")).not.toContain("Complications:");
-    expect(brief({ archetype: "condition", difficulty: "Intermediate" }, "clinicalApproach")).toContain("Complications:");
+    // Complications is depth, not core, so it lives in the "_more" brief.
+    expect(moreBrief(advanced, "clinicalApproach")).not.toContain("Complications:");
+    expect(moreBrief(intermediate, "clinicalApproach")).toContain("Complications:");
+    expect(brief(intermediate, "clinicalApproach")).not.toContain("Complications:");
+  });
+
+  it("puts Workup and Avoid in the core only where the exam tests them", () => {
+    const step2 = brief({ archetype: "condition", examMode: "USMLE Step 2" }, "clinicalApproach");
+    const step1 = brief({ archetype: "condition", examMode: "USMLE Step 1" }, "clinicalApproach");
+    expect(step2).toContain("Workup:");
+    expect(step2).toContain("Avoid:");
+    expect(step1).not.toContain("Workup:");
+    expect(step1).not.toContain("Avoid:");
+    // What Step 1's core leaves out, its depth adds.
+    const step1More = moreBrief({ archetype: "condition", examMode: "USMLE Step 1" }, "clinicalApproach");
+    expect(step1More).toContain("Workup:");
+    expect(step1More).toContain("Avoid:");
   });
 
   it("drops the distinguishing findings when a differential table covers them", () => {
@@ -179,8 +208,9 @@ describe("plan assembly", () => {
   it("keeps the server's briefs and counts off the wire", () => {
     const wire = toWirePlan(resolveSheetPlan({ archetype: "drug" }));
     for (const spec of wire) {
-      expect(spec).not.toHaveProperty("brief");
-      expect(spec).not.toHaveProperty("items");
+      for (const field of ["brief", "moreBrief", "items", "moreItems", "budget", "moreBudget", "coreLabels", "moreLabels"]) {
+        expect(spec).not.toHaveProperty(field);
+      }
     }
   });
 });
