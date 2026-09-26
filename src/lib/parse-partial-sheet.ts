@@ -159,11 +159,17 @@ function collectSections(raw: Record<string, unknown>): Record<string, SectionBo
   const sections: Record<string, SectionBody> = {};
   for (const [key, value] of Object.entries(raw)) {
     if (RESERVED_SHEET_KEYS.has(key)) continue;
-    if (typeof value === "string") sections[key] = value;
+    if (typeof value === "string") sections[key] = dashes(value);
     else if (Array.isArray(value)) sections[key] = asItemsOrRows(value);
   }
   return sections;
 }
+
+/**
+ * GPT-OSS writes some labels with a non-breaking hyphen ("Second‑line"), which
+ * the renderer's label pattern — and a reader's search — miss.
+ */
+const dashes = (s: string) => s.replace(/[‐‑]/g, "-");
 
 /**
  * A table's rows when the array holds arrays, list items otherwise. Mid-stream
@@ -172,9 +178,9 @@ function collectSections(raw: Record<string, unknown>): Record<string, SectionBo
 function asItemsOrRows(value: unknown[]): string[] | string[][] {
   const rows = value.filter((v): v is unknown[] => Array.isArray(v));
   if (rows.length && rows.length === value.length) {
-    return rows.map((row) => row.map((cell) => (typeof cell === "string" ? cell : "")));
+    return rows.map((row) => row.map((cell) => (typeof cell === "string" ? dashes(cell) : "")));
   }
-  return asStringArray(value);
+  return asStringArray(value).map(dashes);
 }
 
 /** Fill every field so a partial object can't crash the renderer. */

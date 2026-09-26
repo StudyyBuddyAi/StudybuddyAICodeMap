@@ -177,6 +177,14 @@ export interface GeneratedSheet {
    * checks it; a client flag alone unlocks nothing that costs anything.
    */
   premiumGrant?: string;
+  /**
+   * How deep the sheet was asked for. Absent on every sheet from before depth,
+   * which reads as high-yield. A comprehensive sheet's depth is in `sections`
+   * under each key's `_more`.
+   */
+  depth?: "highYield" | "comprehensive";
+  /** Asked for comprehensive, but its depth did not arrive; it can be deepened again. */
+  depthFailed?: boolean;
 }
 
 // Lightweight type used when loading a saved sheet from study_history.

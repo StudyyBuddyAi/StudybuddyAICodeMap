@@ -76,6 +76,20 @@ export interface LayerCard {
   at: string;
 }
 
+/**
+ * A section the student had written after the sheet was: depth for one of its
+ * sections (`<key>_more`), or a section rewritten in a direction they picked
+ * (`<key>`). It is generated content — held here because a saved sheet's row
+ * is never changed, so "Original" still shows the sheet as it was made.
+ */
+export interface LayerSection {
+  body: SectionBody;
+  kind: "depth" | "rewrite";
+  /** rewrite only: the direction it took. */
+  style?: string;
+  at: string;
+}
+
 export interface SheetLayer {
   v: 1;
   highlights: LayerHighlight[];
@@ -88,6 +102,8 @@ export interface SheetLayer {
   /** Anchors the student removed from their view of the sheet. */
   hidden: string[];
   cards: LayerCard[];
+  /** Depth and rewrites, by the key they are written under. */
+  sections: Record<string, LayerSection>;
 }
 
 export const EMPTY_LAYER: SheetLayer = Object.freeze({
@@ -99,6 +115,7 @@ export const EMPTY_LAYER: SheetLayer = Object.freeze({
   known: [],
   hidden: [],
   cards: [],
+  sections: {},
 }) as SheetLayer;
 
 export const emptyLayer = (): SheetLayer => ({
@@ -110,6 +127,7 @@ export const emptyLayer = (): SheetLayer => ({
   known: [],
   hidden: [],
   cards: [],
+  sections: {},
 });
 
 /** Caps that keep one sheet's layer a sane size in a row or in localStorage. */
@@ -117,6 +135,10 @@ export const LAYER_LIMITS = {
   items: 400,
   text: 2000,
   quote: 600,
+  /** Sections: a sheet has at most seven, each with a core and a depth. */
+  sections: 20,
+  sectionItems: 30,
+  prose: 8000,
 } as const;
 
 export function newLayerId(): string {
@@ -208,7 +230,34 @@ export function parseLayer(raw: unknown): SheetLayer {
     layer.cards.push({ id: str(c.id, 64) || newLayerId(), question, answer, anchor: c.anchor, at: str(c.at, 40) || now() });
   }
 
+  if (isObj(raw.sections)) {
+    for (const [key, s] of Object.entries(raw.sections).slice(0, LAYER_LIMITS.sections)) {
+      if (!SECTION_KEY_RE.test(key) || !isObj(s)) continue;
+      const body = layerBody(s.body);
+      if (body === null) continue;
+      layer.sections[key] = {
+        body,
+        kind: s.kind === "rewrite" ? "rewrite" : "depth",
+        ...(typeof s.style === "string" ? { style: s.style.slice(0, 20) } : {}),
+        at: str(s.at, 40) || now(),
+      };
+    }
+  }
+
   return layer;
+}
+
+const SECTION_KEY_RE = /^[A-Za-z][A-Za-z0-9_]*$/;
+
+/** A section body as read back: prose, items or rows, trimmed to the caps; null for anything else. */
+function layerBody(v: unknown): SectionBody | null {
+  if (typeof v === "string") return v.slice(0, LAYER_LIMITS.prose);
+  if (!Array.isArray(v)) return null;
+  const items = v.slice(0, LAYER_LIMITS.sectionItems);
+  if (items.length && items.every((x) => Array.isArray(x))) {
+    return (items as unknown[][]).map((row) => row.slice(0, 4).map((c) => (typeof c === "string" ? c.slice(0, LAYER_LIMITS.text) : "")));
+  }
+  return items.filter((x): x is string => typeof x === "string").map((x) => x.slice(0, LAYER_LIMITS.text));
 }
 
 export function isEmptyLayer(layer: SheetLayer): boolean {
@@ -219,7 +268,8 @@ export function isEmptyLayer(layer: SheetLayer): boolean {
     !layer.notes.length &&
     !layer.known.length &&
     !layer.hidden.length &&
-    !layer.cards.length
+    !layer.cards.length &&
+    !Object.keys(layer.sections).length
   );
 }
 
@@ -437,6 +487,86 @@ export function removeCard(layer: SheetLayer, id: string): SheetLayer {
   return { ...layer, cards: layer.cards.filter((c) => c.id !== id) };
 }
 
+// ── Depth and rewrites ───────────────────────────────────────────────────────
+
+/** Depth the student asked for on one section, or on several at once. */
+export function addDepth(layer: SheetLayer, bodies: Record<string, SectionBody>): SheetLayer {
+  const sections = { ...layer.sections };
+  for (const [key, body] of Object.entries(bodies)) {
+    if (!SECTION_KEY_RE.test(key) || Object.keys(sections).length >= LAYER_LIMITS.sections) continue;
+    sections[key] = { body, kind: "depth", at: now() };
+  }
+  return { ...layer, sections };
+}
+
+/** Whether an anchor points at one of a key's lines (not the section as a whole). */
+const onLineOf = (keys: string[]) => (anchor: string) => keys.includes(anchorSection(anchor)) && !anchor.endsWith(":end");
+
+/**
+ * What the student has anchored to a section's lines: highlights, edits,
+ * notes, known and removed lines. A rewrite takes all of it away — the lines
+ * it pointed at are gone — so the page asks first when this is not zero.
+ */
+export function anchoredTo(layer: SheetLayer, keys: string[]): number {
+  const on = onLineOf(keys);
+  return (
+    layer.highlights.filter((h) => on(h.anchor)).length +
+    Object.keys(layer.edits).filter(on).length +
+    layer.notes.filter((n) => on(n.anchor)).length +
+    layer.known.filter(on).length +
+    layer.hidden.filter(on).length
+  );
+}
+
+/**
+ * A section written again. Its new bodies stand in for the sheet's, and what
+ * was anchored to the old lines goes with them. Cards made from the section
+ * stay: they are already in the deck.
+ */
+export function rewriteSection(layer: SheetLayer, bodies: Record<string, SectionBody>, style: string): SheetLayer {
+  const keys = Object.keys(bodies).filter((k) => SECTION_KEY_RE.test(k));
+  const off = (a: string) => !onLineOf(keys)(a);
+  const edits: Record<string, LayerEdit> = {};
+  for (const [a, e] of Object.entries(layer.edits)) if (off(a)) edits[a] = e;
+  const sections = { ...layer.sections };
+  for (const key of keys) sections[key] = { body: bodies[key], kind: "rewrite", style, at: now() };
+  return {
+    ...layer,
+    sections,
+    edits,
+    highlights: layer.highlights.filter((h) => off(h.anchor)),
+    notes: layer.notes.filter((n) => off(n.anchor)),
+    known: layer.known.filter(off),
+    hidden: layer.hidden.filter(off),
+  };
+}
+
+/** Takes a key's depth or rewrite away, back to what the sheet had. */
+export function removeLayerSection(layer: SheetLayer, keys: string[]): SheetLayer {
+  if (!keys.some((k) => k in layer.sections)) return layer;
+  const sections = { ...layer.sections };
+  for (const k of keys) delete sections[k];
+  return { ...layer, sections };
+}
+
+/**
+ * The sheet with the student's depth and rewrites in place of, or beside, what
+ * was generated. What the renderer, the exporter and the section requests
+ * read. The layer's line operations then apply to this sheet's lines.
+ */
+export function withLayerSections(sheet: GeneratedSheet, layer: SheetLayer): GeneratedSheet {
+  const keys = Object.keys(layer.sections);
+  if (!keys.length) return sheet;
+  const out: GeneratedSheet = { ...sheet, sections: { ...(sheet.sections ?? {}) } };
+  const legacy = out as unknown as Record<string, unknown>;
+  for (const key of keys) {
+    const body = layer.sections[key].body;
+    out.sections![key] = body;
+    if (key in legacy && key !== "sections") legacy[key] = body;
+  }
+  return out;
+}
+
 /**
  * What the sheet itself says at an anchor: a prose line (trimmed), a list item,
  * or a table row's cells joined. Null for a section-level anchor or one the
@@ -462,13 +592,16 @@ export function originalLine(sheet: GeneratedSheet, anchor: string): string | nu
  * as text — export, share, the QBank hand-off. The renderer does not use it:
  * it shows the layer in place, marked as the student's.
  */
-export function applyLayer(sheet: GeneratedSheet, layer: SheetLayer): GeneratedSheet {
-  if (isEmptyLayer(layer)) return sheet;
+export function applyLayer(generated: GeneratedSheet, layer: SheetLayer): GeneratedSheet {
+  if (isEmptyLayer(layer)) return generated;
+  const sheet = withLayerSections(generated, layer);
   const out: GeneratedSheet = { ...sheet, sections: { ...(sheet.sections ?? {}) } };
   const legacy = out as unknown as Record<string, unknown>;
   const hidden = new Set(layer.hidden);
 
-  for (const { key } of resolvePlan(sheet)) {
+  // Each section, and its depth: a depth line can be edited or removed too.
+  const keys = resolvePlan(sheet).flatMap(({ key }) => [key, `${key}_more`]);
+  for (const key of keys) {
     const body = sectionBody(sheet, key);
     if (body === undefined) continue;
     const added = layer.additions.filter((a) => a.section === key).map((a) => a.text);

@@ -11,7 +11,9 @@ export function sheetToPlainText(
   legacyOutput: string,
   topic: string,
   /** More sections, before the footer — the student's notes. */
-  extra: string[] = []
+  extra: string[] = [],
+  /** Which sections' depth is on screen, and so goes with the text. */
+  depthShown: (key: string) => boolean = () => false
 ): string {
   if (!sheet) return legacyOutput ?? "";
 
@@ -22,19 +24,24 @@ export function sheetToPlainText(
   // always matches what was on screen — including archetype sections this
   // build has no name for.
   for (const { key, title, columns } of resolvePlan(sheet)) {
-    const value = sectionBody(sheet, key);
-    if (isTableRows(value)) {
-      // Pipe-separated under its header line, which pastes legibly anywhere
-      // and as a table into anything that reads Markdown.
-      const header = columns?.length ? [columns.join(" | ")] : [];
-      parts.push(`${title}\n` + [...header, ...bodyLines(value)].join("\n"));
-    } else if (Array.isArray(value)) {
-      if (!value.length) continue;
-      parts.push(
-        `${title}\n` + value.map((item, i) => `${i + 1}. ${item}`).join("\n")
-      );
-    } else if (typeof value === "string" && value.trim()) {
-      parts.push(`${title}\n${value.trim()}`);
+    // The section, then its depth under a heading of its own when shown.
+    const bodies: [string, string][] = [[title, key]];
+    if (depthShown(key)) bodies.push([`${title} — in depth`, `${key}_more`]);
+    for (const [heading, bodyKey] of bodies) {
+      const value = sectionBody(sheet, bodyKey);
+      if (isTableRows(value)) {
+        // Pipe-separated under its header line, which pastes legibly anywhere
+        // and as a table into anything that reads Markdown.
+        const header = columns?.length ? [columns.join(" | ")] : [];
+        parts.push(`${heading}\n` + [...header, ...bodyLines(value)].join("\n"));
+      } else if (Array.isArray(value)) {
+        if (!value.length) continue;
+        parts.push(
+          `${heading}\n` + value.map((item, i) => `${i + 1}. ${item}`).join("\n")
+        );
+      } else if (typeof value === "string" && value.trim()) {
+        parts.push(`${heading}\n${value.trim()}`);
+      }
     }
   }
 
