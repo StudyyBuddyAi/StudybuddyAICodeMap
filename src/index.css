@@ -450,6 +450,39 @@
     .pane-crossfade {
       animation: pane-crossfade 200ms ease-out both;
     }
+
+    /* A word arriving over the stream. Each one mounts once and keeps its
+       span, so only the newest words are ever mid-animation. */
+    .sb-word-in {
+      animation: sb-word-in var(--dur-slow) var(--ease-out) both;
+    }
+
+    /* Where the next word lands, at the end of the section being written. */
+    .sb-caret {
+      animation: sb-caret-blink 1.05s steps(2, jump-none) infinite;
+    }
+
+    /* Status text that is still in progress: a band of light sweeps across. */
+    .text-shimmer {
+      color: transparent;
+      background-image: linear-gradient(
+        90deg,
+        var(--fg-muted) 0%,
+        var(--fg-muted) 40%,
+        var(--fg) 50%,
+        var(--fg-muted) 60%,
+        var(--fg-muted) 100%
+      );
+      background-size: 250% 100%;
+      -webkit-background-clip: text;
+      background-clip: text;
+      animation: sb-text-shimmer 2.2s linear infinite;
+    }
+
+    /* A section whose content just arrived: its edge glows once, then settles. */
+    .section-landed {
+      animation: sb-section-landed 1100ms var(--ease-out) both;
+    }
   }
 
   @media (prefers-reduced-motion: reduce) {
@@ -584,6 +617,45 @@
     }
   }
 
+  @keyframes sb-word-in {
+    from {
+      opacity: 0;
+      filter: blur(3px);
+    }
+    to {
+      opacity: 1;
+      filter: blur(0);
+    }
+  }
+
+  @keyframes sb-caret-blink {
+    0% {
+      opacity: 1;
+    }
+    100% {
+      opacity: 0;
+    }
+  }
+
+  @keyframes sb-text-shimmer {
+    from {
+      background-position: 100% 0;
+    }
+    to {
+      background-position: -150% 0;
+    }
+  }
+
+  @keyframes sb-section-landed {
+    from {
+      box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 60%, transparent),
+        0 0 22px -4px color-mix(in srgb, var(--accent) 55%, transparent);
+    }
+    to {
+      box-shadow: 0 0 0 0 transparent, 0 0 0 0 transparent;
+    }
+  }
+
   /* Top progress bar — width transitions are cheap enough to keep always-on,
      but hide the bar entirely for reduced motion */
   .top-progress-bar {
@@ -680,6 +752,58 @@
     text-align: center;
   }
 
+  /* ─── Sheet: a student's own highlights. The colour is the reason —
+     key, confusing, to memorise — so the three read apart in both themes. ─── */
+  .sb-hl {
+    color: inherit;
+    border-radius: 2px;
+    cursor: pointer;
+    -webkit-box-decoration-break: clone;
+    box-decoration-break: clone;
+    transition: background-color 120ms ease;
+  }
+  .sb-hl-key {
+    background: hsl(var(--warning) / 0.24);
+  }
+  .sb-hl-confusing {
+    background: hsl(var(--danger) / 0.16);
+    box-shadow: inset 0 -1.5px 0 hsl(var(--danger) / 0.6);
+  }
+  .sb-hl-memorize {
+    background: hsl(var(--info) / 0.18);
+  }
+  .sb-hl:focus-visible {
+    outline: 2px solid hsl(var(--ring));
+    outline-offset: 1px;
+  }
+  /* The enhancement mark's star, drawn by CSS so it is never part of the
+     line's text — a selection's offsets are measured against that text. */
+  .sb-enh-end::after {
+    content: "✦";
+    font-size: 0.6em;
+    vertical-align: super;
+    margin-left: 1px;
+    color: rgba(234, 179, 8, 0.95);
+  }
+
+  /* ─── The app backdrop: still paper grain over the page colour, under
+     the living field. A few percent, multiplied on paper and screened at
+     night, so it textures the page without greying it. ─── */
+  .sb-grain {
+    background-size: 128px 128px;
+    opacity: 0.045;
+    mix-blend-mode: multiply;
+  }
+  .dark .sb-grain {
+    opacity: 0.035;
+    mix-blend-mode: screen;
+  }
+  @media print {
+    .sb-backdrop {
+      display: none !important;
+    }
+  }
+
   /* ─── Print: "Export PDF" is window.print() into the browser's own
      Save-as-PDF, so the page has to reduce to just the sheet document. ─── */
   @media print {
@@ -730,6 +854,23 @@
     .print-document [role="button"],
     .print-document [data-no-print] {
       display: none !important;
+    }
+    /* A mark is text, clickable or not: hiding it with the buttons above
+       dropped the words of every enhanced passage from the PDF. */
+    .print-document mark[role="button"] {
+      display: inline !important;
+    }
+
+    /* Heights measured on screen would clip text reflowed at page width. */
+    .print-document [data-autoheight] {
+      height: auto !important;
+      overflow: visible !important;
+    }
+
+    /* A recall answer can't be revealed on paper, so print it readable. */
+    .print-document .recall-answer {
+      filter: none !important;
+      opacity: 1 !important;
     }
 
     /* Don't split a section card across pages if it can be helped. */

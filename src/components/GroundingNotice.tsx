@@ -1,5 +1,5 @@
 import { AlertTriangle } from "lucide-react";
-import { SECTION_LABELS } from "@/lib/grounding";
+import { sectionLabel } from "@/lib/grounding";
 import type { GroundingLevel, SourceCoverage } from "@/types/generated-sheet";
 
 const CARD_STYLE: React.CSSProperties = {
@@ -59,6 +59,10 @@ interface GroundingNoticeProps {
    * reason-specific headline rather than guessing "no-match".
    */
   reason?: NoticeReason;
+  /** The sheet's plan, which names its sections for the uncovered list. */
+  plan?: readonly { key: string; title: string }[];
+  /** Jumps to the sheet's Sources section. Omit when it has no passages. */
+  onShowSources?: () => void;
 }
 
 /**
@@ -67,7 +71,7 @@ interface GroundingNoticeProps {
  * "don't show again" — this is a property of the document, not a toast, and
  * it must reappear identically every time the sheet is reopened.
  */
-const GroundingNotice = ({ level, coverage, reason }: GroundingNoticeProps) => {
+const GroundingNotice = ({ level, coverage, reason, plan, onShowSources }: GroundingNoticeProps) => {
   if (level === "full" || level === null) return null;
 
   const headline =
@@ -77,7 +81,7 @@ const GroundingNotice = ({ level, coverage, reason }: GroundingNoticeProps) => {
         : null
       : "Partly covered by our library.";
 
-  const uncoveredLabels = (coverage?.uncovered ?? []).map((k) => SECTION_LABELS[k]).filter(Boolean);
+  const uncoveredLabels = (coverage?.uncovered ?? []).map((k) => sectionLabel(k, plan)).filter(Boolean);
 
   return (
     <div className="animate-fade-in" style={CARD_STYLE} role="note">
@@ -94,6 +98,18 @@ const GroundingNotice = ({ level, coverage, reason }: GroundingNoticeProps) => {
         )}
         <p style={{ ...BODY_STYLE, marginTop: headline || (level === "partial" && uncoveredLabels.length > 0) ? 4 : 0 }}>
           {VERIFY_LINE}
+          {onShowSources && (
+            <>
+              {" "}
+              <button
+                type="button"
+                onClick={onShowSources}
+                className="font-medium underline underline-offset-2 transition-colors hover:text-foreground"
+              >
+                See the sources
+              </button>
+            </>
+          )}
         </p>
       </div>
     </div>

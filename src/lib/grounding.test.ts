@@ -22,8 +22,23 @@ describe("parseSourceCoverage", () => {
     expect(parseSourceCoverage({ level: "mostly" })).toBeNull();
   });
 
-  it("drops section names that aren't real sheet sections", () => {
-    const out = parseSourceCoverage({ level: "partial", uncovered: ["keyPoints", "nonsense"] });
+  it("keeps whatever section names the sheet's plan gave it", () => {
+    // Section keys depend on the plan now, so there is no fixed list to check
+    // against. Filtering to the six legacy names would silently drop a drug
+    // sheet reporting "adverseEffects" as ungrounded, turning the model's
+    // honest partial claim into a stronger one than it made.
+    const out = parseSourceCoverage({
+      level: "partial",
+      uncovered: ["keyPoints", "adverseEffects", "pharmacokinetics"],
+    });
+    expect(out).toEqual({
+      level: "partial",
+      uncovered: ["keyPoints", "adverseEffects", "pharmacokinetics"],
+    });
+  });
+
+  it("still drops entries that aren't usable strings", () => {
+    const out = parseSourceCoverage({ level: "partial", uncovered: ["keyPoints", "", "  ", 7, null] });
     expect(out).toEqual({ level: "partial", uncovered: ["keyPoints"] });
   });
 });

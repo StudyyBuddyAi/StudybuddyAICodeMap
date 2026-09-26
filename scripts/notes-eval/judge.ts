@@ -85,7 +85,7 @@ if (mode === "packets") {
     key[k] = {};
     const c = shuffled[0].case;
     const input = c.kind === "sheet" || c.kind === "cards"
-      ? `notes: ${c.body.notes}\npersona: ${c.body.persona ?? "-"} · exam: ${c.body.examMode} · difficulty: ${c.body.difficulty} · focus: ${c.body.focus} · length: ${c.body.length}${c.body.cardCount ? ` · cards: ${c.body.cardCount}` : ""}\nretrieved chunks: ${shuffled[0].retrievedChunks ?? "-"}`
+      ? `notes: ${c.body.notes}\nexam: ${c.body.examMode} · difficulty: ${c.body.difficulty} · length: ${c.body.length}${c.body.cardCount ? ` · cards: ${c.body.cardCount}` : ""}\nretrieved chunks: ${shuffled[0].retrievedChunks ?? "-"}`
       : c.kind === "explain" ? String(c.body.notes)
       : `topic: ${c.body.enhanceTopic} · section: ${c.body.sectionKey}\nitem: ${c.body.itemText}`;
     const body = shuffled.map((r, i) => {

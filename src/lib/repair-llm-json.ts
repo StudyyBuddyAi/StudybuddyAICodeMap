@@ -18,6 +18,22 @@ const SIMPLE_ESCAPES = new Set(['"', "\\", "/", "b", "f", "n", "r", "t"]);
 /** Characters that can legally follow a closing quote in JSON. */
 const CLOSERS = new Set([",", ":", "}", "]"]);
 
+/** Characters a JSON value can begin with. */
+const VALUE_STARTS = new Set(['"', "[", "{", "-", "t", "f", "n", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9"]);
+
+/**
+ * Whether the `:` at `colonIndex` looks like the separator after a key whose
+ * closing quote was dropped — i.e. a value begins right after it.
+ */
+function startsValue(text: string, colonIndex: number): boolean {
+  let i = colonIndex + 1;
+  while (i < text.length && /[ \t]/.test(text[i])) i++;
+  // A newline between the colon and the value is normal in a pretty-printed
+  // object, so skip whitespace generally once past the same-line spaces.
+  while (i < text.length && /\s/.test(text[i])) i++;
+  return i < text.length && VALUE_STARTS.has(text[i]);
+}
+
 const CONTROL_ESCAPES: Record<string, string> = {
   "\n": "\\n",
   "\r": "\\r",
@@ -50,6 +66,12 @@ function dropTrailingComma(out: string[]): void {
 export function repairLlmJson(text: string): string {
   const out: string[] = [];
   let inString = false;
+  /** Open containers, innermost last — only needed to know where keys appear. */
+  const stack: string[] = [];
+  /** True when the next string to open is an object key, not a value. */
+  let expectKey = false;
+  /** True while inside a string that opened in key position. */
+  let inKey = false;
 
   for (let i = 0; i < text.length; i++) {
     const ch = text[i];
@@ -57,9 +79,22 @@ export function repairLlmJson(text: string): string {
     if (!inString) {
       if (ch === '"') {
         inString = true;
+        inKey = expectKey;
+        out.push(ch);
+      } else if (ch === "{" || ch === "[") {
+        stack.push(ch);
+        expectKey = ch === "{";
         out.push(ch);
       } else if (ch === "}" || ch === "]") {
+        stack.pop();
+        expectKey = false;
         dropTrailingComma(out);
+        out.push(ch);
+      } else if (ch === ",") {
+        expectKey = stack[stack.length - 1] === "{";
+        out.push(ch);
+      } else if (ch === ":") {
+        expectKey = false;
         out.push(ch);
       } else {
         out.push(ch);
@@ -100,10 +135,27 @@ export function repairLlmJson(text: string): string {
     if (ch === '"') {
       if (closesString(text, i)) {
         inString = false;
+        inKey = false;
         out.push(ch);
       } else {
         out.push('\\"');
       }
+      continue;
+    }
+
+    // A key whose closing quote was dropped: `"contraindications: [` instead
+    // of `"contraindications": [`. Without this the string runs on and
+    // swallows the rest of the document, which costs every later section —
+    // measured on roughly one procedure sheet in four.
+    //
+    // Only ever applied to a string that opened in key position and has not
+    // yet contained a quote, and only when a value actually begins after the
+    // colon, so a value containing ": [" is untouched.
+    if (ch === ":" && inKey && startsValue(text, i)) {
+      inString = false;
+      inKey = false;
+      expectKey = false;
+      out.push('"', ":");
       continue;
     }
 

@@ -321,6 +321,35 @@ export type Database = {
           },
         ]
       }
+      sheet_layers: {
+        Row: {
+          layer: Json
+          sheet_id: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          layer?: Json
+          sheet_id: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          layer?: Json
+          sheet_id?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sheet_layers_sheet_id_fkey"
+            columns: ["sheet_id"]
+            isOneToOne: true
+            referencedRelation: "study_history"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       study_history: {
         Row: {
           created_at: string

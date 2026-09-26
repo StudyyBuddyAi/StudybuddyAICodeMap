@@ -83,3 +83,51 @@ describe("repairLlmJson", () => {
     expect(result.referenceNote).toBe("Standard references.");
   });
 });
+
+describe("a key whose closing quote the model dropped", () => {
+  it("recovers the real failure seen on a procedure sheet", () => {
+    // Observed from Corti: `"contraindications: [` instead of
+    // `"contraindications": [`. JSON.parse reports "Bad control character in
+    // string literal" because the unterminated key swallows the newline after
+    // it, and every later section is lost with it.
+    const broken = `{
+  "indications": [
+    "Suspected CNS infection"
+  ],
+  "contraindications: [
+    "Raised intracranial pressure"
+  ],
+  "referenceNote": "General knowledge."
+}`;
+    const parsed = JSON.parse(repairLlmJson(broken));
+    expect(parsed.contraindications).toEqual(["Raised intracranial pressure"]);
+    expect(parsed.indications).toEqual(["Suspected CNS infection"]);
+    expect(parsed.referenceNote).toBe("General knowledge.");
+  });
+
+  it("recovers a dropped quote before a string, object or number value", () => {
+    const parsed = JSON.parse(
+      repairLlmJson('{"topic: "Warfarin", "n: 3, "coverage: {"level": "none"}}')
+    );
+    expect(parsed).toEqual({ topic: "Warfarin", n: 3, coverage: { level: "none" } });
+  });
+
+  it("leaves a colon inside a string value alone", () => {
+    // The value position is what protects this: a real value may contain
+    // ": [" and must not be cut in half.
+    const parsed = JSON.parse(
+      repairLlmJson('{"overview": "Diagnosis: [confirm with echo] then treat"}')
+    );
+    expect(parsed.overview).toBe("Diagnosis: [confirm with echo] then treat");
+  });
+
+  it("leaves a colon inside a well-formed key alone", () => {
+    const parsed = JSON.parse(repairLlmJson('{"a:b": "value"}'));
+    expect(parsed["a:b"]).toBe("value");
+  });
+
+  it("does not fire when no value follows the colon", () => {
+    const parsed = JSON.parse(repairLlmJson('{"overview": "Ratio 2:1 is typical"}'));
+    expect(parsed.overview).toBe("Ratio 2:1 is typical");
+  });
+});

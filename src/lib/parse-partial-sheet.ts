@@ -1,7 +1,8 @@
 import { stripFences } from "./sanitize-json";
 import { repairLlmJson } from "./repair-llm-json";
 import { parseSourceCoverage } from "./grounding";
-import type { Flashcard, GeneratedSheet } from "@/types/generated-sheet";
+import { RESERVED_SHEET_KEYS, parsePlan } from "./sheet-plan";
+import type { Flashcard, GeneratedSheet, SectionBody } from "@/types/generated-sheet";
 
 /**
  * Reading a half-streamed sheet.
@@ -20,6 +21,11 @@ export interface PartialSheetResult {
   sheet: GeneratedSheet;
   /** Top-level keys whose value is definitely finished, in arrival order. */
   completeKeys: string[];
+  /**
+   * The key still being written, whose value in `sheet` is a draft that will
+   * keep growing. Absent once the object has closed.
+   */
+  inFlightKey?: string;
 }
 
 interface ScanState {
@@ -141,11 +147,45 @@ function asFlashcards(v: unknown): Flashcard[] {
     }));
 }
 
+/**
+ * Every top-level key that isn't reserved metadata, coerced by the shape it
+ * arrived in.
+ *
+ * This is what lets a sheet carry sections the six-field interface never named.
+ * The old allowlist silently discarded them, so loosening the prompt alone
+ * would have produced sheets with sections missing and no error anywhere.
+ */
+function collectSections(raw: Record<string, unknown>): Record<string, SectionBody> {
+  const sections: Record<string, SectionBody> = {};
+  for (const [key, value] of Object.entries(raw)) {
+    if (RESERVED_SHEET_KEYS.has(key)) continue;
+    if (typeof value === "string") sections[key] = value;
+    else if (Array.isArray(value)) sections[key] = asItemsOrRows(value);
+  }
+  return sections;
+}
+
+/**
+ * A table's rows when the array holds arrays, list items otherwise. Mid-stream
+ * the last row may be short a cell or two; it is kept, and the renderer pads.
+ */
+function asItemsOrRows(value: unknown[]): string[] | string[][] {
+  const rows = value.filter((v): v is unknown[] => Array.isArray(v));
+  if (rows.length && rows.length === value.length) {
+    return rows.map((row) => row.map((cell) => (typeof cell === "string" ? cell : "")));
+  }
+  return asStringArray(value);
+}
+
 /** Fill every field so a partial object can't crash the renderer. */
 function normalize(raw: Record<string, unknown>): GeneratedSheet {
   return {
     topic: typeof raw.topic === "string" ? raw.topic : undefined,
     topicEmoji: typeof raw.topicEmoji === "string" ? raw.topicEmoji : undefined,
+    // A plan carried in the body is accepted, but the live path is the
+    // server's `__meta` frame — the caller merges that in afterwards.
+    plan: parsePlan(raw.plan) ?? undefined,
+    sections: collectSections(raw),
     overview: asString(raw.overview),
     memoryHooks: asStringArray(raw.memoryHooks),
     clinicalApproach: asString(raw.clinicalApproach),
@@ -174,6 +214,7 @@ function build(
   return {
     sheet: normalize(parsed),
     completeKeys: inFlight ? present.slice(0, -1) : present,
+    ...(inFlight ? { inFlightKey: present[present.length - 1] } : {}),
   };
 }
 

@@ -1,3 +1,57 @@
+/**
+ * How a section's body is shaped, which is what the renderer dispatches on.
+ * `prose` is one string with `\n`-separated labelled lines; `list` is an array
+ * of one-liners; `table` is an array of rows, each an array of cells under the
+ * spec's `columns`.
+ */
+export type SectionKind = "prose" | "list" | "table";
+
+/** A section body as it arrives: prose, list items, or table rows. */
+export type SectionBody = string | string[] | string[][];
+
+/**
+ * Icon vocabulary shared by the server (which names one per planned section)
+ * and the renderer (which maps the name to a component). A name the renderer
+ * does not know falls back to a generic mark rather than rendering nothing, so
+ * the server can add archetype sections without a client release.
+ */
+export type SectionIconName =
+  | "overview"
+  | "memory"
+  | "clinical"
+  | "keypoints"
+  | "traps"
+  | "flashcards"
+  | "reference"
+  | "drug"
+  | "micro"
+  | "anatomy"
+  | "pathway"
+  | "procedure"
+  | "data"
+  | "compare";
+
+/**
+ * One planned section: what to call it, how to render it, and where it sits.
+ *
+ * The plan is resolved server-side from the request's settings and sent ahead
+ * of the model's first byte, so the document's shape is known before any
+ * content arrives and never reflows. The model is told to fill these keys and
+ * nothing else.
+ */
+export interface SheetSectionSpec {
+  /** Top-level JSON key the model writes this section's body under. */
+  key: string;
+  /** Heading shown to the reader, e.g. "Adverse Effects". */
+  title: string;
+  kind: SectionKind;
+  icon?: SectionIconName;
+  /** Whether a "verified sources" badge may appear on this section. */
+  evidenceBacked?: boolean;
+  /** `table` only — the column headers, fixed by the server. */
+  columns?: string[];
+}
+
 export interface Flashcard {
   tag: string;        // e.g. "Next Step", "Diagnosis", "Mechanism", "Complication"
   question: string;   // full question text, tag already stripped
@@ -49,14 +103,15 @@ export interface SheetSource {
  */
 export type GroundingLevel = "full" | "partial" | "none";
 
-/** The sheet sections the model can report as uncovered by the context. */
-export type SheetSectionKey =
-  | "overview"
-  | "clinicalApproach"
-  | "keyPoints"
-  | "examTraps"
-  | "memoryHooks"
-  | "flashcards";
+/**
+ * A section key the model can report as uncovered by the context.
+ *
+ * Open rather than a union: which sections a sheet has depends on its plan, so
+ * a drug sheet reports "adverseEffects" and a pathway sheet "cofactors". The
+ * plan supplies the reader-facing label — see `sectionLabel` in
+ * src/lib/grounding.ts.
+ */
+export type SheetSectionKey = string;
 
 /**
  * The model's own declaration of which sections it had to write from general
@@ -71,6 +126,22 @@ export interface SourceCoverage {
 
 export interface GeneratedSheet {
   topic?: string; // normalized topic name, e.g. "Heart Failure"
+  /**
+   * The sections this sheet was built to contain, in reading order. Absent on
+   * every sheet saved before the plan existed, and on any response whose
+   * `__meta` frame did not arrive — `resolvePlan` falls back to the legacy six
+   * in both cases, so an unplanned sheet renders exactly as it always did.
+   */
+  plan?: SheetSectionSpec[];
+  /**
+   * Section bodies by key. Populated by `normalize` from every top-level key
+   * that is not reserved metadata, so a section the legacy interface never
+   * named still survives parsing instead of being silently dropped.
+   *
+   * The six legacy fields below are kept in step with this map for the code
+   * that still reads them by name (export, grounding, the flashcard save).
+   */
+  sections?: Record<string, SectionBody>;
   overview: string;
   memoryHooks: string[];
   clinicalApproach: string;
@@ -94,6 +165,18 @@ export interface GeneratedSheet {
   // sheet can still distinguish "nothing retrieved" from "retrieved but the
   // model judged it not relevant" (both reconcile to groundingLevel "none").
   retrievedChunks?: number;
+  /**
+   * Written by the premium writer (X-Is-Premium). A premium sheet is
+   * personalizable whatever the student's plan — the free premium generation
+   * is the Pro experience. Unlocks the manual parts only: see `premiumGrant`.
+   */
+  premium?: boolean;
+  /**
+   * The server's proof that this sheet was streamed as premium to a student
+   * without Pro (premium_sheet_grants). The AI actions send it, and the server
+   * checks it; a client flag alone unlocks nothing that costs anything.
+   */
+  premiumGrant?: string;
 }
 
 // Lightweight type used when loading a saved sheet from study_history.

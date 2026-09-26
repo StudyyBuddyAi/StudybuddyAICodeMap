@@ -1,12 +1,11 @@
 /**
  * The medical-notes prompts, lifted out so another writer can run them.
  *
- * GENERATED as a verbatim copy of supabase/functions/medical-notes/index.ts
- * (personaPreamble, the grounding block, every prompt template, the user
- * message and the prompt selection) — deliberately not re-indented, because
- * the template literals' whitespace is prompt text. medical-notes itself still
- * carries its own inline copy and is not changed by this spike; the check in
- * scripts/notes-eval/check-prompts.ts fails if the two ever drift.
+ * Originally a verbatim copy of the prompts medical-notes/index.ts carried
+ * inline — deliberately not re-indented, because the template literals'
+ * whitespace is prompt text. That entrypoint is now a bare serve() over
+ * _shared/medical-notes-handler.ts, so this module is the only copy and is
+ * edited directly.
  *
  * `family` stands in for the model check the original makes
  * (`model === "anthropic/claude-haiku-4.5"`): "haiku" selects the Claude-tuned
@@ -14,16 +13,19 @@
  */
 import type { RagChunk } from "./rag.ts";
 import { MEMORY_FOLLOWUP_INSTRUCTION } from "./memory.ts";
+import { DEFAULT_SHEET_PLAN, resolveSheetPlan, sectionQuota, type PlannedSection } from "./sheet-plan.ts";
+import { ONE_HOME_PER_FACT, schemaLine, tableRulesBlock } from "./sheet-schema.ts";
+import type { LengthSetting } from "./sheet-sections.ts";
+import { buildPersonalizePrompt, type PersonalizeRequest } from "./personalize.ts";
 
 export type PromptFamily = "haiku" | "gptOss";
+
 
 export interface NotesPromptInput {
   notes: string;
   difficulty?: string;
-  focus?: string;
   length?: string;
   examMode?: string;
-  persona?: string;
   cardsOnly?: boolean;
   // Raw req.json() value; parsed with parseInt below.
   cardCount?: unknown;
@@ -38,74 +40,56 @@ export interface NotesPromptInput {
   ragChunks: RagChunk[];
   /** True when prior memory turns go into the messages. */
   hasMemory: boolean;
+  /**
+   * The sections this sheet must contain. Resolved by the handler from the
+   * topic's archetype and the request's settings, and sent to the client in
+   * the same shape, so the prompt and the renderer can never disagree about
+   * what the sheet holds. Empty or absent for cards, explain and enhance.
+   */
+  plan?: PlannedSection[];
   family: PromptFamily;
+  /** An AI action on the student's own sheet (_shared/personalize.ts). */
+  personalize?: PersonalizeRequest | null;
 }
 
 /**
- * Role/tone preamble for the two sheet prompts, selected by persona tier.
- * Persona changes prompt content and register only — never model routing, and
- * never the JSON contract in `sheetSchemaBlock`. Unknown values fall back to
- * "student". (Feature 02 — Persona Tiers.)
+ * Role/tone header for the two sheet prompts.
+ *
+ * Replaces the former persona tiers (student / clinician / expert), which
+ * changed register only and were never enforced anywhere — the model was free
+ * to ignore them and the eval harness could not tell whether it had. The
+ * reader level now rides on `difficulty` alone, and the settings line is what
+ * carries the request's axes into the prompt for both model families.
  */
-function personaPreamble(p: string | undefined, mode: string, diff: string, foc: string, len: string): string {
-  const tier = p === "clinician" ? "clinician" : p === "expert" ? "expert" : "student";
+function audienceBlock(mode: string, diff: string, len: string): string {
+  return `You are a medical educator writing high-yield study material. Your goal is comprehension and retention, pitched at the difficulty level named below.
 
-  if (tier === "student") {
-    return `You are an enthusiastic and clear medical educator writing for an undergraduate medical student (Year 2–4 equivalent). Your goal is comprehension and retention.
-
-Mode: ${mode} | Difficulty: ${diff} | Focus: ${foc} | Length: ${len}
-
-STUDENT PERSONA RULES:
-- Write for someone building foundational understanding. Prioritise intuition before detail.
-- Memory hooks must be vivid, simple mnemonics or analogies — something that sticks.
-- Pathophysiology in the overview should build mechanistically from first principles (cause → effect → clinical consequence). No assumed knowledge.
-- Clinical approach: explain the reasoning behind each step ("we order this because…"), not just the step itself.
-- Exam traps should highlight common conceptual confusions, not just recall errors.
-- Flashcards should be clear vignettes with unambiguous single answers. Avoid expert-level nuance.
-- Language: plain clinical English. Define jargon on first use. Avoid passive voice.`;
-  }
-
-  if (tier === "clinician") {
-    return `You are a senior clinician writing practical, bedside-ready content for a junior doctor, intern, or final-year student on clinical placement. Your goal is safe, confident clinical decision-making.
-
-Mode: ${mode} | Difficulty: ${diff} | Focus: ${foc} | Length: ${len}
-
-CLINICIAN PERSONA RULES:
-- Lead with what matters at the bedside: recognition, triage, and first decisions.
-- The overview should connect pathophysiology directly to signs and symptoms the clinician will actually see ("this mechanism → this presentation").
-- Clinical approach must be actionable: decision thresholds, drug doses where relevant, when to escalate.
-- Memory hooks should be clinical heuristics or rule-of-thumb shortcuts that a doctor would actually use ("if the JVP is raised and the CXR shows…").
-- Exam traps should reflect real clinical traps, not just exam MCQ traps — what gets junior doctors in trouble on the ward.
-- Flashcards: vignette-style with a clinical decision or next best step as the answer. At least half should be "what do you do next?" stems.
-- Language: confident clinical register. Write as if handing over a patient. Brevity is a virtue.`;
-  }
-
-  // expert
-  return `You are a clinician-scientist writing for an advanced reader: a senior medical student, registrar, or specialist trainee who wants mechanistic depth and nuanced clinical reasoning.
-
-Mode: ${mode} | Difficulty: ${diff} | Focus: ${foc} | Length: ${len}
-
-EXPERT PERSONA RULES:
-- Assume high baseline knowledge. Do not define standard terminology.
-- Overview: pathophysiology at the cellular and molecular level where relevant (receptor subtypes, ion channels, signalling cascades). Include genetic or epidemiological context if high-yield.
-- Clinical approach: include second-line and third-line management, nuanced contraindications, special populations, and when guidelines diverge from evidence.
-- Memory hooks can be more sophisticated: mechanistic analogies, pattern-recognition heuristics, or unusual associations that reveal deeper understanding.
-- Exam traps should surface expert-level distinctions: atypical presentations, rare but important exceptions, classic "wrong answer traps" that catch people who almost know the topic.
-- Flashcards: include at least one card on a subtlety or exception the topic is known for. Vignettes may have layered reasoning.
-- Language: technical and precise. Abbreviations acceptable. Dense is fine — this reader wants substance, not scaffolding.`;
+Mode: ${mode} | Difficulty: ${diff} | Length: ${len}`;
 }
 
 export function buildNotesPrompts(input: NotesPromptInput): { systemPrompt: string; userContent: string } {
-    const { notes, difficulty, focus, length, examMode, cardsOnly, cardCount, focusCard,
+    // One family for both tiers: the action is Pro-only and always runs on
+    // the premium writer, and it never touches memory or grounding.
+    if (input.personalize) {
+      return buildPersonalizePrompt(input.personalize, { examMode: input.examMode, difficulty: input.difficulty });
+    }
+
+    const { notes, difficulty, length, examMode, cardsOnly, cardCount, focusCard,
             explainMode,
             enhanceMode, itemText, sectionKey, enhanceTopic,
-            persona, groundingAttempted, ragChunks } = input;
+            groundingAttempted, ragChunks } = input;
     const sectionItems = input.sectionItems as string[] | undefined;
 
     const mode = examMode || "General";
     const diff = difficulty || "Basic";
-    const foc = focus || "Quick Revision";
     const len = length || "Concise";
+    // A caller that sends no plan (an eval harness, a direct call) still gets
+    // a coherent sheet: the condition archetype at the requested settings,
+    // which is the shape a sheet has always had.
+    const plan: PlannedSection[] =
+      input.plan?.length
+        ? input.plan
+        : resolveSheetPlan({ archetype: "condition", examMode: mode, difficulty: diff, length: len });
 
     const retrievedChunks = ragChunks.length;
     const grounded = retrievedChunks > 0;
@@ -210,10 +194,18 @@ HARD RULES:
 - Mix clinical vignettes and concept recall cards.`;
 
     // ── SHARED SHEET OUTPUT CONTRACT ───────────────────────────────────────
+    // The JSON skeleton and the length gate are generated from the plan rather
+    // than written out, so the sections a topic gets and the counts each one
+    // must hit come from one place (_shared/sheet-plan.ts) instead of being
+    // restated in prose here, again in the Corti checklist, and again in the
+    // scorer. A sheet cannot ask for a section the plan did not choose.
+    const schemaLines = plan.map(schemaLine).join("\n");
+    const gateLines = plan.map((s) => `- ${s.key}: ${sectionQuota(s)}`).join("\n");
+    const coverageKeys = plan.map((s) => s.key).join(", ");
+
     // Identical JSON schema + length gate + emoji set appended by BOTH model
     // families. Defined once here; the only per-family difference is the
-    // preamble (gptOss = terse; haiku = explicit input/mode/focus rules).
-    // (Step 1 of feature 02 — Persona Tiers.)
+    // preamble (gptOss = terse; haiku = explicit input/mode rules).
     // groundingContextBlock leads the shared contract so retrieved guideline
     // text is in front of the model before the output schema — and is an empty
     // string when grounding was never attempted, leaving the prompt unchanged.
@@ -226,39 +218,19 @@ FORMATTING RULES (non-negotiable):
   overview and clinicalApproach fields. The renderer handles this.
 - Use arrows (→) inside string values to show clinical flow.
 - Numbered list items inside array fields: do NOT include the leading
-  number (e.g. "1."). Each array element is already one item.
+  number (e.g. "1."). Each array element is already one item.${tableRulesBlock(plan)}
 
-OUTPUT — return exactly this JSON shape:
+OUTPUT — return exactly this JSON shape. Write every key listed, in this order,
+and no other keys:
 
 {
   "topicEmoji": "<one emoji matching the topic>",
   "topic": "<normalized topic name, e.g. Heart Failure — plain text, no emoji>",
-  "overview": "<pathophysiology-first conceptual foundation. MANDATORY STRUCTURE — each sub-section on its own line using \\n before the label. Exact format:\\nMechanism: **Bold the core defect** — one sentence on the cellular or molecular trigger.\\nPathophysiology: 2-3 sentences tracing how that defect produces the clinical syndrome. Use arrows → to show flow. Bold **key mechanisms**.\\nKey associations:\\n1. **Buzzword** → why it occurs mechanistically\\n2. **Classic presentation** → the mechanism behind it\\n3. **High-yield link** → pathophysiologic explanation\\nSTRICT RULES: NO drug names. NO diagnostic criteria (no 'gold standard is...'). NO management steps. NO investigations. Those belong in Clinical Approach only. Each label starts after a \\n. Do NOT merge into one paragraph.>",
-  "memoryHooks": [
-    "<mnemonic one-liner 1>",
-    "<mnemonic one-liner 2>",
-    "<mnemonic one-liner 3>"
-  ],
-  "clinicalApproach": "<Complete, topic-specific clinical decision section — this is the ONLY section with diagnostic criteria, drug names, and management steps. MANDATORY STRUCTURE — each sub-section on its own line using \\n before the label. Exact format:\\nDiagnosis: start with the likely diagnosis for this topic, then include age-, pregnancy-, severity-, and comorbidity-specific clues where relevant; list the closest differentials and how to distinguish them. Never present one universal diagnosis as suitable for every patient.\\nWorkup: what to order and why — labs, imaging, scores, and confirmatory tests appropriate to the patient context.\\nManagement:\\nFirst-line → drug + dose rationale, adjusted for age, organ function, pregnancy, and severity when relevant.\\nSecond-line → when and why to escalate.\\nDefinitive → surgical or specialist triggers.\\nComplications: what goes wrong if undertreated — bold **the dangerous ones**.\\nAvoid: interventions or drugs contraindicated in this condition.\\nBe complete here — do not hold back detail. This section should be the most clinically dense section on the sheet and must not use a generic one-size-fits-all diagnosis or treatment.>",
-  "keyPoints": [
-    "<If X → think Y one-liner 1>",
-    "<If X → think Y one-liner 2>"
-  ],
-  "examTraps": [
-    "<trap one-liner 1>",
-    "<trap one-liner 2>"
-  ],
-  "flashcards": [
-    {
-      "tag": "Next Step",
-      "question": "<full vignette question text>",
-      "answer": "<1-2 sentence answer>"
-    }
-  ],
+${schemaLines}
   "referenceNote": "${referenceNote}",
   "sourceCoverage": {
     "level": "full | partial | none",
-    "uncovered": ["<zero or more of: overview, clinicalApproach, keyPoints, examTraps, memoryHooks, flashcards>"]
+    "uncovered": ["<zero or more of: ${coverageKeys}>"]
   }
 }
 
@@ -270,33 +242,12 @@ SOURCE COVERAGE — report honestly, after writing the rest of the sheet:
 - When in doubt, choose the weaker level. Over-claiming source backing is the worst possible error here —
   worse than under-claiming it.
 
-LENGTH GATE — apply strictly based on the Length setting "${len}":
+${ONE_HOME_PER_FACT}
 
-If Length is "Concise":
-- overview: Mechanism (1 sentence) + Pathophysiology (2 sentences) + Key associations (max 3 items). No more.
-- clinicalApproach: Diagnosis (1-2 sentences, gold standard only) + Management (first-line only, 1-2 sentences) + Complications (max 2 items). Omit Workup, Second-line, Definitive, Avoid sections entirely.
-- memoryHooks: exactly 3 items
-- keyPoints: exactly 5 items
-- examTraps: exactly 3 items
-- flashcards: exactly 3 items, mix: 1x Next Step, 1x Diagnosis, 1x Mechanism. All clinical vignettes.
+LENGTH GATE — Length is "${len}". These are MAXIMUMS, whatever the topic's
+complexity. Stop short of a count rather than reach it with a fact the sheet already gave:
 
-If Length is "Moderate":
-- overview: Mechanism (1 sentence) + Pathophysiology (2-3 sentences) + Key associations (max 4 items).
-- clinicalApproach: all subsections at moderate depth, no padding.
-- memoryHooks: 3-4 items
-- keyPoints: 6-8 items
-- examTraps: 4 items
-- flashcards: exactly 4 items, mix: 1x Next Step, 1x Diagnosis, 1x Mechanism, 1x Complication. All clinical vignettes.
-
-If Length is "Detailed":
-- overview: Mechanism (1-2 sentences) + Pathophysiology (3-4 sentences) + Key associations (5-6 items).
-- clinicalApproach: all subsections fully expanded, include edge cases and nuances.
-- memoryHooks: 5 items
-- keyPoints: 8-10 items
-- examTraps: 5-6 items
-- flashcards: exactly 5 items, mix: 2x Next Step, 1x Diagnosis, 1x Mechanism, 1x Complication. All clinical vignettes.
-
-These are HARD CAPS. Do not exceed them regardless of topic complexity.
+${gateLines}
 
 EMOJI OPTIONS:
 🫀 cardiac, 🩸 hematology, 🧠 neuro, 🫁 pulmonary, 🦴 ortho, 🩺 general,
@@ -305,9 +256,9 @@ EMOJI OPTIONS:
 
 Start your response with { and end with }. Nothing else.`;
 
-    const gptOssSheetPrompt = `${personaPreamble(persona, mode, diff, foc, len)}
+    const gptOssSheetPrompt = `${audienceBlock(mode, diff, len)}
 
-Before writing anything: identify the core medical concept from the input, reason through the highest-yield facts for this persona, then generate the full output below.
+Before writing anything: identify the core medical concept from the input, reason through the highest-yield facts for this reader, then generate the full output below.
 
 ${sheetSchemaBlock}`;
 
@@ -430,7 +381,7 @@ HARD RULES:
 - No numbering. No headers between cards. No explanations.
 - Mix clinical vignettes and concept recall cards.`;
 
-    const haikuSheetPrompt = `${personaPreamble(persona, mode, diff, foc, len)}
+    const haikuSheetPrompt = `${audienceBlock(mode, diff, len)}
 
 INPUT HANDLING:
 The user input may be one of three types:
@@ -444,11 +395,6 @@ MODE RULES:
 - USMLE Step 1: Focus on mechanisms, pathophysiology, biochemical pathways, and classic associations.
 - USMLE Step 2: Focus on diagnosis, clinical management, next best steps, and patient scenarios.
 - General: Provide a balanced clinical overview.
-
-FOCUS RULES:
-- Quick Revision: Concise high-yield facts only.
-- Deep Understanding: Brief but clear explanations of mechanisms.
-- Clinical Reasoning: Application-based scenarios and clinical decision-making.
 
 DIFFICULTY RULES:
 - Basic: simple language, minimal jargon, define key terms, suitable for early med students.
@@ -478,7 +424,9 @@ ${sheetSchemaBlock}`;
     } else if (explainMode) {
       systemPrompt = isHaiku ? haikuExplainPrompt : gptOssExplainPrompt;
     } else if (cardsOnly) {
-      const count = Math.min(Math.max(parseInt(String(cardCount)) || 12, 5), 20);
+      // Floor is 3, not 5: a sheet's own deck is 3 cards at Concise. The
+      // standalone deck builder still only offers 5-20.
+      const count = Math.min(Math.max(parseInt(String(cardCount)) || 12, 3), 20);
       systemPrompt = isHaiku ? haikuCardsPrompt(count) : gptOssCardsPrompt(count);
     } else {
       systemPrompt = isHaiku ? haikuSheetPrompt : gptOssSheetPrompt;

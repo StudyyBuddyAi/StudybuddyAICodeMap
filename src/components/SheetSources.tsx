@@ -313,6 +313,11 @@ interface SheetSourcesProps {
    * passages render unhighlighted.
    */
   query?: string;
+  /**
+   * Inside another card — the sheet's Sources section — so without a card of
+   * its own, and with a plain lead-in in place of its heading.
+   */
+  embedded?: boolean;
 }
 
 /**
@@ -330,11 +335,28 @@ interface SheetSourcesProps {
  * src/lib/source-labels.ts before they ever reach this component. Self-hides
  * when there is nothing to show.
  */
-const SheetSources = ({ sources, query }: SheetSourcesProps) => {
+const SheetSources = ({ sources, query, embedded = false }: SheetSourcesProps) => {
   const books = groupSources(sources);
   if (books.length === 0) return null;
 
   const passageCount = books.reduce((n, b) => n + b.passageCount, 0);
+  const summary = `${passageCount} ${passageCount === 1 ? "passage" : "passages"} from ${books.length} ${
+    books.length === 1 ? "book" : "books"
+  } · open any line to read it`;
+
+  if (embedded) {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+        <p style={{ fontFamily: "var(--font-sans)", fontSize: 12, color: "var(--fg-muted)", margin: 0 }}>
+          <span style={{ fontWeight: 600, color: "var(--fg)" }}>From the guideline library</span> ·{" "}
+          {summary}
+        </p>
+        {books.map((book) => (
+          <BookGroup key={book.rawName} book={book} query={query ?? ""} />
+        ))}
+      </div>
+    );
+  }
 
   return (
     <div data-section-key="sources" className="animate-fade-in scroll-mt-20" style={CARD_STYLE}>
@@ -353,8 +375,7 @@ const SheetSources = ({ sources, query }: SheetSourcesProps) => {
                 margin: "2px 0 0",
               }}
             >
-              {passageCount} {passageCount === 1 ? "passage" : "passages"} from {books.length}{" "}
-              {books.length === 1 ? "book" : "books"} · open any line to read it
+              {summary}
             </p>
           </div>
         </div>
