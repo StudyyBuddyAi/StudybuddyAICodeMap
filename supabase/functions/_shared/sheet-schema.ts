@@ -67,10 +67,10 @@ Not high-yield unless the exam tests it directly: prevalence figures, history an
 }
 
 /**
- * Every sheet is written high-yield. A comprehensive sheet is this sheet plus
- * a second call that writes each section's depth from it — asked for both in
- * one pass, the writer shared the facts out between core and depth, so the
- * core stopped being the high-yield sheet (see sheet-section-prompts.ts).
+ * Every sheet is written high-yield. A comprehensive sheet is this sheet with
+ * its first branches grown from it afterwards (sheet-branch-prompts.ts) —
+ * asked for core and depth in one pass, the writer shared the facts out
+ * between them, so the core stopped being the high-yield sheet.
  */
 export const HIGH_YIELD_ONLY = `DEPTH — High-yield. Write only the facts that pass the test above. Leave out everything that does not, even where a count below would allow more. A short sheet of the right facts beats a full one padded with the wrong ones.`;
 

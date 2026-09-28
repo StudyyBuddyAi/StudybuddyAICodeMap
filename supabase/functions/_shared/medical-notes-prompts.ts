@@ -24,8 +24,8 @@ export interface NotesPromptInput {
   difficulty?: string;
   /**
    * The sheet's depth. The sheet prompt is the same for both — a
-   * comprehensive sheet's depth is a second call (sheet-section-prompts.ts) —
-   * so this only sets the deck size the handler asks for.
+   * comprehensive sheet is this sheet with its first branches grown
+   * (sheet-branch-prompts.ts) — so this only sets the deck size.
    */
   depth?: string;
   /** Legacy — sent by a client from before depth; ignored by the prompts. */
@@ -67,8 +67,8 @@ export interface NotesPromptInput {
  * carries the request's axes into the prompt for both model families.
  */
 function audienceBlock(mode: string, diff: string): string {
-  // Every sheet is written high-yield — a comprehensive one adds its depth in
-  // a second call — and "high-yield" is now defined, per exam, below.
+  // Every sheet is written high-yield — a comprehensive one grows branches
+  // from it afterwards — and "high-yield" is now defined, per exam, below.
   return `You are a medical educator writing a high-yield review sheet: only what the exam tests most, and nothing else. Your goal is comprehension and retention, pitched at the difficulty level named below.
 
 Mode: ${mode} | Difficulty: ${diff}`;

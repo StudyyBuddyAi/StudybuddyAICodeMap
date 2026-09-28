@@ -1,4 +1,9 @@
 /**
+ * Historical: branches have since replaced depth passages (branch-pilot.ts).
+ * The section-request contract no longer has expand or expandAll, so only the
+ * sheets and regen phases still run; the outputs under out/depth-pilot* are
+ * the record of what depth passages were.
+ *
  * Depth pilot: high-yield and comprehensive sheets, against the Concise and
  * Detailed sheets they replace, plus the follow-ups on one section (deepen it,
  * rewrite it in a direction).

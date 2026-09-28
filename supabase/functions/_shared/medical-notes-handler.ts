@@ -40,14 +40,14 @@ import { DEFAULT_ARCHETYPE, asDepth, type Depth } from "./sheet-sections.ts";
 import { buildCortiNotesPrompts } from "./medical-notes-prompts-corti.ts";
 import { asCortiModel, cortiChatCompletion, cortiConfigFromEnv, type CortiModel } from "./corti.ts";
 import { PERSONALIZE_MAX_TOKENS, isGrantId, parsePersonalizeRequest } from "./personalize.ts";
+import { REASONING_HEADROOM, SECTION_MAX_TOKENS, buildSectionPrompts, parseSectionRequest } from "./sheet-section-prompts.ts";
 import {
-  EXPAND_ALL_MAX_TOKENS,
-  REASONING_HEADROOM,
-  SECTION_MAX_TOKENS,
-  buildSectionPrompts,
-  parseSectionRequest,
-  type SectionRequest,
-} from "./sheet-section-prompts.ts";
+  GROW_MAX_TOKENS,
+  SUGGEST_MAX_TOKENS,
+  buildGrowPrompts,
+  buildSuggestPrompts,
+  parseBranchRequest,
+} from "./sheet-branch-prompts.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -78,12 +78,18 @@ const ANON_PREMIUM_LIMIT = 1;
 const FREE_PREMIUM_LIMIT = 3;
 const DAILY_CAP = 5;
 /**
- * Section requests a free or anonymous student may make in a day — deepening
- * a section, deepening a whole sheet, rewriting a section. Counted apart from
- * sheets (usage_records kind "section"). A comprehensive sheet's own depth is
- * part of the sheet and does not count here.
+ * Section rewrites a free or anonymous student may make in a day. Counted
+ * apart from sheets (usage_records kind "section").
  */
 const SECTION_DAILY_CAP = 15;
+/**
+ * Branch requests a free or anonymous student may make in a day — the
+ * suggestions for a sheet, and each branch grown. Its own count (kind
+ * "branch"), set high: it is there to stop abuse, not to ration exploring. A
+ * comprehensive sheet grows about ten, and a day's five sheets fit with room
+ * to spare.
+ */
+const BRANCH_DAILY_CAP = 120;
 
 /**
  * How long to wait for Corti's response headers before treating it as
@@ -128,39 +134,6 @@ function decodeJwtPayload(token: string): Record<string, unknown> {
 }
 
 const since = (t: number) => Date.now() - t;
-
-/**
- * The content deltas of an OpenAI-shaped SSE stream, one text at a time.
- * Reasoning and provider metadata are dropped, as the main relay drops them.
- */
-async function* contentDeltas(body: ReadableStream<Uint8Array>): AsyncGenerator<string> {
-  const reader = body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-  try {
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const events = buffer.split(/\r?\n\r?\n/);
-      buffer = events.pop() ?? "";
-      for (const event of events) {
-        const dataLine = event.trim().split("\n").find((line) => line.startsWith("data:"));
-        const payload = dataLine?.slice(5).trim();
-        if (!payload || payload.includes("[DONE]")) continue;
-        try {
-          const text = JSON.parse(payload)?.choices?.[0]?.delta?.content;
-          if (typeof text === "string" && text) yield text;
-        } catch {
-          // skip unparseable chunks
-        }
-      }
-    }
-  } finally {
-    // A caller that stops early (the student left) releases the upstream.
-    reader.cancel().catch(() => {});
-  }
-}
 
 /**
  * Embeds and retrieves, retrying once on failure. Still fail-open: after the
@@ -239,21 +212,6 @@ async function chunksById(client: SupabaseClient, ids: string[]): Promise<RagChu
       pageStart: null,
       pageEnd: null,
     }));
-}
-
-/**
- * The expandAll request that deepens a finished high-yield sheet — the second
- * half of a comprehensive sheet. Null when the sheet's JSON cannot be read.
- */
-function depthRequestFor(sheetText: string, planKeys: string[], fallbackTopic: string): SectionRequest | null {
-  let parsed: Record<string, unknown>;
-  try {
-    parsed = JSON.parse(sanitizeJsonOutput(sheetText));
-  } catch {
-    return null;
-  }
-  const topic = typeof parsed.topic === "string" && parsed.topic.trim() ? parsed.topic : fallbackTopic;
-  return parseSectionRequest({ action: "expandAll", plan: planKeys, sections: parsed, topic, sourceIds: [] });
 }
 
 /** Whether this grant exists and belongs to this user. */
@@ -430,32 +388,44 @@ export async function handleMedicalNotes(req: Request): Promise<Response> {
     }
     const isPersonalize = personalize !== null;
 
-    // Depth for a sheet the student already has, or a rewrite of one of its
-    // sections (_shared/sheet-section-prompts.ts). Its own daily count, never
-    // a sheet's; no retrieval, memory or premium hook — it is grounded on the
-    // sheet's own passages and written by the tier that wrote the sheet.
+    // A rewrite of one section of a sheet the student already has
+    // (_shared/sheet-section-prompts.ts). Its own daily count, never a sheet's;
+    // no retrieval, memory or premium hook — it is grounded on the sheet's own
+    // passages and written by the tier that wrote the sheet.
     const section = body.section == null ? null : parseSectionRequest(body.section);
     if (body.section != null && !section) {
       return json({ error: "invalid_section_request" }, 400);
     }
     const isSection = section !== null;
 
+    // Branches (_shared/sheet-branch-prompts.ts): the pills a finished sheet
+    // offers, and each branch grown from one. Like a rewrite — grounded on the
+    // sheet's own passages, no memory, no premium hook — but on their own daily
+    // count, and written by the premium writer for everyone.
+    const branch = body.branch == null ? null : parseBranchRequest(body.branch);
+    if (body.branch != null && !branch) {
+      return json({ error: "invalid_branch_request" }, 400);
+    }
+    const isBranch = branch !== null;
+    // A follow-up on a sheet already on the page: grounded on its passages, no memory.
+    const isFollowUp = isSection || isBranch;
+
     const isAnonymous =
       user.is_anonymous === true || decodeJwtPayload(token).is_anonymous === true;
     const quotaEligible = !explainMode && !enhanceMode && !isPersonalize;
-    const usageKind = isSection ? "section" : cardsOnly ? "cards" : "sheet";
-    const dailyCap = isSection ? SECTION_DAILY_CAP : DAILY_CAP;
+    const usageKind = isBranch ? "branch" : isSection ? "section" : cardsOnly ? "cards" : "sheet";
+    const dailyCap = isBranch ? BRANCH_DAILY_CAP : isSection ? SECTION_DAILY_CAP : DAILY_CAP;
     // A sectioned JSON document, as opposed to a card deck or a prose reply.
-    const isSheetMode = !cardsOnly && !explainMode && !enhanceMode && !isPersonalize && !isSection;
-    // High-yield or comprehensive. A client from before depth sends a length
-    // instead, and gets high-yield whatever it asked for: it has no renderer
-    // for a section's "_more", so depth would be written, paid for and unseen.
+    const isSheetMode = !cardsOnly && !explainMode && !enhanceMode && !isPersonalize && !isFollowUp;
+    // High-yield or comprehensive. The sheet is written the same either way:
+    // the page grows a comprehensive sheet's branches once it has streamed.
+    // Here depth only sizes the deck.
     const depth = asDepth(body.depth);
 
     // ── Pre-model work, concurrently ────────────────────────────────────────
     // Grounding: sheet/cards only; explain/enhance/personalize are single-item
     // follow-ups, and a section request re-reads its sheet's own passages.
-    const groundingEligible = !enhanceMode && !explainMode && !isPersonalize && !isSection;
+    const groundingEligible = !enhanceMode && !explainMode && !isPersonalize && !isFollowUp;
     const useGroundingFlag = typeof useGrounding === "boolean" ? useGrounding : true;
     const groundingAttempted = groundingEligible && useGroundingFlag;
     const groundingTopK = Math.min(Math.max(Math.round(typeof topK === "number" ? topK : 8), 1), 10);
@@ -469,10 +439,12 @@ export async function handleMedicalNotes(req: Request): Promise<Response> {
           .then((r) => ({ ...r, ms: since(retrievalStartedAt) }))
       : Promise.resolve({ chunks: [] as RagChunk[], attempts: 0, error: null, ms: 0 });
 
-    // The passages the sheet was built on, by the ids it saved — so its depth
-    // rests on what its badges vouch for, with no new embedding call.
-    const sectionChunksPromise: Promise<RagChunk[]> =
-      isSection && section!.sourceIds.length ? chunksById(authClient, section!.sourceIds) : Promise.resolve([]);
+    // The passages the sheet was built on, by the ids it saved — so a rewrite
+    // or a branch rests on what its badges vouch for, with no new embedding call.
+    const followUpSourceIds = section?.sourceIds ?? branch?.sourceIds ?? [];
+    const sectionChunksPromise: Promise<RagChunk[]> = followUpSourceIds.length
+      ? chunksById(authClient, followUpSourceIds)
+      : Promise.resolve([]);
 
     // Archetype: what kind of thing this is, which decides the sheet's
     // sections. Classified by Corti for every tier. Runs beside retrieval
@@ -484,9 +456,9 @@ export async function handleMedicalNotes(req: Request): Promise<Response> {
       : Promise.resolve({ archetype: null, ms: 0, error: null });
 
     // Memory: the shared 10-turn window. enhance reads but never writes;
-    // personalize and section requests neither read nor write — they are
-    // about a sheet already on the page, not a turn.
-    const useMemoryFlag = !isPersonalize && !isSection && (typeof useMemory === "boolean" ? useMemory : true);
+    // personalize, section and branch requests neither read nor write — they
+    // are about a sheet already on the page, not a turn.
+    const useMemoryFlag = !isPersonalize && !isFollowUp && (typeof useMemory === "boolean" ? useMemory : true);
     const memoryWritable = useMemoryFlag && !enhanceMode;
     const memoryStartedAt = Date.now();
     const memoryPromise = (async () => {
@@ -516,9 +488,14 @@ export async function handleMedicalNotes(req: Request): Promise<Response> {
       // server recorded for a premium sheet; it never spends the hook.
       // A section request is written by the tier that wrote its sheet: Corti
       // for Pro (unless they chose fastest) and for a premium sheet's grant,
-      // GPT-OSS otherwise. Depth by a different writer than the core reads as
-      // a different sheet, and GPT-OSS measured least accurate.
-      const hookPromise: Promise<boolean> = isPersonalize
+      // GPT-OSS otherwise. A section by a different writer than the rest reads
+      // as a different sheet, and GPT-OSS measured least accurate.
+      // A branch is written by the premium writer for everyone: it is where a
+      // sheet goes past what it was written with, and GPT-OSS's depth measured
+      // with clinical errors (the depth pilot).
+      const hookPromise: Promise<boolean> = isBranch
+        ? Promise.resolve(true)
+        : isPersonalize
         ? isProUser
           ? Promise.resolve(true)
           : hasPremiumGrant(authClient, user.id, personalize!.grant)
@@ -598,7 +575,7 @@ export async function handleMedicalNotes(req: Request): Promise<Response> {
       const planned = archetypePromise.then((archetype) => {
         // The sections this sheet gets: archetype chooses the spine, exam mode
         // and difficulty add to it. Depth does not change them — it decides
-        // whether each one's "_more" is written — so it travels beside the plan.
+        // whether the page grows branches afterwards — so it travels beside the plan.
         const sheetPlan = isSheetMode
           ? resolveSheetPlan({
               archetype: archetype.archetype,
@@ -674,14 +651,16 @@ export async function handleMedicalNotes(req: Request): Promise<Response> {
         // The validated request, never the raw body field.
         personalize,
       };
-      // A personalize reply is a line or a card, not a document; a section
-      // request, a section or a sheet's worth of depth.
+      // A personalize reply is a line or a card, not a document; a rewrite is
+      // one section; a branch, a few hundred words, or a sheet's pills.
       const maxTokens = isPersonalize
         ? PERSONALIZE_MAX_TOKENS
         : isSection
-        ? section!.action === "expandAll"
-          ? EXPAND_ALL_MAX_TOKENS
-          : SECTION_MAX_TOKENS
+        ? SECTION_MAX_TOKENS
+        : isBranch
+        ? branch!.action === "suggest"
+          ? SUGGEST_MAX_TOKENS
+          : GROW_MAX_TOKENS
         : 8192;
       const messagesFor = (p: { systemPrompt: string; userContent: string }) => [
         { role: "system" as const, content: p.systemPrompt },
@@ -695,9 +674,14 @@ export async function handleMedicalNotes(req: Request): Promise<Response> {
       const notesPrompts = useTunedPrompts ? buildCortiNotesPrompts : buildNotesPrompts;
 
       type Prompts = { systemPrompt: string; userContent: string };
-      /** A section request's prompt is the same for every writer. */
+      /** A rewrite's or a branch's prompt is the same for every writer. */
+      const followUp = { examMode: body.examMode, difficulty: body.difficulty, ragChunks: sectionChunks };
       const sectionPrompts: Prompts | null = isSection
-        ? buildSectionPrompts({ request: section!, examMode: body.examMode, difficulty: body.difficulty, ragChunks: sectionChunks })
+        ? buildSectionPrompts({ request: section!, ...followUp })
+        : isBranch
+        ? branch!.action === "suggest"
+          ? buildSuggestPrompts({ request: branch!, ...followUp })
+          : buildGrowPrompts({ request: branch!, ...followUp })
         : null;
       /** The prompts for a writer: tuned for Corti and GPT-OSS, the originals for the Haiku fallback. */
       const promptsFor = (family: "haiku" | "gptOss", original = false): Prompts =>
@@ -747,28 +731,6 @@ export async function handleMedicalNotes(req: Request): Promise<Response> {
           fallbackReason: null,
         };
       };
-
-      /**
-       * The second half of a comprehensive sheet: once the high-yield sheet has
-       * streamed, every content section's depth, written from it by the same
-       * tier. Null when the sheet cannot be read or the writer cannot start —
-       * the page then offers to deepen the sheet itself.
-       */
-      const writeDepth =
-        isSheetMode && depth === "comprehensive"
-          ? async (sheetText: string) => {
-              const request = depthRequestFor(sheetText, sheetPlan.map((s) => s.key), notes.trim().slice(0, 120));
-              if (!request) return null;
-              const prompts = buildSectionPrompts({
-                request,
-                examMode: body.examMode,
-                difficulty: body.difficulty,
-                ragChunks,
-              });
-              const started = await startWriter(() => prompts, EXPAND_ALL_MAX_TOKENS, false);
-              return started.response?.ok && started.response.body ? started : null;
-            }
-          : null;
 
       /**
        * The deck, written beside the sheet instead of after it.
@@ -849,8 +811,10 @@ export async function handleMedicalNotes(req: Request): Promise<Response> {
         // The action and style only — never the student's text.
         personalize: personalize ? `${personalize.action}${personalize.style ? `:${personalize.style}` : ""}` : null,
         // The action, section and direction only — never the sheet's text.
-        section: section ? `${section.action}${section.key ? `:${section.key}` : ""}${section.style ? `:${section.style}` : ""}` : null,
-        sectionChunks: isSection ? sectionChunks.length : null,
+        section: section ? `${section.action}:${section.key}:${section.style}` : null,
+        // The action and branch type only — never the sheet's text or the question.
+        branch: branch ? `${branch.action}${branch.question ? `:${branch.question.type}` : ""}` : null,
+        sectionChunks: isFollowUp ? sectionChunks.length : null,
         archetype: archetype.archetype ?? (isSheetMode ? DEFAULT_ARCHETYPE : null),
         archetypeFallback: isSheetMode && archetype.archetype === null,
         archetypeError: archetype.error,
@@ -882,7 +846,6 @@ export async function handleMedicalNotes(req: Request): Promise<Response> {
         response,
         modelUsed,
         fallbackReason,
-        writeDepth,
       };
     };
     type Prepared = Awaited<ReturnType<typeof prepare>>;
@@ -897,9 +860,6 @@ export async function handleMedicalNotes(req: Request): Promise<Response> {
         ? { status: 429, error: "Rate limit exceeded. Please try again in a moment." }
         : { status: status === 400 ? 400 : 500, error: "AI service error" };
     };
-
-    /** Stops a comprehensive sheet's depth phase when the student leaves. */
-    const depthAbort = new AbortController();
 
     // ── Relay ───────────────────────────────────────────────────────────────
     /**
@@ -979,34 +939,6 @@ export async function handleMedicalNotes(req: Request): Promise<Response> {
           }
         },
         async flush(controller) {
-          // A comprehensive sheet's depth, written from the high-yield sheet
-          // that has just streamed and relayed as its own phase: the page
-          // parses what follows "depth" as a second, smaller document.
-          let depthMs: number | null = null;
-          if (ctx.writeDepth) {
-            const depthStartedAt = Date.now();
-            controller.enqueue(frame({ __meta: { phase: "depth" } }));
-            let depthChars = 0;
-            let depthModel: string | null = null;
-            try {
-              const started = await ctx.writeDepth(assistantText);
-              if (started) {
-                depthModel = started.modelUsed;
-                for await (const text of contentDeltas(started.response!.body!)) {
-                  if (depthAbort.signal.aborted) break;
-                  depthChars += text.length;
-                  controller.enqueue(frame({ choices: [{ index: 0, delta: { content: text } }] }));
-                }
-              }
-            } catch (depthErr: unknown) {
-              log("depth_failed", { err: depthErr instanceof Error ? depthErr.message : String(depthErr) });
-            }
-            depthMs = since(depthStartedAt);
-            // Nothing written is a failure the page can offer to retry.
-            controller.enqueue(frame({ __meta: { phase: "depthEnd", ok: depthChars > 0 } }));
-            log("depth_end", { userId: user.id, model: depthModel, depthChars, depthMs });
-          }
-
           // Book/chapter labels, raced against a timeout so a slow label call
           // can never hold the stream open. Must precede [DONE].
           if (groundingAttempted) {
@@ -1048,7 +980,6 @@ export async function handleMedicalNotes(req: Request): Promise<Response> {
           controller.enqueue(encoder.encode("data: [DONE]\n\n"));
           log("generation_stream_end", {
             flashcardsMs,
-            depthMs,
             userId: user.id,
             model: ctx.modelUsed,
             isPremium: routing.isPremium,
@@ -1175,9 +1106,8 @@ export async function handleMedicalNotes(req: Request): Promise<Response> {
       },
       cancel() {
         // The student left: stop reading the writer rather than pay for a
-        // sheet nobody will see — or its depth.
+        // sheet nobody will see.
         clientOpen = false;
-        depthAbort.abort();
         upstreamReader?.cancel().catch(() => {});
       },
     });

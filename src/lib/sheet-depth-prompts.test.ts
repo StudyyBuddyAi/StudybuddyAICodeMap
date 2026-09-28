@@ -1,19 +1,18 @@
 import { describe, it, expect } from "vitest";
-import { STUDY_AIDS, resolvePlanFromKeys, resolveSheetPlan } from "../../supabase/functions/_shared/sheet-plan.ts";
+import { resolvePlanFromKeys, resolveSheetPlan } from "../../supabase/functions/_shared/sheet-plan.ts";
 import { HIGH_YIELD_ONLY, highYieldTest, schemaLine } from "../../supabase/functions/_shared/sheet-schema.ts";
 import { asDepth } from "../../supabase/functions/_shared/sheet-sections.ts";
 import {
   SECTION_LIMITS,
   buildSectionPrompts,
-  depthSections,
+  groundingBlock,
   parseSectionRequest,
 } from "../../supabase/functions/_shared/sheet-section-prompts.ts";
 
 /**
- * Depth: every sheet is written high-yield; a comprehensive sheet is that
- * sheet plus a second call writing each content section's `<key>_more`. These
- * check what the model is shown for each, and for the follow-ups on one
- * section.
+ * Depth and rewrites: every sheet is written high-yield (a comprehensive one
+ * then grows branches — see sheet-branch-prompts.test.ts), and one section
+ * can be rewritten in a direction. These check what the model is shown.
  */
 
 const step2 = resolveSheetPlan({ archetype: "condition", examMode: "USMLE Step 2" });
@@ -34,11 +33,9 @@ describe("asDepth", () => {
 });
 
 describe("the sheet prompt's pieces", () => {
-  it("tells a prose depth to keep its lines apart, but not to write every label", () => {
+  it("tells a prose section to write every label on its own line", () => {
     const overview = step2.find((s) => s.key === "overview")!;
     expect(schemaLine(overview)).toContain("Write all of them.");
-    expect(schemaLine(overview, "more")).not.toContain("Write all of them.");
-    expect(schemaLine(overview, "more")).toContain("on its own line");
   });
 
   it("defines high-yield by the exam", () => {
@@ -55,7 +52,8 @@ describe("the sheet prompt's pieces", () => {
 
 describe("parseSectionRequest", () => {
   const valid = {
-    action: "expand",
+    action: "regenerate",
+    style: "simpler",
     key: "clinicalApproach",
     topic: "Diabetic ketoacidosis",
     plan: ["overview", "clinicalApproach", "keyPoints"],
@@ -74,13 +72,16 @@ describe("parseSectionRequest", () => {
     expect(req.sourceIds).toEqual(["e78c0a6e-5c26-41d0-b54b-9524159115d1"]);
   });
 
-  it("keeps only the plan's sections and their depths", () => {
+  it("keeps only the plan's sections", () => {
     const req = parseSectionRequest(valid)!;
     expect(Object.keys(req.sections)).not.toContain("injected");
   });
 
   it("refuses what names nothing runnable", () => {
     expect(parseSectionRequest({ ...valid, action: "delete" })).toBeNull();
+    // Deepening is gone: branches took its place.
+    expect(parseSectionRequest({ ...valid, action: "expand" })).toBeNull();
+    expect(parseSectionRequest({ ...valid, action: "expandAll" })).toBeNull();
     expect(parseSectionRequest({ ...valid, key: "memoryHooks" })).toBeNull();
     expect(parseSectionRequest({ ...valid, plan: ["overview", "madeUpSection"], key: "madeUpSection" })).toBeNull();
     expect(parseSectionRequest({ ...valid, topic: "" })).toBeNull();
@@ -92,16 +93,18 @@ describe("parseSectionRequest", () => {
   });
 
   it("refuses a rewrite without a direction", () => {
-    expect(parseSectionRequest({ ...valid, action: "regenerate" })).toBeNull();
-    expect(parseSectionRequest({ ...valid, action: "regenerate", style: "louder" })).toBeNull();
-    expect(parseSectionRequest({ ...valid, action: "regenerate", style: "custom" })).toBeNull();
-    expect(parseSectionRequest({ ...valid, action: "regenerate", style: "custom", instruction: "more on K+" })!.instruction).toBe("more on K+");
-    expect(parseSectionRequest({ ...valid, action: "regenerate", style: "simpler" })!.style).toBe("simpler");
+    const { style: _style, ...noStyle } = valid;
+    expect(parseSectionRequest(noStyle)).toBeNull();
+    expect(parseSectionRequest({ ...valid, style: "louder" })).toBeNull();
+    expect(parseSectionRequest({ ...valid, style: "custom" })).toBeNull();
+    expect(parseSectionRequest({ ...valid, style: "custom", instruction: "more on K+" })!.instruction).toBe("more on K+");
+    expect(parseSectionRequest(valid)!.style).toBe("simpler");
   });
 });
 
 describe("buildSectionPrompts", () => {
   const base = {
+    action: "regenerate",
     key: "clinicalApproach",
     topic: "Diabetic ketoacidosis",
     plan: ["overview", "clinicalApproach", "keyPoints", "memoryHooks", "examTraps"],
@@ -113,128 +116,50 @@ describe("buildSectionPrompts", () => {
     sourceIds: [],
   };
 
-  it("asks an expansion for the depth alone", () => {
-    const req = parseSectionRequest({ ...base, action: "expand" })!;
-    const { systemPrompt, userContent } = buildSectionPrompts({ request: req, examMode: "USMLE Step 1", ragChunks: [] });
-    expect(systemPrompt).toContain('"clinicalApproach_more":');
-    expect(systemPrompt).not.toContain('"clinicalApproach": ');
-    expect(systemPrompt).toContain('The only keys are "clinicalApproach_more", "covered".');
-    // The whole sheet goes with it: the lines the passage explains.
+  it("gives a rewrite its direction and the section alone to write", () => {
+    const { systemPrompt, userContent } = buildSectionPrompts({
+      request: parseSectionRequest({ ...base, style: "simpler" })!,
+      examMode: "USMLE Step 2",
+      ragChunks: [],
+    });
+    expect(systemPrompt).toContain("Make it simpler");
+    expect(systemPrompt).toContain('"clinicalApproach":');
+    expect(systemPrompt).not.toContain("_more");
+    expect(systemPrompt).toContain('The only keys are "clinicalApproach", "covered".');
+    expect(systemPrompt).toContain("ONE HOME PER FACT");
+    // The whole sheet goes with it, the section being rewritten marked.
     expect(userContent).toContain("If K < 3.3 → hold insulin");
-    expect(userContent).toContain("## Clinical Approach (THE SECTION YOU ARE EXPLAINING)");
+    expect(userContent).toContain("## Clinical Approach (CURRENT VERSION — the one you are rewriting)");
   });
 
-  it("writes a content section's depth as a passage that explains it", () => {
-    const req = parseSectionRequest({ ...base, action: "expand" })!;
-    const { systemPrompt } = buildSectionPrompts({ request: req, examMode: "USMLE Step 2", difficulty: "Basic", ragChunks: [] });
-    expect(systemPrompt).toContain("WHAT AN IN-DEPTH PASSAGE IS");
-    expect(systemPrompt).toContain("clinicalApproach_more: an array of 1 to 3 paragraphs, one paragraph per string");
-    expect(systemPrompt).toContain("bold run-in head");
-    // Pitched at the student, and aimed at what the exam reasons about.
-    expect(systemPrompt).toContain("Define each technical term");
-    expect(systemPrompt).toContain("why this test or step comes next");
-    // Explaining a line means naming it, so the sheet's no-repeat rules — and
-    // the high-yield bar, which a passage is not held to — stay out.
-    expect(systemPrompt).not.toContain("ONE HOME PER FACT");
-    expect(systemPrompt).not.toContain("WHAT COUNTS AS HIGH-YIELD");
-    expect(systemPrompt).not.toContain("WHAT DEPTH IS NOT");
-    // The depth the core left out comes in as reasoning, not labelled lines.
-    expect(systemPrompt).toContain("second-line, definitive");
-  });
-
-  it("pitches a passage by difficulty", () => {
-    const req = parseSectionRequest({ ...base, action: "expand" })!;
-    const at = (difficulty: string) => buildSectionPrompts({ request: req, difficulty, ragChunks: [] }).systemPrompt;
-    expect(at("Advanced")).toContain("Dense is fine.");
-    expect(at("Advanced")).not.toContain("Define each technical term");
-    expect(at("Intermediate")).toContain("without re-teaching the basics");
-  });
-
-  it("deepens every content section in one call, and none of the study aids", () => {
-    const req = parseSectionRequest({ ...base, action: "expandAll", key: "ignored" })!;
-    expect(req.key).toBeNull();
-    const { systemPrompt } = buildSectionPrompts({ request: req, examMode: "USMLE Step 2", ragChunks: [] });
-    const at = (k: string) => systemPrompt.indexOf(`"${k}":`);
-    expect(at("overview_more")).toBeGreaterThan(-1);
-    expect(at("overview_more")).toBeLessThan(at("clinicalApproach_more"));
-    for (const aid of STUDY_AIDS) expect(at(`${aid}_more`)).toBe(-1);
-    expect(systemPrompt).toContain('"sourceCoverage": {');
-    // A section with nothing worth adding may say so.
-    expect(systemPrompt).toContain("or none");
-    // One format line for every passage, and a check against explaining a thing twice.
-    expect(systemPrompt).toContain("- overview_more, clinicalApproach_more: each an array of");
-    expect(systemPrompt).toContain("check the passages you have already written");
-  });
-
-  it("skips, deepening the whole sheet, a section already deepened on its own", () => {
-    const withDepth = { ...base.sections, overview_more: "Mechanism: counterregulatory hormones amplify it." };
-    const req = parseSectionRequest({ ...base, action: "expandAll", sections: withDepth })!;
-    const { systemPrompt } = buildSectionPrompts({ request: req, examMode: "USMLE Step 2", ragChunks: [] });
-    expect(systemPrompt.indexOf('"overview_more":')).toBe(-1);
-    expect(systemPrompt).toContain('"clinicalApproach_more":');
-    // With every content section deepened there is nothing left to ask for.
-    const all = { ...withDepth, clinicalApproach_more: "Second-line: x." };
-    expect(parseSectionRequest({ ...base, action: "expandAll", sections: all })).toBeNull();
-  });
-
-  it("lets one study aid be deepened on its own, with more of its kind rather than a passage", () => {
-    const req = parseSectionRequest({ ...base, action: "expand", key: "examTraps" })!;
-    const { systemPrompt } = buildSectionPrompts({ request: req, ragChunks: [] });
-    expect(systemPrompt).toContain('"examTraps_more":');
-    expect(systemPrompt).toContain("WHAT DEPTH IS NOT");
-    expect(systemPrompt).not.toContain("WHAT AN IN-DEPTH PASSAGE IS");
-    expect(systemPrompt).toContain("- examTraps_more: one fact per item");
+  it("takes the student's own words for a custom rewrite", () => {
+    const { systemPrompt } = buildSectionPrompts({
+      request: parseSectionRequest({ ...base, style: "custom", instruction: "focus on potassium" })!,
+      ragChunks: [],
+    });
+    expect(systemPrompt).toContain('"focus on potassium"');
   });
 
   it("lists every section's scope, so a fact can be sent to its one home", () => {
-    const req = parseSectionRequest({ ...base, action: "expand" })!;
-    const { systemPrompt } = buildSectionPrompts({ request: req, ragChunks: [] });
+    const { systemPrompt } = buildSectionPrompts({ request: parseSectionRequest({ ...base, style: "exam" })!, ragChunks: [] });
     expect(systemPrompt).toContain("- Overview: mechanism and pathophysiology only");
     expect(systemPrompt).toContain("- Clinical Approach: The only section with diagnostic criteria");
   });
 
-  it("gives a rewrite its direction, and the depth when the section has one", () => {
-    const simpler = buildSectionPrompts({
-      request: parseSectionRequest({ ...base, action: "regenerate", style: "simpler" })!,
-      examMode: "USMLE Step 2",
-      ragChunks: [],
-    }).systemPrompt;
-    expect(simpler).toContain("Make it simpler");
-    expect(simpler).toContain('"clinicalApproach":');
-    expect(simpler).not.toContain('"clinicalApproach_more":');
-
-    const custom = buildSectionPrompts({
-      request: parseSectionRequest({ ...base, action: "regenerate", style: "custom", instruction: "focus on potassium", depth: "comprehensive" })!,
-      examMode: "USMLE Step 2",
-      ragChunks: [],
-    }).systemPrompt;
-    expect(custom).toContain('"focus on potassium"');
-    expect(custom).toContain('"clinicalApproach_more":');
-    // The rewritten core still keeps to the sheet's rules; its depth is a passage.
-    expect(custom).toContain("ONE HOME PER FACT");
-    expect(custom).toContain("is the in-depth passage under it");
-  });
-
   it("keeps a rewritten core to its own labels", () => {
-    const req = parseSectionRequest({ ...base, action: "regenerate", style: "exam" })!;
+    const req = parseSectionRequest({ ...base, style: "exam" })!;
     const { systemPrompt } = buildSectionPrompts({ request: req, examMode: "USMLE Step 1", ragChunks: [] });
     const format = systemPrompt.slice(systemPrompt.indexOf("FORMAT:"), systemPrompt.indexOf("COUNTS —"));
     expect(format).toContain('"Diagnosis:"');
-    // Step 1 leaves Workup to the depth, so a high-yield rewrite may not add it.
+    // Step 1's high-yield core has no Workup line, so a rewrite may not add one.
     expect(format).not.toContain('"Workup:"');
   });
 
   it("grounds on the sheet's own passages when there are any", () => {
-    const req = parseSectionRequest({ ...base, action: "expand" })!;
     const chunk = { guidelineName: "ADA Standards", sectionTitle: "Hyperglycemic crises", content: "Give fluids first." };
-    const { systemPrompt } = buildSectionPrompts({ request: req, ragChunks: [chunk] });
+    const { systemPrompt } = buildSectionPrompts({ request: parseSectionRequest({ ...base, style: "exam" })!, ragChunks: [chunk] });
     expect(systemPrompt).toContain("[source 1: ADA Standards — Hyperglycemic crises]");
-  });
-});
-
-describe("depthSections", () => {
-  it("is the plan without its study aids", () => {
-    expect(depthSections(step2).map((s) => s.key)).toEqual(["overview", "clinicalApproach", "differentials"]);
+    expect(groundingBlock([])).toContain("No verified guideline passages");
   });
 });
 

@@ -35,13 +35,16 @@ export type Difficulty = "Basic" | "Intermediate" | "Advanced";
 /**
  * How deep a sheet goes.
  *
- * Every section is written in two parts: its high-yield core under its own
- * key, and what a comprehensive sheet adds under `<key>_more`. A high-yield
- * sheet is the cores alone; a comprehensive one is the cores and then the
- * depth. So the high-yield view of any sheet is always a subset of its
- * comprehensive view, the two can never disagree, and switching between them
- * is a matter of showing or hiding `_more` — the way AMBOSS's High-Yield
- * toggle hides the rest of one article rather than serving a shorter one.
+ * Every sheet is written as its high-yield core. A comprehensive sheet is the
+ * same sheet with its most useful branches grown from it
+ * (sheet-branch-prompts.ts), so the high-yield sheet is always what the
+ * comprehensive one grew from, and the two can never disagree.
+ *
+ * The split below between what a section's core holds and what it leaves to
+ * `<key>_more` still decides the core: a label outside it (Second-line,
+ * Definitive) is left out of the high-yield sheet, and the branch suggestions
+ * are pointed at it. Nothing writes `_more` now; depth was written there
+ * before branches replaced it.
  *
  * It replaced three lengths (Concise / Moderate / Detailed) that only changed
  * item counts. Counts were the least reliable part of the contract — writers

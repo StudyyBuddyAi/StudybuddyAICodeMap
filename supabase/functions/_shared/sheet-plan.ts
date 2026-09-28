@@ -98,8 +98,8 @@ export const STUDY_AIDS: readonly string[] = TRAILING_SECTIONS;
 /**
  * What decides the plan. Depth is not on it: a high-yield and a comprehensive
  * sheet on the same topic have the same sections, so switching a sheet's view
- * never changes its outline. Depth decides only whether each section's `_more`
- * is written.
+ * never changes its outline. Depth decides only whether the page grows the
+ * sheet's first branches once it has streamed.
  */
 export interface PlanRequest {
   archetype?: ArchetypeId | null;
