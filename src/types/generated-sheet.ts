@@ -179,11 +179,14 @@ export interface GeneratedSheet {
   premiumGrant?: string;
   /**
    * How deep the sheet was asked for. Absent on every sheet from before depth,
-   * which reads as high-yield. A comprehensive sheet's depth is in `sections`
-   * under each key's `_more`.
+   * which reads as high-yield. A comprehensive sheet grows its first branches
+   * once it has streamed; they live in the student's layer.
    */
   depth?: "highYield" | "comprehensive";
-  /** Asked for comprehensive, but its depth did not arrive; it can be deepened again. */
+  /**
+   * @deprecated Written by the depth passages branches replaced, and never
+   * now; kept so a sheet saved with it reads it as metadata, not a section.
+   */
   depthFailed?: boolean;
 }
 

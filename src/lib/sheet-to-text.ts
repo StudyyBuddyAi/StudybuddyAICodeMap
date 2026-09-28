@@ -1,6 +1,5 @@
 import type { GeneratedSheet } from "@/types/generated-sheet";
 import { bodyLines, isTableRows, resolvePlan, sectionBody } from "@/lib/sheet-plan";
-import { isPassageKey } from "@/lib/sheet-depth";
 
 /**
  * Flattens a generated sheet into plain text suitable for the clipboard or the
@@ -12,9 +11,7 @@ export function sheetToPlainText(
   legacyOutput: string,
   topic: string,
   /** More sections, before the footer — the student's notes. */
-  extra: string[] = [],
-  /** Which sections' depth is on screen, and so goes with the text. */
-  depthShown: (key: string) => boolean = () => false
+  extra: string[] = []
 ): string {
   if (!sheet) return legacyOutput ?? "";
 
@@ -25,27 +22,19 @@ export function sheetToPlainText(
   // always matches what was on screen — including archetype sections this
   // build has no name for.
   for (const { key, title, columns } of resolvePlan(sheet)) {
-    // The section, then its depth under a heading of its own when shown.
-    const bodies: [string, string][] = [[title, key]];
-    if (depthShown(key)) bodies.push([`${title} — in depth`, `${key}_more`]);
-    for (const [heading, bodyKey] of bodies) {
-      const value = sectionBody(sheet, bodyKey);
-      if (isTableRows(value)) {
-        // Pipe-separated under its header line, which pastes legibly anywhere
-        // and as a table into anything that reads Markdown.
-        const header = columns?.length ? [columns.join(" | ")] : [];
-        parts.push(`${heading}\n` + [...header, ...bodyLines(value)].join("\n"));
-      } else if (Array.isArray(value) && isPassageKey(bodyKey)) {
-        // A passage reads as paragraphs, not a numbered list.
-        if (value.length) parts.push(`${heading}\n${bodyLines(value).join("\n\n")}`);
-      } else if (Array.isArray(value)) {
-        if (!value.length) continue;
-        parts.push(
-          `${heading}\n` + value.map((item, i) => `${i + 1}. ${item}`).join("\n")
-        );
-      } else if (typeof value === "string" && value.trim()) {
-        parts.push(`${heading}\n${value.trim()}`);
-      }
+    const value = sectionBody(sheet, key);
+    if (isTableRows(value)) {
+      // Pipe-separated under its header line, which pastes legibly anywhere
+      // and as a table into anything that reads Markdown.
+      const header = columns?.length ? [columns.join(" | ")] : [];
+      parts.push(`${title}\n` + [...header, ...bodyLines(value)].join("\n"));
+    } else if (Array.isArray(value)) {
+      if (!value.length) continue;
+      parts.push(
+        `${title}\n` + value.map((item, i) => `${i + 1}. ${item}`).join("\n")
+      );
+    } else if (typeof value === "string" && value.trim()) {
+      parts.push(`${title}\n${value.trim()}`);
     }
   }
 

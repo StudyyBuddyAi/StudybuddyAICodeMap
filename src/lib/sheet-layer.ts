@@ -1,5 +1,6 @@
 import type { Flashcard, GeneratedSheet, SectionBody } from "@/types/generated-sheet";
 import { resolvePlan, sectionBody } from "@/lib/sheet-plan";
+import type { BranchQuestion, BranchType } from "@/lib/sheet-branches";
 
 /**
  * A student's own layer over a generated sheet.
@@ -16,6 +17,10 @@ import { resolvePlan, sectionBody } from "@/lib/sheet-plan";
  * Anchors: `${sectionKey}:${index}` for a prose line (its index in the body
  * split on "\n", blank lines included — the renderer's own count), a list
  * item or a table row; `${sectionKey}:end` for the section as a whole.
+ *
+ * Branches live here too (src/lib/sheet-branches.ts): the questions the sheet
+ * suggests growing from its lines, and each branch grown — by the AI or by the
+ * student — kept as markdown and anchored to the line it grew from.
  *
  * Every operation here is pure: it takes a layer and returns a new one.
  */
@@ -77,16 +82,51 @@ export interface LayerCard {
 }
 
 /**
- * A section the student had written after the sheet was: depth for one of its
- * sections (`<key>_more`), or a section rewritten in a direction they picked
- * (`<key>`). It is generated content — held here because a saved sheet's row
- * is never changed, so "Original" still shows the sheet as it was made.
+ * A section the student had written after the sheet was: rewritten in a
+ * direction they picked. It is generated content — held here because a saved
+ * sheet's row is never changed, so "Original" still shows the sheet as it was
+ * made. ("depth" is a section's depth under `<key>_more`, from before branches
+ * replaced it; nothing writes or shows one now.)
  */
 export interface LayerSection {
   body: SectionBody;
   kind: "depth" | "rewrite";
   /** rewrite only: the direction it took. */
   style?: string;
+  at: string;
+}
+
+/** A branch the sheet suggests growing from one of its lines: a pill. */
+export interface LayerPill extends BranchQuestion {
+  id: string;
+  anchor: string;
+}
+
+/**
+ * A branch: the answer to one question about one line of the sheet, or about
+ * the branch it grew from. Kept as markdown, whatever shape it arrived in.
+ */
+export interface LayerBranch {
+  id: string;
+  /** The line of the sheet it grows from, or `${section}:end` once that section was rewritten. */
+  anchor: string;
+  /** The branch it grew from; absent for one grown from the sheet. */
+  parentId?: string;
+  type: BranchType;
+  label: string;
+  /** The question it answers. */
+  ask: string;
+  versus?: string;
+  text: string;
+  /** What it suggests growing next. */
+  next: BranchQuestion[];
+  /** Who wrote it: the AI, or the student ("note"). An AI branch the student edits stays "ai", marked edited. */
+  source: LayerSource;
+  edited?: boolean;
+  /** Whether the sheet's passages backed it. */
+  covered?: boolean;
+  /** The pill it was grown from. */
+  pillId?: string;
   at: string;
 }
 
@@ -104,6 +144,13 @@ export interface SheetLayer {
   cards: LayerCard[];
   /** Depth and rewrites, by the key they are written under. */
   sections: Record<string, LayerSection>;
+  /** The branches the sheet suggests, in the order suggested. */
+  pills: LayerPill[];
+  /** When the suggestions arrived; absent until they have, so they are asked for once. */
+  suggestedAt?: string;
+  /** A comprehensive sheet's first branches have been grown, so they are not grown again. */
+  picksGrown?: boolean;
+  branches: LayerBranch[];
 }
 
 export const EMPTY_LAYER: SheetLayer = Object.freeze({
@@ -116,6 +163,8 @@ export const EMPTY_LAYER: SheetLayer = Object.freeze({
   hidden: [],
   cards: [],
   sections: {},
+  pills: [],
+  branches: [],
 }) as SheetLayer;
 
 export const emptyLayer = (): SheetLayer => ({
@@ -128,6 +177,8 @@ export const emptyLayer = (): SheetLayer => ({
   hidden: [],
   cards: [],
   sections: {},
+  pills: [],
+  branches: [],
 });
 
 /** Caps that keep one sheet's layer a sane size in a row or in localStorage. */
@@ -138,6 +189,9 @@ export const LAYER_LIMITS = {
   /** Sections: a sheet has at most seven, each with a core and a depth. */
   sections: 20,
   sectionItems: 30,
+  pills: 60,
+  branches: 200,
+  branchText: 8000,
   prose: 8000,
 } as const;
 
@@ -230,6 +284,39 @@ export function parseLayer(raw: unknown): SheetLayer {
     layer.cards.push({ id: str(c.id, 64) || newLayerId(), question, answer, anchor: c.anchor, at: str(c.at, 40) || now() });
   }
 
+  for (const x of list(raw.pills).slice(0, LAYER_LIMITS.pills)) {
+    if (!isObj(x) || !validAnchor(x.anchor)) continue;
+    const q = question(x);
+    if (q) layer.pills.push({ ...q, id: str(x.id, 64) || newLayerId(), anchor: x.anchor });
+  }
+  if (typeof raw.suggestedAt === "string") layer.suggestedAt = raw.suggestedAt.slice(0, 40);
+  if (raw.picksGrown === true) layer.picksGrown = true;
+
+  const branchIds = new Set<string>();
+  for (const b of list(raw.branches).slice(0, LAYER_LIMITS.branches)) {
+    if (!isObj(b) || !validAnchor(b.anchor)) continue;
+    const q = question(b, true);
+    const text = str(b.text, LAYER_LIMITS.branchText);
+    if (!q || text === null) continue;
+    const id = str(b.id, 64) || newLayerId();
+    branchIds.add(id);
+    layer.branches.push({
+      id,
+      anchor: b.anchor,
+      ...(typeof b.parentId === "string" ? { parentId: b.parentId.slice(0, 64) } : {}),
+      ...q,
+      text,
+      next: (Array.isArray(b.next) ? b.next : []).slice(0, 3).map((n) => question(n)).filter((n): n is BranchQuestion => !!n),
+      source: src(b.source),
+      ...(b.edited === true ? { edited: true } : {}),
+      ...(typeof b.covered === "boolean" ? { covered: b.covered } : {}),
+      ...(typeof b.pillId === "string" ? { pillId: b.pillId.slice(0, 64) } : {}),
+      at: str(b.at, 40) || now(),
+    });
+  }
+  // A branch whose parent is gone has nothing to hang from.
+  layer.branches = layer.branches.filter((b) => !b.parentId || branchIds.has(b.parentId));
+
   if (isObj(raw.sections)) {
     for (const [key, s] of Object.entries(raw.sections).slice(0, LAYER_LIMITS.sections)) {
       if (!SECTION_KEY_RE.test(key) || !isObj(s)) continue;
@@ -248,6 +335,19 @@ export function parseLayer(raw: unknown): SheetLayer {
 }
 
 const SECTION_KEY_RE = /^[A-Za-z][A-Za-z0-9_]*$/;
+
+const BRANCH_TYPES: readonly BranchType[] = ["mechanism", "management", "compare", "differential", "case", "ask", "note"];
+
+/** A pill's or branch's question as read back; null when it is not one. `any` also admits the student's own types. */
+function question(v: unknown, any = false): BranchQuestion | null {
+  if (!isObj(v)) return null;
+  const type = BRANCH_TYPES.includes(v.type as BranchType) ? (v.type as BranchType) : null;
+  if (!type || (!any && (type === "ask" || type === "note"))) return null;
+  const label = str(v.label, 80)?.trim();
+  if (!label) return null;
+  const versus = str(v.versus, 80)?.trim();
+  return { type, label, ask: str(v.ask, 300) ?? "", ...(versus ? { versus } : {}) };
+}
 
 /** A section body as read back: prose, items or rows, trimmed to the caps; null for anything else. */
 function layerBody(v: unknown): SectionBody | null {
@@ -269,7 +369,9 @@ export function isEmptyLayer(layer: SheetLayer): boolean {
     !layer.known.length &&
     !layer.hidden.length &&
     !layer.cards.length &&
-    !Object.keys(layer.sections).length
+    !Object.keys(layer.sections).length &&
+    !layer.pills.length &&
+    !layer.branches.length
   );
 }
 
@@ -281,6 +383,7 @@ export interface LayerSummary {
   known: number;
   hidden: number;
   cards: number;
+  branches: number;
 }
 
 export function summarizeLayer(layer: SheetLayer): LayerSummary {
@@ -292,6 +395,7 @@ export function summarizeLayer(layer: SheetLayer): LayerSummary {
     known: layer.known.length,
     hidden: layer.hidden.length,
     cards: layer.cards.length,
+    branches: layer.branches.length,
   };
 }
 
@@ -489,16 +593,6 @@ export function removeCard(layer: SheetLayer, id: string): SheetLayer {
 
 // ── Depth and rewrites ───────────────────────────────────────────────────────
 
-/** Depth the student asked for on one section, or on several at once. */
-export function addDepth(layer: SheetLayer, bodies: Record<string, SectionBody>): SheetLayer {
-  const sections = { ...layer.sections };
-  for (const [key, body] of Object.entries(bodies)) {
-    if (!SECTION_KEY_RE.test(key) || Object.keys(sections).length >= LAYER_LIMITS.sections) continue;
-    sections[key] = { body, kind: "depth", at: now() };
-  }
-  return { ...layer, sections };
-}
-
 /** Whether an anchor points at one of a key's lines (not the section as a whole). */
 const onLineOf = (keys: string[]) => (anchor: string) => keys.includes(anchorSection(anchor)) && !anchor.endsWith(":end");
 
@@ -526,6 +620,10 @@ export function anchoredTo(layer: SheetLayer, keys: string[]): number {
 export function rewriteSection(layer: SheetLayer, bodies: Record<string, SectionBody>, style: string): SheetLayer {
   const keys = Object.keys(bodies).filter((k) => SECTION_KEY_RE.test(k));
   const off = (a: string) => !onLineOf(keys)(a);
+  // Its branches stay — what they say still holds — but the lines they grew
+  // from are gone, so they hang from the section instead. Its suggestions
+  // named those lines, and go.
+  const reanchor = (b: LayerBranch) => (off(b.anchor) ? b : { ...b, anchor: anchorOf(anchorSection(b.anchor), "end") });
   const edits: Record<string, LayerEdit> = {};
   for (const [a, e] of Object.entries(layer.edits)) if (off(a)) edits[a] = e;
   const sections = { ...layer.sections };
@@ -538,6 +636,8 @@ export function rewriteSection(layer: SheetLayer, bodies: Record<string, Section
     notes: layer.notes.filter((n) => off(n.anchor)),
     known: layer.known.filter(off),
     hidden: layer.hidden.filter(off),
+    pills: layer.pills.filter((p) => off(p.anchor)),
+    branches: layer.branches.map(reanchor),
   };
 }
 
@@ -581,6 +681,100 @@ export function originalLine(sheet: GeneratedSheet, anchor: string): string | nu
   const item = body?.[i];
   if (item === undefined) return null;
   return Array.isArray(item) ? item.join(" | ") : item;
+}
+
+// ── Branches ─────────────────────────────────────────────────────────────────
+
+/** The sheet's suggestions, replacing any it had. A pill keeps the id it streamed in with. */
+export function setPills(layer: SheetLayer, pills: (BranchQuestion & { anchor: string; id?: string })[]): SheetLayer {
+  return {
+    ...layer,
+    pills: pills
+      .filter((p) => validAnchor(p.anchor))
+      .slice(0, LAYER_LIMITS.pills)
+      .map((p) => ({ ...p, id: p.id ?? newLayerId() })),
+    suggestedAt: now(),
+  };
+}
+
+/** Marks a comprehensive sheet's first branches as grown, so a reload does not grow them again. */
+export const markPicksGrown = (layer: SheetLayer): SheetLayer => (layer.picksGrown ? layer : { ...layer, picksGrown: true });
+
+export type NewBranch = Omit<LayerBranch, "at" | "id"> & { id?: string };
+
+/** A branch grown or written. An id already in the layer replaces that branch. */
+export function addBranch(layer: SheetLayer, b: NewBranch): SheetLayer {
+  if (!validAnchor(b.anchor) || layer.branches.length >= LAYER_LIMITS.branches) return layer;
+  const branch: LayerBranch = { ...b, id: b.id ?? newLayerId(), text: b.text.slice(0, LAYER_LIMITS.branchText), at: now() };
+  const at = layer.branches.findIndex((x) => x.id === branch.id);
+  const branches = [...layer.branches];
+  if (at >= 0) branches[at] = branch;
+  else branches.push(branch);
+  return { ...layer, branches };
+}
+
+/** The student's own wording of a branch. Writing it empty removes it. */
+export function editBranch(layer: SheetLayer, id: string, text: string): SheetLayer {
+  if (!text.trim()) return removeBranch(layer, id);
+  return {
+    ...layer,
+    branches: layer.branches.map((b) =>
+      b.id === id ? { ...b, text: text.slice(0, LAYER_LIMITS.branchText), edited: b.source === "ai" ? true : b.edited } : b
+    ),
+  };
+}
+
+/** A branch and every branch grown from it. */
+export function removeBranch(layer: SheetLayer, id: string): SheetLayer {
+  const gone = new Set([id]);
+  for (let grew = true; grew; ) {
+    grew = false;
+    for (const b of layer.branches) {
+      if (b.parentId && gone.has(b.parentId) && !gone.has(b.id)) {
+        gone.add(b.id);
+        grew = true;
+      }
+    }
+  }
+  return { ...layer, branches: layer.branches.filter((b) => !gone.has(b.id)) };
+}
+
+/** The branches a branch hangs from, outermost first. */
+export function branchPath(layer: SheetLayer, id: string): LayerBranch[] {
+  const byId = new Map(layer.branches.map((b) => [b.id, b]));
+  const path: LayerBranch[] = [];
+  let at = byId.get(id)?.parentId;
+  while (at && path.length < 10) {
+    const parent = byId.get(at);
+    if (!parent) break;
+    path.unshift(parent);
+    at = parent.parentId;
+  }
+  return path;
+}
+
+/**
+ * The branches as text, section by section, for the end of an export or a
+ * share. Empty when there are none.
+ */
+export function layerBranchesText(sheet: GeneratedSheet, layer: SheetLayer): string {
+  if (!layer.branches.length) return "";
+  const titles = new Map(resolvePlan(sheet).map((s) => [s.key, s.title]));
+  const children = (parent?: string) => layer.branches.filter((b) => b.parentId === parent);
+  const write = (b: LayerBranch, depth: number): string[] => [
+    `${"#".repeat(Math.min(depth + 2, 6))} ${b.label}`,
+    b.text.replace(/^#{1,6}\s+/gm, ""),
+    ...children(b.id).flatMap((c) => write(c, depth + 1)),
+  ];
+  const bySection = new Map<string, LayerBranch[]>();
+  for (const b of children(undefined)) {
+    const key = anchorSection(b.anchor);
+    bySection.set(key, [...(bySection.get(key) ?? []), b]);
+  }
+  const parts = [...bySection.entries()].map(([key, list]) =>
+    [`# ${titles.get(key) ?? key}`, ...list.flatMap((b) => write(b, 0))].join("\n\n")
+  );
+  return `My branches\n\n${parts.join("\n\n")}`;
 }
 
 // ── The sheet as the student has made it ─────────────────────────────────────

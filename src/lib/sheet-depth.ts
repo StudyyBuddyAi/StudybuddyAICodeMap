@@ -1,44 +1,20 @@
 import { callMedicalNotes } from "@/lib/callMedicalNotes";
 import { parseModelUsed, type ModelUsed } from "@/lib/model-used";
 import { parsePartialSheet, parseSheetOutput } from "@/lib/parse-partial-sheet";
-import type { SectionBody, SourceCoverage } from "@/types/generated-sheet";
+import type { SectionBody } from "@/types/generated-sheet";
 
 /**
- * A sheet's depth, on the client.
+ * A sheet's depth, and rewrites of one of its sections, on the client.
  *
- * Every sheet is written high-yield. Each section's comprehensive depth lives
- * beside its core under `<key>_more` — written with the sheet when it was
- * asked for comprehensive, or later, one section or the whole sheet at a time.
- * The high-yield view hides the depth; the comprehensive view shows it. The
- * contract is supabase/functions/_shared/sheet-section-prompts.ts.
+ * Every sheet is written high-yield. A comprehensive sheet is the same sheet
+ * with its most useful branches grown (src/lib/sheet-branches.ts). A section
+ * can be rewritten in a direction the student picks; the contract is
+ * supabase/functions/_shared/sheet-section-prompts.ts.
  */
 
 export type Depth = "highYield" | "comprehensive";
 
 export const DEPTH_LABEL: Record<Depth, string> = { highYield: "High-yield", comprehensive: "Comprehensive" };
-
-export const MORE_SUFFIX = "_more";
-export const moreKey = (key: string) => `${key}${MORE_SUFFIX}`;
-export const isMoreKey = (key: string) => key.endsWith(MORE_SUFFIX);
-export const baseKey = (key: string) => (isMoreKey(key) ? key.slice(0, -MORE_SUFFIX.length) : key);
-
-/**
- * The study aids, which get no depth when a whole sheet is deepened — the
- * server's STUDY_AIDS. One of them can still be deepened on its own.
- */
-export const STUDY_AIDS: readonly string[] = ["keyPoints", "memoryHooks", "examTraps"];
-
-/**
- * Whether a depth key holds a passage — paragraphs explaining its section, as
- * a textbook would — rather than more items of its section's kind. Every
- * content section's depth is one; a study aid's is more hooks, traps or
- * one-liners. The server's isPassage.
- */
-export const isPassageKey = (key: string) => isMoreKey(key) && !STUDY_AIDS.includes(baseKey(key));
-
-/** About how long a passage takes to read, in whole minutes, at a study pace. */
-export const readingMinutes = (paragraphs: string[]) =>
-  Math.max(1, Math.round(paragraphs.join(" ").split(/\s+/).filter(Boolean).length / 200));
 
 /**
  * The depth a sheet was made at. Saved sheets from before depth carry a
@@ -64,21 +40,17 @@ export const REGEN_CHOICES: { style: Exclude<RegenStyle, "custom">; label: strin
   { style: "exam", label: "Sharper for the exam", hint: "Thresholds, discriminators, traps" },
 ];
 
-export type SectionAction = "expandAll" | "expand" | "regenerate";
-
 export interface SectionRequestParams {
-  action: SectionAction;
-  /** The section, except for expandAll. */
-  key?: string;
+  action: "regenerate";
+  /** The section to rewrite. */
+  key: string;
   /** The sheet's planned section keys, in order. */
   plan: string[];
-  /** The sheet's bodies as the student has them, cores and depth. */
+  /** The sheet's bodies as the student has them. */
   sections: Record<string, SectionBody>;
   topic: string;
-  style?: RegenStyle;
+  style: RegenStyle;
   instruction?: string;
-  /** regenerate: whether to write the section's depth too. */
-  depth?: Depth;
   /** The ids of the passages the sheet was built on. */
   sourceIds: string[];
   /** The premium sheet's grant, for a student without Pro. */
@@ -87,7 +59,7 @@ export interface SectionRequestParams {
   difficulty?: string;
 }
 
-/** Today's section requests are used up (free and anonymous students). */
+/** Today's section rewrites are used up (free and anonymous students). */
 export class SectionQuotaError extends Error {
   constructor() {
     super("section_quota_exceeded");
@@ -117,16 +89,14 @@ export interface SectionDraft {
 
 export interface SectionResult {
   sections: Record<string, SectionBody>;
-  /** expand / regenerate: whether the passages backed what was written. */
+  /** Whether the passages backed what was written. */
   covered: boolean | null;
-  /** expandAll: the sheet's coverage shape, for the depth it wrote. */
-  coverage: SourceCoverage | null;
   model: ModelUsed | null;
 }
 
 /**
- * Runs one section request, streaming drafts into `onDraft`, and resolves to
- * the finished bodies. Throws SectionQuotaError on a 429.
+ * Runs one rewrite, streaming drafts into `onDraft`, and resolves to the
+ * finished bodies. Throws SectionQuotaError on a 429.
  */
 export async function runSectionRequest(
   params: SectionRequestParams,
@@ -187,19 +157,6 @@ export async function runSectionRequest(
   return {
     sections,
     covered: covered === undefined ? null : covered === "true",
-    coverage: result?.sheet.sourceCoverage ?? null,
     model,
   };
-}
-
-/**
- * The sheet's coverage once depth has been added: sections the depth was
- * written for without the passages' support join "uncovered". It can only
- * weaken the sheet's claim, never strengthen it.
- */
-export function weakenCoverage(current: SourceCoverage | undefined, uncovered: string[]): SourceCoverage | undefined {
-  const keys = [...new Set(uncovered.map(baseKey))];
-  if (!keys.length || !current) return current;
-  const merged = [...new Set([...current.uncovered, ...keys])];
-  return { level: current.level === "full" ? "partial" : current.level, uncovered: merged };
 }

@@ -27,8 +27,6 @@ export interface GenerationStatus {
   writing?: boolean;
   /** The writer is reasoning before its first words. */
   thinking?: boolean;
-  /** A comprehensive sheet: the high-yield sheet is written and its depth is coming. */
-  deepening?: boolean;
 }
 
 interface SheetProgressProps {
@@ -45,11 +43,6 @@ interface SheetProgressProps {
 
 function currentLabel({ sections, readyKeys, liveKey, status, done }: SheetProgressProps) {
   if (done) return "Sheet ready";
-  if (status.deepening) {
-    // The depth's key in flight is "<key>_more".
-    const deep = sections.find((s) => `${s.key}_more` === liveKey);
-    return deep ? `Going deeper: ${deep.title}` : "Going deeper";
-  }
   const live = sections.find((s) => s.key === liveKey);
   if (live) return `Writing ${live.title}`;
   const readyCount = sections.filter((s) => readyKeys.includes(s.key)).length;

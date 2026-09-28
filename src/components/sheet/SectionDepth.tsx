@@ -1,5 +1,5 @@
-import { useState, type ReactNode } from "react";
-import { ChevronsDown, ChevronsUp, Layers, Loader2, MoreHorizontal, RotateCcw, Undo2, Wand2 } from "lucide-react";
+import { useState } from "react";
+import { MoreHorizontal, Undo2, Wand2 } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -8,111 +8,21 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { REGEN_CHOICES, type Depth, type RegenStyle } from "@/lib/sheet-depth";
+import { REGEN_CHOICES, type RegenStyle } from "@/lib/sheet-depth";
 
 /**
- * A section's depth, and what can be done to one section.
- *
- * Every section is written high-yield. Its comprehensive depth sits under it,
- * set apart the way AMBOSS shades the less essential part of an article: read
- * as "and beyond the core", never mistaken for it. The high-yield view hides
- * it; the section can show its own, or ask for it when it has none.
+ * What can be done to one section: rewrite it in a direction the student
+ * picks, in their own words, or take the rewrite back.
  */
 
 // ── What is running on one section ───────────────────────────────────────────
 
 export interface SectionJob {
-  action: "expand" | "regenerate" | "expandAll";
+  action: "regenerate";
   status: "running" | "error";
   /** For a rewrite: the direction, as the menu names it. */
   label?: string;
   error?: string;
-}
-
-// ── The depth block ───────────────────────────────────────────────────────────
-
-interface DepthBlockProps {
-  /** Still arriving: the label says so and Hide waits. */
-  streaming?: boolean;
-  onHide?: () => void;
-  /** Undoes depth the student asked for (not depth written with the sheet). */
-  onRemove?: () => void;
-  children: ReactNode;
-}
-
-export function DepthBlock({ streaming, onHide, onRemove, children }: DepthBlockProps) {
-  return (
-    <div className="mt-4 border-t border-dashed border-border pt-3" data-depth-block>
-      <div className="mb-2 flex items-center gap-2">
-        <span className="font-mono text-[10px] font-medium uppercase tracking-widest text-muted-foreground">
-          {streaming ? "Going deeper…" : "In depth"}
-        </span>
-        {streaming && <Loader2 aria-hidden className="h-3 w-3 animate-spin text-muted-foreground" />}
-        <span className="ml-auto flex items-center gap-3">
-          {!streaming && onRemove && (
-            <button
-              type="button"
-              onClick={onRemove}
-              className="text-[11px] text-muted-foreground transition-colors hover:text-foreground"
-            >
-              Remove
-            </button>
-          )}
-          {!streaming && onHide && (
-            <button
-              type="button"
-              onClick={onHide}
-              className="inline-flex items-center gap-1 text-[11px] text-muted-foreground transition-colors hover:text-foreground"
-            >
-              <ChevronsUp aria-hidden className="h-3 w-3" />
-              High-yield only
-            </button>
-          )}
-        </span>
-      </div>
-      <div className="border-l-2 border-primary/20 pl-3 opacity-90">{children}</div>
-    </div>
-  );
-}
-
-// ── The prompt under a section ────────────────────────────────────────────────
-
-interface DepthPromptProps {
-  /** "show": the depth exists, hidden. "deepen": there is none yet. "retry": asking failed. */
-  kind: "show" | "deepen" | "retry";
-  /** How many lines the hidden depth holds. */
-  count?: number;
-  /** For a passage: about how long it takes to read, which says more than a paragraph count. */
-  minutes?: number;
-  busy?: boolean;
-  onClick: () => void;
-}
-
-export function DepthPrompt({ kind, count, minutes, busy, onClick }: DepthPromptProps) {
-  const Icon = busy ? Loader2 : kind === "show" ? ChevronsDown : kind === "retry" ? RotateCcw : Layers;
-  const label =
-    kind === "show"
-      ? `Show in depth${minutes ? ` · ${minutes} min read` : count ? ` · ${count} more` : ""}`
-      : kind === "retry"
-      ? "Couldn't go deeper — try again"
-      : busy
-      ? "Going deeper…"
-      : "Go deeper";
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={busy}
-      className={`mt-3 inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors duration-200 disabled:cursor-default ${
-        kind === "retry"
-          ? "border-warning/40 text-warning hover:border-warning"
-          : "border-border text-muted-foreground hover:border-primary/50 hover:text-foreground"
-      }`}
-    >
-      <Icon aria-hidden className={`h-3 w-3 ${busy ? "animate-spin" : ""}`} />
-      {label}
-    </button>
-  );
 }
 
 // ── The section's menu ────────────────────────────────────────────────────────
@@ -200,52 +110,5 @@ export function CustomRewrite({ onSubmit, onCancel }: { onSubmit: (instruction: 
         Rewrite
       </button>
     </form>
-  );
-}
-
-// ── The sheet's view ──────────────────────────────────────────────────────────
-
-interface DepthToggleProps {
-  value: Depth;
-  onChange: (depth: Depth) => void;
-  /** Depth for the whole sheet is being written. */
-  busy?: boolean;
-  disabled?: boolean;
-}
-
-/**
- * High-yield or comprehensive, for the whole sheet: AMBOSS's toolbar toggle.
- * Where the depth exists it is a view; where it doesn't, comprehensive asks
- * for it.
- */
-export function DepthToggle({ value, onChange, busy, disabled }: DepthToggleProps) {
-  const option = (depth: Depth, full: string, short: string) => {
-    const on = value === depth;
-    return (
-      <button
-        type="button"
-        role="radio"
-        aria-checked={on}
-        disabled={disabled}
-        onClick={() => !on && onChange(depth)}
-        className={`inline-flex h-full items-center gap-1 rounded-md px-2 text-xs font-medium transition-colors duration-200 disabled:cursor-default ${
-          on ? "bg-secondary text-foreground" : "text-muted-foreground hover:text-foreground"
-        }`}
-      >
-        {busy && depth === "comprehensive" && <Loader2 aria-hidden className="h-3 w-3 animate-spin" />}
-        <span className="hidden sm:inline">{full}</span>
-        <span className="sm:hidden">{short}</span>
-      </button>
-    );
-  };
-  return (
-    <div
-      role="radiogroup"
-      aria-label="Sheet depth"
-      className="inline-flex h-8 shrink-0 items-center gap-0.5 rounded-lg border border-border bg-card p-0.5"
-    >
-      {option("highYield", "High-yield", "HY")}
-      {option("comprehensive", "Comprehensive", "Full")}
-    </div>
   );
 }

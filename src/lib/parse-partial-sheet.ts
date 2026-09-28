@@ -256,6 +256,26 @@ export function parsePartialSheet(raw: string): PartialSheetResult | null {
 }
 
 /**
+ * However much of any streamed JSON object has arrived, as the raw object —
+ * for replies that are not sheets (a branch, a sheet's suggestions). `closed`
+ * says the object is finished; until it is, the last element of any array may
+ * still be half-written. Null when the text is not a JSON object.
+ */
+export function parsePartialObject(raw: string): { value: Record<string, unknown>; closed: boolean } | null {
+  const text = repairLlmJson(stripFences(raw));
+  if (!text.startsWith("{")) return null;
+  const direct = tryParse(text);
+  if (direct) return { value: direct, closed: true };
+  const repaired = tryParse(repairTail(text, scan(text)));
+  if (repaired) return { value: repaired, closed: false };
+  const state = scan(text);
+  if (state.lastTopComma < 0) return null;
+  const truncated = text.slice(0, state.lastTopComma);
+  const salvaged = tryParse(repairTail(truncated, scan(truncated)));
+  return salvaged ? { value: salvaged, closed: false } : null;
+}
+
+/**
  * How much of the response survived.
  * - `ok`       — parsed as sent
  * - `repaired` — the model's escaping was fixed; the sheet is still complete

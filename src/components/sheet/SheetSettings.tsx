@@ -37,11 +37,11 @@ const DIFFICULTY_CHOICES: Choice[] = [
 ];
 
 // Depth replaced Concise / Moderate / Detailed. High-yield is chosen by what
-// the exam tests, not cut to a size; comprehensive is that sheet plus each
-// section's depth, which can also be added later, one section at a time.
+// the exam tests, not cut to a size; comprehensive is that sheet with its most
+// useful branches already grown — which a high-yield sheet can grow later.
 const DEPTH_CHOICES: Choice<Depth>[] = [
-  { value: "highYield", label: "High-yield", hint: "What the exam tests most — nothing else" },
-  { value: "comprehensive", label: "Comprehensive", hint: "High-yield, plus a textbook-style explanation under each section" },
+  { value: "highYield", label: "High-yield", hint: "What the exam tests most — branch out as you go" },
+  { value: "comprehensive", label: "Comprehensive", hint: "High-yield, with its most useful branches already grown" },
 ];
 
 const SOURCE_CHOICES: Choice<"on" | "off">[] = [
