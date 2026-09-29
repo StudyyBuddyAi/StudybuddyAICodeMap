@@ -1,6 +1,7 @@
 import { callMedicalNotes } from "@/lib/callMedicalNotes";
 import { parsePartialObject } from "@/lib/parse-partial-sheet";
 import type { SectionBody } from "@/types/generated-sheet";
+import type { SheetSignature } from "./sheet-signature";
 
 /**
  * Branches, on the client.
@@ -38,9 +39,24 @@ export const BRANCH_TYPE_LABEL: Record<BranchType, string> = {
   compare: "Compare",
   differential: "Differential",
   mechanism: "Mechanism",
-  case: "Case",
+  case: "Practice case",
   ask: "Your question",
   note: "Your note",
+};
+
+/**
+ * Each kind of deep dive as a chart would mark it: the shorthand a clinician
+ * writes (Mx, DDx, vs) on the stub of its tag, and the colour of that stub —
+ * the way a patient chart's divider tabs are told apart at a glance.
+ */
+export const BRANCH_KIND: Record<BranchType, { short: string; color: string }> = {
+  management: { short: "MX", color: "var(--kind-mx)" },
+  differential: { short: "DDX", color: "var(--kind-ddx)" },
+  compare: { short: "VS", color: "var(--kind-vs)" },
+  mechanism: { short: "PATH", color: "var(--kind-path)" },
+  case: { short: "CASE", color: "var(--kind-case)" },
+  ask: { short: "ASK", color: "var(--kind-ask)" },
+  note: { short: "NOTE", color: "var(--kind-note)" },
 };
 
 /** What a pill asks for. */
@@ -49,7 +65,22 @@ export interface BranchQuestion {
   label: string;
   ask: string;
   versus?: string;
+  /** ask only: the shape the student wants the answer in. */
+  format?: AskFormat;
 }
+
+/** The shapes a student can ask their own question to come back in — the server's ASK_FORMATS. */
+export type AskFormat = "auto" | "explain" | "table" | "steps" | "drug" | "mnemonic" | "case";
+export const ASK_FORMAT_LABEL: Record<AskFormat, string> = {
+  auto: "Let AI choose",
+  explain: "Explain",
+  table: "Table",
+  steps: "Steps",
+  drug: "Drug card",
+  mnemonic: "Mnemonic",
+  case: "Practice case",
+};
+export const ASK_FORMATS = Object.keys(ASK_FORMAT_LABEL) as AskFormat[];
 
 /** A suggestion tied to a line of the sheet. */
 export interface AnchoredQuestion extends BranchQuestion {
@@ -76,6 +107,19 @@ export function versusFromLabel(label: string): string | undefined {
   return m?.[1].trim() || undefined;
 }
 
+/**
+ * A label that names its subject. The prompts ask for that, and now and then
+ * a "Why …" or "How …" comes back anyway; its opener drops ("Why fat
+ * breakdown makes acid" → "Fat breakdown makes acid"). "How to …" stays: it
+ * reads wrong without its verb.
+ */
+export function namedLabel(label: string): string {
+  const m = /^(why|how)\s+(?!to\b)(.+)$/i.exec(label.trim());
+  if (!m) return label;
+  const rest = m[2].replace(/\?$/, "");
+  return rest.charAt(0).toUpperCase() + rest.slice(1);
+}
+
 /** A question as it arrived from the model, validated; null when it is not one. */
 export function asQuestion(raw: unknown, allowed: readonly BranchType[] = SUGGESTED_TYPES): BranchQuestion | null {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
@@ -83,7 +127,7 @@ export function asQuestion(raw: unknown, allowed: readonly BranchType[] = SUGGES
   const type = allowed.includes(r.type as BranchType) ? (r.type as BranchType) : null;
   const ask = clean(r.ask, LIMITS.ask);
   if (!type || !ask) return null;
-  const label = clean(r.label, LIMITS.label) ?? ask.slice(0, LIMITS.label);
+  const label = namedLabel(clean(r.label, LIMITS.label) ?? ask.slice(0, LIMITS.label));
   const q: BranchQuestion = { type, label, ask };
   const versus = clean(r.versus, LIMITS.versus) ?? versusFromLabel(label);
   if (NEEDS_VERSUS.includes(type)) {
@@ -111,6 +155,28 @@ export class BranchOutdatedError extends Error {
   }
 }
 
+/** The request failed with this HTTP status: 5xx is worth one more try, 4xx is not. */
+export class BranchHttpError extends Error {
+  constructor(readonly status: number) {
+    super(`branch request failed: ${status}`);
+    this.name = "BranchHttpError";
+  }
+}
+
+/** The stream ended before the server said it was done: the reply is cut short, and never kept. */
+export class BranchIncompleteError extends Error {
+  constructor() {
+    super("branch reply cut short");
+    this.name = "BranchIncompleteError";
+  }
+}
+
+/** Whether a failed request is worth trying once more by itself: the server or the network, not the request. */
+export const isTransient = (e: unknown): boolean =>
+  e instanceof BranchIncompleteError ||
+  (e instanceof BranchHttpError && e.status >= 500) ||
+  (e instanceof TypeError && !(e instanceof BranchOutdatedError)); // fetch's network failure
+
 export interface BranchSheet {
   /** The sheet's planned section keys, in order. */
   plan: string[];
@@ -119,16 +185,33 @@ export interface BranchSheet {
   topic: string;
   /** The ids of the passages it was built on. */
   sourceIds: string[];
+  /** The server's signatures on the sections, for it to check the sheet is the one it wrote. */
+  signature: SheetSignature | null;
   examMode?: string;
   difficulty?: string;
 }
 
+/** What the server's clinical review of a grown branch said. */
+export type BranchReviewResult =
+  | { verdict: "ok" }
+  | { verdict: "corrected"; fixes: string[]; branch: Record<string, unknown> }
+  | { verdict: "flagged"; fixes: string[] }
+  | { verdict: "unchecked" };
+
 export type BranchRequestParams =
-  | { action: "suggest" }
+  | {
+      action: "suggest";
+      /** Only these sections — a section just rewritten. */
+      only?: string[];
+      /** The branches the student already has, not to be suggested again. */
+      others?: { label: string; ask: string }[];
+    }
   | {
       action: "grow";
       anchor: string;
       quote: string;
+      /** The words the student selected on the line, which their question is about. */
+      focus?: string;
       question: BranchQuestion;
       /** The branches it grows from, outermost first. */
       path: { label: string; text: string }[];
@@ -143,7 +226,14 @@ export type BranchRequestParams =
 export async function runBranchRequest(
   sheet: BranchSheet,
   params: BranchRequestParams,
-  opts: { signal?: AbortSignal; onText?: (text: string) => void } = {}
+  opts: {
+    signal?: AbortSignal;
+    onText?: (text: string) => void;
+    /** The branch is written and the server is checking it. */
+    onReviewing?: () => void;
+    /** The check's verdict, when there is one. */
+    onReview?: (review: BranchReviewResult) => void;
+  } = {}
 ): Promise<string> {
   const { examMode, difficulty, ...rest } = sheet;
   const response = await callMedicalNotes(
@@ -151,12 +241,13 @@ export async function runBranchRequest(
     { signal: opts.signal }
   );
   if (response.status === 429) throw new BranchQuotaError();
-  if (!response.ok || !response.body) throw new Error(`branch request failed: ${response.status}`);
+  if (!response.ok || !response.body) throw new BranchHttpError(response.status);
 
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
   let text = "";
+  let finished = false;
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
@@ -167,16 +258,25 @@ export async function runBranchRequest(
       const trimmed = line.trim();
       if (!trimmed.startsWith("data:")) continue;
       const payload = trimmed.slice(5).trim();
+      if (payload === "[DONE]") finished = true;
       if (!payload || payload === "[DONE]") continue;
-      let parsed: { __meta?: unknown; choices?: { delta?: { content?: unknown } }[] } | null = null;
+      let parsed: { __meta?: Record<string, unknown>; choices?: { delta?: { content?: unknown } }[] } | null = null;
       try {
         parsed = JSON.parse(payload);
       } catch {
         continue; // a partial frame
       }
       if (parsed?.__meta) {
-        reader.cancel().catch(() => {});
-        throw new BranchOutdatedError();
+        const meta = parsed.__meta;
+        // An old server answers with a sheet, which opens with its plan and model.
+        if ("plan" in meta || "model" in meta) {
+          reader.cancel().catch(() => {});
+          throw new BranchOutdatedError();
+        }
+        if (meta.stage === "reviewing") opts.onReviewing?.();
+        const review = asReview(meta.review);
+        if (review) opts.onReview?.(review);
+        continue;
       }
       const delta = parsed?.choices?.[0]?.delta?.content;
       if (typeof delta !== "string") continue;
@@ -185,7 +285,22 @@ export async function runBranchRequest(
     }
   }
   if (!text.trim()) throw new Error("branch request returned nothing");
+  // The server always ends with [DONE]. Without it the connection dropped
+  // mid-reply, and what arrived is a fragment, however complete it looks.
+  if (!finished) throw new BranchIncompleteError();
   return text;
+}
+
+function asReview(v: unknown): BranchReviewResult | null {
+  if (v === "unchecked") return { verdict: "unchecked" };
+  if (!v || typeof v !== "object" || Array.isArray(v)) return null;
+  const r = v as Record<string, unknown>;
+  if (r.verdict === "ok") return { verdict: "ok" };
+  const fixes = (Array.isArray(r.fixes) ? r.fixes : []).filter((f): f is string => typeof f === "string").slice(0, 5);
+  if (!fixes.length) return null;
+  if (r.verdict === "flagged") return { verdict: "flagged", fixes };
+  if (r.verdict !== "corrected" || !r.branch || typeof r.branch !== "object" || Array.isArray(r.branch)) return null;
+  return { verdict: "corrected", fixes, branch: r.branch as Record<string, unknown> };
 }
 
 // ── Reading the suggestions ──────────────────────────────────────────────────
@@ -293,10 +408,86 @@ export function branchMarkdown(
       }
       break;
     }
-    default:
+    default: {
+      // The student's own question comes back in the shape they asked for, or
+      // the one the writer chose: read by the keys it arrived with.
+      if (Array.isArray(body.steps)) return branchMarkdown("management", body, ctx);
+      if (Array.isArray(body.profile)) return branchMarkdown("differential", body, ctx);
+      if (typeof body.stem === "string") return branchMarkdown("case", body, ctx);
+      if (Array.isArray(body.rows)) {
+        const columns = strings(body.columns).map(cell);
+        const rows = (body.rows as unknown[]).filter(Array.isArray) as unknown[][];
+        const width = Math.min(4, Math.max(2, columns.length || rows[0]?.length || 2));
+        const cells = rows.map((r) => r.slice(0, width).map((c) => cell(typeof c === "string" ? c : ""))).filter((r) => r.some(Boolean));
+        if (cells.length) {
+          const pad = (r: string[]) => [...r, ...Array(width).fill("")].slice(0, width);
+          parts.push(
+            [`| ${pad(columns).join(" | ")} |`, `| ${Array(width).fill("---").join(" | ")} |`, ...cells.map((r) => `| ${pad(r).join(" | ")} |`)].join("\n")
+          );
+        }
+        const takeaway = str(body.takeaway);
+        if (takeaway) parts.push(`> ${takeaway}`);
+        break;
+      }
+      const mnemonic = str(body.mnemonic);
+      const lines = strings(body.lines);
+      if (mnemonic || lines.length) {
+        if (mnemonic) parts.push(`**${mnemonic.replace(/\*\*/g, "")}**`);
+        if (lines.length) {
+          // "B — BUN": the part bold, what it stands for after it.
+          parts.push(lines.map((l) => `- ${l.replace(/^([^—:-]{1,24}?)\s*[—:-]\s+/, "**$1** — ")}`).join("\n"));
+        }
+        const tip = str(body.tip);
+        if (tip) parts.push(`> ${tip}`);
+        break;
+      }
       parts.push(...strings(body.paragraphs));
+    }
   }
   return parts.join("\n\n");
+}
+
+const STOP = new Set(
+  "about after also and are because been before being between both but can could does doing each from have having here into more most much must only other over same should some such than that their them then there these they this those through under very what when where which while with would your you".split(
+    " "
+  )
+);
+
+/** The words of a text worth matching on: lower-case, four letters or more, not common glue. */
+const termsOf = (text: string) =>
+  new Set(
+    text
+      .toLowerCase()
+      .replace(/\*\*/g, "")
+      .split(/[^a-z0-9+]+/)
+      .filter((w) => w.length >= 4 && !STOP.has(w))
+  );
+
+/**
+ * The line a question asked of the whole sheet belongs under: the one that
+ * shares most of its words, counted over the sheet's lines as the page
+ * anchors them. Null when no line shares any — the student then picks a
+ * section. The student can always move it; this only saves them the looking.
+ */
+export function bestAnchor(sections: Record<string, SectionBody>, keys: string[], question: string): string | null {
+  const want = termsOf(question);
+  if (!want.size) return null;
+  let best: { anchor: string; score: number } | null = null;
+  for (const key of keys) {
+    if (key === "memoryHooks") continue;
+    const body = sections[key];
+    if (body === undefined) continue;
+    const lines: string[] =
+      typeof body === "string" ? body.split("\n") : (body as (string | string[])[]).map((x) => (Array.isArray(x) ? x.join(" ") : x));
+    lines.forEach((line, i) => {
+      if (!line.trim()) return;
+      const have = termsOf(line);
+      let score = 0;
+      for (const w of want) if (have.has(w)) score++;
+      if (score && (!best || score > best.score)) best = { anchor: `${key}:${i}`, score };
+    });
+  }
+  return best ? (best as { anchor: string }).anchor : null;
 }
 
 export interface BranchReply {
@@ -306,6 +497,10 @@ export interface BranchReply {
   /** Whether the sheet's passages backed it; null when the reply did not say. */
   covered: boolean | null;
   closed: boolean;
+  /** The question wasn't about medicine: this is what the writer said instead, and nothing is kept. */
+  offTopic?: string;
+  /** "ask" only: what the answer is about, in a few words, for its chip. */
+  label?: string;
 }
 
 /** A grow reply so far, read into the branch it makes. */
@@ -313,6 +508,11 @@ export function readBranch(text: string, type: BranchType, ctx: { topic: string;
   const parsed = parsePartialObject(text);
   if (!parsed) return { markdown: "", next: [], covered: null, closed: false };
   const { value, closed } = parsed;
+  if (value.offTopic === true) {
+    const message = typeof value.message === "string" && value.message.trim() ? value.message.trim() : "That isn't something this can help with here.";
+    return { markdown: "", next: [], covered: null, closed, offTopic: message.slice(0, 300) };
+  }
+  const label = type === "ask" && closed ? clean(value.label, 60) : undefined;
   const next = (Array.isArray(value.next) ? (closed ? value.next : value.next.slice(0, -1)) : [])
     .map((q) => asQuestion(q))
     .filter((q): q is BranchQuestion => q !== null)
@@ -322,6 +522,7 @@ export function readBranch(text: string, type: BranchType, ctx: { topic: string;
     next,
     covered: typeof value.covered === "boolean" ? value.covered : null,
     closed,
+    ...(label ? { label: namedLabel(label) } : {}),
   };
 }
 

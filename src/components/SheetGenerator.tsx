@@ -34,12 +34,12 @@ import SheetSettings from "@/components/sheet/SheetSettings";
 import SheetTopicBar from "@/components/sheet/SheetTopicBar";
 import SheetPreparation from "@/components/sheet/SheetPreparation";
 import SheetFinish, { type SheetDeck } from "@/components/sheet/SheetFinish";
-import { SectionsMenu, SheetSectionRail } from "@/components/sheet/SheetSections";
+import { TrackedSectionRail, TrackedSectionsMenu } from "@/components/sheet/SheetSections";
+import { BranchesButton, BranchesMenuItem, PanelAwareLayout } from "@/components/sheet/branches/BranchesChrome";
 import {
   TOPIC_BAR_BUTTON,
   jumpToSection,
   listSections,
-  useActiveSection,
 } from "@/components/sheet/sheet-nav";
 import { useUsageLimit, MAX_DAILY_SHEETS } from "@/hooks/use-usage-limit";
 import { useCitationUsage } from "@/hooks/use-citation-usage";
@@ -78,6 +78,7 @@ import { sheetToPlainText } from "@/lib/sheet-to-text";
 import { ENTER, FOLD, RISE } from "@/lib/motion";
 import { useStudyHistory } from "@/hooks/use-study-history";
 import { useSheetLayer } from "@/hooks/use-sheet-layer";
+import { parseSignature, requestSignature, requestTopic, type SheetSignature } from "@/lib/sheet-signature";
 import {
   anchoredTo,
   applyLayer,
@@ -292,6 +293,8 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
   // the server recorded for it when the student has no Pro. Both ride on the
   // sheet: a premium sheet is personalizable like a Pro one.
   const premiumRef = useRef<{ premium: boolean; grant?: string }>({ premium: false });
+  // The server's signature on the sheet's sections, sent as the stream ends.
+  const signatureRef = useRef<SheetSignature | null>(null);
 
   // The saved row the sheet on screen is, once it is one: opened from
   // history, saved with Save, or saved on the student's first personal touch.
@@ -374,6 +377,7 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
     planRef.current = null;
     flashcardsRef.current = null;
     premiumRef.current = { premium: false };
+    signatureRef.current = null;
     // Captured per-generation rather than read at render time: the sheet must
     // keep describing the settings it was actually built with, even if the
     // toggle is flipped afterwards.
@@ -397,6 +401,7 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
       ...(flashcardsRef.current ? { flashcards: flashcardsRef.current } : {}),
       ...(premiumRef.current.premium ? { premium: true } : {}),
       ...(premiumRef.current.grant ? { premiumGrant: premiumRef.current.grant } : {}),
+      ...(signatureRef.current ? { signature: signatureRef.current } : {}),
       depth: requestedDepth,
     });
 
@@ -515,6 +520,9 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
               }
               // Proof, for the AI actions later, that this premium sheet may
               // be personalized without Pro.
+              if (meta.signature !== undefined) {
+                signatureRef.current = parseSignature(meta.signature);
+              }
               if (typeof meta.premiumGrant === "string") {
                 premiumRef.current.grant = meta.premiumGrant;
               }
@@ -926,9 +934,10 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
     ...p,
     plan: sheetKeys,
     sections: (studentSheet?.sections ?? {}) as Record<string, SectionBody>,
-    topic: sheetTopic.slice(0, 120),
+    topic: sheet ? requestTopic(sheet, sheetTopic) : sheetTopic.slice(0, 120),
     sourceIds: (sheet?.sources ?? []).map((s) => s.id),
     grant: sheet?.premiumGrant,
+    signature: sheet ? requestSignature(sheet, layerState.layer) : null,
     examMode: activeSettings.examMode,
     difficulty: activeSettings.difficulty,
   });
@@ -942,7 +951,7 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
     key: string,
     job: SectionJob,
     params: SectionRequestParams,
-    done: (sections: Record<string, SectionBody>) => void
+    done: (sections: Record<string, SectionBody>, sigs: Record<string, string>) => void
   ) => {
     const controller = new AbortController();
     sectionAborts.current.get(key)?.abort();
@@ -960,7 +969,7 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
         signal: controller.signal,
         onDraft: (d) => setSectionDrafts((all) => ({ ...all, ...d.sections })),
       });
-      done(result.sections);
+      done(result.sections, result.sigs);
       setJob(null);
     } catch (e: unknown) {
       if (e instanceof Error && e.name === "AbortError") return;
@@ -990,8 +999,11 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
       key,
       { action: "regenerate", status: "running", label },
       sectionParams({ action: "regenerate", key, style, instruction }),
-      (sections) => {
-        if (hasBody(sections[key])) updateLayer((l) => rewriteSection(l, { [key]: sections[key] }, style));
+      (sections, sigs) => {
+        if (!hasBody(sections[key])) return;
+        updateLayer((l) => rewriteSection(l, { [key]: sections[key] }, style, sigs));
+        // Its suggestions named lines it no longer has, and went with them.
+        branches.actions.suggestFor([key]);
       }
     );
   };
@@ -1034,15 +1046,11 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
     },
     onQuota: () => {
       setGoProOpen(true);
-      toast({ title: "You've grown today's branches", description: "They reset at midnight UTC. Pro is unlimited." });
+      toast({ title: "You've used today's deep dives", description: "They reset at midnight UTC. Pro is unlimited." });
     },
     onOutdated: () =>
-      toast({ title: "Branches aren't live yet", description: "StudyBuddy is being updated. Try again later.", variant: "destructive" }),
+      toast({ title: "Deep dives aren't live yet", description: "StudyBuddy is being updated. Try again later.", variant: "destructive" }),
   });
-  const branchCount = branches.branches.length;
-  const branchesBusy = branches.suggesting || Object.values(branches.growing).some((g) => g.status === "growing");
-  const panelOpen = branches.panel !== null;
-  const toggleBranches = () => (branches.panel === "all" ? branches.close() : branches.openAll());
 
   const personal: PersonalProps | undefined =
     sheet && !legacyOutput
@@ -1180,10 +1188,6 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
   // text, so this ends the moment it starts writing.
   const waitingForContent = loading && !liveKey && streamedKeys.length === 0;
   const sectionEntries = planned ? listSections(readingSheet, loading, streamedKeys, liveKey) : [];
-  const activeSection = useActiveSection(
-    sectionEntries.map((s) => s.key),
-    generationId
-  );
   // What the progress line counts. The deck arrives in its own frame at the
   // end, not as a section the parser reports, so it is left out.
   const progressSections = planned
@@ -1209,25 +1213,12 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
   const topicActions = (
     <>
       <div className="xl:hidden">
-        <SectionsMenu items={sectionEntries} activeKey={activeSection} onJump={jumpToSection} />
+        <TrackedSectionsMenu items={sectionEntries} onJump={jumpToSection} resetToken={generationId} />
       </div>
 
       {/* The sheet's branches. On a phone the title needs the room: they move into the menu below. */}
       {sheet && !legacyOutput && (
-        <button
-          type="button"
-          onClick={toggleBranches}
-          disabled={loading}
-          aria-pressed={branches.panel === "all"}
-          aria-label={`Branches${branchCount ? ` (${branchCount})` : ""}`}
-          className={`${TOPIC_BAR_BUTTON} hidden sm:inline-flex${branches.panel === "all" ? " bg-secondary text-foreground" : ""}`}
-        >
-          {branchesBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin text-info" /> : <GitBranch className="h-3.5 w-3.5 text-info" />}
-          <span>Branches</span>
-          {branchCount > 0 && (
-            <span className="rounded-full bg-info-soft px-1.5 py-0.5 font-mono text-[10px] leading-none text-info">{branchCount}</span>
-          )}
-        </button>
+        <BranchesButton store={branches} disabled={loading} className={`${TOPIC_BAR_BUTTON} hidden sm:inline-flex`} />
       )}
 
       <Popover open={editOpen} onOpenChange={handleEditOpenChange}>
@@ -1254,8 +1245,8 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
               if (onlyDeeper) {
                 setEditOpen(false);
                 setActiveSettings((s) => ({ ...s, depth }));
-                branches.growPicks();
-                branches.openAll();
+                branches.actions.growPicks();
+                branches.actions.openAll();
                 return;
               }
               generate();
@@ -1279,7 +1270,7 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
             <div className="flex items-center justify-between gap-3 border-t border-border pt-3">
               <p className="text-[11px] leading-snug text-muted-foreground">
                 {onlyDeeper
-                  ? "Grows this sheet's top branches — your highlights and notes stay."
+                  ? "Writes this sheet's top deep dives — your highlights and notes stay."
                   : pro
                   ? "Rewrites the sheet with these settings."
                   : "Rewrites the sheet — uses one of today's generations."}
@@ -1291,7 +1282,7 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
                 className="shrink-0 gap-1.5"
               >
                 <RefreshCw className="h-3.5 w-3.5" />
-                {onlyDeeper ? "Grow branches" : "Regenerate"}
+                {onlyDeeper ? "Write deep dives" : "Regenerate"}
               </Button>
             </div>
           </form>
@@ -1318,15 +1309,7 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
           </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-56">
-          {sheet && !legacyOutput && (
-            <>
-              <DropdownMenuItem className="sm:hidden" disabled={loading} onSelect={branches.openAll}>
-                <GitBranch className="mr-2 h-4 w-4" />
-                Branches{branchCount ? ` · ${branchCount}` : ""}
-              </DropdownMenuItem>
-              <DropdownMenuSeparator className="sm:hidden" />
-            </>
-          )}
+          {sheet && !legacyOutput && <BranchesMenuItem store={branches} disabled={loading} />}
           <DropdownMenuItem onSelect={newSheet} disabled={loading}>
             <Plus className="mr-2 h-4 w-4" />
             New sheet
@@ -1358,15 +1341,16 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
     </>
   );
 
-  // With the branch panel open on a wide screen, the sheet moves over to sit
-  // beside it — the line a branch grew from stays in view — and the contents
-  // rail gives up its column.
+  // Room for the branch panel, and the contents rail: see PanelAwareLayout,
+  // which re-renders when the panel opens so that the sheet doesn't.
   const readView = (
-    <div className={`transition-[padding] duration-300 ${panelOpen ? "lg:pr-[400px] xl:pr-[440px]" : ""}`}>
-    <div
-      className={`mx-auto grid w-full max-w-[760px] grid-cols-1 ${
-        panelOpen ? "" : "xl:max-w-[1064px] xl:grid-cols-[minmax(0,760px)_240px] xl:gap-16"
-      }`}
+    <PanelAwareLayout
+      store={sheet && !legacyOutput ? branches : null}
+      rail={
+        <div className="sticky" style={{ top: "calc(var(--nav-h, 64px) + 24px)" }}>
+          <TrackedSectionRail items={sectionEntries} onJump={jumpToSection} resetToken={generationId} />
+        </div>
+      }
     >
       <div ref={docRef} className="min-w-0">
         <SheetTopicBar
@@ -1495,15 +1479,7 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
         </div>
       </div>
 
-      {!panelOpen && (
-        <aside className="hidden xl:block" aria-label="Sheet contents">
-          <div className="sticky" style={{ top: "calc(var(--nav-h, 64px) + 24px)" }}>
-            <SheetSectionRail items={sectionEntries} activeKey={activeSection} onJump={jumpToSection} />
-          </div>
-        </aside>
-      )}
-    </div>
-    </div>
+    </PanelAwareLayout>
   );
 
   const composeView = (
@@ -1546,7 +1522,7 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
           </m.div>
         </AnimatePresence>
 
-        {reading && sheet && !legacyOutput && <BranchPanel api={branches} />}
+        {reading && sheet && !legacyOutput && <BranchPanel store={branches} />}
 
         <AuthModal open={authModalOpen} onOpenChange={setAuthModalOpen} />
         <GoProModal open={goProOpen} onOpenChange={setGoProOpen} />

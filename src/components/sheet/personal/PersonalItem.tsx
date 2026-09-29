@@ -3,7 +3,6 @@ import {
   Check,
   Eye,
   EyeOff,
-  GitBranch,
   Layers,
   Lightbulb,
   Loader2,
@@ -14,6 +13,7 @@ import {
   Plus,
   RotateCcw,
   Sparkles,
+  Stethoscope,
   Trash2,
   Wand2,
   X,
@@ -49,7 +49,7 @@ import {
 } from "@/lib/sheet-layer";
 import { REWRITE_STYLES } from "@/lib/personalize";
 import { cardFromSuggestion, usePersonal, type PersonalApi } from "./personal-context";
-import { useBranches } from "@/components/sheet/branches/branch-context";
+import { useBranchActions, useBranchesEnabled } from "@/components/sheet/branches/branch-context";
 
 /** `**bold**` in a line the student or the AI wrote, rendered as the sheet renders it. */
 export function BoldText({ text }: { text: string }) {
@@ -84,10 +84,12 @@ const MENU_BUTTON =
 
 export function ItemMenu({ anchor, effective, sectionTitle, canEdit }: ItemMenuProps) {
   const p = usePersonal();
-  const branches = useBranches();
+  // Subscribed to whether branches can grow, and nothing else: this menu is on every line.
+  const branchesEnabled = useBranchesEnabled();
+  const branches = useBranchActions();
   if (!p || p.readOnly) return null;
   // Branching is for every student, not only Pro. A mnemonic has nothing to branch into.
-  const canBranch = !!branches?.enabled && anchorSection(anchor) !== "memoryHooks";
+  const canBranch = branchesEnabled && !!branches && anchorSection(anchor) !== "memoryHooks";
   const { layer } = p;
   const edited = !!layer.edits[anchor];
   const known = layer.known.includes(anchor);
@@ -109,7 +111,7 @@ export function ItemMenu({ anchor, effective, sectionTitle, canEdit }: ItemMenuP
         {canBranch && (
           <>
             <DropdownMenuItem onSelect={() => branches!.openLine(anchor)}>
-              <GitBranch className="mr-2 h-4 w-4" /> Branch from this line
+              <Stethoscope className="mr-2 h-4 w-4" /> Ask about this line
             </DropdownMenuItem>
             <DropdownMenuSeparator />
           </>

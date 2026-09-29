@@ -1,8 +1,14 @@
 import { afterEach, describe, it, expect, vi } from "vitest";
 import {
+  BranchHttpError,
+  BranchIncompleteError,
   BranchOutdatedError,
   BranchQuotaError,
   comprehensivePicks,
+  bestAnchor,
+  branchMarkdown,
+  isTransient,
+  namedLabel,
   markdownBlocks,
   plainText,
   readBranch,
@@ -12,15 +18,18 @@ import {
 import {
   addBranch,
   branchPath,
+  descendantCount,
   editBranch,
   emptyLayer,
   isEmptyLayer,
   layerBranchesText,
   parseLayer,
   removeBranch,
+  replaceSectionPills,
   rewriteSection,
   setPills,
 } from "./sheet-layer";
+import { requestSignature } from "./sheet-signature";
 import type { GeneratedSheet } from "@/types/generated-sheet";
 
 vi.mock("@/lib/callMedicalNotes", () => ({ callMedicalNotes: vi.fn() }));
@@ -203,7 +212,7 @@ describe("branches in the layer", () => {
     let layer = addBranch(emptyLayer(), branch({ id: "a" }));
     layer = addBranch(layer, branch({ id: "b", parentId: "a", label: "Gastrografin", text: "#### Dose\n100 mL." }));
     expect(layerBranchesText(sheet, layer)).toBe(
-      "My branches\n\n# Clinical Approach\n\n## Conservative trial\n\n1. Decompress.\n\n### Gastrografin\n\nDose\n100 mL."
+      "My deep dives\n\n# Clinical Approach\n\n## Conservative trial\n\n1. Decompress.\n\n### Gastrografin\n\nDose\n100 mL."
     );
     expect(layerBranchesText(sheet, emptyLayer())).toBe("");
   });
@@ -211,12 +220,12 @@ describe("branches in the layer", () => {
 
 // ── The request itself ─────────────────────────────────────────────────────
 
-const sse = (frames: unknown[]) =>
+const sse = (frames: unknown[], done = true) =>
   new Response(
     new ReadableStream({
       start(c) {
         for (const f of frames) c.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(f)}\n\n`));
-        c.enqueue(new TextEncoder().encode("data: [DONE]\n\n"));
+        if (done) c.enqueue(new TextEncoder().encode("data: [DONE]\n\n"));
         c.close();
       },
     })
@@ -224,7 +233,7 @@ const sse = (frames: unknown[]) =>
 const delta = (content: string) => ({ choices: [{ index: 0, delta: { content } }] });
 
 describe("runBranchRequest", () => {
-  const sheet = { plan: ["overview"], sections: { overview: "Mechanism: x." }, topic: "SBO", sourceIds: [], examMode: "USMLE Step 2" };
+  const sheet = { plan: ["overview"], sections: { overview: "Mechanism: x." }, topic: "SBO", sourceIds: [], signature: null, examMode: "USMLE Step 2" };
   afterEach(() => vi.mocked(callMedicalNotes).mockReset());
 
   it("sends the sheet and the request, and streams the reply", async () => {
@@ -245,5 +254,134 @@ describe("runBranchRequest", () => {
   it("stops at once when the server answers with a sheet instead", async () => {
     vi.mocked(callMedicalNotes).mockResolvedValue(sse([{ __meta: { plan: [] } }]));
     await expect(runBranchRequest(sheet, { action: "suggest" })).rejects.toBeInstanceOf(BranchOutdatedError);
+  });
+
+  it("never takes a reply that ended without [DONE] for a whole one", async () => {
+    vi.mocked(callMedicalNotes).mockResolvedValue(sse([delta('{"paragraphs": ["**Half a head.** cut off in the mid')], false));
+    const err = await runBranchRequest(sheet, { action: "suggest" }).catch((e) => e);
+    expect(err).toBeInstanceOf(BranchIncompleteError);
+    expect(isTransient(err)).toBe(true);
+  });
+
+  it("hands on the review: checking, then its verdict — neither a sign of an old server", async () => {
+    const review = { verdict: "corrected", fixes: ["peaked T waves → hyperkalemia"], branch: { steps: ["**Hold K+** — now."] } };
+    vi.mocked(callMedicalNotes).mockResolvedValue(
+      sse([delta('{"steps": ["x"]}'), { __meta: { stage: "reviewing" } }, { __meta: { review } }])
+    );
+    const seen: string[] = [];
+    await runBranchRequest(sheet, { action: "suggest" }, { onReviewing: () => seen.push("reviewing"), onReview: (r) => seen.push(r.verdict) });
+    expect(seen).toEqual(["reviewing", "corrected"]);
+  });
+
+  it("marks a server error as worth one more try, a bad request not", async () => {
+    vi.mocked(callMedicalNotes).mockResolvedValue(new Response("{}", { status: 500 }));
+    const err = await runBranchRequest(sheet, { action: "suggest" }).catch((e) => e);
+    expect(err).toBeInstanceOf(BranchHttpError);
+    expect(isTransient(err)).toBe(true);
+    expect(isTransient(new BranchHttpError(400))).toBe(false);
+    expect(isTransient(new BranchQuotaError())).toBe(false);
+  });
+});
+
+describe("what a grow reply says besides its branch", () => {
+  it("passes on a declined question, keeping nothing", () => {
+    const r = readBranch('{"offTopic": true, "message": "I can help with DKA here."}', "ask", { topic: "DKA" });
+    expect(r.offTopic).toBe("I can help with DKA here.");
+    expect(r.markdown).toBe("");
+  });
+
+  it("names the student's own question by what the answer covers", () => {
+    const r = readBranch('{"label": "Why magnesium comes first", "paragraphs": ["Replace Mg."]}', "ask", { topic: "DKA" });
+    expect(r.label).toBe("Magnesium comes first");
+  });
+
+  it("drops a Why or How opener from a label, but not How to", () => {
+    expect(namedLabel("Why fat breakdown makes acid")).toBe("Fat breakdown makes acid");
+    expect(namedLabel("How insulin shifts K+?")).toBe("Insulin shifts K+");
+    expect(namedLabel("How to dose insulin")).toBe("How to dose insulin");
+    expect(namedLabel("Potassium before insulin")).toBe("Potassium before insulin");
+  });
+});
+
+describe("the layer's newer parts", () => {
+  const q = { type: "mechanism" as const, label: "x", ask: "x?" };
+
+  it("replaces only a rewritten section's suggestions", () => {
+    const l = setPills(emptyLayer(), [
+      { ...q, anchor: "overview:0" },
+      { ...q, label: "y", anchor: "clinicalApproach:1" },
+    ]);
+    const next = replaceSectionPills(l, ["clinicalApproach"], [{ ...q, label: "new", anchor: "clinicalApproach:0" }]);
+    expect(next.pills.map((p) => `${p.anchor}:${p.label}`)).toEqual(["overview:0:x", "clinicalApproach:0:new"]);
+  });
+
+  it("counts every branch below one, at any depth", () => {
+    let l = emptyLayer();
+    const b = (id: string, parentId?: string) => ({ id, anchor: "overview:0", ...(parentId ? { parentId } : {}), ...q, text: "t", next: [], source: "ai" as const });
+    l = addBranch(l, b("a"));
+    l = addBranch(l, b("b", "a"));
+    l = addBranch(l, b("c", "b"));
+    l = addBranch(l, b("d", "a"));
+    expect(descendantCount(l, "a")).toBe(3);
+  });
+
+  it("keeps a branch's review, and a rewrite's signature, through saving", () => {
+    const sig = "s".repeat(43);
+    let l = addBranch(emptyLayer(), { id: "a", anchor: "overview:0", ...q, text: "t", next: [], source: "ai", review: { verdict: "corrected", fixes: ["x → y"] } });
+    l = rewriteSection(l, { overview: "New." }, "simpler", { overview: sig });
+    const back = parseLayer(JSON.parse(JSON.stringify(l)));
+    expect(back.branches[0].review).toEqual({ verdict: "corrected", fixes: ["x → y"] });
+    expect(back.sections.overview.sig).toBe(sig);
+  });
+
+  it("sends a rewritten section's own signature, and leaves one without unsigned", () => {
+    const sheet = { signature: { v: 1 as const, topic: "DKA", sections: { overview: "o".repeat(43), clinicalApproach: "c".repeat(43) } } } as unknown as GeneratedSheet;
+    let l = rewriteSection(emptyLayer(), { overview: "New." }, "simpler", { overview: "n".repeat(43) });
+    l = rewriteSection(l, { clinicalApproach: "New too." }, "simpler");
+    const sig = requestSignature(sheet, l)!;
+    expect(sig.sections.overview).toBe("n".repeat(43));
+    expect(sig.sections.clinicalApproach).toBeUndefined();
+    expect(requestSignature({} as GeneratedSheet, l)).toBeNull();
+  });
+});
+
+describe("the student's own question, in the shape they asked for", () => {
+  const ctx = { topic: "DKA" };
+
+  it("reads a table with its own column headings", () => {
+    const md = branchMarkdown("ask", { columns: ["Score", "Cut-off"], rows: [["BISAP", "≥3"], ["Ranson", "≥3 | severe"]], takeaway: "Both use 3." }, ctx);
+    expect(md).toBe("| Score | Cut-off |\n| --- | --- |\n| BISAP | ≥3 |\n| Ranson | ≥3 / severe |\n\n> Both use 3.");
+    expect(markdownBlocks(md)[0]).toMatchObject({ kind: "table", header: ["Score", "Cut-off"] });
+  });
+
+  it("reads a mnemonic: the word bold, each part bold before what it stands for", () => {
+    const md = branchMarkdown("ask", { mnemonic: "BISAP", lines: ["B — BUN > 25", "I: Impaired mental status"], tip: "3 or more is severe." }, ctx);
+    expect(md).toBe("**BISAP**\n\n- **B** — BUN > 25\n- **I** — Impaired mental status\n\n> 3 or more is severe.");
+  });
+
+  it("reads steps, a drug card and a case as their kinds do", () => {
+    expect(branchMarkdown("ask", { steps: ["**Give fluids** — 1 L."] }, ctx)).toBe("1. **Give fluids** — 1 L.");
+    expect(branchMarkdown("ask", { profile: ["Class: insulin"] }, ctx)).toBe("- **Class:** insulin");
+    expect(branchMarkdown("ask", { stem: "A man.", question: "Next?", answer: "Fluids." }, ctx)).toContain("> **Answer:** Fluids.");
+    expect(branchMarkdown("ask", { paragraphs: ["Plain."] }, ctx)).toBe("Plain.");
+  });
+});
+
+describe("where a question of the whole sheet goes", () => {
+  const sections = {
+    overview: "Mechanism: insulin deficiency drives ketogenesis.\n\nPathophysiology: osmotic diuresis dehydrates.",
+    clinicalApproach: ["Give isotonic fluids first.", "Start the insulin infusion once potassium is above 3.3."],
+    memoryHooks: ["Potassium potassium potassium"],
+  };
+  const keys = ["overview", "clinicalApproach", "memoryHooks"];
+
+  it("finds the line that shares most of its words, counting lines as the page anchors them", () => {
+    expect(bestAnchor(sections, keys, "When can the insulin infusion start given potassium?")).toBe("clinicalApproach:1");
+    expect(bestAnchor(sections, keys, "Why does osmotic diuresis happen?")).toBe("overview:2");
+  });
+
+  it("never picks the mnemonics, and gives up when nothing matches", () => {
+    expect(bestAnchor(sections, keys, "potassium")).toBe("clinicalApproach:1");
+    expect(bestAnchor(sections, keys, "What about the weather today?")).toBeNull();
   });
 });

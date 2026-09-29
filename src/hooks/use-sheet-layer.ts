@@ -47,6 +47,10 @@ export function useSheetLayer(sheetKey: string | number, sheetId: string | null)
   const [status, setStatus] = useState<LayerStatus>(sheetId ? "loading" : "ready");
   const [unsaved, setUnsaved] = useState(false);
   const [saveFailed, setSaveFailed] = useState(false);
+  // The sheet the state above belongs to. The effect below catches up with a
+  // different sheet only after the render that shows it; until then, the
+  // state is the last sheet's, and must not be handed out as this one's.
+  const [owner, setOwner] = useState(sheetKey);
 
   // The sheet and id the pending layer belongs to (undefined until the first
   // load), and the layer itself.
@@ -110,6 +114,7 @@ export function useSheetLayer(sheetKey: string | number, sheetId: string | null)
     keyRef.current = sheetKey;
     idRef.current = sheetId;
     pendingRef.current = null;
+    setOwner(sheetKey);
     setUnsaved(false);
     setSaveFailed(false);
     setLayer(emptyLayer());
@@ -168,8 +173,17 @@ export function useSheetLayer(sheetKey: string | number, sheetId: string | null)
     [flush]
   );
 
+  // A different sheet, in the render before the effect has seen it: nothing
+  // loaded yet. Handing out the last sheet's "ready" here is what let a saved
+  // sheet, just opened, look like one with no branches and ask for them again.
+  if (owner !== sheetKey) {
+    return { layer: EMPTY, status: sheetId ? "loading" : "ready", unsaved: false, saveFailed: false, update };
+  }
   return { layer, status, unsaved, saveFailed, update };
 }
+
+/** The layer a sheet has before its own has loaded — one object, so it never looks like a change. */
+const EMPTY: SheetLayer = emptyLayer();
 
 /** A saved sheet's layer, read once, for views that only show it. */
 export function useSavedSheetLayer(sheetId: string | null): SheetLayer | null {

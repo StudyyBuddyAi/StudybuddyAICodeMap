@@ -77,10 +77,12 @@ import {
 } from "@/lib/sheet-layer";
 import { REGEN_CHOICES, hasBody, type RegenStyle } from "@/lib/sheet-depth";
 import { CustomRewrite, SectionMenu, type SectionJob } from "@/components/sheet/SectionDepth";
-import type { BranchesApi } from "@/hooks/use-sheet-branches";
-import { BranchesProvider, useBranches } from "@/components/sheet/branches/branch-context";
-import { LineBranches, lineHasBranches } from "@/components/sheet/branches/LineBranches";
+import type { BranchesStore } from "@/hooks/use-sheet-branches";
+import { BranchesProvider, useBranchStore, useBranchesEnabled } from "@/components/sheet/branches/branch-context";
+import { LineBranches, useLineHasChips } from "@/components/sheet/branches/LineBranches";
 import { PrintBranches } from "@/components/sheet/branches/PrintBranches";
+import { SavedBranches } from "@/components/sheet/branches/SavedBranches";
+import { BranchesNotice } from "@/components/sheet/branches/BranchesNotice";
 import { PersonalProvider, usePersonal, type PersonalApi, type PersonalProps } from "@/components/sheet/personal/personal-context";
 import {
   AdditionRow,
@@ -323,7 +325,7 @@ interface OutputSectionProps {
    * The sheet's branches: the chips under its lines, grown or suggested, and
    * the "Branch from this line" item. Absent, the sheet shows none.
    */
-  branches?: BranchesApi;
+  branches?: BranchesStore;
 }
 
 /** What the page lets a section do about its wording. */
@@ -1064,12 +1066,31 @@ const tableWidth = (columns: string[], rows: string[][]) =>
 
 const hasNodes = (n: React.ReactNode) => (Array.isArray(n) ? n.some(Boolean) : !!n);
 
+/**
+ * What goes under a table row — its enhancements, the student's extras, its
+ * branches — in a row of its own, which exists only when one of them does. The
+ * branches are asked for here, by subscription, so a table row gains or loses
+ * its chips without the sheet re-rendering.
+ */
+function TableBelow({ anchor, width, nodes }: { anchor: string; width: number; nodes: React.ReactNode[] }) {
+  const chips = useLineHasChips(anchor, true);
+  if (!chips && !nodes.some(hasNodes)) return null;
+  return (
+    <tr>
+      <td colSpan={width} style={{ padding: "0 12px 8px" }}>
+        {nodes}
+        {chips && <LineBranches anchor={anchor} />}
+      </td>
+    </tr>
+  );
+}
+
 function renderTableSection(
   rawRows: string[][],
   columns: string[],
   sectionKey: string,
   onKeywordClick: KeywordClickHandler,
-  renderInline: (anchor: string) => React.ReactNode,
+  renderInline: (anchor: string, withChips?: boolean) => React.ReactNode,
   collapsedByAnchor: Record<string, CollapsedRef[]>,
   onReopen: (key: string) => void,
   pr?: PersonalRender
@@ -1088,7 +1109,7 @@ function renderTableSection(
         // A row is not edited in place — its cells are the table's shape — so
         // under it go only what the student asked for: an explanation, a card,
         // a note.
-        const below = [renderInline(anchor), pr?.extras(anchor, rowText, rowText)];
+        const below = [renderInline(anchor, false), pr?.extras(anchor, rowText, rowText)];
         return (
           <Fragment key={r}>
             <tr
@@ -1116,13 +1137,7 @@ function renderTableSection(
                 </td>
               ))}
             </tr>
-            {below.some(hasNodes) && (
-              <tr>
-                <td colSpan={width} style={{ padding: "0 12px 8px" }}>
-                  {below}
-                </td>
-              </tr>
-            )}
+            <TableBelow anchor={anchor} width={width} nodes={below} />
           </Fragment>
         );
       })}
@@ -1281,6 +1296,8 @@ interface EnhanceBubbleProps {
   left: number;
   onAction: (kind: EnhanceKind) => void;
   innerRef?: React.Ref<HTMLDivElement>;
+  /** Ask a deep dive about the selected words — absent where the sheet can't take one. */
+  onAsk?: () => void;
 }
 
 // Anchored to the scrolling document container (its parent is `position: relative`),
@@ -1308,7 +1325,7 @@ const BubbleDivider = () => (
 
 // Rendered inside AnimatePresence, so it fades back out when dismissed rather
 // than vanishing. Motion owns the transform, hence `x` in place of translateX.
-const EnhanceBubble = ({ top, left, onAction, innerRef }: EnhanceBubbleProps) => (
+const EnhanceBubble = ({ top, left, onAction, innerRef, onAsk }: EnhanceBubbleProps) => (
   <m.div
     ref={innerRef}
     initial={{ opacity: 0, y: 4, scale: 0.97 }}
@@ -1333,6 +1350,19 @@ const EnhanceBubble = ({ top, left, onAction, innerRef }: EnhanceBubbleProps) =>
     }}
     onMouseDown={(e) => e.stopPropagation()}
   >
+    {onAsk && (
+      <>
+        <button
+          type="button"
+          onClick={onAsk}
+          title="Ask a deep dive about what you selected"
+          style={{ ...BUBBLE_BUTTON_STYLE, color: "var(--accent)", display: "inline-flex", alignItems: "center", gap: 4 }}
+        >
+          <Stethoscope style={{ width: 13, height: 13 }} aria-hidden /> Ask
+        </button>
+        <BubbleDivider />
+      </>
+    )}
     <button
       type="button"
       onClick={() => onAction("enhance")}
@@ -1662,7 +1692,10 @@ const OutputSectionBody = ({
 }: OutputSectionProps) => {
   const ref = useRef<HTMLDivElement>(null);
   const personal = usePersonal();
-  const branches = useBranches();
+  // The store only: this never re-renders for a branch; each line's chips do.
+  const branches = useBranchStore();
+  // Whether deep dives can be asked for now — it changes once, when the sheet is ready.
+  const branchesEnabled = useBranchesEnabled();
   const referenceNoteRef = useRef<HTMLDivElement>(null);
   // The section asking, in the student's own words, how it should be rewritten.
   const [customFor, setCustomFor] = useState<string | null>(null);
@@ -1825,6 +1858,17 @@ const OutputSectionBody = ({
   const clearSelection = () => {
     setSelection(null);
     window.getSelection()?.removeAllRanges();
+  };
+
+  // A deep dive about the words selected: on a line the sheet has — not the
+  // mnemonics, which have nothing to go deeper into — and once the sheet is ready.
+  const selectionAnchor = selection ? selection.mark?.anchor ?? selection.anchor : "";
+  const canAskSelection =
+    !!branches && branchesEnabled && /^[A-Za-z][A-Za-z0-9_]*:(\d+|end)$/.test(selectionAnchor) && !selectionAnchor.startsWith("memoryHooks:");
+  const askSelection = () => {
+    if (!selection || !branches) return;
+    branches.actions.openLine(selectionAnchor, selection.text);
+    clearSelection();
   };
 
   // ── The student's own layer: highlights, and AI on a line ─────────────────
@@ -2131,9 +2175,12 @@ const OutputSectionBody = ({
    * What goes under a line: its open enhancements, then its branches. Null
    * when there is neither, so a table adds no empty row for it.
    */
-  const renderInline = (anchor: string): React.ReactNode => {
+  const renderInline = (anchor: string, withChips = true): React.ReactNode => {
     const enhancements = renderEnhancements(anchor);
-    const chips = !isStreaming && lineHasBranches(branches, anchor) ? <LineBranches key="branches" anchor={anchor} /> : null;
+    // Each line's chips subscribe to the branches themselves, so a branch
+    // changing re-renders its line, not the sheet. They render nothing when
+    // the line has none.
+    const chips = withChips && !isStreaming && branches ? <LineBranches key="branches" anchor={anchor} /> : null;
     if (!chips) return enhancements;
     return enhancements ? [enhancements, chips] : chips;
   };
@@ -2250,6 +2297,7 @@ const OutputSectionBody = ({
       )}
 
       {p && <LayerBar />}
+      {!isStreaming && <BranchesNotice />}
 
       {sectionOrder.map((spec, idx) => {
         const key = spec.key;
@@ -2491,6 +2539,8 @@ const OutputSectionBody = ({
               )}
               {ready && renderInline(`${key}:end`)}
               {ready && !rewriting && branches && <PrintBranches sectionKey={key} />}
+              {/* A saved sheet shown without its page (the Library): its branches, read in place. */}
+              {ready && !branches && p?.readOnly && <SavedBranches sectionKey={key} branches={p.layer.branches} />}
               {ready && p && key !== "flashcards" && key !== "referenceNote" && (
                 <SectionFooter
                   sectionKey={key}
@@ -2531,6 +2581,7 @@ const OutputSectionBody = ({
               locked={!p.entitled}
               onHighlight={markSelection}
               onAi={aiOnSelection}
+              onAsk={canAskSelection ? askSelection : undefined}
             />
           ) : (
             <EnhanceBubble
@@ -2539,6 +2590,7 @@ const OutputSectionBody = ({
               top={selection.top}
               left={selection.left}
               onAction={fireSelectionEnhance}
+              onAsk={canAskSelection ? askSelection : undefined}
             />
           ))}
       </AnimatePresence>

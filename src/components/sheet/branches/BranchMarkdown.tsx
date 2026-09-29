@@ -104,8 +104,14 @@ export function BranchMarkdown({ text, caret, revealAnswers }: { text: string; c
             );
           case "table":
             return (
+              // The panel is narrow and a table has at most four columns: it fits
+              // the width, its cells wrapping, rather than running off the edge.
               <div key={i} className="-mx-1 overflow-x-auto">
-                <table className="w-full min-w-[420px] border-collapse text-[13px] leading-snug">
+                <table
+                  className={`w-full border-collapse leading-snug [overflow-wrap:anywhere] ${
+                    (b.header.length || b.rows[0]?.length || 0) > 3 ? "text-[12px]" : "text-[13px]"
+                  }`}
+                >
                   {b.header.some(Boolean) && (
                     <thead>
                       <tr>
@@ -113,7 +119,7 @@ export function BranchMarkdown({ text, caret, revealAnswers }: { text: string; c
                           <th
                             key={j}
                             scope="col"
-                            className="border-b border-border px-2 py-1.5 text-left font-mono text-[10px] font-medium uppercase tracking-wider text-muted-foreground"
+                            className="border-b border-border px-1.5 py-1.5 text-left align-bottom font-mono text-[9.5px] font-medium uppercase tracking-wider text-muted-foreground"
                           >
                             {h.replace(/\*\*/g, "")}
                           </th>
@@ -125,7 +131,7 @@ export function BranchMarkdown({ text, caret, revealAnswers }: { text: string; c
                     {b.rows.map((row, r) => (
                       <tr key={r} className="border-b border-border/60 align-top last:border-0">
                         {row.map((c, j) => (
-                          <td key={j} className={`px-2 py-2 ${j === 0 ? "font-medium text-foreground" : ""}`}>
+                          <td key={j} className={`px-1.5 py-2 ${j === 0 ? "font-medium text-foreground" : ""}`}>
                             <Bold text={c} />
                           </td>
                         ))}

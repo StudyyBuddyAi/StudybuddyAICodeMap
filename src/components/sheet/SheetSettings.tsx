@@ -40,8 +40,8 @@ const DIFFICULTY_CHOICES: Choice[] = [
 // the exam tests, not cut to a size; comprehensive is that sheet with its most
 // useful branches already grown — which a high-yield sheet can grow later.
 const DEPTH_CHOICES: Choice<Depth>[] = [
-  { value: "highYield", label: "High-yield", hint: "What the exam tests most — branch out as you go" },
-  { value: "comprehensive", label: "Comprehensive", hint: "High-yield, with its most useful branches already grown" },
+  { value: "highYield", label: "High-yield", hint: "What the exam tests most — deep dives when you want them" },
+  { value: "comprehensive", label: "Comprehensive", hint: "High-yield, with its most useful deep dives already written" },
 ];
 
 const SOURCE_CHOICES: Choice<"on" | "off">[] = [

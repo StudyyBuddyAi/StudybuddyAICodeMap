@@ -1,3 +1,4 @@
+import { parseSignature, type SheetSignature } from "./sheet-signature";
 import { callMedicalNotes } from "@/lib/callMedicalNotes";
 import { parseModelUsed, type ModelUsed } from "@/lib/model-used";
 import { parsePartialSheet, parseSheetOutput } from "@/lib/parse-partial-sheet";
@@ -55,6 +56,8 @@ export interface SectionRequestParams {
   sourceIds: string[];
   /** The premium sheet's grant, for a student without Pro. */
   grant?: string;
+  /** The sheet's signatures, for the server to check the sheet is the one it wrote. */
+  signature: SheetSignature | null;
   examMode?: string;
   difficulty?: string;
 }
@@ -69,7 +72,8 @@ export class SectionQuotaError extends Error {
 
 /**
  * The server predates section requests: it ignores the field and answers as a
- * sheet, opening with `__meta` frames a section reply never sends.
+ * sheet, opening with the plan and the model — `__meta` frames a section reply
+ * never sends. (A section reply's only frame is its signature, at the end.)
  */
 export class SectionOutdatedError extends Error {
   constructor() {
@@ -89,6 +93,8 @@ export interface SectionDraft {
 
 export interface SectionResult {
   sections: Record<string, SectionBody>;
+  /** The server's signatures on the rewritten bodies, by key; empty when it signed nothing. */
+  sigs: Record<string, string>;
   /** Whether the passages backed what was written. */
   covered: boolean | null;
   model: ModelUsed | null;
@@ -115,6 +121,7 @@ export async function runSectionRequest(
   const decoder = new TextDecoder();
   let buffer = "";
   let text = "";
+  let sigs: Record<string, string> = {};
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
@@ -126,15 +133,21 @@ export async function runSectionRequest(
       if (!trimmed.startsWith("data:")) continue;
       const payload = trimmed.slice(5).trim();
       if (!payload || payload === "[DONE]") continue;
-      let parsed: { __meta?: unknown; choices?: { delta?: { content?: unknown } }[] } | null = null;
+      let parsed: { __meta?: Record<string, unknown>; choices?: { delta?: { content?: unknown } }[] } | null = null;
       try {
         parsed = JSON.parse(payload);
       } catch {
         continue; // a partial frame
       }
       if (parsed?.__meta) {
-        reader.cancel().catch(() => {});
-        throw new SectionOutdatedError();
+        const meta = parsed.__meta;
+        if ("plan" in meta || "model" in meta) {
+          reader.cancel().catch(() => {});
+          throw new SectionOutdatedError();
+        }
+        const signature = parseSignature(meta.signature);
+        if (signature) sigs = signature.sections;
+        continue;
       }
       const delta = parsed?.choices?.[0]?.delta?.content;
       if (typeof delta !== "string") continue;
@@ -156,6 +169,7 @@ export async function runSectionRequest(
   const covered = /"covered"\s*:\s*(true|false)/.exec(text)?.[1];
   return {
     sections,
+    sigs,
     covered: covered === undefined ? null : covered === "true",
     model,
   };

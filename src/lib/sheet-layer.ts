@@ -1,6 +1,9 @@
 import type { Flashcard, GeneratedSheet, SectionBody } from "@/types/generated-sheet";
 import { resolvePlan, sectionBody } from "@/lib/sheet-plan";
-import type { BranchQuestion, BranchType } from "@/lib/sheet-branches";
+import type { AskFormat, BranchQuestion, BranchType } from "@/lib/sheet-branches";
+
+/** The shapes a student's own question can ask for — kept on the branch, so writing it again asks the same. */
+const ASK_FORMATS: readonly AskFormat[] = ["auto", "explain", "table", "steps", "drug", "mnemonic", "case"];
 
 /**
  * A student's own layer over a generated sheet.
@@ -93,8 +96,20 @@ export interface LayerSection {
   kind: "depth" | "rewrite";
   /** rewrite only: the direction it took. */
   style?: string;
+  /** rewrite only: the server's signature on this body (sheet-signature.ts), sent back with the sheet. */
+  sig?: string;
   at: string;
 }
+
+/**
+ * What the clinical review said of an AI branch: nothing wrong, what it
+ * corrected, or that it couldn't be checked (it failed or ran out of time).
+ */
+export type BranchReviewMark =
+  | { verdict: "ok" }
+  | { verdict: "corrected"; fixes: string[] }
+  | { verdict: "flagged"; fixes: string[] }
+  | { verdict: "unchecked" };
 
 /** A branch the sheet suggests growing from one of its lines: a pill. */
 export interface LayerPill extends BranchQuestion {
@@ -117,6 +132,8 @@ export interface LayerBranch {
   /** The question it answers. */
   ask: string;
   versus?: string;
+  /** The student's own question: the shape they asked it to come back in. */
+  format?: AskFormat;
   text: string;
   /** What it suggests growing next. */
   next: BranchQuestion[];
@@ -127,6 +144,8 @@ export interface LayerBranch {
   covered?: boolean;
   /** The pill it was grown from. */
   pillId?: string;
+  /** AI branches: the clinical review of what was written. Absent on branches from before reviews. */
+  review?: BranchReviewMark;
   at: string;
 }
 
@@ -311,6 +330,7 @@ export function parseLayer(raw: unknown): SheetLayer {
       ...(b.edited === true ? { edited: true } : {}),
       ...(typeof b.covered === "boolean" ? { covered: b.covered } : {}),
       ...(typeof b.pillId === "string" ? { pillId: b.pillId.slice(0, 64) } : {}),
+      ...(reviewMark(b.review) ? { review: reviewMark(b.review)! } : {}),
       at: str(b.at, 40) || now(),
     });
   }
@@ -326,6 +346,7 @@ export function parseLayer(raw: unknown): SheetLayer {
         body,
         kind: s.kind === "rewrite" ? "rewrite" : "depth",
         ...(typeof s.style === "string" ? { style: s.style.slice(0, 20) } : {}),
+        ...(typeof s.sig === "string" && /^[A-Za-z0-9_-]{43}$/.test(s.sig) ? { sig: s.sig } : {}),
         at: str(s.at, 40) || now(),
       };
     }
@@ -346,10 +367,19 @@ function question(v: unknown, any = false): BranchQuestion | null {
   const label = str(v.label, 80)?.trim();
   if (!label) return null;
   const versus = str(v.versus, 80)?.trim();
-  return { type, label, ask: str(v.ask, 300) ?? "", ...(versus ? { versus } : {}) };
+  const format = type === "ask" && ASK_FORMATS.includes(v.format as AskFormat) ? (v.format as AskFormat) : undefined;
+  return { type, label, ask: str(v.ask, 300) ?? "", ...(versus ? { versus } : {}), ...(format ? { format } : {}) };
 }
 
 /** A section body as read back: prose, items or rows, trimmed to the caps; null for anything else. */
+function reviewMark(v: unknown): BranchReviewMark | null {
+  if (!isObj(v)) return null;
+  if (v.verdict === "ok" || v.verdict === "unchecked") return { verdict: v.verdict };
+  if ((v.verdict !== "corrected" && v.verdict !== "flagged") || !Array.isArray(v.fixes)) return null;
+  const fixes = v.fixes.filter((f): f is string => typeof f === "string").map((f) => f.slice(0, 240)).slice(0, 5);
+  return fixes.length ? { verdict: v.verdict, fixes } : null;
+}
+
 function layerBody(v: unknown): SectionBody | null {
   if (typeof v === "string") return v.slice(0, LAYER_LIMITS.prose);
   if (!Array.isArray(v)) return null;
@@ -617,7 +647,13 @@ export function anchoredTo(layer: SheetLayer, keys: string[]): number {
  * was anchored to the old lines goes with them. Cards made from the section
  * stay: they are already in the deck.
  */
-export function rewriteSection(layer: SheetLayer, bodies: Record<string, SectionBody>, style: string): SheetLayer {
+export function rewriteSection(
+  layer: SheetLayer,
+  bodies: Record<string, SectionBody>,
+  style: string,
+  /** The server's signatures on the new bodies, by key. */
+  sigs: Record<string, string> = {}
+): SheetLayer {
   const keys = Object.keys(bodies).filter((k) => SECTION_KEY_RE.test(k));
   const off = (a: string) => !onLineOf(keys)(a);
   // Its branches stay — what they say still holds — but the lines they grew
@@ -627,7 +663,7 @@ export function rewriteSection(layer: SheetLayer, bodies: Record<string, Section
   const edits: Record<string, LayerEdit> = {};
   for (const [a, e] of Object.entries(layer.edits)) if (off(a)) edits[a] = e;
   const sections = { ...layer.sections };
-  for (const key of keys) sections[key] = { body: bodies[key], kind: "rewrite", style, at: now() };
+  for (const key of keys) sections[key] = { body: bodies[key], kind: "rewrite", style, ...(sigs[key] ? { sig: sigs[key] } : {}), at: now() };
   return {
     ...layer,
     sections,
@@ -697,6 +733,23 @@ export function setPills(layer: SheetLayer, pills: (BranchQuestion & { anchor: s
   };
 }
 
+/**
+ * New suggestions for some sections only — a section just rewritten, whose old
+ * suggestions named lines it no longer has. The rest of the sheet keeps its own.
+ */
+export function replaceSectionPills(
+  layer: SheetLayer,
+  keys: string[],
+  pills: (BranchQuestion & { anchor: string; id?: string })[]
+): SheetLayer {
+  const inKeys = (anchor: string) => keys.includes(anchorSection(anchor));
+  const kept = layer.pills.filter((p) => !inKeys(p.anchor));
+  const added = pills
+    .filter((p) => inKeys(p.anchor) && validAnchor(p.anchor))
+    .map((p) => ({ ...p, id: p.id ?? newLayerId() }));
+  return { ...layer, pills: [...kept, ...added].slice(0, LAYER_LIMITS.pills) };
+}
+
 /** Marks a comprehensive sheet's first branches as grown, so a reload does not grow them again. */
 export const markPicksGrown = (layer: SheetLayer): SheetLayer => (layer.picksGrown ? layer : { ...layer, picksGrown: true });
 
@@ -740,6 +793,22 @@ export function removeBranch(layer: SheetLayer, id: string): SheetLayer {
 }
 
 /** The branches a branch hangs from, outermost first. */
+/** How many branches grew below one, at any depth — what deleting it takes with it. */
+export function descendantCount(layer: SheetLayer, id: string): number {
+  let count = 0;
+  const stack = [id];
+  while (stack.length) {
+    const parent = stack.pop()!;
+    for (const b of layer.branches) {
+      if (b.parentId === parent) {
+        count++;
+        stack.push(b.id);
+      }
+    }
+  }
+  return count;
+}
+
 export function branchPath(layer: SheetLayer, id: string): LayerBranch[] {
   const byId = new Map(layer.branches.map((b) => [b.id, b]));
   const path: LayerBranch[] = [];
@@ -774,7 +843,7 @@ export function layerBranchesText(sheet: GeneratedSheet, layer: SheetLayer): str
   const parts = [...bySection.entries()].map(([key, list]) =>
     [`# ${titles.get(key) ?? key}`, ...list.flatMap((b) => write(b, 0))].join("\n\n")
   );
-  return `My branches\n\n${parts.join("\n\n")}`;
+  return `My deep dives\n\n${parts.join("\n\n")}`;
 }
 
 // ── The sheet as the student has made it ─────────────────────────────────────

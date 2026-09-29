@@ -5,32 +5,47 @@ import {
   Check,
   ChevronRight,
   Copy,
-  GitBranch,
+  CornerDownRight,
   Loader2,
   PenLine,
   RefreshCw,
   RotateCcw,
   Send,
+  ShieldAlert,
+  ShieldCheck,
   Sprout,
+  Stethoscope,
   Trash2,
   X,
 } from "lucide-react";
 import { Drawer, DrawerContent, DrawerDescription, DrawerTitle } from "@/components/ui/drawer";
 import { Textarea } from "@/components/ui/textarea";
-import { useBranchDraft, type BranchesApi } from "@/hooks/use-sheet-branches";
-import { BRANCH_TYPE_LABEL, plainText, type BranchQuestion } from "@/lib/sheet-branches";
+import { useBranchDraft, useBranchesApi, type BranchesApi, type BranchesStore, type GrowingBranch } from "@/hooks/use-sheet-branches";
+import {
+  ASK_FORMATS,
+  ASK_FORMAT_LABEL,
+  BRANCH_TYPE_LABEL,
+  plainText,
+  type AskFormat,
+  type BranchQuestion,
+} from "@/lib/sheet-branches";
 import { anchorSection, type LayerBranch, type LayerPill } from "@/lib/sheet-layer";
 import { ENTER, EXIT } from "@/lib/motion";
-import { BRANCH_ICON } from "./branch-context";
 import { Bold, BranchMarkdown } from "./BranchMarkdown";
 import { BranchChip } from "./BranchChip";
+import { EcgTrace, KindBadge, kindStyle } from "./kind";
 import { branchesAt } from "./LineBranches";
 
 /**
- * Where a branch is read, grown and changed: beside the sheet on a wide
- * screen, so the line it grew from stays in view; a sheet from the bottom on
- * a phone. It shows one branch, one line (to branch from any line of the
- * sheet), or every branch as a tree.
+ * Where a deep dive is read, written and changed: beside the sheet on a wide
+ * screen, so the line it grew from stays in view; a sheet from the bottom on a
+ * phone. One deep dive reads as a consult note — what it is regarding, the
+ * question, the answer, and a sign-off saying what it rests on and whether it
+ * was checked. The panel also shows one line (to ask about it, or about words
+ * selected on it) and every deep dive, with a box to ask anything at all.
+ *
+ * It subscribes to the whole of the branches' store — it shows most of it —
+ * and is the only part of the page that does.
  */
 
 const DESKTOP = "(min-width: 1024px)";
@@ -47,7 +62,7 @@ function useDesktop(): boolean {
   );
 }
 
-/** Scrolls the sheet to a line and flashes it, so the student sees where a branch grew from. */
+/** Scrolls the sheet to a line and flashes it, so the student sees where a deep dive grew from. */
 export function jumpToAnchor(anchor: string) {
   const el =
     (!anchor.endsWith(":end") && document.querySelector<HTMLElement>(`[data-enh-anchor="${CSS.escape(anchor)}"]`)) ||
@@ -60,26 +75,78 @@ export function jumpToAnchor(anchor: string) {
   });
 }
 
-const Caret = () => <span aria-hidden className="ml-0.5 inline-block h-3.5 w-[2px] translate-y-0.5 animate-pulse bg-primary/70" />;
+const Caret = () => <span aria-hidden className="ml-0.5 inline-block h-3.5 w-[2px] translate-y-0.5 animate-pulse bg-foreground/60" />;
+
+/** Whether a deep dive in flight is still being written or checked — not failed, not declined. */
+const inProgress = (g?: GrowingBranch) => g?.status === "growing" || g?.status === "reviewing";
+
+/** How many deep dives hang below one, at any depth. */
+function descendants(branches: LayerBranch[], id: string): number {
+  let n = 0;
+  const stack = [id];
+  while (stack.length) {
+    const parent = stack.pop()!;
+    for (const b of branches) {
+      if (b.parentId !== parent) continue;
+      n++;
+      stack.push(b.id);
+    }
+  }
+  return n;
+}
+
+/** A note's date, the way a chart dates an entry: "29 Sep". */
+const noteDate = (iso: string) => {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? "" : d.toLocaleDateString(undefined, { day: "numeric", month: "short" });
+};
+
+/** The small caps of a chart: a field's name, a band's heading. */
+const EYEBROW = "font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-muted-foreground";
 
 // ── The panel ─────────────────────────────────────────────────────────────────
 
-export function BranchPanel({ api }: { api: BranchesApi }) {
+export function BranchPanel({ store }: { store: BranchesStore }) {
+  const api = useBranchesApi(store)!;
   const desktop = useDesktop();
   const open = api.panel !== null;
+
+  // Focus goes into the panel when it opens and back to what opened it when
+  // it closes — a keyboard student otherwise lands at the top of the page.
+  const opener = useRef<HTMLElement | null>(null);
+  const heading = useRef<HTMLDivElement>(null);
+  const wasOpen = useRef(false);
+  useEffect(() => {
+    if (open && !wasOpen.current) {
+      const active = document.activeElement;
+      opener.current = active instanceof HTMLElement && active !== document.body ? active : null;
+      // After the panel has mounted and animated in.
+      window.setTimeout(() => heading.current?.focus({ preventScroll: true }), 60);
+    }
+    if (!open && wasOpen.current) {
+      const back = opener.current;
+      opener.current = null;
+      if (back?.isConnected) back.focus({ preventScroll: true });
+    }
+    wasOpen.current = open;
+  }, [open]);
 
   if (!desktop) {
     return (
       <Drawer open={open} onOpenChange={(o) => !o && api.close()} shouldScaleBackground={false}>
         <DrawerContent className="max-h-[88vh]">
-          <DrawerTitle className="sr-only">Branches</DrawerTitle>
-          <DrawerDescription className="sr-only">Grow, read and change this sheet's branches.</DrawerDescription>
+          <DrawerTitle className="sr-only">Deep dives</DrawerTitle>
+          <DrawerDescription className="sr-only">Read, ask for and change this sheet's deep dives.</DrawerDescription>
           <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-6 pt-2">
-            <PanelBody api={api} onJump={(a) => {
-              api.close();
-              // After the sheet has closed, or the scroll fights its animation.
-              window.setTimeout(() => jumpToAnchor(a), 320);
-            }} />
+            <PanelBody
+              api={api}
+              headingRef={heading}
+              onJump={(a) => {
+                api.close();
+                // After the sheet has closed, or the scroll fights its animation.
+                window.setTimeout(() => jumpToAnchor(a), 320);
+              }}
+            />
           </div>
         </DrawerContent>
       </Drawer>
@@ -91,7 +158,7 @@ export function BranchPanel({ api }: { api: BranchesApi }) {
       {open && (
         <m.aside
           key="branch-panel"
-          aria-label="Branches"
+          aria-label="Deep dives"
           initial={{ opacity: 0, x: 24 }}
           animate={{ opacity: 1, x: 0, transition: ENTER }}
           exit={{ opacity: 0, x: 24, transition: EXIT }}
@@ -102,7 +169,7 @@ export function BranchPanel({ api }: { api: BranchesApi }) {
           style={{ top: "var(--nav-h, 64px)" }}
         >
           <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-8 pt-4">
-            <PanelBody api={api} onJump={jumpToAnchor} />
+            <PanelBody api={api} headingRef={heading} onJump={jumpToAnchor} />
           </div>
         </m.aside>
       )}
@@ -110,15 +177,23 @@ export function BranchPanel({ api }: { api: BranchesApi }) {
   );
 }
 
-function PanelBody({ api, onJump }: { api: BranchesApi; onJump: (anchor: string) => void }) {
+function PanelBody({
+  api,
+  onJump,
+  headingRef,
+}: {
+  api: BranchesApi;
+  onJump: (anchor: string) => void;
+  headingRef: React.RefObject<HTMLDivElement>;
+}) {
   const count = api.branches.length;
   return (
     <div className="space-y-5">
-      <div className="flex items-center gap-2">
+      <div ref={headingRef} tabIndex={-1} className="flex items-center gap-2 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-primary/40">
         {api.panel === "all" ? (
-          <p className="flex items-center gap-1.5 font-mono text-[10px] font-medium uppercase tracking-widest text-muted-foreground">
-            <GitBranch aria-hidden className="h-3.5 w-3.5" />
-            Your branches{count ? ` · ${count}` : ""}
+          <p className={`flex items-center gap-1.5 ${EYEBROW}`}>
+            <Stethoscope aria-hidden className="h-3.5 w-3.5" />
+            Your deep dives{count ? ` · ${count}` : ""}
           </p>
         ) : (
           <button
@@ -127,13 +202,13 @@ function PanelBody({ api, onJump }: { api: BranchesApi; onJump: (anchor: string)
             className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
           >
             <ArrowLeft aria-hidden className="h-3.5 w-3.5" />
-            All branches{count ? ` · ${count}` : ""}
+            All deep dives{count ? ` · ${count}` : ""}
           </button>
         )}
         <button
           type="button"
           onClick={api.close}
-          aria-label="Close branches"
+          aria-label="Close deep dives"
           className="ml-auto inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
         >
           <X className="h-4 w-4" />
@@ -143,7 +218,7 @@ function PanelBody({ api, onJump }: { api: BranchesApi; onJump: (anchor: string)
       {api.panel === "branch" && api.openId ? (
         <BranchView key={api.openId} api={api} id={api.openId} onJump={onJump} />
       ) : api.panel === "line" && api.lineAnchor ? (
-        <LineView key={api.lineAnchor} api={api} anchor={api.lineAnchor} onJump={onJump} />
+        <LineView key={`${api.lineAnchor}|${api.lineFocus ?? ""}`} api={api} anchor={api.lineAnchor} onJump={onJump} />
       ) : (
         <AllView api={api} onJump={onJump} />
       )}
@@ -151,85 +226,171 @@ function PanelBody({ api, onJump }: { api: BranchesApi; onJump: (anchor: string)
   );
 }
 
-// ── Where it grew from ────────────────────────────────────────────────────────
+// ── A note's fields ──────────────────────────────────────────────────────────
 
-function Trail({
-  api,
-  anchor,
-  path,
-  onJump,
-}: {
-  api: BranchesApi;
-  anchor: string;
-  path: LayerBranch[];
-  onJump: (anchor: string) => void;
-}) {
-  const line = api.lineOf(anchor);
+/** A chart field: its name in small caps, what it says beside it. */
+function Field({ name, children }: { name: string; children: ReactNode }) {
   return (
-    <div className="space-y-1.5">
-      <p className="font-mono text-[10px] font-medium uppercase tracking-widest text-muted-foreground">
-        {api.sectionTitleOf(anchor)}
-      </p>
-      {line && !anchor.endsWith(":end") && (
-        <button
-          type="button"
-          onClick={() => onJump(anchor)}
-          title="Show this line in the sheet"
-          className="block w-full rounded-md border-l-2 border-border py-0.5 pl-2.5 text-left text-xs leading-relaxed text-muted-foreground transition-colors hover:border-primary/60 hover:text-foreground"
-        >
-          <span className="line-clamp-3">
-            <Bold text={line} />
+    <>
+      <dt className={`${EYEBROW} pt-[3px]`}>{name}</dt>
+      <dd className="min-w-0 text-xs leading-relaxed text-muted-foreground">{children}</dd>
+    </>
+  );
+}
+
+/** What a note is regarding: the line of the sheet (click to see it there), or its section as a whole. */
+function ReField({ api, anchor, onJump }: { api: BranchesApi; anchor: string; onJump: (anchor: string) => void }) {
+  const line = api.lineOf(anchor);
+  if (anchor.endsWith(":end") || !line) return <Field name="Re">{api.sectionTitleOf(anchor)} — the section as a whole</Field>;
+  return (
+    <Field name="Re">
+      <button
+        type="button"
+        onClick={() => onJump(anchor)}
+        title="Show this line in the sheet"
+        className="block w-full text-left transition-colors hover:text-foreground"
+      >
+        <span className="line-clamp-3">
+          <Bold text={line} />
+        </span>
+      </button>
+    </Field>
+  );
+}
+
+/** Where a follow-up came from: the notes above it, each one click away. */
+function FromField({ api, path }: { api: BranchesApi; path: LayerBranch[] }) {
+  if (!path.length) return null;
+  return (
+    <Field name="From">
+      <nav aria-label="Deep dives above this one" className="flex flex-wrap items-center gap-1">
+        {path.map((p) => (
+          <span key={p.id} className="inline-flex min-w-0 items-center gap-1">
+            <button
+              type="button"
+              onClick={() => api.open(p.id)}
+              className="inline-flex min-w-0 items-center gap-1 rounded px-0.5 transition-colors hover:text-foreground"
+            >
+              <KindBadge type={p.type} />
+              <span className="truncate">{p.label}</span>
+            </button>
+            <ChevronRight aria-hidden className="h-3 w-3 shrink-0 text-muted-foreground/60" />
           </span>
-        </button>
+        ))}
+      </nav>
+    </Field>
+  );
+}
+
+// ── The sign-off ─────────────────────────────────────────────────────────────
+
+/**
+ * How a note ends: what it rests on, what the clinical check made of it, and
+ * its date — the way a chart entry is signed. A correction or a flag is spelt
+ * out above it.
+ */
+function SignOff({ branch, checking }: { branch: LayerBranch; checking: boolean }) {
+  // While it is being checked, the verdict it had (unchecked, as kept) is not the news.
+  const review = branch.source === "ai" && !checking ? branch.review : undefined;
+  const source =
+    branch.source === "user"
+      ? "Your note"
+      : branch.covered
+      ? "From the reference library"
+      : "From general medical knowledge — check before clinical use";
+  const verdict =
+    branch.source !== "ai" ? null : checking ? (
+      <span className="inline-flex items-center gap-1 text-[hsl(var(--kind-ask))]" aria-live="polite">
+        <EcgTrace className="h-2.5 w-5" /> Checking for clinical errors
+      </span>
+    ) : review?.verdict === "ok" ? (
+      <span className="inline-flex items-center gap-1 text-success">
+        <ShieldCheck aria-hidden className="h-3 w-3" /> Checked
+      </span>
+    ) : review?.verdict === "corrected" ? (
+      <span className="inline-flex items-center gap-1 text-success">
+        <ShieldCheck aria-hidden className="h-3 w-3" /> Corrected after check
+      </span>
+    ) : review?.verdict === "flagged" ? (
+      <span className="inline-flex items-center gap-1 text-warning">
+        <ShieldAlert aria-hidden className="h-3 w-3" /> Flagged by check
+      </span>
+    ) : review?.verdict === "unchecked" ? (
+      <span className="inline-flex items-center gap-1 text-warning">
+        <ShieldAlert aria-hidden className="h-3 w-3" /> Not checked — read with care
+      </span>
+    ) : null;
+  const date = noteDate(branch.at);
+
+  return (
+    <div className="space-y-2">
+      {(review?.verdict === "corrected" || review?.verdict === "flagged") && (
+        <div
+          className={`rounded-md border px-2.5 py-2 text-[11px] leading-relaxed text-foreground/80 ${
+            review.verdict === "corrected" ? "border-success/35 bg-success-soft" : "border-warning/40 bg-warning-soft"
+          }`}
+        >
+          <p className={`font-medium ${review.verdict === "corrected" ? "text-success" : "text-warning"}`}>
+            {review.verdict === "corrected" ? "Corrected after a clinical check" : "A clinical check flagged this — the text above is as written"}
+          </p>
+          <ul className="mt-1 space-y-0.5 pl-4">
+            {review.fixes.map((f) => (
+              <li key={f} className="list-disc">
+                {f}
+              </li>
+            ))}
+          </ul>
+        </div>
       )}
-      {path.length > 0 && (
-        <nav aria-label="Branches above this one" className="flex flex-wrap items-center gap-1 pt-0.5 text-xs">
-          {path.map((p) => {
-            const Icon = BRANCH_ICON[p.type];
-            return (
-              <span key={p.id} className="inline-flex min-w-0 items-center gap-1">
-                <button
-                  type="button"
-                  onClick={() => api.open(p.id)}
-                  className="inline-flex min-w-0 items-center gap-1 rounded px-1 py-0.5 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
-                >
-                  <Icon aria-hidden className="h-3 w-3 shrink-0" />
-                  <span className="truncate">{p.label}</span>
-                </button>
-                <ChevronRight aria-hidden className="h-3 w-3 shrink-0 text-muted-foreground/60" />
-              </span>
-            );
-          })}
-        </nav>
-      )}
+      <p className="flex flex-wrap items-center gap-x-2 gap-y-1 border-t border-dashed border-border pt-2 font-mono text-[9.5px] uppercase tracking-[0.1em] text-muted-foreground">
+        <span>{source}</span>
+        {verdict && <span aria-hidden>·</span>}
+        {verdict}
+        {date && <span aria-hidden>·</span>}
+        {date && <span>{date}</span>}
+        {branch.edited && <span aria-hidden>·</span>}
+        {branch.edited && <span>Edited by you</span>}
+      </p>
     </div>
   );
 }
 
-// ── One branch ────────────────────────────────────────────────────────────────
+// ── One deep dive ─────────────────────────────────────────────────────────────
 
 function BranchView({ api, id, onJump }: { api: BranchesApi; id: string; onJump: (anchor: string) => void }) {
   const branch = api.branches.find((b) => b.id === id);
   const growing = api.growing[id];
-  const draft = useBranchDraft(api.drafts, growing?.status === "growing" ? id : null);
+  const draft = useBranchDraft(api.drafts, inProgress(growing) ? id : null);
   const [editing, setEditing] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [confirmRegrow, setConfirmRegrow] = useState(false);
   const [copied, setCopied] = useState(false);
 
   if (!branch && !growing) {
-    return <p className="text-sm text-muted-foreground">This branch is gone.</p>;
+    return <p className="text-sm text-muted-foreground">This deep dive is gone.</p>;
   }
 
   const q: BranchQuestion = branch ?? growing!.question;
   const anchor = branch?.anchor ?? growing!.anchor;
   const parentId = branch?.parentId ?? growing?.parentId;
   const path = branch ? api.pathOf(id) : parentId ? [...api.pathOf(parentId), ...api.branches.filter((b) => b.id === parentId)] : [];
-  const Icon = BRANCH_ICON[q.type];
-  const isGrowing = growing?.status === "growing";
+  const writing = growing?.status === "growing";
+  const checking = growing?.status === "reviewing";
+  // A deep dive kept and being checked reads like any other; only one not kept yet shows its draft.
+  const isGrowing = writing || (checking && !branch);
   const failed = growing?.status === "error";
+  const declined = growing?.status === "declined";
   const children = api.branches.filter((b) => b.parentId === id);
-  const childGrowing = Object.values(api.growing).filter((g) => g.parentId === id && !api.branches.some((b) => b.id === g.id));
+  const childGrowing = Object.values(api.growing).filter(
+    (g) => g.parentId === id && g.status !== "declined" && !api.branches.some((b) => b.id === g.id)
+  );
   const canBranch = !!branch && api.canBranch(id) && !isGrowing;
+  // At the depth limit a question is still welcome: it goes beside this note rather than below it.
+  const askTarget = branch ? { anchor: branch.anchor, parentId: canBranch ? id : branch.parentId } : null;
+  const below = branch ? descendants(api.branches, id) : 0;
+  const suggestions = canBranch
+    ? branch!.next.filter((n) => !children.some((c) => c.label === n.label) && !childGrowing.some((g) => g.question.label === n.label))
+    : [];
 
   const copy = async () => {
     if (!branch) return;
@@ -242,97 +403,116 @@ function BranchView({ api, id, onJump }: { api: BranchesApi; id: string; onJump:
     }
   };
 
+  const regrow = () => {
+    setConfirmRegrow(false);
+    api.regrow(id);
+  };
+
   return (
-    <article className="space-y-4">
-      <Trail api={api} anchor={anchor} path={path} onJump={onJump} />
-
-      <header className="space-y-1.5">
-        <div className="flex items-start gap-2.5">
-          <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-info text-info-foreground shadow-[0_3px_10px_-4px_hsl(var(--info)/0.55)]">
-            <Icon aria-hidden className="h-3.5 w-3.5" />
+    <article className="space-y-4" style={kindStyle(q.type)}>
+      <div className="overflow-hidden rounded-[13px] border border-border bg-background/50">
+        {/* The band: its kind, where on the sheet it belongs, and what is happening to it — where
+            the status sits, so the text below never moves when it is done. */}
+        <div className="flex items-center gap-2 border-b border-border bg-secondary/60 px-3.5 py-2">
+          <KindBadge type={q.type} size="md" />
+          <span className={`min-w-0 flex-1 truncate ${EYEBROW}`}>
+            {BRANCH_TYPE_LABEL[q.type]}
+            {q.versus ? ` · vs ${q.versus}` : ""}
+            {` · ${api.sectionTitleOf(anchor)}`}
           </span>
-          <div className="min-w-0 flex-1">
-            <h2 className="text-[15px] font-semibold leading-snug text-foreground">{q.label}</h2>
-            <p className="mt-0.5 flex items-center gap-1.5 font-mono text-[10px] font-medium uppercase tracking-widest text-muted-foreground">
-              <span>
-                {BRANCH_TYPE_LABEL[q.type]}
-                {q.versus ? ` · vs ${q.versus}` : ""}
-              </span>
-              {/* Where it says it is being written, so the text below never moves when it is done. */}
-              {isGrowing && (
-                <span className="inline-flex items-center gap-1 text-info" aria-live="polite">
-                  <Loader2 aria-hidden className="h-3 w-3 animate-spin" />
-                  {growing?.replaces ? "Growing again" : "Growing"}
-                </span>
+          {(isGrowing || checking) && (
+            <span
+              className="inline-flex shrink-0 items-center gap-1 font-mono text-[10px] uppercase tracking-[0.12em] text-[hsl(var(--k))]"
+              aria-live="polite"
+            >
+              <EcgTrace className="h-3 w-6" />
+              {checking ? "Checking" : growing?.replaces ? "Writing again" : "Writing"}
+            </span>
+          )}
+        </div>
+
+        <div className="space-y-3.5 px-4 py-3.5">
+          <dl className="grid grid-cols-[2.6rem_1fr] gap-x-2 gap-y-1.5">
+            <ReField api={api} anchor={anchor} onJump={onJump} />
+            <FromField api={api} path={path} />
+            {growing?.focus && <Field name="On">“{growing.focus}”</Field>}
+            {q.ask && q.ask !== q.label && q.type !== "note" && <Field name="Q">{q.ask}</Field>}
+          </dl>
+
+          <h2 className="font-display text-[21px] font-medium leading-snug text-foreground [text-wrap:balance]">{q.label}</h2>
+
+          {declined ? (
+            <div className="space-y-2 rounded-lg border border-border bg-secondary/40 px-3 py-2.5 text-sm text-foreground/85">
+              <p>{growing?.message}</p>
+              <button type="button" onClick={() => api.dismiss(id)} className="text-xs font-medium text-primary hover:underline">
+                OK
+              </button>
+            </div>
+          ) : isGrowing ? (
+            <div aria-busy="true">
+              {draft ? (
+                <BranchMarkdown text={draft} caret={checking ? undefined : <Caret />} />
+              ) : (
+                <div className="space-y-2">
+                  {[92, 78, 85].map((w) => (
+                    <div key={w} className="h-3 animate-pulse rounded bg-secondary" style={{ width: `${w}%` }} />
+                  ))}
+                </div>
               )}
-            </p>
-          </div>
-        </div>
-        {q.ask && q.ask !== q.label && q.type !== "note" && (
-          <p className="text-xs leading-relaxed text-muted-foreground">{q.ask}</p>
-        )}
-      </header>
-
-      {isGrowing ? (
-        <div aria-busy="true">
-          {draft ? (
-            <BranchMarkdown text={draft} caret={<Caret />} />
+            </div>
+          ) : editing && branch ? (
+            <BranchEditor
+              initial={branch.text}
+              onSave={(text) => {
+                api.edit(id, text);
+                setEditing(false);
+              }}
+              onCancel={() => setEditing(false)}
+            />
           ) : (
-            <div className="space-y-2">
-              {[92, 78, 85].map((w) => (
-                <div key={w} className="h-3 animate-pulse rounded bg-secondary" style={{ width: `${w}%` }} />
-              ))}
-            </div>
+            <>
+              {failed && (
+                <div className="flex items-center gap-2 rounded-lg border border-warning/40 px-3 py-2 text-xs text-warning">
+                  <span className="flex-1">{branch ? "Couldn't write it again — here is what it said." : "Couldn't write this deep dive."}</span>
+                  <button type="button" onClick={() => api.retry(id)} className="inline-flex items-center gap-1 font-medium hover:underline">
+                    <RotateCcw aria-hidden className="h-3 w-3" /> Try again
+                  </button>
+                  <button type="button" onClick={() => api.dismiss(id)} className="text-muted-foreground hover:text-foreground">
+                    Dismiss
+                  </button>
+                </div>
+              )}
+              {branch && <BranchMarkdown text={branch.text} />}
+            </>
           )}
+
+          {branch && !isGrowing && !editing && !declined && <SignOff branch={branch} checking={checking} />}
         </div>
-      ) : editing && branch ? (
-        <BranchEditor
-          initial={branch.text}
-          onSave={(text) => {
-            api.edit(id, text);
-            setEditing(false);
-          }}
-          onCancel={() => setEditing(false)}
-        />
-      ) : (
-        <>
-          {failed && (
-            <div className="flex items-center gap-2 rounded-lg border border-warning/40 px-3 py-2 text-xs text-warning">
-              <span className="flex-1">{branch ? "Couldn't grow it again — here is what it said." : "Couldn't grow this branch."}</span>
-              <button type="button" onClick={() => api.retry(id)} className="inline-flex items-center gap-1 font-medium hover:underline">
-                <RotateCcw aria-hidden className="h-3 w-3" /> Try again
-              </button>
-              <button type="button" onClick={() => api.dismiss(id)} className="text-muted-foreground hover:text-foreground">
-                Dismiss
-              </button>
-            </div>
-          )}
-          {branch && <BranchMarkdown text={branch.text} />}
-        </>
-      )}
+      </div>
 
-      {branch && !isGrowing && !editing && (
-        <>
-          <p className="text-[11px] leading-relaxed text-muted-foreground">
-            {branch.source === "user"
-              ? "Your note."
-              : branch.covered
-              ? "Backed by the passages this sheet was built on."
-              : "Written from general medical knowledge — check it before clinical use."}
-            {branch.edited ? " Edited by you." : ""}
-          </p>
-
-          {!api.readOnly && (
-            <div className="flex flex-wrap items-center gap-1 border-y border-border py-1.5">
+      {branch && !isGrowing && !editing && !declined && !api.readOnly && (
+        <div className="flex flex-wrap items-center gap-1">
+          {confirmRegrow ? (
+            <span className="inline-flex flex-wrap items-center gap-2 px-1 text-xs">
+              <span className="text-muted-foreground">Writing it again replaces your edits.</span>
+              <button type="button" onClick={regrow} className="font-medium text-primary hover:underline">
+                Write again
+              </button>
+              <button type="button" onClick={() => setConfirmRegrow(false)} className="text-muted-foreground hover:text-foreground">
+                Keep mine
+              </button>
+            </span>
+          ) : (
+            <>
               <PanelAction icon={PenLine} label="Edit" onClick={() => setEditing(true)} />
-              {branch.source === "ai" && <PanelAction icon={RefreshCw} label="Grow again" onClick={() => api.regrow(id)} />}
+              {branch.source === "ai" && (
+                <PanelAction icon={RefreshCw} label="Write again" onClick={() => (branch.edited ? setConfirmRegrow(true) : regrow())} />
+              )}
               <PanelAction icon={copied ? Check : Copy} label={copied ? "Copied" : "Copy"} onClick={copy} />
               <span className="ml-auto">
                 {confirmDelete ? (
                   <span className="inline-flex items-center gap-2 text-xs">
-                    <span className="text-muted-foreground">
-                      {children.length ? `Delete it and the ${children.length} grown from it?` : "Delete it?"}
-                    </span>
+                    <span className="text-muted-foreground">{below ? `Delete it and the ${below} under it?` : "Delete it?"}</span>
                     <button type="button" onClick={() => api.remove(id)} className="font-medium text-danger hover:underline">
                       Delete
                     </button>
@@ -344,43 +524,41 @@ function BranchView({ api, id, onJump }: { api: BranchesApi; id: string; onJump:
                   <PanelAction icon={Trash2} label="Delete" onClick={() => setConfirmDelete(true)} />
                 )}
               </span>
-            </div>
+            </>
           )}
-        </>
+        </div>
       )}
 
-      {branch && !editing && (children.length > 0 || childGrowing.length > 0 || (canBranch && !api.readOnly)) && (
+      {branch && !editing && !api.readOnly && (children.length > 0 || childGrowing.length > 0 || suggestions.length > 0 || (askTarget && api.enabled)) && (
         <section className="space-y-2.5">
-          <p className="flex items-center gap-1.5 font-mono text-[10px] font-medium uppercase tracking-widest text-muted-foreground">
-            <Sprout aria-hidden className="h-3.5 w-3.5" /> Go further
+          <p className={`flex items-center gap-1.5 ${EYEBROW}`}>
+            <CornerDownRight aria-hidden className="h-3.5 w-3.5" /> Follow-ups
           </p>
-          <div className="flex flex-wrap gap-1.5">
-            {children.map((c) => (
-              <GrownPill key={c.id} branch={c} onClick={() => api.open(c.id)} />
-            ))}
-            {childGrowing.map((g) => (
-              <BranchChip
-                key={g.id}
-                size="md"
-                type={g.question.type}
-                label={g.question.label}
-                state={g.status === "error" ? "error" : "growing"}
-                onClick={() => api.open(g.id)}
-              />
-            ))}
-            {canBranch &&
-              !api.readOnly &&
-              branch.next
-                .filter((n) => !children.some((c) => c.label === n.label) && !childGrowing.some((g) => g.question.label === n.label))
-                .map((n) => (
-                  <SuggestedPill key={n.label} q={n} disabled={!api.enabled} onClick={() => api.growNext(id, n)} />
-                ))}
-          </div>
-          {canBranch && !api.readOnly && api.enabled && (
+          {(children.length > 0 || childGrowing.length > 0 || suggestions.length > 0) && (
+            <div className="flex flex-wrap gap-1.5">
+              {children.map((c) => (
+                <GrownPill key={c.id} branch={c} onClick={() => api.open(c.id)} />
+              ))}
+              {childGrowing.map((g) => (
+                <BranchChip
+                  key={g.id}
+                  size="md"
+                  type={g.question.type}
+                  label={g.question.label}
+                  state={g.status === "error" ? "error" : "growing"}
+                  onClick={() => api.open(g.id)}
+                />
+              ))}
+              {suggestions.map((n) => (
+                <SuggestedPill key={n.label} q={n} disabled={!api.enabled} onClick={() => api.growNext(id, n)} />
+              ))}
+            </div>
+          )}
+          {askTarget && api.enabled && !isGrowing && (
             <Composer
-              askPlaceholder="Ask something about this branch…"
-              onAsk={(text) => api.ask({ anchor: branch.anchor, parentId: id }, text)}
-              onWrite={(label, text) => api.write({ anchor: branch.anchor, parentId: id }, label, text)}
+              placeholder="Ask a follow-up…"
+              onAsk={(text, format) => api.ask(askTarget, text, format)}
+              onWrite={(label, text) => api.write(askTarget, label, text)}
             />
           )}
         </section>
@@ -426,10 +604,10 @@ function BranchEditor({ initial, onSave, onCancel }: { initial: string; onSave: 
         onChange={(e) => setText(e.target.value)}
         onKeyDown={(e) => e.key === "Escape" && onCancel()}
         className="min-h-[240px] font-mono text-[13px] leading-relaxed"
-        aria-label="This branch, to edit"
+        aria-label="This deep dive, to edit"
       />
       <p className="text-[11px] leading-relaxed text-muted-foreground">
-        **bold** · 1. steps · - points · | table | rows · &gt; a callout. Emptying it deletes the branch.
+        **bold** · 1. steps · - points · | table | rows · &gt; a callout. Emptying it deletes it.
       </p>
       <div className="flex justify-end gap-2">
         <button type="button" onClick={onCancel} className="rounded-md px-2.5 py-1 text-xs text-muted-foreground hover:text-foreground">
@@ -447,37 +625,55 @@ function BranchEditor({ initial, onSave, onCancel }: { initial: string; onSave: 
   );
 }
 
-/** Ask the AI a question of your own, or write a branch yourself. */
+/**
+ * Ask a question of your own — in the shape you want the answer, or letting
+ * the AI choose — or write a note yourself.
+ */
 function Composer({
-  askPlaceholder,
+  placeholder,
   onAsk,
   onWrite,
+  autoFocus,
+  footer,
+  onQuestionChange,
 }: {
-  askPlaceholder: string;
-  onAsk: (text: string) => void;
+  placeholder: string;
+  onAsk: (text: string, format: AskFormat) => void;
   onWrite: (label: string, text: string) => void;
+  autoFocus?: boolean;
+  /** Under the box: where the answer will go, for a question asked of the whole sheet. */
+  footer?: ReactNode;
+  onQuestionChange?: (text: string) => void;
 }) {
   const [mode, setMode] = useState<"ask" | "write">("ask");
   const [question, setQuestion] = useState("");
+  const [format, setFormat] = useState<AskFormat>("auto");
   const [label, setLabel] = useState("");
   const [text, setText] = useState("");
+  const input = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (autoFocus) input.current?.focus({ preventScroll: true });
+  }, [autoFocus]);
 
   if (mode === "write") {
     return (
-      <div className="space-y-2 rounded-lg border border-border bg-secondary/30 p-2.5">
-        <input
-          value={label}
-          onChange={(e) => setLabel(e.target.value)}
-          maxLength={80}
-          placeholder="Title (optional)"
-          aria-label="Your branch's title"
-          className="w-full bg-transparent px-1 text-sm font-medium outline-none placeholder:text-muted-foreground"
-        />
+      <div className="space-y-2 rounded-lg border border-border bg-secondary/30 p-2.5" style={kindStyle("note")}>
+        <div className="flex items-center gap-2">
+          <KindBadge type="note" />
+          <input
+            value={label}
+            onChange={(e) => setLabel(e.target.value)}
+            maxLength={80}
+            placeholder="Title (optional)"
+            aria-label="Your note's title"
+            className="min-w-0 flex-1 bg-transparent px-1 text-sm font-medium outline-none placeholder:text-muted-foreground"
+          />
+        </div>
         <Textarea
           value={text}
           onChange={(e) => setText(e.target.value)}
           placeholder="Write it in your own words…"
-          aria-label="Your branch"
+          aria-label="Your note"
           className="min-h-[110px] text-sm"
         />
         <div className="flex items-center justify-end gap-2">
@@ -495,43 +691,70 @@ function Composer({
             }}
             className="rounded-md bg-primary px-3 py-1 text-xs font-medium text-primary-foreground disabled:opacity-50"
           >
-            Add branch
+            Add note
           </button>
         </div>
       </div>
     );
   }
   return (
-    <div className="space-y-1.5">
+    <div className="space-y-2">
       <form
-        className="flex items-center gap-2 rounded-lg border border-border bg-background px-2.5 py-1.5 focus-within:border-info/50"
+        className="flex items-center gap-2 rounded-lg border border-border bg-background px-2.5 py-1.5 focus-within:border-primary/50"
         onSubmit={(e) => {
           e.preventDefault();
           if (!question.trim()) return;
-          onAsk(question);
+          onAsk(question, format);
           setQuestion("");
+          onQuestionChange?.("");
         }}
       >
         <input
+          ref={input}
           value={question}
-          onChange={(e) => setQuestion(e.target.value)}
+          onChange={(e) => {
+            setQuestion(e.target.value);
+            onQuestionChange?.(e.target.value);
+          }}
           maxLength={300}
-          placeholder={askPlaceholder}
-          aria-label={askPlaceholder}
+          placeholder={placeholder}
+          aria-label={placeholder}
           className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
         />
         <button
           type="submit"
           disabled={!question.trim()}
-          aria-label="Grow the answer"
-          className="inline-flex h-6 w-6 items-center justify-center rounded-md text-info transition-colors hover:bg-info/10 disabled:text-muted-foreground disabled:opacity-50"
+          aria-label="Ask"
+          className="inline-flex h-6 w-6 items-center justify-center rounded-md text-primary transition-colors hover:bg-primary/10 disabled:text-muted-foreground disabled:opacity-50"
         >
           <Send className="h-3.5 w-3.5" />
         </button>
       </form>
-      <button type="button" onClick={() => setMode("write")} className="text-xs text-muted-foreground hover:text-foreground hover:underline">
-        or write your own branch
-      </button>
+      <div role="group" aria-label="Answer as" className="flex flex-wrap items-center gap-1">
+        {ASK_FORMATS.map((f) => (
+          <button
+            key={f}
+            type="button"
+            aria-pressed={format === f}
+            onClick={() => setFormat(f)}
+            className={`h-6 rounded-full border px-2 text-[11px] transition-colors ${
+              format === f
+                ? "border-primary/50 bg-primary/10 text-primary"
+                : "border-border text-muted-foreground hover:border-foreground/30 hover:text-foreground"
+            }`}
+          >
+            {ASK_FORMAT_LABEL[f]}
+          </button>
+        ))}
+        <button
+          type="button"
+          onClick={() => setMode("write")}
+          className="h-6 rounded-full border border-dashed border-border px-2 text-[11px] text-muted-foreground transition-colors hover:border-foreground/30 hover:text-foreground"
+        >
+          My own note
+        </button>
+      </div>
+      {footer}
     </div>
   );
 }
@@ -540,30 +763,52 @@ function Composer({
 
 function LineView({ api, anchor, onJump }: { api: BranchesApi; anchor: string; onJump: (anchor: string) => void }) {
   const { grown, growing, pills } = branchesAt(api, anchor);
+  const focus = api.lineFocus;
   return (
     <div className="space-y-4">
-      <Trail api={api} anchor={anchor} path={[]} onJump={onJump} />
-      <h2 className="text-[15px] font-semibold text-foreground">Branch from this line</h2>
+      <div className="space-y-3 rounded-[13px] border border-border bg-background/50 px-4 py-3.5">
+        <p className={EYEBROW}>{api.sectionTitleOf(anchor)}</p>
+        <dl className="grid grid-cols-[2.6rem_1fr] gap-x-2 gap-y-1.5">
+          <ReField api={api} anchor={anchor} onJump={onJump} />
+          {focus && <Field name="On">“{focus}”</Field>}
+        </dl>
+        <h2 className="font-display text-[19px] font-medium leading-snug text-foreground">
+          {focus ? "Ask about what you selected" : "Ask about this line"}
+        </h2>
+        {api.enabled ? (
+          <Composer
+            autoFocus
+            placeholder={focus ? "What do you want to know about it?" : "Ask anything about this line…"}
+            onAsk={(text, format) => api.ask({ anchor, ...(focus ? { focus } : {}) }, text, format)}
+            onWrite={(label, text) => api.write({ anchor }, label, text)}
+          />
+        ) : (
+          <p className="text-xs text-muted-foreground">Deep dives can be asked for once the sheet has finished.</p>
+        )}
+      </div>
       {(grown.length > 0 || growing.length > 0) && (
-        <div className="flex flex-wrap gap-1.5">
-          {grown.map((b) => (
-            <GrownPill key={b.id} branch={b} onClick={() => api.open(b.id)} />
-          ))}
-          {growing.map((g) => (
-            <BranchChip
-              key={g.id}
-              size="md"
-              type={g.question.type}
-              label={g.question.label}
-              state={g.status === "error" ? "error" : "growing"}
-              onClick={() => api.open(g.id)}
-            />
-          ))}
+        <div className="space-y-1.5">
+          <p className={EYEBROW}>On this line</p>
+          <div className="flex flex-wrap gap-1.5">
+            {grown.map((b) => (
+              <GrownPill key={b.id} branch={b} onClick={() => api.open(b.id)} />
+            ))}
+            {growing.map((g) => (
+              <BranchChip
+                key={g.id}
+                size="md"
+                type={g.question.type}
+                label={g.question.label}
+                state={g.status === "error" ? "error" : "growing"}
+                onClick={() => api.open(g.id)}
+              />
+            ))}
+          </div>
         </div>
       )}
       {pills.length > 0 && (
         <div className="space-y-1.5">
-          <p className="font-mono text-[10px] font-medium uppercase tracking-widest text-muted-foreground">Suggested</p>
+          <p className={EYEBROW}>Suggested</p>
           <div className="flex flex-wrap gap-1.5">
             {pills.map((p) => (
               <SuggestedPill key={p.id} q={p} disabled={!api.enabled} onClick={() => api.growPill(p)} />
@@ -571,24 +816,68 @@ function LineView({ api, anchor, onJump }: { api: BranchesApi; anchor: string; o
           </div>
         </div>
       )}
-      {api.enabled ? (
-        <Composer
-          askPlaceholder="Ask something about this line…"
-          onAsk={(text) => api.ask({ anchor }, text)}
-          onWrite={(label, text) => api.write({ anchor }, label, text)}
-        />
-      ) : (
-        <p className="text-xs text-muted-foreground">Branches can be grown once the sheet has finished.</p>
-      )}
     </div>
   );
 }
 
-// ── Every branch ─────────────────────────────────────────────────────────────
+// ── Every deep dive ──────────────────────────────────────────────────────────
+
+/**
+ * A question of the whole sheet: it goes under the line that shares most of
+ * its words — shown as the student types — or a section they pick instead.
+ */
+function AskAnything({ api }: { api: BranchesApi }) {
+  const [question, setQuestion] = useState("");
+  const [chosen, setChosen] = useState("");
+  const matched = question.trim().length >= 6 ? api.anchorFor(question) : "";
+  const target = chosen || matched;
+  const where = target ? (target.endsWith(":end") ? `${api.sectionTitleOf(target)} (the section)` : api.lineOf(target)) : "";
+
+  return (
+    <div className="space-y-2.5 rounded-[13px] border border-border bg-background/50 px-4 py-3.5">
+      <h2 className="font-display text-[19px] font-medium leading-snug text-foreground">Ask anything about this sheet</h2>
+      <Composer
+        placeholder="A table of…, the steps for…, how does…"
+        onQuestionChange={setQuestion}
+        onAsk={(text, format) => {
+          api.ask({ anchor: chosen || api.anchorFor(text) }, text, format);
+          setChosen("");
+        }}
+        onWrite={(label, text) => api.write({ anchor: chosen || api.anchorFor(`${label} ${text}`) }, label, text)}
+        footer={
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
+            <span className={EYEBROW}>Goes under</span>
+            <span className="min-w-0 flex-1 truncate" title={where}>
+              {where ? <Bold text={where} /> : "the line it fits best"}
+            </span>
+            <label className="sr-only" htmlFor="ask-anything-where">
+              Where it goes
+            </label>
+            <select
+              id="ask-anything-where"
+              value={chosen}
+              onChange={(e) => setChosen(e.target.value)}
+              className="h-6 max-w-[9.5rem] rounded-md border border-border bg-background px-1 text-[11px] text-foreground"
+            >
+              <option value="">Best match</option>
+              {api.sectionOrder
+                .filter((k) => k !== "memoryHooks")
+                .map((k) => (
+                  <option key={k} value={`${k}:end`}>
+                    {api.sectionTitleOf(`${k}:end`)}
+                  </option>
+                ))}
+            </select>
+          </div>
+        }
+      />
+    </div>
+  );
+}
 
 function AllView({ api, onJump }: { api: BranchesApi; onJump: (anchor: string) => void }) {
   const kept = new Set(api.branches.map((b) => b.id));
-  const growingTop = Object.values(api.growing).filter((g) => !g.parentId && !kept.has(g.id));
+  const growingTop = Object.values(api.growing).filter((g) => !g.parentId && !kept.has(g.id) && g.status !== "declined");
   const taken = new Set([...api.branches.map((b) => b.pillId), ...Object.values(api.growing).map((g) => g.pillId)]);
   const sections = api.sectionOrder
     .map((key) => ({
@@ -602,11 +891,11 @@ function AllView({ api, onJump }: { api: BranchesApi; onJump: (anchor: string) =
 
   const status: ReactNode = api.suggesting ? (
     <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
-      <Loader2 aria-hidden className="h-3.5 w-3.5 animate-spin text-info" /> Finding the branches worth growing…
+      <Loader2 aria-hidden className="h-3.5 w-3.5 animate-spin" /> Finding the deep dives worth writing…
     </p>
   ) : api.suggestFailed ? (
     <p className="flex items-center gap-2 text-xs text-warning">
-      Couldn't find branches for this sheet.
+      Couldn't find deep dives for this sheet.
       <button type="button" onClick={api.suggest} className="font-medium hover:underline">
         Try again
       </button>
@@ -615,33 +904,29 @@ function AllView({ api, onJump }: { api: BranchesApi; onJump: (anchor: string) =
 
   return (
     <div className="space-y-5">
+      {api.enabled && !api.readOnly && <AskAnything api={api} />}
       {status}
       {api.picksPending && api.enabled && (
         <button
           type="button"
           onClick={api.growPicks}
-          className="flex w-full items-center gap-3 rounded-xl border border-info/25 bg-info-soft px-3.5 py-3 text-left transition-colors hover:border-info/60"
+          className="flex w-full items-center gap-3 rounded-xl border border-primary/25 bg-primary/5 px-3.5 py-3 text-left transition-colors hover:border-primary/60"
         >
-          <Sprout aria-hidden className="h-4 w-4 shrink-0 text-info" />
+          <Sprout aria-hidden className="h-4 w-4 shrink-0 text-primary" />
           <span className="flex-1">
             <span className="block text-sm font-medium text-foreground">Make it comprehensive</span>
-            <span className="block text-xs text-muted-foreground">Grows the two most useful branches in each section.</span>
+            <span className="block text-xs text-muted-foreground">Writes the two most useful deep dives in each section.</span>
           </span>
         </button>
       )}
       {!sections.length && !api.suggesting && (
         <p className="text-sm leading-relaxed text-muted-foreground">
-          No branches yet. Under the lines of the sheet are the questions worth asking next — pick one to grow it here, or
-          choose <span className="font-medium text-foreground">Branch from this line</span> in any line's menu to ask your own.
+          No deep dives yet. Under the lines of the sheet are the questions worth asking next — pick one, or ask your own above.
         </p>
       )}
       {sections.map((s) => (
         <section key={s.key} className="space-y-2">
-          <button
-            type="button"
-            onClick={() => onJump(`${s.key}:end`)}
-            className="font-mono text-[10px] font-medium uppercase tracking-widest text-muted-foreground transition-colors hover:text-foreground"
-          >
+          <button type="button" onClick={() => onJump(`${s.key}:end`)} className={`${EYEBROW} transition-colors hover:text-foreground`}>
             {s.title}
           </button>
           <ul className="space-y-0.5">
@@ -654,11 +939,12 @@ function AllView({ api, onJump }: { api: BranchesApi; onJump: (anchor: string) =
                   type="button"
                   onClick={() => api.open(g.id)}
                   className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-muted-foreground hover:bg-secondary"
+                  style={kindStyle(g.question.type)}
                 >
                   {g.status === "error" ? (
                     <RotateCcw aria-hidden className="h-3.5 w-3.5 shrink-0 text-warning" />
                   ) : (
-                    <Loader2 aria-hidden className="h-3.5 w-3.5 shrink-0 animate-spin text-info" />
+                    <EcgTrace className="h-3 w-[34px] shrink-0 text-[hsl(var(--k))]" />
                   )}
                   <span className="truncate">{g.question.label}</span>
                 </button>
@@ -679,23 +965,22 @@ function AllView({ api, onJump }: { api: BranchesApi; onJump: (anchor: string) =
 }
 
 function TreeRow({ api, branch, depth }: { api: BranchesApi; branch: LayerBranch; depth: number }) {
-  const Icon = BRANCH_ICON[branch.type];
   const children = api.branches.filter((b) => b.parentId === branch.id);
-  const growing = !!api.growing[branch.id];
+  const growing = inProgress(api.growing[branch.id]);
   return (
     <li>
       <button
         type="button"
         onClick={() => api.open(branch.id)}
         className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-foreground/90 transition-colors hover:bg-secondary"
-        style={{ paddingLeft: 8 + depth * 18 }}
+        style={{ paddingLeft: 8 + depth * 18, ...kindStyle(branch.type) }}
       >
-        {growing ? (
-          <Loader2 aria-hidden className="h-3.5 w-3.5 shrink-0 animate-spin text-info" />
-        ) : (
-          <Icon aria-hidden className="h-3.5 w-3.5 shrink-0 text-info" />
-        )}
+        {growing ? <EcgTrace className="h-3 w-[34px] shrink-0 text-[hsl(var(--k))]" /> : <KindBadge type={branch.type} />}
         <span className="truncate">{branch.label}</span>
+        {branch.review?.verdict === "corrected" && (
+          <ShieldCheck aria-label="Corrected after a clinical check" className="h-3 w-3 shrink-0 text-success" />
+        )}
+        {branch.review?.verdict === "flagged" && <ShieldAlert aria-label="Flagged by a clinical check" className="h-3 w-3 shrink-0 text-warning" />}
         {branch.edited && <span className="ml-auto shrink-0 text-[10px] text-muted-foreground">edited</span>}
       </button>
       {children.length > 0 && (

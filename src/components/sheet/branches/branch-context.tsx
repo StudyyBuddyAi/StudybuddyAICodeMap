@@ -1,35 +1,34 @@
 import { createContext, useContext } from "react";
 import {
-  ArrowLeftRight,
-  Atom,
-  ListChecks,
-  MessageCircleQuestion,
-  PenLine,
-  Search,
-  UserRound,
-  type LucideIcon,
-} from "lucide-react";
-import type { BranchesApi } from "@/hooks/use-sheet-branches";
-import type { BranchType } from "@/lib/sheet-branches";
+  NO_BRANCHES,
+  useBranchesApi,
+  useBranchesSelector,
+  type BranchActions,
+  type BranchesApi,
+  type BranchesStore,
+} from "@/hooks/use-sheet-branches";
 
 /**
- * The page's branches, for the parts of the sheet that show them: the chips
- * under each line, the line menu, the panel. Absent (Library's saved-sheet
- * view), a sheet renders without branches.
+ * The page's deep dives, for the parts of the sheet that show them: the tags
+ * under each line, the line menu, the selection toolbar, the panel. What is
+ * handed down is the store, which never changes: each part subscribes to what
+ * it shows. Absent (Library's saved-sheet view), a sheet renders without them.
  */
-const BranchesContext = createContext<BranchesApi | null>(null);
+const BranchesContext = createContext<BranchesStore | null>(null);
 
 export const BranchesProvider = BranchesContext.Provider;
 
-export const useBranches = () => useContext(BranchesContext);
+/** The store itself, for a part that picks its own slice (useBranchesSelector). */
+export const useBranchStore = () => useContext(BranchesContext);
 
-/** Each kind of branch's mark, so a chip says what it will open before it is opened. */
-export const BRANCH_ICON: Record<BranchType, LucideIcon> = {
-  management: ListChecks,
-  compare: ArrowLeftRight,
-  differential: Search,
-  mechanism: Atom,
-  case: UserRound,
-  ask: MessageCircleQuestion,
-  note: PenLine,
-};
+/** Everything, re-rendering on any change — for the panel. */
+export const useBranches = (): BranchesApi | null => useBranchesApi(useContext(BranchesContext));
+
+/** Whether deep dives can be asked for now — the one thing a line's menu needs to know, subscribed to alone. */
+export function useBranchesEnabled(): boolean {
+  const store = useContext(BranchesContext);
+  return useBranchesSelector(store ?? NO_BRANCHES, "enabled", (st) => st.enabled, Object.is);
+}
+
+/** What the deep dives do, and nothing that changes: a menu holding these never re-renders for them. */
+export const useBranchActions = (): BranchActions | null => useContext(BranchesContext)?.actions ?? null;

@@ -117,6 +117,7 @@ describe("runSectionRequest", () => {
     sections: {},
     topic: "DKA",
     sourceIds: [],
+    signature: null,
   };
   afterEach(() => vi.mocked(callMedicalNotes).mockReset());
 
@@ -129,6 +130,16 @@ describe("runSectionRequest", () => {
     expect(result.sections.overview).toBe("Mechanism: glucagon drives it.");
     expect(result.covered).toBe(false);
     expect(drafts.length).toBeGreaterThan(0);
+  });
+
+  it("keeps the server's signature on the rewrite, which is no sign of an old server", async () => {
+    const sig = "a".repeat(43);
+    vi.mocked(callMedicalNotes).mockResolvedValue(
+      sse([delta('{"overview": "Rewritten."}'), { __meta: { signature: { v: 1, topic: "DKA", sections: { overview: sig } } } }])
+    );
+    const result = await runSectionRequest(params);
+    expect(result.sections.overview).toBe("Rewritten.");
+    expect(result.sigs).toEqual({ overview: sig });
   });
 
   it("says when today's requests are used up", async () => {

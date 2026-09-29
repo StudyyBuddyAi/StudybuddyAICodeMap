@@ -1,7 +1,8 @@
 import type { LayerBranch } from "@/lib/sheet-layer";
 import { anchorSection } from "@/lib/sheet-layer";
 import { BRANCH_TYPE_LABEL } from "@/lib/sheet-branches";
-import { useBranches } from "./branch-context";
+import { NO_BRANCHES, useBranchesSelector } from "@/hooks/use-sheet-branches";
+import { useBranchStore } from "./branch-context";
 import { BranchMarkdown } from "./BranchMarkdown";
 
 /**
@@ -10,11 +11,12 @@ import { BranchMarkdown } from "./BranchMarkdown";
  * branches under the section they grew from, each under the one above it.
  */
 export function PrintBranches({ sectionKey }: { sectionKey: string }) {
-  const api = useBranches();
-  if (!api) return null;
-  const roots = api.branches.filter((b) => !b.parentId && anchorSection(b.anchor) === sectionKey);
-  if (!roots.length) return null;
-  const childrenOf = (id: string) => api.branches.filter((b) => b.parentId === id);
+  const store = useBranchStore();
+  // The branches only: nothing here changes when the panel opens or a branch is growing.
+  const branches = useBranchesSelector(store ?? NO_BRANCHES, "branches", (st) => st.layer.branches, Object.is);
+  const roots = branches.filter((b) => !b.parentId && anchorSection(b.anchor) === sectionKey);
+  if (!store || !roots.length) return null;
+  const childrenOf = (id: string) => branches.filter((b) => b.parentId === id);
 
   const render = (b: LayerBranch, depth: number) => (
     <div key={b.id} className="mt-3 break-inside-avoid" style={{ marginLeft: depth * 16 }}>
@@ -29,7 +31,7 @@ export function PrintBranches({ sectionKey }: { sectionKey: string }) {
 
   return (
     <div className="hidden border-t border-dashed border-border pt-2 print:block">
-      <p className="text-[10px] font-medium uppercase tracking-widest text-muted-foreground">Branches</p>
+      <p className="text-[10px] font-medium uppercase tracking-widest text-muted-foreground">Deep dives</p>
       {roots.map((b) => render(b, 0))}
     </div>
   );
