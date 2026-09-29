@@ -46,7 +46,7 @@ const AuthCallback = () => {
       await runPostUpgradeMigrations(userId);
 
       toast({ title: "Signed in" });
-      navigate("/", { replace: true });
+      navigate(pending?.returnTo ?? "/dashboard", { replace: true });
     };
 
     const fail = () => {
