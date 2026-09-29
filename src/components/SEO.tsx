@@ -9,7 +9,7 @@ interface SEOProps {
   ogImage?: string;
   ogType?: string;
   noIndex?: boolean;
-  schema?: Record<string, any>;
+  schema?: Record<string, unknown>;
 }
 
 const SEO = ({
@@ -108,7 +108,7 @@ function updateMetaTag(
 }
 
 // Helper function to add structured data
-function addStructuredData(schema: Record<string, any>) {
+function addStructuredData(schema: Record<string, unknown>) {
   // Remove existing schema script with same context
   const existingScript = document.querySelector(`script[type="application/ld+json"][data-schema="${schema["@context"]}"]`);
   if (existingScript) {
@@ -118,7 +118,7 @@ function addStructuredData(schema: Record<string, any>) {
   // Create new schema script
   const script = document.createElement("script");
   script.type = "application/ld+json";
-  script.setAttribute("data-schema", schema["@context"]);
+  script.setAttribute("data-schema", String(schema["@context"] ?? ""));
   script.text = JSON.stringify(schema);
   document.head.appendChild(script);
 }
