@@ -91,6 +91,19 @@
     --info: 262 60% 48%;
     --info-foreground: 0 0% 100%;
     --info-soft: 262 70% 95%;
+
+    /* Deep dives, by kind — the colour of a chart tab, on the stub of each
+       tag: management, differential, compare, mechanism, a practice case, the
+       student's question, their note. Muted, and dark enough for white
+       shorthand on them; the dark theme lightens them and darkens the text. */
+    --kind-mx: 177 80% 27%;
+    --kind-ddx: 28 72% 38%;
+    --kind-vs: 206 40% 36%;
+    --kind-path: 286 32% 42%;
+    --kind-case: 349 46% 42%;
+    --kind-ask: 262 60% 48%;
+    --kind-note: 38 14% 37%;
+    --kind-fg: 0 0% 100%;
   }
 
   .dark {
@@ -164,6 +177,36 @@
     --info: 262 70% 74%;
     --info-foreground: 220 16% 5%;
     --info-soft: 262 30% 20%;
+
+    --kind-mx: 177 50% 52%;
+    --kind-ddx: 32 72% 62%;
+    --kind-vs: 206 45% 68%;
+    --kind-path: 286 38% 72%;
+    --kind-case: 349 55% 70%;
+    --kind-ask: 262 70% 74%;
+    --kind-note: 43 12% 66%;
+    --kind-fg: 220 16% 5%;
+  }
+}
+
+/* The trace a deep dive shows while it is being written: a heartbeat drawn
+   across its tag, over and over. Still, as a flat line, for reduced motion. */
+@keyframes ecg-trace {
+  from {
+    stroke-dashoffset: 64;
+  }
+  to {
+    stroke-dashoffset: -64;
+  }
+}
+.ecg-trace path {
+  stroke-dasharray: 64;
+  animation: ecg-trace 1.3s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .ecg-trace path {
+    animation: none;
+    stroke-dasharray: none;
   }
 }
 

@@ -21,6 +21,7 @@ import { parseSheetOutput } from "../../src/lib/parse-partial-sheet.ts";
 import { parseFlashcardsFromOutput } from "../../src/lib/parse-flashcards.ts";
 import { PRICES } from "./cases.ts";
 import { resolveSheetPlan, type PlannedSection } from "../../supabase/functions/_shared/sheet-plan.ts";
+import { asDepth, type Depth } from "../../supabase/functions/_shared/sheet-sections.ts";
 import { bodyToLines, sheetRedundancy } from "./redundancy.ts";
 import type { RunRecord } from "./run.ts";
 
@@ -56,11 +57,10 @@ const sentences = (s: string) =>
 const bolds = (s: string) => (s.match(/\*\*[^*]+\*\*/g) ?? []).length;
 const inRange = (n: number, lo: number, hi: number) => n >= lo && n <= hi;
 
-/** Deck size by length — the one sheet count the plan does not carry. */
-const CARD_GATE: Record<string, [number, number]> = {
-  Concise: [3, 3],
-  Moderate: [4, 4],
-  Detailed: [5, 5],
+/** Deck size by depth — the one sheet count the plan does not carry. */
+const CARD_GATE: Record<Depth, [number, number]> = {
+  highYield: [3, 3],
+  comprehensive: [5, 5],
 };
 
 /**
@@ -87,27 +87,18 @@ function resolveAll(r: RunRecord): PlannedSection[] {
     archetype: "condition",
     examMode: String(r.case.body.examMode ?? "General"),
     difficulty: String(r.case.body.difficulty ?? "Intermediate"),
-    length: String(r.case.body.length ?? "Concise"),
   });
 }
 
 /**
- * A prose section's internal structure: the labelled lines its brief asked
- * for. Derived from the brief rather than hard-coded, so a section this file
- * has never heard of is still checked for the structure it was told to use.
- *
- * A label must be followed by content on the same line. Without that the
- * brief's own "Structure it as:" preamble — which sits at the head of a line
- * and ends there — counts as a required label, and every section carrying one
- * fails a structure check it was always going to fail.
+ * A prose section's internal structure: the labelled lines its core must
+ * write, as the plan resolved them for this exam mode — a Step 1 Clinical
+ * Approach leaves Workup and Avoid to its depth. The plan derives them from
+ * the brief, so a section this file has never heard of is still checked for
+ * the structure it was told to use.
  */
 function expectedLabels(section: PlannedSection): string[] {
-  const all = [...section.brief.matchAll(/^([A-Z][A-Za-z ,/&-]{0,30}?):[ \t]+\S/gm)].map((m) => m[1]);
-  // A length budget may tell a section to leave some of its labels out — a
-  // Concise clinicalApproach is told to omit Workup, Second-line, Definitive
-  // and Avoid. Requiring those anyway fails the sheet for doing as it was told.
-  const omitted = /\bomit\b([^.]*)/i.exec(section.budget ?? "")?.[1] ?? "";
-  return all.filter((label) => !new RegExp(`\\b${label}\\b`, "i").test(omitted));
+  return section.coreLabels ?? [];
 }
 
 const CLINICAL_TAGS = new Set(["diagnosis", "mechanism", "next step", "complication", "association"]);
@@ -192,7 +183,7 @@ function scoreSheet(r: RunRecord): Check[] {
   // its own __meta frame — so it is scored from there when the record carries
   // one. A record from before the split has none, and the sheet's own
   // flashcards field is checked instead.
-  const cardGate = CARD_GATE[String(r.case.body.length)] ?? CARD_GATE.Concise;
+  const cardGate = CARD_GATE[asDepth(r.case.body.depth, r.case.body.length)];
   const deck = r.flashcards !== undefined
     ? parseFlashcardsFromOutput(r.flashcards ?? "", String(r.case.body.notes))
     : s.flashcards;

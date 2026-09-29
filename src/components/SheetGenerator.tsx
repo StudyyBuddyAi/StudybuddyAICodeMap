@@ -14,7 +14,9 @@ import {
 import {
   AlertTriangle,
   FileDown,
+  GitBranch,
   Layers,
+  Loader2,
   MoreHorizontal,
   PenLine,
   Play,
@@ -32,12 +34,12 @@ import SheetSettings from "@/components/sheet/SheetSettings";
 import SheetTopicBar from "@/components/sheet/SheetTopicBar";
 import SheetPreparation from "@/components/sheet/SheetPreparation";
 import SheetFinish, { type SheetDeck } from "@/components/sheet/SheetFinish";
-import { SectionsMenu, SheetSectionRail } from "@/components/sheet/SheetSections";
+import { TrackedSectionRail, TrackedSectionsMenu } from "@/components/sheet/SheetSections";
+import { BranchesButton, BranchesMenuItem, PanelAwareLayout } from "@/components/sheet/branches/BranchesChrome";
 import {
   TOPIC_BAR_BUTTON,
   jumpToSection,
   listSections,
-  useActiveSection,
 } from "@/components/sheet/sheet-nav";
 import { useUsageLimit, MAX_DAILY_SHEETS } from "@/hooks/use-usage-limit";
 import { useCitationUsage } from "@/hooks/use-citation-usage";
@@ -63,7 +65,7 @@ import {
 } from "@/types/generated-sheet";
 import GroundingNotice from "@/components/GroundingNotice";
 import { reconcileGroundingLevel, resolveGroundingLevel } from "@/lib/grounding";
-import { parsePlan, renderOrder, resolvePlan } from "@/lib/sheet-plan";
+import { parsePlan, renderOrder, resolvePlan, sectionBody } from "@/lib/sheet-plan";
 import type { SheetSectionSpec } from "@/types/generated-sheet";
 import { applySourceLabels } from "@/lib/source-labels";
 import { fetchBestCitation, type CitationResult } from "@/lib/citation";
@@ -76,7 +78,45 @@ import { sheetToPlainText } from "@/lib/sheet-to-text";
 import { ENTER, FOLD, RISE } from "@/lib/motion";
 import { useStudyHistory } from "@/hooks/use-study-history";
 import { useSheetLayer } from "@/hooks/use-sheet-layer";
-import { applyLayer, isEmptyLayer, layerNotesText, type SheetLayer } from "@/lib/sheet-layer";
+import { parseSignature, requestSignature, requestTopic, type SheetSignature } from "@/lib/sheet-signature";
+import {
+  anchoredTo,
+  applyLayer,
+  isEmptyLayer,
+  layerBranchesText,
+  layerNotesText,
+  removeLayerSection,
+  rewriteSection,
+  withLayerSections,
+  type SheetLayer,
+} from "@/lib/sheet-layer";
+import {
+  DEPTH_LABEL,
+  REGEN_CHOICES,
+  SectionOutdatedError,
+  SectionQuotaError,
+  depthOf,
+  hasBody,
+  runSectionRequest,
+  type Depth,
+  type RegenStyle,
+  type SectionRequestParams,
+} from "@/lib/sheet-depth";
+import type { SectionJob } from "@/components/sheet/SectionDepth";
+import type { RewriteControls } from "@/components/OutputSection";
+import { useSheetBranches } from "@/hooks/use-sheet-branches";
+import { BranchPanel } from "@/components/sheet/branches/BranchPanel";
+import type { SectionBody } from "@/types/generated-sheet";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import type { PersonalProps } from "@/components/sheet/personal/personal-context";
 import { useBackdropScene } from "@/components/backdrop/backdrop-scene";
 
@@ -119,7 +159,7 @@ interface SheetSettingsSnapshot {
   notes: string;
   examMode: string;
   difficulty: string;
-  length: string;
+  depth: Depth;
   useGrounding: boolean;
   topK: number;
   threshold: number;
@@ -131,7 +171,7 @@ const EXAM_LABELS: Record<string, string> = {
 };
 
 const settingsSummary = (s: SheetSettingsSnapshot) =>
-  [EXAM_LABELS[s.examMode] ?? s.examMode, s.difficulty, s.length].join(" · ");
+  [EXAM_LABELS[s.examMode] ?? s.examMode, s.difficulty, DEPTH_LABEL[s.depth]].join(" · ");
 
 /** A title for a sheet whose topic hasn't arrived: the first line asked for. */
 const firstLine = (text: string) => text.trim().split("\n")[0].trim().slice(0, 80);
@@ -150,7 +190,8 @@ function ScrollToTopOnMount() {
 const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
   const [notes, setNotes] = useState(prefill?.input ?? "");
   const [difficulty, setDifficulty] = useState(prefill?.modeInfo?.difficulty ?? "Basic");
-  const [length, setLength] = useState(prefill?.modeInfo?.length ?? "Concise");
+  // Saved sheets from before depth carry a length; only Detailed reads as comprehensive.
+  const [depth, setDepth] = useState<Depth>(depthOf(prefill?.modeInfo?.length));
   const [examMode, setExamMode] = useState(prefill?.modeInfo?.examMode ?? "General");
   const [sheet, setSheet] = useState<GeneratedSheet | null>(
     prefill?.output ? parseStoredSheet(prefill.output) : null
@@ -217,11 +258,23 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
     notes: prefill?.input ?? "",
     examMode: prefill?.modeInfo?.examMode ?? "General",
     difficulty: prefill?.modeInfo?.difficulty ?? "Basic",
-    length: prefill?.modeInfo?.length ?? "Concise",
+    depth: depthOf(prefill?.modeInfo?.length),
     useGrounding: true,
     topK: 8,
     threshold: 0.6,
   }));
+
+  // What is running on each section — a rewrite — and the drafts arriving.
+  const [sectionJobs, setSectionJobs] = useState<Record<string, SectionJob>>({});
+  const [sectionDrafts, setSectionDrafts] = useState<Record<string, SectionBody>>({});
+  const sectionAborts = useRef(new Map<string, AbortController>());
+  // A rewrite that would take the student's highlights and notes with it, waiting on a yes.
+  const [pendingRewrite, setPendingRewrite] = useState<{
+    key: string;
+    style: RegenStyle;
+    instruction?: string;
+    anchored: number;
+  } | null>(null);
   // Null until the server's __meta event arrives. Staying null means grounding
   // was never attempted, so the sheet keeps its pre-grounding appearance —
   // distinct from an attempt that retrieved nothing ({ retrievedChunks: 0 }).
@@ -240,6 +293,8 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
   // the server recorded for it when the student has no Pro. Both ride on the
   // sheet: a premium sheet is personalizable like a Pro one.
   const premiumRef = useRef<{ premium: boolean; grant?: string }>({ premium: false });
+  // The server's signature on the sheet's sections, sent as the stream ends.
+  const signatureRef = useRef<SheetSignature | null>(null);
 
   // The saved row the sheet on screen is, once it is one: opened from
   // history, saved with Save, or saved on the student's first personal touch.
@@ -302,13 +357,14 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
       notes: activeNotes,
       examMode,
       difficulty,
-      length,
+      depth,
       useGrounding,
       topK: groundingTopK,
       threshold: groundingThreshold,
     });
     setEditOpen(false);
     setLoading(true);
+    resetSectionState();
     setSheet(null);
     setLegacyOutput("");
     setDeckSaved(false);
@@ -321,6 +377,7 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
     planRef.current = null;
     flashcardsRef.current = null;
     premiumRef.current = { premium: false };
+    signatureRef.current = null;
     // Captured per-generation rather than read at render time: the sheet must
     // keep describing the settings it was actually built with, even if the
     // toggle is flipped afterwards.
@@ -334,13 +391,18 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
     // the way this build's default plan would.
     // The plan and the deck both ride on the sheet so they are saved with it:
     // a reloaded sheet must lay out the way it did when it was generated, and
-    // keep the cards that were written for it.
+    // keep the cards that were written for it. A comprehensive sheet is written
+    // like a high-yield one; its branches are grown once it has streamed.
+    const requestedDepth = depth;
+
     const withPlan = (s: GeneratedSheet): GeneratedSheet => ({
       ...s,
       ...(planRef.current ? { plan: planRef.current } : {}),
       ...(flashcardsRef.current ? { flashcards: flashcardsRef.current } : {}),
       ...(premiumRef.current.premium ? { premium: true } : {}),
       ...(premiumRef.current.grant ? { premiumGrant: premiumRef.current.grant } : {}),
+      ...(signatureRef.current ? { signature: signatureRef.current } : {}),
+      depth: requestedDepth,
     });
 
     // Draft updates are coalesced to one render per animation frame: chunks
@@ -348,12 +410,14 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
     // re-lays-out the whole document. Declared out here so the error path can
     // cancel a frame that would otherwise land after it.
     let pendingPartial: PartialSheetResult | null = null;
+    let lastCore: PartialSheetResult | null = null;
     let frame = 0;
     const flushPartial = () => {
       frame = 0;
-      const p = pendingPartial;
+      const p = pendingPartial ?? lastCore;
       pendingPartial = null;
       if (!p) return;
+      lastCore = p;
       setSheet(withPlan(p.sheet));
       setStreamedKeys(p.completeKeys);
       setLiveKey(p.inFlightKey);
@@ -369,7 +433,9 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
       const response = await callMedicalNotes({
         notes: activeNotes,
         difficulty,
-        length,
+        depth,
+        // For an edge function from before depth, which reads only a length.
+        length: depth === "comprehensive" ? "Detailed" : "Concise",
         examMode,
         useGrounding,
         topK: groundingTopK,
@@ -454,6 +520,9 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
               }
               // Proof, for the AI actions later, that this premium sheet may
               // be personalized without Pro.
+              if (meta.signature !== undefined) {
+                signatureRef.current = parseSignature(meta.signature);
+              }
               if (typeof meta.premiumGrant === "string") {
                 premiumRef.current.grant = meta.premiumGrant;
               }
@@ -544,7 +613,7 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
         // Reconcile the model's self-reported coverage against retrieval truth.
         // Retrieval can only ever weaken the claim, never strengthen it.
         const grounding = groundingResultRef.current;
-        const planned = withPlan(result.sheet);
+        const planned: GeneratedSheet = withPlan(result.sheet);
         const groundedSheet: GeneratedSheet = grounding
           ? {
               ...planned,
@@ -649,14 +718,14 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
    */
   const handleShare = async () => {
     // The sheet as the student has made it: their edits and points in place,
-    // what they removed gone, their notes at the end.
+    // what they removed gone, their notes and branches at the end.
     const layer = layerState.layer;
     const mine = sheet && !isEmptyLayer(layer);
     const text = sheetToPlainText(
       mine ? applyLayer(sheet, layer) : sheet,
       legacyOutput,
       activeSettings.notes,
-      mine ? [layerNotesText(sheet, layer)] : []
+      mine ? [layerNotesText(sheet, layer), layerBranchesText(sheet, layer)] : []
     );
     if (!text.trim()) {
       toast({ title: "Nothing to share yet", variant: "destructive" });
@@ -687,14 +756,16 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
   // Load a saved sheet straight from history (no regeneration) — mirrors how the
   // `prefill` prop hydrates the generator on mount.
   const loadHistoryItem = (item: StudyHistoryItem) => {
+    const stored = isJsonSheet(item.output) ? parseStoredSheet(item.output) : null;
     const loaded = {
       examMode: item.modeInfo?.examMode || "General",
       difficulty: item.modeInfo?.difficulty || "Basic",
-      length: item.modeInfo?.length || "Concise",
+      depth: stored?.depth ?? depthOf(item.modeInfo?.length),
     };
     setExamMode(loaded.examMode);
     setDifficulty(loaded.difficulty);
-    setLength(loaded.length);
+    setDepth(loaded.depth);
+    resetSectionState();
     setNotes(item.input);
     setActiveSettings((prev) => ({ ...prev, ...loaded, notes: item.input }));
     setDeckSaved(false);
@@ -793,7 +864,8 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
     savingRef.current ??= saveItem(activeSettings.notes, JSON.stringify(sheet), {
       examMode: activeSettings.examMode,
       difficulty: activeSettings.difficulty,
-      length: activeSettings.length,
+      // study_history.length is free text: it now holds the depth.
+      length: activeSettings.depth,
     })
       .then((id) => {
         setSavedSheetId(id);
@@ -841,6 +913,145 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
   /** A QBank set on this sheet, focused on what the student marked. */
   const practiceInQBank = (focus = "") => navigate("/qbank", { state: { topic: qbankTopic(sheetTopic, focus) } });
 
+  // ── Rewrites, one section at a time ───────────────────────────────────
+  /** Every rewrite stops. */
+  function resetSectionState() {
+    for (const c of sectionAborts.current.values()) c.abort();
+    sectionAborts.current.clear();
+    setSectionJobs({});
+    setSectionDrafts({});
+  }
+
+  /** The sheet as the student has it: their rewrites in place. */
+  const studentSheet = sheet ? withLayerSections(sheet, layerState.layer) : null;
+  const sheetKeys = sheet ? resolvePlan(sheet).map((s) => s.key) : [];
+  // Rewrites and branches need the finished sheet and its loaded layer, which they write to.
+  const sectionsReady = !!sheet && !legacyOutput && !loading && layerState.status === "ready";
+
+  const sectionParams = (
+    p: Pick<SectionRequestParams, "action" | "key" | "style" | "instruction">
+  ): SectionRequestParams => ({
+    ...p,
+    plan: sheetKeys,
+    sections: (studentSheet?.sections ?? {}) as Record<string, SectionBody>,
+    topic: sheet ? requestTopic(sheet, sheetTopic) : sheetTopic.slice(0, 120),
+    sourceIds: (sheet?.sources ?? []).map((s) => s.id),
+    grant: sheet?.premiumGrant,
+    signature: sheet ? requestSignature(sheet, layerState.layer) : null,
+    examMode: activeSettings.examMode,
+    difficulty: activeSettings.difficulty,
+  });
+
+  /**
+   * Runs one rewrite under `key`, its draft landing as it arrives, and hands
+   * the finished bodies to `done`. Tells the student when today's requests
+   * are used up; the section stays as it was otherwise.
+   */
+  const runSection = async (
+    key: string,
+    job: SectionJob,
+    params: SectionRequestParams,
+    done: (sections: Record<string, SectionBody>, sigs: Record<string, string>) => void
+  ) => {
+    const controller = new AbortController();
+    sectionAborts.current.get(key)?.abort();
+    sectionAborts.current.set(key, controller);
+    const setJob = (next: SectionJob | null) =>
+      setSectionJobs((all) => {
+        const out = { ...all };
+        if (next) out[key] = next;
+        else delete out[key];
+        return out;
+      });
+    setJob(job);
+    try {
+      const result = await runSectionRequest(params, {
+        signal: controller.signal,
+        onDraft: (d) => setSectionDrafts((all) => ({ ...all, ...d.sections })),
+      });
+      done(result.sections, result.sigs);
+      setJob(null);
+    } catch (e: unknown) {
+      if (e instanceof Error && e.name === "AbortError") return;
+      setJob(null);
+      if (e instanceof SectionQuotaError) {
+        setGoProOpen(true);
+        toast({ title: "You've used today's section rewrites", description: "They reset at midnight UTC. Pro is unlimited." });
+      } else if (e instanceof SectionOutdatedError) {
+        toast({ title: "This needs the latest StudyBuddy", description: "Section rewrites aren't live on the server yet.", variant: "destructive" });
+      } else {
+        toast({ title: "Couldn't rewrite this section", description: "It's as it was. Try again from its menu.", variant: "destructive" });
+      }
+    } finally {
+      setSectionDrafts((all) => {
+        const out = { ...all };
+        delete out[key];
+        return out;
+      });
+      if (sectionAborts.current.get(key) === controller) sectionAborts.current.delete(key);
+    }
+  };
+
+  /** A section rewritten in a direction. */
+  const doRewrite = (key: string, style: RegenStyle, instruction?: string) => {
+    const label = style === "custom" ? "your way" : REGEN_CHOICES.find((c) => c.style === style)?.label.toLowerCase();
+    void runSection(
+      key,
+      { action: "regenerate", status: "running", label },
+      sectionParams({ action: "regenerate", key, style, instruction }),
+      (sections, sigs) => {
+        if (!hasBody(sections[key])) return;
+        updateLayer((l) => rewriteSection(l, { [key]: sections[key] }, style, sigs));
+        // Its suggestions named lines it no longer has, and went with them.
+        branches.actions.suggestFor([key]);
+      }
+    );
+  };
+
+  /** Asks first when the rewrite would take the student's own marks with it. */
+  const rewriteSectionRequest = (key: string, style: RegenStyle, instruction?: string) => {
+    if (!sectionsReady) return;
+    const anchored = anchoredTo(layerState.layer, [key]);
+    if (anchored > 0) setPendingRewrite({ key, style, instruction, anchored });
+    else doRewrite(key, style, instruction);
+  };
+
+  const rewriteControls: RewriteControls | undefined =
+    sheet && !legacyOutput
+      ? {
+          rewrite: rewriteSectionRequest,
+          undoRewrite: (key) => updateLayer((l) => removeLayerSection(l, [key].filter((k) => l.sections[k]?.kind === "rewrite"))),
+          jobs: sectionJobs,
+          drafts: sectionDrafts,
+          enabled: sectionsReady,
+        }
+      : undefined;
+
+  // ── Branches ───────────────────────────────────────────────────────────
+  // What the sheet suggests growing, and what the student grows. A
+  // comprehensive sheet grows its first picks as soon as they are suggested.
+  const branches = useSheetBranches({
+    sheet: studentSheet && !legacyOutput ? studentSheet : null,
+    sheetKey: generationId,
+    ready: sectionsReady,
+    comprehensive: activeSettings.depth === "comprehensive",
+    layer: layerState.layer,
+    update: layerState.update,
+    touch: updateLayer,
+    context: {
+      topic: sheetTopic,
+      examMode: activeSettings.examMode,
+      difficulty: activeSettings.difficulty,
+      sourceIds: (sheet?.sources ?? []).map((s) => s.id),
+    },
+    onQuota: () => {
+      setGoProOpen(true);
+      toast({ title: "You've used today's deep dives", description: "They reset at midnight UTC. Pro is unlimited." });
+    },
+    onOutdated: () =>
+      toast({ title: "Deep dives aren't live yet", description: "StudyBuddy is being updated. Try again later.", variant: "destructive" }),
+  });
+
   const personal: PersonalProps | undefined =
     sheet && !legacyOutput
       ? {
@@ -865,6 +1076,7 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
   /** Back to the composer, keeping the settings for the next sheet. */
   const newSheet = () => {
     if (loading) return;
+    resetSectionState();
     setSheet(null);
     setLegacyOutput("");
     setNotes("");
@@ -886,7 +1098,7 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
       setNotes(activeSettings.notes);
       setExamMode(activeSettings.examMode);
       setDifficulty(activeSettings.difficulty);
-      setLength(activeSettings.length);
+      setDepth(activeSettings.depth);
       setUseGrounding(activeSettings.useGrounding);
       setGroundingTopK(activeSettings.topK);
       setGroundingThreshold(activeSettings.threshold);
@@ -901,8 +1113,8 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
       onExamMode={setExamMode}
       difficulty={difficulty}
       onDifficulty={setDifficulty}
-      length={length}
-      onLength={setLength}
+      depth={depth}
+      onDepth={setDepth}
       grounding={{ on: useGrounding, topK: groundingTopK, threshold: groundingThreshold }}
       onGrounding={(next) => {
         if (next.on !== undefined) setUseGrounding(next.on);
@@ -976,10 +1188,6 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
   // text, so this ends the moment it starts writing.
   const waitingForContent = loading && !liveKey && streamedKeys.length === 0;
   const sectionEntries = planned ? listSections(readingSheet, loading, streamedKeys, liveKey) : [];
-  const activeSection = useActiveSection(
-    sectionEntries.map((s) => s.key),
-    generationId
-  );
   // What the progress line counts. The deck arrives in its own frame at the
   // end, not as a section the parser reports, so it is left out.
   const progressSections = planned
@@ -988,15 +1196,30 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
   const activeModeInfo = {
     examMode: activeSettings.examMode,
     difficulty: activeSettings.difficulty,
-    length: activeSettings.length,
+    length: activeSettings.depth,
   };
   const sourceCount = loading ? 0 : sheet?.sources?.length ?? 0;
+
+  // The Edit panel changed nothing but the depth, upwards.
+  const onlyDeeper =
+    !!sheet &&
+    !legacyOutput &&
+    depth === "comprehensive" &&
+    activeSettings.depth === "highYield" &&
+    notes === activeSettings.notes &&
+    examMode === activeSettings.examMode &&
+    difficulty === activeSettings.difficulty;
 
   const topicActions = (
     <>
       <div className="xl:hidden">
-        <SectionsMenu items={sectionEntries} activeKey={activeSection} onJump={jumpToSection} />
+        <TrackedSectionsMenu items={sectionEntries} onJump={jumpToSection} resetToken={generationId} />
       </div>
+
+      {/* The sheet's branches. On a phone the title needs the room: they move into the menu below. */}
+      {sheet && !legacyOutput && (
+        <BranchesButton store={branches} disabled={loading} className={`${TOPIC_BAR_BUTTON} hidden sm:inline-flex`} />
+      )}
 
       <Popover open={editOpen} onOpenChange={handleEditOpenChange}>
         <PopoverTrigger asChild>
@@ -1015,7 +1238,18 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
             className="space-y-3"
             onSubmit={(e) => {
               e.preventDefault();
-              if (!loading && notes.trim()) generate();
+              if (loading || !notes.trim()) return;
+              // Only the depth went up: grow this sheet's top branches rather
+              // than write a new one, which would spend a sheet and drop the
+              // student's layer.
+              if (onlyDeeper) {
+                setEditOpen(false);
+                setActiveSettings((s) => ({ ...s, depth }));
+                branches.actions.growPicks();
+                branches.actions.openAll();
+                return;
+              }
+              generate();
             }}
           >
             <div>
@@ -1035,7 +1269,9 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
             {settingsRow}
             <div className="flex items-center justify-between gap-3 border-t border-border pt-3">
               <p className="text-[11px] leading-snug text-muted-foreground">
-                {pro
+                {onlyDeeper
+                  ? "Writes this sheet's top deep dives — your highlights and notes stay."
+                  : pro
                   ? "Rewrites the sheet with these settings."
                   : "Rewrites the sheet — uses one of today's generations."}
               </p>
@@ -1046,7 +1282,7 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
                 className="shrink-0 gap-1.5"
               >
                 <RefreshCw className="h-3.5 w-3.5" />
-                Regenerate
+                {onlyDeeper ? "Write deep dives" : "Regenerate"}
               </Button>
             </div>
           </form>
@@ -1073,6 +1309,7 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
           </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-56">
+          {sheet && !legacyOutput && <BranchesMenuItem store={branches} disabled={loading} />}
           <DropdownMenuItem onSelect={newSheet} disabled={loading}>
             <Plus className="mr-2 h-4 w-4" />
             New sheet
@@ -1104,8 +1341,17 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
     </>
   );
 
+  // Room for the branch panel, and the contents rail: see PanelAwareLayout,
+  // which re-renders when the panel opens so that the sheet doesn't.
   const readView = (
-    <div className="mx-auto grid w-full max-w-[760px] grid-cols-1 xl:max-w-[1064px] xl:grid-cols-[minmax(0,760px)_240px] xl:gap-16">
+    <PanelAwareLayout
+      store={sheet && !legacyOutput ? branches : null}
+      rail={
+        <div className="sticky" style={{ top: "calc(var(--nav-h, 64px) + 24px)" }}>
+          <TrackedSectionRail items={sectionEntries} onJump={jumpToSection} resetToken={generationId} />
+        </div>
+      }
+    >
       <div ref={docRef} className="min-w-0">
         <SheetTopicBar
           emoji={sheet?.topicEmoji}
@@ -1208,6 +1454,8 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
                   showHeader={false}
                   deck={deck ?? undefined}
                   personal={personal}
+                  rewrites={rewriteControls}
+                  branches={sheet && !legacyOutput ? branches : undefined}
                 />
               </m.div>
             )}
@@ -1231,12 +1479,7 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
         </div>
       </div>
 
-      <aside className="hidden xl:block" aria-label="Sheet contents">
-        <div className="sticky" style={{ top: "calc(var(--nav-h, 64px) + 24px)" }}>
-          <SheetSectionRail items={sectionEntries} activeKey={activeSection} onJump={jumpToSection} />
-        </div>
-      </aside>
-    </div>
+    </PanelAwareLayout>
   );
 
   const composeView = (
@@ -1259,7 +1502,10 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
   // it while it is read — in this topic's own fold.
   useBackdropScene({
     mode: loading ? "generating" : reading ? "reading" : "compose",
-    progress: progressSections.length ? streamedKeys.length / progressSections.length : 0,
+    // A comprehensive sheet's depth keys stream too; the core sets the pace.
+    progress: progressSections.length
+      ? Math.min(1, progressSections.filter((s) => streamedKeys.includes(s.key)).length / progressSections.length)
+      : 0,
     seed: reading ? sheetTopic : "",
   });
 
@@ -1276,8 +1522,34 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
           </m.div>
         </AnimatePresence>
 
+        {reading && sheet && !legacyOutput && <BranchPanel store={branches} />}
+
         <AuthModal open={authModalOpen} onOpenChange={setAuthModalOpen} />
         <GoProModal open={goProOpen} onOpenChange={setGoProOpen} />
+        <AlertDialog open={!!pendingRewrite} onOpenChange={(open) => !open && setPendingRewrite(null)}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Rewrite this section?</AlertDialogTitle>
+              <AlertDialogDescription>
+                {pendingRewrite?.anchored === 1
+                  ? "Your highlight, note or edit on this section points at lines that will be replaced, so it will go."
+                  : `Your ${pendingRewrite?.anchored} highlights, notes and edits on this section point at lines that will be replaced, so they will go.`}{" "}
+                You can go back to the original section from its menu.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Keep it</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={() => {
+                  if (pendingRewrite) doRewrite(pendingRewrite.key, pendingRewrite.style, pendingRewrite.instruction);
+                  setPendingRewrite(null);
+                }}
+              >
+                Rewrite
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </MotionConfig>
     </LazyMotion>
   );

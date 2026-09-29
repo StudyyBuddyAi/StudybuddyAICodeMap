@@ -1,3 +1,4 @@
+import { RESERVED_SHEET_KEYS } from "../../supabase/functions/_shared/sheet-text.ts";
 import type {
   GeneratedSheet,
   SectionBody,
@@ -29,24 +30,10 @@ import type {
 
 /**
  * Top-level keys of the sheet JSON that carry metadata rather than a section
- * body. Everything else `normalize` sees becomes a section.
+ * body. Everything else `normalize` sees becomes a section. Shared with the
+ * edge function, which reads a finished sheet the same way.
  */
-export const RESERVED_SHEET_KEYS: ReadonlySet<string> = new Set([
-  "topic",
-  "topicEmoji",
-  "plan",
-  "sections",
-  "flashcards",
-  "referenceNote",
-  "sourceCoverage",
-  "enhancements",
-  "grounded",
-  "sources",
-  "groundingLevel",
-  "retrievedChunks",
-  "premium",
-  "premiumGrant",
-]);
+export { RESERVED_SHEET_KEYS };
 
 const KINDS: readonly SectionKind[] = ["prose", "list", "table"];
 

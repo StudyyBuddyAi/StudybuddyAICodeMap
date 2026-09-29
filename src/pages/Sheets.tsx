@@ -1,6 +1,6 @@
 import { useLocation } from "react-router-dom";
 import DashboardLayout from "@/components/dashboard/DashboardLayout";
-import SheetGenerator from "@/components/SheetGenerator";
+import SheetGenerator, { type SheetGeneratorPrefill } from "@/components/SheetGenerator";
 import "@/index.css";
 
 /**
@@ -12,13 +12,19 @@ import "@/index.css";
  * third of the screen.
  */
 const Sheets = () => {
-  // The Roadmap navigates here with a topic to seed the box.
+  // The Roadmap navigates here with a topic to seed the box; the Library, with a
+  // saved sheet to open for more work — its layer and branches load with it.
   const location = useLocation();
-  const topic = (location.state as { topic?: string } | null)?.topic;
+  const state = location.state as { topic?: string; saved?: SheetGeneratorPrefill } | null;
+  const topic = state?.topic;
+  const saved = state?.saved?.id ? state.saved : null;
 
   return (
     <DashboardLayout>
-      <SheetGenerator key={topic ?? "blank"} prefill={topic ? { input: topic, output: "" } : undefined} />
+      <SheetGenerator
+        key={saved?.id ?? topic ?? "blank"}
+        prefill={saved ?? (topic ? { input: topic, output: "" } : undefined)}
+      />
     </DashboardLayout>
   );
 };

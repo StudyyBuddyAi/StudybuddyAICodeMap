@@ -25,11 +25,13 @@ import {
   briefFor,
   itemPhrase,
   listItems,
+  moreBriefFor,
   proseBudget,
+  scopeOf,
+  sectionLabels,
   type ArchetypeId,
   type Difficulty,
   type ExamMode,
-  type LengthSetting,
   type SectionKind,
   type SectionTemplate,
 } from "./sheet-sections.ts";
@@ -49,14 +51,25 @@ export interface SheetSectionSpec {
 
 /**
  * A planned section: the wire spec plus what the prompt needs to ask for it
- * and what the scorer needs to check it.
+ * and what the scorer needs to check it. Each part comes twice: once for the
+ * high-yield core, written under `key`, and once for the depth a
+ * comprehensive sheet adds, written under `<key>_more`.
  */
 export interface PlannedSection extends SheetSectionSpec {
   brief: string;
+  moreBrief: string;
+  /** What belongs here, in one line — for routing a fact to its home. */
+  scope: string;
   /** `list` and `table` (as rows). */
   items?: [number, number];
+  moreItems?: [number, number];
   /** `prose` only. */
   budget?: string;
+  moreBudget?: string;
+  /** `prose` only — the labels the core writes, in reading order. */
+  coreLabels?: string[];
+  /** `prose` only — sub-sections only the depth may add. */
+  moreLabels?: string[];
 }
 
 /**
@@ -74,33 +87,54 @@ export const MAX_SECTIONS = 7;
  */
 const TRAILING_SECTIONS = ["keyPoints", "memoryHooks", "examTraps"];
 
+/**
+ * The study aids, which get no depth when a whole sheet is deepened. Written
+ * after the content sections' depth, they re-served it — a DKA sheet's extra
+ * traps and key points restated its new workup lines. A student can still
+ * deepen one of them on its own.
+ */
+export const STUDY_AIDS: readonly string[] = TRAILING_SECTIONS;
+
+/**
+ * What decides the plan. Depth is not on it: a high-yield and a comprehensive
+ * sheet on the same topic have the same sections, so switching a sheet's view
+ * never changes its outline. Depth decides only whether the page grows the
+ * sheet's first branches once it has streamed.
+ */
 export interface PlanRequest {
   archetype?: ArchetypeId | null;
   examMode?: string;
   difficulty?: string;
-  length?: string;
 }
 
-const asExamMode = (v: string | undefined): ExamMode =>
+export const asExamMode = (v: string | undefined): ExamMode =>
   v === "USMLE Step 1" || v === "USMLE Step 2" ? v : "General";
 
 const asDifficulty = (v: string | undefined): Difficulty =>
   v === "Basic" || v === "Advanced" ? v : "Intermediate";
 
-const asLength = (v: string | undefined): LengthSetting =>
-  v === "Moderate" || v === "Detailed" ? v : "Concise";
-
-function toPlanned(template: SectionTemplate, len: LengthSetting, planKeys: string[]): PlannedSection {
+function toPlanned(template: SectionTemplate, planKeys: string[], exam: ExamMode): PlannedSection {
   const spec: PlannedSection = {
     key: template.key,
     title: template.title,
     kind: template.kind,
     icon: template.icon,
     evidenceBacked: template.evidenceBacked,
-    brief: briefFor(template, planKeys),
+    brief: briefFor(template, planKeys, exam),
+    moreBrief: moreBriefFor(template, planKeys, exam),
+    scope: scopeOf(template, planKeys, exam),
   };
-  if (template.kind === "prose") spec.budget = proseBudget(template, len);
-  else spec.items = listItems(template, len);
+  if (template.kind === "prose") {
+    spec.budget = proseBudget(template, "core");
+    spec.moreBudget = proseBudget(template, "more");
+    const labels = sectionLabels(template, planKeys, exam);
+    spec.coreLabels = labels.core;
+    spec.moreLabels = labels.more;
+  } else {
+    const range = listItems(template);
+    spec.items = range.core;
+    spec.moreItems = range.more;
+  }
   if (template.kind === "table") spec.columns = [...(template.columns ?? [])];
   return spec;
 }
@@ -122,7 +156,6 @@ export function resolveSheetPlan(req: PlanRequest = {}): PlannedSection[] {
   const archetype = ARCHETYPES[req.archetype ?? DEFAULT_ARCHETYPE] ?? ARCHETYPES[DEFAULT_ARCHETYPE];
   const examMode = asExamMode(req.examMode);
   const difficulty = asDifficulty(req.difficulty);
-  const len = asLength(req.length);
 
   const keys: string[] = [];
   const add = (key: string) => {
@@ -142,7 +175,18 @@ export function resolveSheetPlan(req: PlanRequest = {}): PlannedSection[] {
   ];
 
   const planKeys = ordered.slice(0, MAX_SECTIONS);
-  return planKeys.map((key) => toPlanned(SECTIONS[key], len, planKeys));
+  return planKeys.map((key) => toPlanned(SECTIONS[key], planKeys, examMode));
+}
+
+/**
+ * A saved sheet's plan, rebuilt from its section keys for a follow-up on one
+ * of its sections. The briefs and counts are this build's — never taken from
+ * the client — and a key the catalogue does not know is dropped.
+ */
+export function resolvePlanFromKeys(keys: readonly string[], examMode?: string): PlannedSection[] {
+  const exam = asExamMode(examMode);
+  const planKeys = [...new Set(keys.filter((k) => !!SECTIONS[k]))].slice(0, MAX_SECTIONS);
+  return planKeys.map((key) => toPlanned(SECTIONS[key], planKeys, exam));
 }
 
 /** Strips the server-only fields before the plan goes over the wire. */
@@ -157,12 +201,15 @@ export function toWirePlan(plan: PlannedSection[]): SheetSectionSpec[] {
   }));
 }
 
-/** The count phrase for one section, as the prompt and checklist both state it. */
-export function sectionQuota(section: PlannedSection): string {
-  if (section.kind === "table" && section.items) return `${itemPhrase(section.items)} rows`;
-  return section.kind === "list" && section.items
-    ? `${itemPhrase(section.items)} items`
-    : section.budget ?? "";
+/**
+ * The count phrase for one section's core, or for its depth, as the prompt and
+ * checklist both state it.
+ */
+export function sectionQuota(section: PlannedSection, part: "core" | "more" = "core"): string {
+  const items = part === "core" ? section.items : section.moreItems;
+  if (section.kind === "table" && items) return `${itemPhrase(items)} rows`;
+  if (section.kind === "list" && items) return `${itemPhrase(items)} items`;
+  return (part === "core" ? section.budget : section.moreBudget) ?? "";
 }
 
 /**
@@ -171,5 +218,5 @@ export function sectionQuota(section: PlannedSection): string {
  * as the drift guard's reference.
  */
 export const DEFAULT_SHEET_PLAN: readonly SheetSectionSpec[] = toWirePlan(
-  resolveSheetPlan({ archetype: "condition", examMode: "General", difficulty: "Intermediate", length: "Concise" })
+  resolveSheetPlan({ archetype: "condition", examMode: "General", difficulty: "Intermediate" })
 );

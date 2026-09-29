@@ -1,6 +1,6 @@
 import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { m } from "motion/react";
-import { Layers, Lightbulb, Lock, Sparkles, Trash2, Wand2 } from "lucide-react";
+import { Layers, Lightbulb, Lock, Sparkles, Stethoscope, Trash2, Wand2 } from "lucide-react";
 import { ENTER, EXIT } from "@/lib/motion";
 import { REWRITE_STYLES, type RewriteStyle } from "@/lib/personalize";
 import type { HighlightIntent } from "@/lib/sheet-layer";
@@ -88,6 +88,8 @@ interface SelectionToolbarProps {
   locked: boolean;
   onHighlight: (intent: HighlightIntent) => void;
   onAi: (choice: AiChoice) => void;
+  /** Ask a deep dive about the selected words — absent where the sheet can't take one. */
+  onAsk?: () => void;
 }
 
 /**
@@ -96,7 +98,7 @@ interface SelectionToolbarProps {
  * inside the bubble rather than as a menu of its own — a portalled menu sits
  * outside the bubble, and a click there reads as a click away from it.
  */
-export function SelectionToolbar({ top, left, innerRef, onEnhance, canMark, canRewrite, locked, onHighlight, onAi }: SelectionToolbarProps) {
+export function SelectionToolbar({ top, left, innerRef, onEnhance, canMark, canRewrite, locked, onHighlight, onAi, onAsk }: SelectionToolbarProps) {
   const [aiOpen, setAiOpen] = useState(false);
   const lock = locked ? <Lock className="h-3 w-3 opacity-60" /> : null;
   const bubble = useClampedBubble(left, innerRef);
@@ -119,6 +121,14 @@ export function SelectionToolbar({ top, left, innerRef, onEnhance, canMark, canR
       onMouseUp={(e) => e.stopPropagation()}
     >
       <div className="flex flex-wrap items-center">
+        {onAsk && (
+          <>
+            <button type="button" onClick={onAsk} title="Ask a deep dive about what you selected" className={`${PILL} text-primary`}>
+              <Stethoscope className="h-3.5 w-3.5" /> Ask
+            </button>
+            <Divider />
+          </>
+        )}
         {canMark && (
           <>
             {INTENTS.map((i) => (

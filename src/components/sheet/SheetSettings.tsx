@@ -4,6 +4,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Slider } from "@/components/ui/slider";
 import { PoweredByCorti } from "@/components/PoweredByCorti";
 import type { ModelPreference } from "@/hooks/use-model-preference";
+import type { Depth } from "@/lib/sheet-depth";
 
 /**
  * The sheet's settings as a row of chips, each opening onto its choices.
@@ -35,10 +36,12 @@ const DIFFICULTY_CHOICES: Choice[] = [
   { value: "Advanced", label: "Advanced", hint: "Adds a deeper section" },
 ];
 
-const LENGTH_CHOICES: Choice[] = [
-  { value: "Concise", label: "Concise", hint: "The essentials" },
-  { value: "Moderate", label: "Moderate", hint: "More in each section" },
-  { value: "Detailed", label: "Detailed", hint: "Everything worth knowing" },
+// Depth replaced Concise / Moderate / Detailed. High-yield is chosen by what
+// the exam tests, not cut to a size; comprehensive is that sheet with its most
+// useful branches already grown — which a high-yield sheet can grow later.
+const DEPTH_CHOICES: Choice<Depth>[] = [
+  { value: "highYield", label: "High-yield", hint: "What the exam tests most — deep dives when you want them" },
+  { value: "comprehensive", label: "Comprehensive", hint: "High-yield, with its most useful deep dives already written" },
 ];
 
 const SOURCE_CHOICES: Choice<"on" | "off">[] = [
@@ -148,8 +151,8 @@ export interface SheetSettingsProps {
   onExamMode: (value: string) => void;
   difficulty: string;
   onDifficulty: (value: string) => void;
-  length: string;
-  onLength: (value: string) => void;
+  depth: Depth;
+  onDepth: (value: Depth) => void;
   grounding: GroundingSettings;
   onGrounding: (next: Partial<GroundingSettings>) => void;
   useMemory: boolean;
@@ -169,8 +172,8 @@ const SheetSettings = ({
   onExamMode,
   difficulty,
   onDifficulty,
-  length,
-  onLength,
+  depth,
+  onDepth,
   grounding,
   onGrounding,
   useMemory,
@@ -207,14 +210,14 @@ const SheetSettings = ({
       )}
     </SettingChip>
 
-    <SettingChip name="Length" value={labelOf(LENGTH_CHOICES, length)} disabled={disabled}>
+    <SettingChip name="Depth" value={labelOf(DEPTH_CHOICES, depth)} disabled={disabled} width={280}>
       {(close) => (
         <ChoiceList
-          name="Length"
-          choices={LENGTH_CHOICES}
-          value={length}
+          name="Depth"
+          choices={DEPTH_CHOICES}
+          value={depth}
           onPick={(v) => {
-            onLength(v);
+            onDepth(v);
             close();
           }}
         />

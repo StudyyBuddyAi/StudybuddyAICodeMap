@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -9,7 +9,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Sparkles, FileText, Trash2, Search, Layers } from "lucide-react";
+import { Sparkles, FileText, Trash2, Search, Layers, ArrowUpRight } from "lucide-react";
 import DashboardLayout from "@/components/dashboard/DashboardLayout";
 import DeckList from "@/components/DeckList";
 import StudyMode from "@/components/StudyMode";
@@ -24,6 +24,7 @@ type StudyFilter = { topic?: string; mode: "due" | "all-cards" | "deck" };
 
 const Library = () => {
   const { toast } = useToast();
+  const navigate = useNavigate();
   const { allCards, dueCards, reviewCard, deleteCard, settings } = useFlashcardDeck();
   const { history, deleteItem } = useStudyHistory();
 
@@ -312,8 +313,24 @@ const Library = () => {
         onOpenChange={(o) => !o && setActiveSheet(null)}
       >
         <DialogContent className="max-w-3xl">
-          <DialogHeader>
-            <DialogTitle className="truncate">{activeSheet?.topic}</DialogTitle>
+          <DialogHeader className="flex-row items-center gap-3 space-y-0 pr-8">
+            <DialogTitle className="min-w-0 flex-1 truncate">{activeSheet?.topic}</DialogTitle>
+            {activeSheet && (
+              <button
+                type="button"
+                onClick={() =>
+                  navigate("/sheets", {
+                    state: {
+                      saved: { input: activeSheet.input, output: activeSheet.output, modeInfo: activeSheet.modeInfo, id: activeSheet.id },
+                    },
+                  })
+                }
+                className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-secondary"
+              >
+                Open in Sheets
+                <ArrowUpRight aria-hidden className="h-3.5 w-3.5" />
+              </button>
+            )}
           </DialogHeader>
           {activeSheet && (
             <ScrollArea className="max-h-[70vh] pr-2">

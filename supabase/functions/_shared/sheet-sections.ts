@@ -29,9 +29,67 @@
  * drop a column.
  */
 export type SectionKind = "prose" | "list" | "table";
-export type LengthSetting = "Concise" | "Moderate" | "Detailed";
 export type ExamMode = "General" | "USMLE Step 1" | "USMLE Step 2";
 export type Difficulty = "Basic" | "Intermediate" | "Advanced";
+
+/**
+ * How deep a sheet goes.
+ *
+ * Every sheet is written as its high-yield core. A comprehensive sheet is the
+ * same sheet with its most useful branches grown from it
+ * (sheet-branch-prompts.ts), so the high-yield sheet is always what the
+ * comprehensive one grew from, and the two can never disagree.
+ *
+ * The split below between what a section's core holds and what it leaves to
+ * `<key>_more` still decides the core: a label outside it (Second-line,
+ * Definitive) is left out of the high-yield sheet, and the branch suggestions
+ * are pointed at it. Nothing writes `_more` now; depth was written there
+ * before branches replaced it.
+ *
+ * It replaced three lengths (Concise / Moderate / Detailed) that only changed
+ * item counts. Counts were the least reliable part of the contract — writers
+ * overran or collapsed them — whereas which key a fact is written under is
+ * structure, and a high-yield view that filters by key holds even when a
+ * writer overshoots.
+ */
+export type Depth = "highYield" | "comprehensive";
+
+/** The lengths a sheet was made at before depth replaced them. Old clients still send one. */
+export type LengthSetting = "Concise" | "Moderate" | "Detailed";
+
+/**
+ * The request's depth. A current client sends `depth`; one from before sends
+ * `length`, of which only Detailed asked for more than a high-yield sheet.
+ */
+export function asDepth(depth: unknown, legacyLength?: unknown): Depth {
+  if (depth === "highYield" || depth === "comprehensive") return depth;
+  return legacyLength === "Detailed" ? "comprehensive" : "highYield";
+}
+
+/** The suffix of the key that holds a section's comprehensive depth. */
+export const MORE_SUFFIX = "_more";
+export const moreKey = (key: string) => `${key}${MORE_SUFFIX}`;
+
+/** A section's high-yield core range, and what comprehensive depth adds to it. */
+export interface DepthRange {
+  core: [number, number];
+  more: [number, number];
+}
+
+/**
+ * One labelled line of a prose section whose labels are not all high-yield.
+ * The ones outside the core at the request's exam mode are left to the
+ * section's `_more`.
+ */
+export interface LabelSpec {
+  label: string;
+  /** What goes on the line after "Label: ". */
+  line: string;
+  /** Exam modes at which this label is part of the high-yield core. Absent: every mode. */
+  coreAt?: readonly ExamMode[];
+  /** A section that takes this label's content over when the plan has it. */
+  droppedBy?: string;
+}
 
 export interface SectionTemplate {
   key: string;
@@ -41,14 +99,32 @@ export interface SectionTemplate {
   icon: string;
   /** Whether a "verified sources" badge may appear on this section. */
   evidenceBacked: boolean;
-  /** What the model is told to put here. */
+  /**
+   * What the model is told to put here. For a prose section with `labels`,
+   * only what comes before them.
+   */
   brief: string;
-  /** `list` and `table` — item (or row) count range per length. */
-  items?: Record<LengthSetting, [number, number]>;
+  /**
+   * `prose` only — labelled lines split between the core and the depth. A
+   * prose section without them keeps its labels in `brief`, all of them core.
+   */
+  labels?: LabelSpec[];
+  /** `prose` with `labels` — said after the labelled lines. */
+  tail?: string;
+  /**
+   * What belongs in this section, in one line, for a prompt that lists every
+   * section so a fact can be routed to its home. Defaults to the brief's
+   * first sentence, or its labels when the brief opens with them.
+   */
+  scope?: string;
+  /** What this section's `_more` adds, in its own terms. Defaults by kind. */
+  more?: string;
+  /** `prose` only — the depth's line budget, when the default is too small for it. */
+  moreBudget?: string;
+  /** `list` and `table` — item (or row) ranges for the core and the depth. */
+  items?: DepthRange;
   /** `table` only — the column headers, in order. */
   columns?: string[];
-  /** `prose` only — sentence budget per length. */
-  sentences?: Record<LengthSetting, string>;
   /**
    * Parts of the brief another section takes over when the plan has it:
    * section key → the exact text to leave out. Without this a plan with its
@@ -62,31 +138,102 @@ export interface SectionTemplate {
  * Item ranges are ceilings with a floor, not quotas. Exact counts made the
  * model pad: once a topic's distinct facts ran out, it filled the remaining
  * slots by restating what earlier sections had said.
+ *
+ * The core sits between the old Concise and Moderate counts: a high-yield
+ * section is chosen by what is tested, not cut to a size, so it gets a little
+ * room. Core plus depth lands near the old Detailed.
+ *
+ * The depth's floor is 1, and deepening every section at once drops it to 0:
+ * a floor of 2 made a three-enzyme cofactor table invent rows it had to label
+ * "substrate, not cofactor". A section with nothing more worth saying says
+ * nothing more.
  */
-const LIST_DEFAULT: Record<LengthSetting, [number, number]> = {
-  Concise: [2, 3],
-  Moderate: [3, 5],
-  Detailed: [4, 8],
+const LIST_DEFAULT: DepthRange = { core: [2, 4], more: [1, 4] };
+
+const PROSE_CORE_BUDGET = "one or two sentences per label";
+const PROSE_MORE_BUDGET = "1 to 5 further labelled lines";
+
+const MORE_DEFAULT: Record<SectionKind, string> = {
+  prose:
+    "Deeper lines for this section: the mechanism behind its core facts, finer detail, exceptions and special populations.",
+  list: "Further items of second rank for this section: the less common, secondary or finer-grained ones its core left out.",
+  table: "Further rows of second rank: the less common or less often tested ones its core left out.",
 };
 
-const PROSE_DEFAULT: Record<LengthSetting, string> = {
-  Concise: "2-3 sentences",
-  Moderate: "3-5 sentences",
-  Detailed: "5-8 sentences",
-};
+export const listItems = (t: SectionTemplate): DepthRange => t.items ?? LIST_DEFAULT;
 
-export const listItems = (t: SectionTemplate, len: LengthSetting): [number, number] =>
-  (t.items ?? LIST_DEFAULT)[len];
+export const proseBudget = (t: SectionTemplate, part: "core" | "more"): string =>
+  part === "core" ? PROSE_CORE_BUDGET : t.moreBudget ?? PROSE_MORE_BUDGET;
 
-export const proseBudget = (t: SectionTemplate, len: LengthSetting): string =>
-  (t.sentences ?? PROSE_DEFAULT)[len];
-
-/** The brief as this plan needs it: minus what the plan's other sections cover. */
-export const briefFor = (t: SectionTemplate, planKeys: readonly string[]): string =>
+/** Leaves out the parts of a brief the plan's other sections cover. */
+const withoutYielded = (t: SectionTemplate, planKeys: readonly string[], text: string): string =>
   Object.entries(t.yieldsTo ?? {}).reduce(
-    (brief, [key, text]) => (planKeys.includes(key) ? brief.replace(text, "") : brief),
-    t.brief
+    (brief, [key, cut]) => (planKeys.includes(key) ? brief.replace(cut, "") : brief),
+    text
   );
+
+/** The labelled lines this plan keeps, at this exam mode, split into core and depth. */
+function splitLabels(t: SectionTemplate, planKeys: readonly string[], exam: ExamMode) {
+  const kept = (t.labels ?? []).filter((l) => !l.droppedBy || !planKeys.includes(l.droppedBy));
+  const isCore = (l: LabelSpec) => !l.coreAt || l.coreAt.includes(exam);
+  return { core: kept.filter(isCore), more: kept.filter((l) => !isCore(l)) };
+}
+
+const labelLines = (labels: LabelSpec[]) => labels.map((l) => `${l.label}: ${l.line}`).join("\n");
+
+/** The labels a prose brief writes inline, as "Label: text" at the head of a line. */
+const inlineLabels = (brief: string): string[] =>
+  [...brief.matchAll(/^([A-Z][A-Za-z ,/&-]{0,30}?):[ \t]+\S/gm)].map((m) => m[1]);
+
+/**
+ * The labels a prose section's core must write, in reading order, and the
+ * ones only its depth may introduce.
+ */
+export function sectionLabels(
+  t: SectionTemplate,
+  planKeys: readonly string[],
+  exam: ExamMode
+): { core: string[]; more: string[] } {
+  if (t.kind !== "prose") return { core: [], more: [] };
+  if (!t.labels) return { core: inlineLabels(withoutYielded(t, planKeys, t.brief)), more: [] };
+  const { core, more } = splitLabels(t, planKeys, exam);
+  return { core: core.map((l) => l.label), more: more.map((l) => l.label) };
+}
+
+/** What belongs in a section, in one line. */
+export function scopeOf(t: SectionTemplate, planKeys: readonly string[], exam: ExamMode = "General"): string {
+  if (t.scope) return t.scope;
+  const first = t.brief.split(/(?<=\.)\s|\n/)[0].trim();
+  // A brief that opens straight into its labels says what it holds by them.
+  if (/^Structure it as:?$/i.test(first) || /:\s*$/.test(first)) {
+    const { core, more } = sectionLabels(t, planKeys, exam);
+    return [...core, ...more].join(", ").toLowerCase();
+  }
+  return first.replace(/\.$/, "");
+}
+
+/** The brief for a section's high-yield core, as this plan needs it. */
+export function briefFor(t: SectionTemplate, planKeys: readonly string[], exam: ExamMode = "General"): string {
+  if (!t.labels) return withoutYielded(t, planKeys, t.brief);
+  const { core } = splitLabels(t, planKeys, exam);
+  return withoutYielded(t, planKeys, [t.brief, labelLines(core), t.tail].filter(Boolean).join("\n"));
+}
+
+/** The brief for what a comprehensive sheet adds to this section, under `<key>_more`. */
+export function moreBriefFor(t: SectionTemplate, planKeys: readonly string[], exam: ExamMode = "General"): string {
+  const base = t.more ?? MORE_DEFAULT[t.kind];
+  if (t.kind !== "prose") return base;
+  const { core, more } = sectionLabels(t, planKeys, exam);
+  if (!t.labels || !more.length) {
+    return `${base} Start every line with one of this section's labels: ${core.join(", ")}.`;
+  }
+  const { more: moreSpecs } = splitLabels(t, planKeys, exam);
+  return withoutYielded(
+    t,
+    planKeys,
+    `${base} The sub-sections the high-yield core left out, each on its own line — leave out any that does not apply to this topic:\n${labelLines(moreSpecs)}\nThen, if the topic needs it, deeper lines under ${core.join(", ")}.`
+  );
+}
 
 /** Renders an item range as the phrase the prompt and the checklist both use. */
 export const itemPhrase = ([lo, hi]: [number, number]): string =>
@@ -151,25 +298,40 @@ export const SECTIONS: Record<string, SectionTemplate> = {
 Mechanism: **Bold the core defect** — one sentence on the cellular or molecular trigger.
 Pathophysiology: trace how that defect produces the clinical syndrome. Use arrows → to show flow. Bold **key mechanisms**.
 Key associations: a numbered idea per line — **Buzzword** → why it occurs mechanistically. Mechanistic links only; differentials and clinical pearls belong to later sections.
-Never put drug names, diagnostic criteria, management steps or investigations here — they belong in other sections only.`
+Never put drug names, diagnostic criteria, management steps or investigations here — they belong in other sections only.`,
+    {
+      scope: "mechanism and pathophysiology only — no drugs, diagnostic criteria, investigations or management",
+      more: "Deeper mechanism: the steps between the defect and the syndrome that the core skipped, the body's compensation and why it fails, and the less classic associations with their mechanism. Still no drug names, diagnostic criteria, management steps or investigations.",
+    }
   ),
   clinicalApproach: prose(
     "clinicalApproach",
     "Clinical Approach",
     "clinical",
-    `The only section with diagnostic criteria, drug names and management steps. Each sub-section on its own line, starting with a \\n before the label:
-Diagnosis: gold standard → what it shows. Key distinguishing findings.
-Workup: what to order and why — labs, imaging, scores.
-Management: first-line → drug and rationale. Second-line → when and why to escalate. Definitive → surgical or specialist triggers.
-Complications: what goes wrong if undertreated — bold **the dangerous ones**.
-Avoid: interventions or drugs contraindicated here.
-Be the most clinically dense section on the sheet.`,
+    "The only section with diagnostic criteria, drug names and management steps. Each sub-section on its own line, starting with a \\n before the label:",
     {
-      sentences: { Concise: "Diagnosis and first-line Management only — omit Workup, Second-line, Definitive and Avoid entirely", Moderate: "every sub-section at moderate depth", Detailed: "every sub-section fully expanded, with edge cases" },
-      yieldsTo: {
-        complications: "\nComplications: what goes wrong if undertreated — bold **the dangerous ones**.",
-        differentials: " Key distinguishing findings.",
-      },
+      // Which sub-sections are high-yield depends on the exam: Step 2 asks for
+      // the best initial test and the contraindication as often as the
+      // diagnosis, Step 1 rarely does. What the core leaves out, `_more` holds.
+      labels: [
+        { label: "Diagnosis", line: "gold standard → what it shows. Key distinguishing findings." },
+        { label: "Workup", line: "what to order and why — labs, imaging, scores.", coreAt: ["USMLE Step 2"] },
+        { label: "Management", line: "first-line → drug and rationale." },
+        { label: "Second-line", line: "when first-line fails or is contraindicated → what and why.", coreAt: [] },
+        { label: "Definitive", line: "surgical or specialist triggers.", coreAt: [] },
+        {
+          label: "Complications",
+          line: "what goes wrong if undertreated — bold **the dangerous ones**.",
+          coreAt: [],
+          droppedBy: "complications",
+        },
+        { label: "Avoid", line: "interventions or drugs contraindicated here.", coreAt: ["USMLE Step 2", "General"] },
+      ],
+      tail: "Be the most clinically dense section on the sheet.",
+      more: "The clinical depth a comprehensive sheet needs.",
+      // Up to five sub-sections the core left out, plus deeper lines under the rest.
+      moreBudget: "2 to 7 further labelled lines",
+      yieldsTo: { differentials: " Key distinguishing findings." },
     }
   ),
   memoryHooks: list(
@@ -177,21 +339,32 @@ Be the most clinically dense section on the sheet.`,
     "Memory Hooks",
     "memory",
     "One memory device per line — a mnemonic, an analogy or a vivid image — each encoding one of the sheet's most central facts. The device is the content: a line that only restates a fact is not a hook.",
-    { evidenceBacked: false, items: { Concise: [2, 3], Moderate: [2, 4], Detailed: [3, 5] } }
+    {
+      evidenceBacked: false,
+      items: { core: [2, 3], more: [1, 2] },
+      more: "Devices for important facts the core hooks did not encode — never a second hook for the same fact.",
+    }
   ),
   keyPoints: list(
     "keyPoints",
     "Key Points",
     "keypoints",
     'High-yield "If X → think Y" one-liners the sections above did not state — thresholds and numbers, discriminators between look-alikes, next best steps, classic presentations. Never a restatement of an earlier line.',
-    { items: { Concise: [3, 5], Moderate: [4, 8], Detailed: [5, 10] } }
+    {
+      items: { core: [3, 5], more: [1, 4] },
+      more: 'Second-rank "If X → think Y" one-liners: atypical presentations, secondary discriminators, finer thresholds, special populations. Never a restatement of an earlier line.',
+    }
   ),
   examTraps: list(
     "examTraps",
     "Exam Traps",
     "traps",
     "Each trap: the tempting wrong answer or misconception → why it is wrong → what is right. Only mistakes the sheet has not already warned about.",
-    { evidenceBacked: false, items: { Concise: [2, 3], Moderate: [3, 4], Detailed: [3, 6] } }
+    {
+      evidenceBacked: false,
+      items: { core: [2, 3], more: [1, 3] },
+      more: "Subtler traps: second-order misconceptions and the distractors that catch students who know the basics. Same format.",
+    }
   ),
 
   // ── Condition ─────────────────────────────────────────────────────────────

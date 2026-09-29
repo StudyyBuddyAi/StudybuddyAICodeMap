@@ -1,7 +1,8 @@
 import { stripFences } from "./sanitize-json";
 import { repairLlmJson } from "./repair-llm-json";
 import { parseSourceCoverage } from "./grounding";
-import { RESERVED_SHEET_KEYS, parsePlan } from "./sheet-plan";
+import { parsePlan } from "./sheet-plan";
+import { sheetSections } from "../../supabase/functions/_shared/sheet-text.ts";
 import type { Flashcard, GeneratedSheet, SectionBody } from "@/types/generated-sheet";
 
 /**
@@ -148,34 +149,11 @@ function asFlashcards(v: unknown): Flashcard[] {
 }
 
 /**
- * Every top-level key that isn't reserved metadata, coerced by the shape it
- * arrived in.
- *
- * This is what lets a sheet carry sections the six-field interface never named.
- * The old allowlist silently discarded them, so loosening the prompt alone
- * would have produced sheets with sections missing and no error anywhere.
+ * Every top-level key that isn't reserved metadata, as a section — read by the
+ * reader the edge function signs with, so what the page keeps is what the
+ * server wrote, byte for byte (supabase/functions/_shared/sheet-text.ts).
  */
-function collectSections(raw: Record<string, unknown>): Record<string, SectionBody> {
-  const sections: Record<string, SectionBody> = {};
-  for (const [key, value] of Object.entries(raw)) {
-    if (RESERVED_SHEET_KEYS.has(key)) continue;
-    if (typeof value === "string") sections[key] = value;
-    else if (Array.isArray(value)) sections[key] = asItemsOrRows(value);
-  }
-  return sections;
-}
-
-/**
- * A table's rows when the array holds arrays, list items otherwise. Mid-stream
- * the last row may be short a cell or two; it is kept, and the renderer pads.
- */
-function asItemsOrRows(value: unknown[]): string[] | string[][] {
-  const rows = value.filter((v): v is unknown[] => Array.isArray(v));
-  if (rows.length && rows.length === value.length) {
-    return rows.map((row) => row.map((cell) => (typeof cell === "string" ? cell : "")));
-  }
-  return asStringArray(value);
-}
+const collectSections = (raw: Record<string, unknown>): Record<string, SectionBody> => sheetSections(raw);
 
 /** Fill every field so a partial object can't crash the renderer. */
 function normalize(raw: Record<string, unknown>): GeneratedSheet {
@@ -247,6 +225,26 @@ export function parsePartialSheet(raw: string): PartialSheetResult | null {
   const salvaged = tryParse(repairTail(truncated, truncatedState));
   if (!salvaged) return null;
   return build(salvaged, truncatedState.keys, true);
+}
+
+/**
+ * However much of any streamed JSON object has arrived, as the raw object —
+ * for replies that are not sheets (a branch, a sheet's suggestions). `closed`
+ * says the object is finished; until it is, the last element of any array may
+ * still be half-written. Null when the text is not a JSON object.
+ */
+export function parsePartialObject(raw: string): { value: Record<string, unknown>; closed: boolean } | null {
+  const text = repairLlmJson(stripFences(raw));
+  if (!text.startsWith("{")) return null;
+  const direct = tryParse(text);
+  if (direct) return { value: direct, closed: true };
+  const repaired = tryParse(repairTail(text, scan(text)));
+  if (repaired) return { value: repaired, closed: false };
+  const state = scan(text);
+  if (state.lastTopComma < 0) return null;
+  const truncated = text.slice(0, state.lastTopComma);
+  const salvaged = tryParse(repairTail(truncated, scan(truncated)));
+  return salvaged ? { value: salvaged, closed: false } : null;
 }
 
 /**

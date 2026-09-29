@@ -40,6 +40,8 @@ import type { CitationResult } from "@/lib/citation";
 import {
   type GeneratedSheet,
   type EnhancementResult,
+  type SectionBody,
+  type SheetSectionSpec,
   parseStoredSheet,
   isJsonSheet,
 } from "@/types/generated-sheet";
@@ -71,7 +73,16 @@ import {
   type LayerAddition,
   type LayerHighlight,
   type LayerSource,
+  withLayerSections,
 } from "@/lib/sheet-layer";
+import { REGEN_CHOICES, hasBody, type RegenStyle } from "@/lib/sheet-depth";
+import { CustomRewrite, SectionMenu, type SectionJob } from "@/components/sheet/SectionDepth";
+import type { BranchesStore } from "@/hooks/use-sheet-branches";
+import { BranchesProvider, useBranchStore, useBranchesEnabled } from "@/components/sheet/branches/branch-context";
+import { LineBranches, useLineHasChips } from "@/components/sheet/branches/LineBranches";
+import { PrintBranches } from "@/components/sheet/branches/PrintBranches";
+import { SavedBranches } from "@/components/sheet/branches/SavedBranches";
+import { BranchesNotice } from "@/components/sheet/branches/BranchesNotice";
 import { PersonalProvider, usePersonal, type PersonalApi, type PersonalProps } from "@/components/sheet/personal/personal-context";
 import {
   AdditionRow,
@@ -304,6 +315,30 @@ interface OutputSectionProps {
    * generated and offers nothing personal.
    */
   personal?: PersonalProps;
+  /**
+   * What can be done to one section: rewrite it in a direction, or take the
+   * rewrite back. Absent, sections render without the menu (Library's
+   * saved-sheet dialog).
+   */
+  rewrites?: RewriteControls;
+  /**
+   * The sheet's branches: the chips under its lines, grown or suggested, and
+   * the "Branch from this line" item. Absent, the sheet shows none.
+   */
+  branches?: BranchesStore;
+}
+
+/** What the page lets a section do about its wording. */
+export interface RewriteControls {
+  rewrite: (key: string, style: RegenStyle, instruction?: string) => void;
+  /** Back to the section as generated. */
+  undoRewrite: (key: string) => void;
+  /** What is running, by section key. */
+  jobs: Record<string, SectionJob>;
+  /** Drafts arriving, by section key. */
+  drafts: Record<string, SectionBody>;
+  /** Rewrites can run: the sheet is finished and its layer loaded. */
+  enabled: boolean;
 }
 
 // ─── Legacy renderer helpers (kept for old text-blob sheets) ───────────────
@@ -1031,12 +1066,31 @@ const tableWidth = (columns: string[], rows: string[][]) =>
 
 const hasNodes = (n: React.ReactNode) => (Array.isArray(n) ? n.some(Boolean) : !!n);
 
+/**
+ * What goes under a table row — its enhancements, the student's extras, its
+ * branches — in a row of its own, which exists only when one of them does. The
+ * branches are asked for here, by subscription, so a table row gains or loses
+ * its chips without the sheet re-rendering.
+ */
+function TableBelow({ anchor, width, nodes }: { anchor: string; width: number; nodes: React.ReactNode[] }) {
+  const chips = useLineHasChips(anchor, true);
+  if (!chips && !nodes.some(hasNodes)) return null;
+  return (
+    <tr>
+      <td colSpan={width} style={{ padding: "0 12px 8px" }}>
+        {nodes}
+        {chips && <LineBranches anchor={anchor} />}
+      </td>
+    </tr>
+  );
+}
+
 function renderTableSection(
   rawRows: string[][],
   columns: string[],
   sectionKey: string,
   onKeywordClick: KeywordClickHandler,
-  renderInline: (anchor: string) => React.ReactNode,
+  renderInline: (anchor: string, withChips?: boolean) => React.ReactNode,
   collapsedByAnchor: Record<string, CollapsedRef[]>,
   onReopen: (key: string) => void,
   pr?: PersonalRender
@@ -1055,7 +1109,7 @@ function renderTableSection(
         // A row is not edited in place — its cells are the table's shape — so
         // under it go only what the student asked for: an explanation, a card,
         // a note.
-        const below = [renderInline(anchor), pr?.extras(anchor, rowText, rowText)];
+        const below = [renderInline(anchor, false), pr?.extras(anchor, rowText, rowText)];
         return (
           <Fragment key={r}>
             <tr
@@ -1083,13 +1137,7 @@ function renderTableSection(
                 </td>
               ))}
             </tr>
-            {below.some(hasNodes) && (
-              <tr>
-                <td colSpan={width} style={{ padding: "0 12px 8px" }}>
-                  {below}
-                </td>
-              </tr>
-            )}
+            <TableBelow anchor={anchor} width={width} nodes={below} />
           </Fragment>
         );
       })}
@@ -1248,6 +1296,8 @@ interface EnhanceBubbleProps {
   left: number;
   onAction: (kind: EnhanceKind) => void;
   innerRef?: React.Ref<HTMLDivElement>;
+  /** Ask a deep dive about the selected words — absent where the sheet can't take one. */
+  onAsk?: () => void;
 }
 
 // Anchored to the scrolling document container (its parent is `position: relative`),
@@ -1275,7 +1325,7 @@ const BubbleDivider = () => (
 
 // Rendered inside AnimatePresence, so it fades back out when dismissed rather
 // than vanishing. Motion owns the transform, hence `x` in place of translateX.
-const EnhanceBubble = ({ top, left, onAction, innerRef }: EnhanceBubbleProps) => (
+const EnhanceBubble = ({ top, left, onAction, innerRef, onAsk }: EnhanceBubbleProps) => (
   <m.div
     ref={innerRef}
     initial={{ opacity: 0, y: 4, scale: 0.97 }}
@@ -1300,6 +1350,19 @@ const EnhanceBubble = ({ top, left, onAction, innerRef }: EnhanceBubbleProps) =>
     }}
     onMouseDown={(e) => e.stopPropagation()}
   >
+    {onAsk && (
+      <>
+        <button
+          type="button"
+          onClick={onAsk}
+          title="Ask a deep dive about what you selected"
+          style={{ ...BUBBLE_BUTTON_STYLE, color: "var(--accent)", display: "inline-flex", alignItems: "center", gap: 4 }}
+        >
+          <Stethoscope style={{ width: 13, height: 13 }} aria-hidden /> Ask
+        </button>
+        <BubbleDivider />
+      </>
+    )}
     <button
       type="button"
       onClick={() => onAction("enhance")}
@@ -1601,14 +1664,11 @@ const InlineEnhancement = ({
 // ─── Main component ───────────────────────────────────────────────────────
 
 /** The personal layer's state is the provider's, so the body can read it. */
-const OutputSection = (props: OutputSectionProps) =>
-  props.personal ? (
-    <PersonalProvider value={props.personal}>
-      <OutputSectionBody {...props} />
-    </PersonalProvider>
-  ) : (
-    <OutputSectionBody {...props} />
-  );
+const OutputSection = (props: OutputSectionProps) => {
+  const body = <OutputSectionBody {...props} />;
+  const withBranches = props.branches ? <BranchesProvider value={props.branches}>{body}</BranchesProvider> : body;
+  return props.personal ? <PersonalProvider value={props.personal}>{withBranches}</PersonalProvider> : withBranches;
+};
 
 const OutputSectionBody = ({
   output,
@@ -1628,10 +1688,17 @@ const OutputSectionBody = ({
   liveKey,
   showHeader = true,
   deck,
+  rewrites,
 }: OutputSectionProps) => {
   const ref = useRef<HTMLDivElement>(null);
   const personal = usePersonal();
+  // The store only: this never re-renders for a branch; each line's chips do.
+  const branches = useBranchStore();
+  // Whether deep dives can be asked for now — it changes once, when the sheet is ready.
+  const branchesEnabled = useBranchesEnabled();
   const referenceNoteRef = useRef<HTMLDivElement>(null);
+  // The section asking, in the student's own words, how it should be rewritten.
+  const [customFor, setCustomFor] = useState<string | null>(null);
 
   // The highlight-to-enhance tip is shown until it is dismissed or the reader
   // enhances something, then never again.
@@ -1675,10 +1742,14 @@ const OutputSectionBody = ({
     );
   });
 
-  const sheet: GeneratedSheet | null = isJsonSheet(output) ? parseStoredSheet(output) : null;
-  if (sheet && sheet.overview === undefined && (sheet as { summary?: string }).summary !== undefined) {
-    sheet.overview = (sheet as { summary?: string }).summary as string;
+  const generated: GeneratedSheet | null = isJsonSheet(output) ? parseStoredSheet(output) : null;
+  if (generated && generated.overview === undefined && (generated as { summary?: string }).summary !== undefined) {
+    generated.overview = (generated as { summary?: string }).summary as string;
   }
+  // The student's rewrites in place, unless they are looking at the
+  // original. Everything below — lines, anchors, edits — reads this sheet.
+  const sheet: GeneratedSheet | null =
+    generated && personal && !personal.showOriginal ? withLayerSections(generated, personal.layer) : generated;
   const isJson = sheet !== null;
 
   // Keyword-click menu state — only used in JSON renderer. `top`/`left` are
@@ -1787,6 +1858,17 @@ const OutputSectionBody = ({
   const clearSelection = () => {
     setSelection(null);
     window.getSelection()?.removeAllRanges();
+  };
+
+  // A deep dive about the words selected: on a line the sheet has — not the
+  // mnemonics, which have nothing to go deeper into — and once the sheet is ready.
+  const selectionAnchor = selection ? selection.mark?.anchor ?? selection.anchor : "";
+  const canAskSelection =
+    !!branches && branchesEnabled && /^[A-Za-z][A-Za-z0-9_]*:(\d+|end)$/.test(selectionAnchor) && !selectionAnchor.startsWith("memoryHooks:");
+  const askSelection = () => {
+    if (!selection || !branches) return;
+    branches.actions.openLine(selectionAnchor, selection.text);
+    clearSelection();
   };
 
   // ── The student's own layer: highlights, and AI on a line ─────────────────
@@ -2067,7 +2149,7 @@ const OutputSectionBody = ({
     }
   }
 
-  const renderInline = (anchor: string): React.ReactNode => {
+  const renderEnhancements = (anchor: string): React.ReactNode => {
     const entries = enhancementsByAnchor[anchor];
     if (!entries?.length) return null;
     return entries
@@ -2087,6 +2169,20 @@ const OutputSectionBody = ({
           onClose={closeEnhancement}
         />
       ));
+  };
+
+  /**
+   * What goes under a line: its open enhancements, then its branches. Null
+   * when there is neither, so a table adds no empty row for it.
+   */
+  const renderInline = (anchor: string, withChips = true): React.ReactNode => {
+    const enhancements = renderEnhancements(anchor);
+    // Each line's chips subscribe to the branches themselves, so a branch
+    // changing re-renders its line, not the sheet. They render nothing when
+    // the line has none.
+    const chips = withChips && !isStreaming && branches ? <LineBranches key="branches" anchor={anchor} /> : null;
+    if (!chips) return enhancements;
+    return enhancements ? [enhancements, chips] : chips;
   };
 
   // ── The student's layer, as each line needs it ──────────────────────────
@@ -2155,6 +2251,23 @@ const OutputSectionBody = ({
   // The cards the student made from this sheet, after the ones written with it.
   const myCards = p && !p.showOriginal ? p.layer.cards.map((c) => ({ tag: "Mine", question: c.question, answer: c.answer })) : [];
 
+  // ── Rewrites ───────────────────────────────────────────────────────────
+  const isContentKey = (key: string) => key !== "flashcards" && key !== "referenceNote";
+
+  /** A rewrite mid-write, in the draft renderers. */
+  const renderDraftBody = (spec: SheetSectionSpec, body: SectionBody) =>
+    isTableRows(body)
+      ? renderDraftTable(body, spec.columns ?? [])
+      : Array.isArray(body)
+      ? renderDraftList(bodyLines(body))
+      : spec.kind !== "prose"
+      ? renderDraftList([body])
+      : renderDraftProse(body);
+
+  /** The label on a rewritten section. */
+  const rewriteLabel = (style?: string) =>
+    style === "custom" ? "your way" : REGEN_CHOICES.find((c) => c.style === style)?.label.toLowerCase() ?? "rewritten";
+
   return (
     <LazyMotion features={domAnimation} strict>
     <MotionConfig reducedMotion="user">
@@ -2184,6 +2297,7 @@ const OutputSectionBody = ({
       )}
 
       {p && <LayerBar />}
+      {!isStreaming && <BranchesNotice />}
 
       {sectionOrder.map((spec, idx) => {
         const key = spec.key;
@@ -2220,6 +2334,14 @@ const OutputSectionBody = ({
             : Array.isArray(body)
             ? bodyLines(body).map((item, i) => `${i + 1}. ${item}`).join("\n")
             : body ?? "";
+
+        // A rewrite: running (its draft stands in for the section), or kept
+        // (the heading says so, and the menu can take it back).
+        const job = rewrites?.jobs[key];
+        const rewriting = job?.action === "regenerate" && job.status === "running";
+        const rewriteDraft = rewriting ? rewrites?.drafts[key] : undefined;
+        const kept = p && !p.showOriginal ? p.layer.sections[key] : undefined;
+        const rewritten = kept?.kind === "rewrite" ? kept : undefined;
 
         return (
           <div
@@ -2266,6 +2388,11 @@ const OutputSectionBody = ({
                 </h3>
                 {showEvidenceBadge && <EvidenceBadge onClick={scrollToReference} />}
                 {ready && idx === 0 && modelUsed && <ModelBadge model={modelUsed} />}
+                {rewritten && (
+                  <span className="rounded-full bg-secondary px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+                    Rewritten · {rewriteLabel(rewritten.style)}
+                  </span>
+                )}
               </div>
               <div className="flex shrink-0 items-center gap-1">
                 {ready ? (
@@ -2286,6 +2413,15 @@ const OutputSectionBody = ({
                     <span className="transition-opacity duration-200 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover/section:opacity-100 [@media(hover:hover)]:group-focus-within/section:opacity-100">
                       <CopyButton text={copyText} compact />
                     </span>
+                    {!isStreaming && rewrites && isContentKey(key) && (
+                      <SectionMenu
+                        title={spec.title}
+                        disabled={!rewrites.enabled || !!job && job.status === "running"}
+                        onRewrite={(style) => rewrites.rewrite(key, style)}
+                        onCustom={() => setCustomFor(key)}
+                        onUndo={rewritten ? () => rewrites.undoRewrite(key) : undefined}
+                      />
+                    )}
                   </>
                 ) : (
                   // Marks where the next content lands. Only the dot pulses —
@@ -2307,7 +2443,23 @@ const OutputSectionBody = ({
 
             <AutoHeight>
             <div style={SECTION_BODY_STYLE} data-enh-section={key}>
-              {!ready && draft !== undefined ? (
+              {customFor === key && rewrites && (
+                <CustomRewrite
+                  onSubmit={(instruction) => {
+                    setCustomFor(null);
+                    rewrites.rewrite(key, "custom", instruction);
+                  }}
+                  onCancel={() => setCustomFor(null)}
+                />
+              )}
+              {rewriting ? (
+                <div aria-busy="true" className="text-sm text-muted-foreground leading-relaxed">
+                  <p className="mb-2 font-mono text-[10px] font-medium uppercase tracking-widest text-muted-foreground">
+                    Rewriting — {job?.label ?? "your way"}…
+                  </p>
+                  {hasBody(rewriteDraft) ? renderDraftBody(spec, rewriteDraft!) : <SectionSkeleton variant="sheet-body" />}
+                </div>
+              ) : !ready && draft !== undefined ? (
                 <div aria-busy="true" className="text-sm text-muted-foreground leading-relaxed">
                   {isTableRows(draft)
                     ? renderDraftTable(draft, spec.columns ?? [])
@@ -2386,6 +2538,9 @@ const OutputSectionBody = ({
                 )
               )}
               {ready && renderInline(`${key}:end`)}
+              {ready && !rewriting && branches && <PrintBranches sectionKey={key} />}
+              {/* A saved sheet shown without its page (the Library): its branches, read in place. */}
+              {ready && !branches && p?.readOnly && <SavedBranches sectionKey={key} branches={p.layer.branches} />}
               {ready && p && key !== "flashcards" && key !== "referenceNote" && (
                 <SectionFooter
                   sectionKey={key}
@@ -2426,6 +2581,7 @@ const OutputSectionBody = ({
               locked={!p.entitled}
               onHighlight={markSelection}
               onAi={aiOnSelection}
+              onAsk={canAskSelection ? askSelection : undefined}
             />
           ) : (
             <EnhanceBubble
@@ -2434,6 +2590,7 @@ const OutputSectionBody = ({
               top={selection.top}
               left={selection.left}
               onAction={fireSelectionEnhance}
+              onAsk={canAskSelection ? askSelection : undefined}
             />
           ))}
       </AnimatePresence>

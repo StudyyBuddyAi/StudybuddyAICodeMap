@@ -9,7 +9,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { SPRING_GLIDE, SPRING_POP } from "@/lib/motion";
-import { TOPIC_BAR_BUTTON, type SectionEntry, type SectionState } from "./sheet-nav";
+import { TOPIC_BAR_BUTTON, useActiveSection, type SectionEntry, type SectionState } from "./sheet-nav";
 
 /**
  * The sheet's table of contents, in two forms that read off one list: a rail
@@ -137,4 +137,26 @@ export function SectionsMenu({ items, activeKey, onJump }: SectionListProps) {
       </DropdownMenuContent>
     </DropdownMenu>
   );
+}
+
+interface TrackedProps {
+  items: SectionEntry[];
+  onJump: (key: string) => void;
+  /** Changes with the sheet on the page, which starts the tracking over at its top. */
+  resetToken: unknown;
+}
+
+/**
+ * The rail and the menu, each tracking which section is in view on its own.
+ * The tracking used to live in the page, so every section scrolled past
+ * re-rendered the whole sheet; here it re-renders a list of titles.
+ */
+export function TrackedSectionRail({ items, onJump, resetToken }: TrackedProps) {
+  const active = useActiveSection(items.map((s) => s.key), resetToken);
+  return <SheetSectionRail items={items} activeKey={active} onJump={onJump} />;
+}
+
+export function TrackedSectionsMenu({ items, onJump, resetToken }: TrackedProps) {
+  const active = useActiveSection(items.map((s) => s.key), resetToken);
+  return <SectionsMenu items={items} activeKey={active} onJump={onJump} />;
 }

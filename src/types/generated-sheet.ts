@@ -1,3 +1,4 @@
+import type { SheetSignature } from "../../supabase/functions/_shared/sheet-signature.ts";
 /**
  * How a section's body is shaped, which is what the renderer dispatches on.
  * `prose` is one string with `\n`-separated labelled lines; `list` is an array
@@ -177,6 +178,24 @@ export interface GeneratedSheet {
    * checks it; a client flag alone unlocks nothing that costs anything.
    */
   premiumGrant?: string;
+  /**
+   * The server's signature on each section it wrote (sheet-signature.ts). A
+   * branch or a rewrite sends it back, and the server checks the sheet it is
+   * sent is the one it wrote. Absent on sheets from before signing: they
+   * still grow, on a smaller daily allowance.
+   */
+  signature?: SheetSignature;
+  /**
+   * How deep the sheet was asked for. Absent on every sheet from before depth,
+   * which reads as high-yield. A comprehensive sheet grows its first branches
+   * once it has streamed; they live in the student's layer.
+   */
+  depth?: "highYield" | "comprehensive";
+  /**
+   * @deprecated Written by the depth passages branches replaced, and never
+   * now; kept so a sheet saved with it reads it as metadata, not a section.
+   */
+  depthFailed?: boolean;
 }
 
 // Lightweight type used when loading a saved sheet from study_history.
