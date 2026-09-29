@@ -33,6 +33,7 @@ import { useQBankContext } from "@/contexts/QBankContext";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { MIN_SET_SIZE, MAX_SET_SIZE, SET_SIZE_STEP } from "@/lib/qbank-wave-runner";
+import SEO from "@/components/SEO";
 import {
   CHALLENGE_LABELS,
   CHALLENGE_BLURBS,
@@ -285,7 +286,7 @@ const QBank = () => {
 
   const { data: sessionHistory, isLoading: historyLoading } = useQuery({
     queryKey: ["qbank-sessions", user?.id, page],
-    enabled: !!user && !isAnonymous,
+    enabled: !!user,
     queryFn: async (): Promise<{ rows: SessionRow[]; hasMore: boolean }> => {
       const { data, error: queryError } = await supabase
         .from("qbank_sessions")
@@ -483,9 +484,15 @@ const QBank = () => {
   );
 
   return (
-    <DashboardLayout wide>
+    <>
+      <SEO
+        title="QBank · USMLE-Style Questions"
+        description="Generate USMLE-style clinical vignettes on any medical topic. Adaptive practice with spaced repetition and detailed explanations."
+        keywords="medical QBank, USMLE questions, clinical vignettes, medical exam prep, spaced repetition"
+      />
+      <DashboardLayout wide>
       {/* The layout owns the page gutter; no padding of our own on top of it. */}
-      <div className="flex flex-col gap-6 lg:flex-row lg:gap-8">
+      <div className="flex flex-col gap-6 lg:flex-row lg:gap-8 max-w-[86%] mx-auto">
         {/* Left Panel — the generator */}
         <div className="flex-1 max-w-2xl mx-auto lg:mx-0 lg:max-w-none space-y-6 animate-fade-in">
           {/* Header — same voice as Sheets: mono eyebrow, serif headline, one-line lede. */}
@@ -516,7 +523,7 @@ const QBank = () => {
           </div>
 
           {/* Sign In Card */}
-          {isAnonymous || !user ? (
+          {!user ? (
             <div className="space-y-4 rounded-[26px] border border-[color:var(--color-border)] bg-[color:var(--color-card)] p-6 text-center shadow-[0_18px_40px_rgba(15,23,42,0.04)]">
               <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-[color:var(--color-foreground)] text-[color:var(--color-accent)] shadow-sm">
                 <LogIn className="h-5 w-5" strokeWidth={2.2} />
@@ -900,18 +907,19 @@ const QBank = () => {
             </>
           )}
 
-          {/* Session History — Mobile */}
-          {!isAnonymous && user && (
+{/* Session History — Mobile */}
+          {user && (
             <div className="w-full space-y-4 pt-2 lg:hidden">{history}</div>
           )}
         </div>
 
         {/* Right Panel — Session History (Desktop) */}
-        {!isAnonymous && user && (
+        {user && (
           <div className="hidden lg:block w-80 xl:w-96 space-y-4">{history}</div>
         )}
       </div>
     </DashboardLayout>
+    </>
   );
 };
 

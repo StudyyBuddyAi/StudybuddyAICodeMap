@@ -21,6 +21,36 @@ import {
 const AUTH_LANDING_ROUTES = ["/auth/callback", "/reset-password"];
 
 /**
+ * Explicit-logout marker (Strategy 1). Set when the user intentionally signs
+ * out so the bootstrap does not immediately mint a replacement anonymous user
+ * (which reads as "my account/subscription disappeared"). Cleared only when a
+ * real (non-anonymous) session arrives. Kept in localStorage so it survives a
+ * refresh and is visible to every tab sharing the browser.
+ */
+const EXPLICIT_LOGOUT_KEY = "sb_explicit_logout";
+const markExplicitLogout = () => {
+  try {
+    localStorage.setItem(EXPLICIT_LOGOUT_KEY, "1");
+  } catch {
+    // Storage can be unavailable (private browsing); the marker is best-effort.
+  }
+};
+const hasExplicitLogout = () => {
+  try {
+    return localStorage.getItem(EXPLICIT_LOGOUT_KEY) === "1";
+  } catch {
+    return false;
+  }
+};
+const clearExplicitLogout = () => {
+  try {
+    localStorage.removeItem(EXPLICIT_LOGOUT_KEY);
+  } catch {
+    // ignore
+  }
+};
+
+/**
  * Anonymous sign-in, deduplicated across every caller. Previously each
  * component that mounted while the session was empty fired its own
  * signInAnonymously(), which minted a throwaway anonymous user per component
@@ -90,6 +120,13 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       setUser(newSession?.user ?? null);
       setLoading(false);
 
+      // A real (non-anonymous) session means the user just signed in: an
+      // earlier explicit logout no longer applies, so drop the marker.
+      // Never cleared for anonymous sessions.
+      if (newSession?.user && !newSession.user.is_anonymous) {
+        clearExplicitLogout();
+      }
+
       // If user confirms email via magic link, event will be USER_UPDATED
       // The session will be refreshed automatically by Supabase
     });
@@ -102,9 +139,13 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   // Every visitor gets a session: anonymous until they upgrade. Kept separate
   // from the effect above so it also covers a session that goes away later
-  // (sign-out), and so leaving an auth landing route re-arms it.
+  // (sign-out — unless an explicit logout marker is set), and so leaving an
+  // auth landing route re-arms it.
   useEffect(() => {
     if (loading || session || onAuthLanding) return;
+    // An explicit, still-standing logout must not be undone by the bootstrap
+    // creating a fresh anonymous session on this or any later tab/refresh.
+    if (hasExplicitLogout()) return;
     ensureAnonSession();
   }, [loading, session, onAuthLanding]);
 
@@ -214,14 +255,21 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     return { error: null };
   };
 
-  // Re-establish an anonymous session immediately: without a JWT the app is
-  // left on an app route where every RLS-backed query fails until a reload.
-  // This runs even when signOut() reports an error, because supabase-js still
-  // drops the local session on most failing sign-outs (an already-expired JWT
-  // returning 403, say) — the error path is exactly when it is needed most.
+  // Explicit logout (Strategy 1): mark the intent BEFORE signing out so the
+  // bootstrap leaves the user signed out instead of minting a replacement
+  // anonymous account ("looks like a brand-new user"). Anonymous sessions never
+  // set the marker — only a real account sign-out does. If a failed sign-out
+  // leaves the local session intact, the user is not actually logged out, so
+  // the marker is dropped again.
   const signOut = async (): Promise<{ error: string | null }> => {
+    if (session?.user && !session.user.is_anonymous) {
+      markExplicitLogout();
+    }
     const { error } = await supabase.auth.signOut();
-    await ensureAnonSession();
+    const { data } = await supabase.auth.getSession();
+    if (data.session) {
+      clearExplicitLogout();
+    }
     return { error: error?.message ?? null };
   };
 

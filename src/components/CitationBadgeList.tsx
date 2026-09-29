@@ -1,5 +1,6 @@
 import { ExternalLink, Lock, BookOpen } from "lucide-react";
 import type { CitationResult } from "@/lib/citation";
+import { sanitizeUrl } from "@/lib/url";
 
 export interface CitationBadgeListProps {
   state: "loading" | "found" | "locked" | "hidden";
@@ -49,9 +50,24 @@ const CitationBadgeList = ({
 
   if (state === "found" && citations && citations.length > 0) {
     const c = citations[0];
+    const safeUrl = sanitizeUrl(c.url);
+
+    if (!safeUrl) {
+      return (
+        <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-border/50 bg-background/40 text-xs text-muted-foreground max-w-full">
+          <BookOpen className="h-3 w-3 shrink-0" />
+          <span className="font-semibold text-foreground/85 shrink-0">
+            PubMed
+          </span>
+          <span className="opacity-50">·</span>
+          <span className="truncate">{truncate(c.title)}</span>
+        </div>
+      );
+    }
+
     return (
       <a
-        href={c.url}
+        href={safeUrl}
         target="_blank"
         rel="noopener noreferrer"
         className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-border/50 bg-background/40 text-xs text-muted-foreground hover:text-primary hover:border-primary/40 transition-colors max-w-full"

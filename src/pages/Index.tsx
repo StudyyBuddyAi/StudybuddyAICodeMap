@@ -28,7 +28,13 @@ import {
   Zap,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
 import { ResponsiveCarousel } from "@/components/ResponsiveCarousel";
+import AuthModal from "@/components/AuthModal";
+import { useAuth } from "@/hooks/use-auth";
+import { supabase } from "@/integrations/supabase/client";
+import SEO from "@/components/SEO";
+import { createWebSiteSchema, createOrganizationSchema, createFAQPageSchema, createProductSchema } from "@/utils/schema";
 import "@/pages/index.css";
 const CONTACT_EMAIL = "mailto:osama200az@gmail.com";
 const SOCIALS = {
@@ -271,6 +277,16 @@ function SectionHeading({
 
 function App() {
   const navigate = useNavigate();
+  const { user, isAnonymous } = useAuth();
+  const [authModalOpen, setAuthModalOpen] = useState(false);
+  const profileQuery = useQuery({
+    queryKey: ["landing-profile", user?.id],
+    enabled: Boolean(user?.id && !isAnonymous),
+    queryFn: async () => {
+      const { data } = await supabase.from("profiles").select("username").eq("id", user!.id).maybeSingle();
+      return data;
+    },
+  });
   const [isDark, setIsDark] = useState(() => {
     try {
       return localStorage.getItem("studybuddy-theme") === "dark";
@@ -279,6 +295,10 @@ function App() {
     }
   });
   const [menuOpen, setMenuOpen] = useState(false);
+
+  const faqSchema = createFAQPageSchema(
+    FAQS.map((faq) => ({ question: faq.q, answer: faq.a }))
+  );
 
   useEffect(() => {
     document.documentElement.classList.toggle("dark", isDark);
@@ -290,15 +310,39 @@ function App() {
   }, [isDark]);
 
   const startStudying = () => navigate("/dashboard?start=sheet");
+  const displayName =
+    profileQuery.data?.username ||
+    user?.user_metadata?.username ||
+    user?.user_metadata?.full_name ||
+    user?.email?.split("@")[0] ||
+    "Student";
   const closeMenu = () => setMenuOpen(false);
 
   return (
-    <div className="site-shell">
-      <div className="ambient ambient-one" aria-hidden="true" />
-      <div className="ambient ambient-two" aria-hidden="true" />
+    <>
+      <SEO
+        title="Study Smarter. Score Higher."
+        description="StudyBuddy AI turns your curriculum into clinical cases, smart questions, and instant explanations. Built for medical students in MENA. Free to start."
+        keywords="medical education, AI study platform, USMLE prep, medical students, MENA, study sheets, flashcards, QBank, spaced repetition"
+        schema={{
+          ...createWebSiteSchema(),
+          ...createOrganizationSchema(),
+          ...createProductSchema(
+            "StudyBuddy AI",
+            "AI-powered study platform for medical students",
+            "https://studybuddyai.com"
+          ),
+          ...faqSchema,
+        }}
+      />
+      <div className="site-shell">
+        <div className="ambient ambient-one" aria-hidden="true" />
+        <div className="ambient ambient-two" aria-hidden="true" />
 
-      <header className={`site-header ${menuOpen ? "menu-open" : ""}`}>
-        <div className="container header-inner">
+        <header
+          className={`site-header ${menuOpen ? "menu-open" : ""}`}
+        >
+          <div className="container header-inner">
           <a href="#home" className="brand" onClick={closeMenu} data-testid="link-brand-home" aria-label="StudyBuddy AI home">
             <span className="brand-mark"><HeartPulse size={18} strokeWidth={2.25} /></span>
             <span className="brand-name">StudyBuddy <b>AI</b></span>
@@ -315,9 +359,18 @@ function App() {
             <button className="theme-button" type="button" onClick={() => setIsDark((value) => !value)} aria-label={isDark ? "Switch to light theme" : "Switch to dark theme"} data-testid="button-theme-toggle">
               {isDark ? <Sun size={17} /> : <Moon size={17} />}
             </button>
-            <ButtonLink href="/dashboard?start=sheet" onClick={startStudying} testId="button-header-early-access">
-              <span className="header-cta-label">Get early access</span><ArrowRight size={15} />
-            </ButtonLink>
+            {user && !isAnonymous ? (
+              <>
+                <span className="header-cta-label" aria-label={`Signed in as ${displayName}`}>{displayName}</span>
+                <ButtonLink href="/dashboard" onClick={() => navigate("/dashboard")} testId="button-header-dashboard">
+                  Dashboard <ArrowRight size={15} />
+                </ButtonLink>
+              </>
+            ) : (
+              <button type="button" className="button button-primary" onClick={() => setAuthModalOpen(true)} data-testid="button-header-sign-in">
+                Sign in <ArrowRight size={15} />
+              </button>
+            )}
             <button className="menu-button" type="button" onClick={() => setMenuOpen((value) => !value)} aria-expanded={menuOpen} aria-controls="mobile-nav" aria-label={menuOpen ? "Close menu" : "Open menu"} data-testid="button-mobile-menu">
               {menuOpen ? <X size={22} /> : <Menu size={22} />}
             </button>
@@ -340,6 +393,7 @@ function App() {
                 <h1>Study smarter.<br />Score <em>higher.</em> Pass.</h1>
                 <p className="hero-lede">StudyBuddy turns your curriculum into AI-powered sheets, questions, and explanations — so every study hour compounds. Built by an MD for medical students across MENA.</p>
                 <div className="hero-actions">
+                  {user && !isAnonymous && <p className="hero-welcome">Welcome back, {displayName}.</p>}
                   <ButtonLink href="/dashboard?start=sheet" onClick={startStudying} testId="button-hero-start">Start free — no card required <ArrowRight size={18} /></ButtonLink>
                   <a href="#playground" className="button button-ghost" data-testid="link-hero-how-it-works">See how it works <ChevronDown size={17} /></a>
                 </div>
@@ -495,11 +549,12 @@ function App() {
             <div><h4>Resources</h4><a href="#faq" data-testid="link-footer-faq">FAQ</a><a href="/roadmap" data-testid="link-footer-roadmap">Roadmap</a><a href={CONTACT_EMAIL} data-testid="link-footer-email"><Mail size={14} /> Email us</a></div>
             <div><h4>Connect</h4><a href={SOCIALS.instagram} target="_blank" rel="noopener noreferrer" data-testid="link-footer-instagram"><Instagram size={14} /> Instagram</a><a href={SOCIALS.linkedin} target="_blank" rel="noopener noreferrer" data-testid="link-footer-linkedin"><Linkedin size={14} /> LinkedIn</a><a href={SOCIALS.telegram} target="_blank" rel="noopener noreferrer" data-testid="link-footer-telegram"><Send size={14} /> Telegram</a></div>
           </div>
-          <div className="footer-bottom"><span>© {new Date().getFullYear()} StudyBuddy AI</span><span>Built by medical students, for medical students · Gaza</span><span className="footer-status"><span />Made for the next exam</span></div>
+          <div className="footer-bottom"><span> 2024 StudyBuddy AI</span><span>Built by medical students, for medical students · Gaza</span><span className="footer-status"><span />Made for the next exam</span></div>
         </div>
       </footer>
+      <AuthModal open={authModalOpen} onOpenChange={setAuthModalOpen} />
     </div>
-  );
+  </>);
 }
 
 export default App;

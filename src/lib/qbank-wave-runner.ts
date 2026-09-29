@@ -348,7 +348,6 @@ async function runWave(
             }
             if (typeof summary.system === "string") result.system = summary.system;
             if (typeof summary.systemName === "string") result.systemName = summary.systemName;
-            if (typeof summary.streamError === "string") result.streamError = summary.streamError;
 
             /**
              * A wave that wrote questions and could not commit a single one.
@@ -369,12 +368,11 @@ async function runWave(
               typeof summary.insertFailures === "number" ? summary.insertFailures : 0;
             const persisted = typeof summary.persisted === "number" ? summary.persisted : 0;
             if (insertFailures > 0 && persisted === 0) {
-              const reason =
-                typeof summary.insertError === "string" && summary.insertError
-                  ? ` The database said: ${summary.insertError}.`
-                  : "";
+              // The database's own words — a column-name like `exam_mode` or a
+              // table name — can be a map of the schema, so they never cross the
+              // boundary. The counts are enough; the server logs the reason.
               result.fatal =
-                `The questions were written but none of them could be saved.${reason}` +
+                "The questions were written but none of them could be saved." +
                 " The database schema is probably behind the deployed function — apply the pending migrations and try again.";
             }
           }

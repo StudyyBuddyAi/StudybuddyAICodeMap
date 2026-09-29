@@ -193,7 +193,11 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated }: FlashcardsGene
       return;
     }
     if (isCardsLimited) {
-      setGoProOpen(true);
+      if (isAnonymous) {
+        setAuthModalOpen(true);
+      } else {
+        setGoProOpen(true);
+      }
       return;
     }
     recordRecentTopic(activeTopic);
@@ -476,7 +480,7 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated }: FlashcardsGene
                     key={label}
                     type="button"
                     onClick={() => { setTopic(label); setShowTextarea(false); }}
-                    className="group flex flex-col items-center gap-1.5 p-3 rounded-xl border border-border bg-card hover:border-primary hover:shadow-sm transition-all duration-200"
+                    className="group flex flex-col items-center gap-1.5 p-3 rounded-xl border border-border bg-card  hover:shadow-sm transition-all duration-200 hover:border-[color:var(--color-accent)]"
                   >
                     {/* Inverted chip, on the sheet configurator's own token pair
                         rather than Tailwind's `foreground`/`primary`: those are
@@ -488,7 +492,7 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated }: FlashcardsGene
                       <Icon className="h-4 w-4" strokeWidth={2.2} />
                     </span>
                     <div className="text-center">
-                      <p className="text-xs font-medium text-foreground group-hover:text-primary leading-tight">{label}</p>
+                      <p className="text-sm font-medium text-foreground group-hover:text-[color:var(--color-accent)] leading-tight">{label}</p>
                       <p className="text-[10px] text-muted-foreground">{category}</p>
                     </div>
                   </button>
@@ -656,9 +660,15 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated }: FlashcardsGene
                 <button
                   type="button"
                   className="underline hover:text-warning transition-colors"
-                  onClick={() => setGoProOpen(true)}
+                  onClick={() => {
+                    if (isAnonymous) {
+                      setAuthModalOpen(true);
+                    } else {
+                      setGoProOpen(true);
+                    }
+                  }}
                 >
-                  Upgrade for unlimited
+                  {isAnonymous ? "Sign in free to keep going" : "Upgrade for unlimited"}
                 </button>
               </span>
             ) : (

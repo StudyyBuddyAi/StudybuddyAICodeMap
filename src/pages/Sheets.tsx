@@ -1,6 +1,7 @@
 import { useLocation } from "react-router-dom";
 import DashboardLayout from "@/components/dashboard/DashboardLayout";
 import SheetGenerator from "@/components/SheetGenerator";
+import SEO from "@/components/SEO";
 import "@/index.css";
 
 /**
@@ -17,9 +18,16 @@ const Sheets = () => {
   const topic = (location.state as { topic?: string } | null)?.topic;
 
   return (
-    <DashboardLayout>
-      <SheetGenerator key={topic ?? "blank"} prefill={topic ? { input: topic, output: "" } : undefined} />
-    </DashboardLayout>
+    <>
+      <SEO
+        title="Study Sheets · AI-Powered Medical Notes"
+        description="Generate structured clinical study sheets on any medical topic. Covers pathophysiology, diagnosis, and management with PubMed citations."
+        keywords="medical study sheets, clinical notes, AI medical education, pathophysiology, medical students"
+      />
+      <DashboardLayout>
+        <SheetGenerator key={topic ?? "blank"} prefill={topic ? { input: topic, output: "" } : undefined} />
+      </DashboardLayout>
+    </>
   );
 };
 

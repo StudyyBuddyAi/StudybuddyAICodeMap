@@ -1,10 +1,28 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
+const ALLOWED_ORIGINS = new Set([
+  "https://studyybuddyai.com",
+  "https://www.studyybuddyai.com",
+  "http://localhost:8080",
+]);
+
+const BASE_CORS_HEADERS: Record<string, string> = {
   "Access-Control-Allow-Headers":
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
+
+// Origin-aware CORS. Only allowlisted origins get Access-Control-Allow-Origin;
+// anything else gets no CORS headers (browser denies the cross-origin call).
+function buildCorsHeaders(req: Request): Record<string, string> {
+  const origin = req.headers.get("Origin");
+  if (!origin || !ALLOWED_ORIGINS.has(origin)) {
+    return { ...BASE_CORS_HEADERS };
+  }
+  return { ...BASE_CORS_HEADERS, "Access-Control-Allow-Origin": origin };
+}
+
+const MAX_BODY_BYTES = 102_400; // 100 KB — consistent with rag-generate
+const MAX_TOPIC_LENGTH = 500; // chars; a medical topic name is never this long
 
 // Structured, machine-parseable logs (visible in Supabase edge-fn logs).
 // Metadata only — never log topic content, tokens, or keys.
@@ -283,7 +301,7 @@ function checkBurstLimit(userId: string, nowMs: number): boolean {
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
-    return new Response(null, { headers: corsHeaders });
+    return new Response(null, { headers: buildCorsHeaders(req) });
   }
 
   const json = (
@@ -293,7 +311,7 @@ serve(async (req) => {
   ) =>
     new Response(JSON.stringify(body), {
       status,
-      headers: { ...corsHeaders, "Content-Type": "application/json", ...extraHeaders },
+      headers: { ...buildCorsHeaders(req), "Content-Type": "application/json", ...extraHeaders },
     });
 
   let quotaConsumed = false;
@@ -341,9 +359,38 @@ serve(async (req) => {
       return json({ error: "rate_limited" }, 429, { "Retry-After": "60" });
     }
 
-    const { topic } = await req.json();
+    // -- Request body size guard -----------------------------------------------
+    // Reject oversized requests before any expensive work. Prefer the declared
+    // Content-Length header when present; always enforce on the actual bytes read.
+    const declaredLength = Number(req.headers.get("Content-Length"));
+    if (Number.isFinite(declaredLength) && declaredLength > MAX_BODY_BYTES) {
+      log("body_too_large", { declaredLength, userId: user.id });
+      return json({ error: { code: "INVALID_INPUT", message: "Request body too large" } }, 400);
+    }
+    const rawBytes = await req.arrayBuffer();
+    if (rawBytes.byteLength > MAX_BODY_BYTES) {
+      log("body_too_large", { actualBytes: rawBytes.byteLength, userId: user.id });
+      return json({ error: { code: "INVALID_INPUT", message: "Request body too large" } }, 400);
+    }
+    // Safe JSON parse -- never expose parse errors to the caller.
+    let body: Record<string, unknown>;
+    try {
+      body = JSON.parse(new TextDecoder().decode(rawBytes));
+      if (typeof body !== "object" || body === null || Array.isArray(body)) {
+        throw new TypeError("body must be a JSON object");
+      }
+    } catch {
+      log("invalid_json", { userId: user.id });
+      return json({ error: { code: "INVALID_INPUT", message: "Request body must be valid JSON" } }, 400);
+    }
+    // -- Input validation -------------------------------------------------------
+    const { topic } = body as { topic?: unknown };
     if (!topic || typeof topic !== "string" || !topic.trim()) {
       return json({ citations: [] });
+    }
+    if (topic.length > MAX_TOPIC_LENGTH) {
+      log("topic_too_long", { topicLength: topic.length, userId: user.id });
+      return json({ error: { code: "INVALID_INPUT", message: "Topic too long" } }, 400);
     }
 
     // ── SERVER-SIDE DAILY CITATION QUOTA ───────────────────────────────────

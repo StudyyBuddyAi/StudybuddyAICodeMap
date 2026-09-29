@@ -83,8 +83,6 @@ interface WaveSpec {
   legacy?: boolean;
   /** Questions written and announced, then refused by the database. */
   insertFailures?: number;
-  /** The database's reason, as the edge function relays it. */
-  insertError?: string;
 }
 
 function waveFrames(spec: WaveSpec, startIndex: number): unknown[] {
@@ -149,11 +147,9 @@ function waveFrames(spec: WaveSpec, startIndex: number): unknown[] {
           requested: spec.delivers + insertFailures,
           persisted: spec.delivers,
           insertFailures,
-          insertError: spec.insertError ?? null,
           system: spec.system ?? "renal",
           systemName: spec.systemName ?? "Renal",
           subtopics: spec.subtopics ?? [],
-          streamError: null,
         },
       },
     });
@@ -339,16 +335,17 @@ describe("runQbankGeneration", () => {
     expect(calls).toHaveLength(1);
   });
 
-  it("names the database rather than the topic when nothing can be saved", async () => {
+  it("blames the schema, not the topic, when nothing can be saved", async () => {
     // The sibling of the case above. The questions were written and were fine;
     // the table would not take them. Retrying regenerates perfectly good items
     // into the same refusal, so the run ends on the first wave and the message
-    // points at the schema instead of at what the student asked for.
+    // points at the schema instead of at what the student asked for. The
+    // database's own words — a column name like the old `exam_mode` — never
+    // cross to the browser.
     const { call, calls } = fakeCall([
       {
         delivers: 0,
         insertFailures: 2,
-        insertError: '42703: column "exam_mode" of relation "questions" does not exist',
       },
     ]);
 
@@ -356,7 +353,8 @@ describe("runQbankGeneration", () => {
 
     expect(outcome.status).toBe("failed");
     expect(outcome.error).toMatch(/none of them could be saved/i);
-    expect(outcome.error).toMatch(/exam_mode/);
+    expect(outcome.error).toMatch(/migrations/i);
+    expect(outcome.error).not.toMatch(/exam_mode/);
     expect(calls).toHaveLength(1);
   });
 

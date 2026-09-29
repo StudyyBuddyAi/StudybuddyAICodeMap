@@ -227,6 +227,7 @@ export type Database = {
           is_pro: boolean
           pro_expires_at: string | null
           pro_source: string | null
+          username: string | null
           premium_used: number
           preferred_model: string
           srs_desired_retention: number
@@ -246,6 +247,7 @@ export type Database = {
           pro_source?: string | null
           premium_used?: number
           preferred_model?: string
+          username?: string | null
         }
         Update: {
           created_at?: string
@@ -256,6 +258,7 @@ export type Database = {
           pro_source?: string | null
           premium_used?: number
           preferred_model?: string
+          username?: string | null
         }
         Relationships: []
       }

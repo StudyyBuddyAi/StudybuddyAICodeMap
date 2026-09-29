@@ -10,6 +10,8 @@ import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useUsageLimit } from "@/hooks/use-usage-limit";
 import GoProModal from "@/components/GoProModal";
+import AuthModal from "@/components/AuthModal";
+import { useAuth } from "@/hooks/use-auth";
 import { getCitationsForTopic } from "@/lib/citation-store";
 import CitationBadgeList from "@/components/CitationBadgeList";
 import SheetSources from "@/components/SheetSources";
@@ -423,12 +425,14 @@ interface ExplainPanelProps {
 export const ExplainPanel = ({ open, scope, card, onClose }: ExplainPanelProps) => {
   const { toast } = useToast();
   const { isSheetLimited } = useUsageLimit();
+  const { isAnonymous } = useAuth();
   // Same shared 10-turn window as sheets and cards — see use-memory-preference.
   const { useMemory } = useMemoryPreference();
   const [output, setOutput] = useState("");
   const [loading, setLoading] = useState(false);
   const [started, setStarted] = useState(false);
   const [goProOpen, setGoProOpen] = useState(false);
+  const [authModalOpen, setAuthModalOpen] = useState(false);
   const [modelUsed, setModelUsed] = useState<ModelUsed | null>(null);
 
   useEffect(() => {
@@ -448,7 +452,11 @@ export const ExplainPanel = ({ open, scope, card, onClose }: ExplainPanelProps) 
     if (!open || started) return;
     if (isSheetLimited) {
       onClose();
-      setGoProOpen(true);
+      if (isAnonymous) {
+        setAuthModalOpen(true);
+      } else {
+        setGoProOpen(true);
+      }
       return;
     }
     setStarted(true);
@@ -534,6 +542,7 @@ export const ExplainPanel = ({ open, scope, card, onClose }: ExplainPanelProps) 
   return (
     <>
     <GoProModal open={goProOpen} onOpenChange={setGoProOpen} />
+    <AuthModal open={authModalOpen} onOpenChange={setAuthModalOpen} />
     <div
       className="fixed inset-x-0 bottom-0 top-[15vh] z-50 bg-background border-t border-border rounded-t-xl shadow-2xl flex flex-col"
       style={{

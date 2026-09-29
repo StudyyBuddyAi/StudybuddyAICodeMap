@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Dialog,
@@ -10,10 +11,11 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
-import { Loader2 } from "lucide-react";
+import { Loader2, LogOut, Moon, Sparkles, Sun } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
+import GoProModal from "@/components/GoProModal";
 
 interface AccountDashboardProps {
   open: boolean;
@@ -23,6 +25,7 @@ interface AccountDashboardProps {
 interface ProfileRow {
   is_pro: boolean;
   pro_expires_at: string | null;
+  username: string | null;
 }
 
 const ERROR_MESSAGES: Record<string, string> = {
@@ -45,7 +48,8 @@ const formatDate = (iso: string) => {
 };
 
 const AccountDashboard = ({ open, onOpenChange }: AccountDashboardProps) => {
-  const { user } = useAuth();
+  const { user, signOut } = useAuth();
+  const navigate = useNavigate();
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const userId = user?.id ?? null;
@@ -53,6 +57,10 @@ const AccountDashboard = ({ open, onOpenChange }: AccountDashboardProps) => {
   const [code, setCode] = useState("");
   const [redeemError, setRedeemError] = useState<string | null>(null);
   const [redeemLoading, setRedeemLoading] = useState(false);
+  const [username, setUsername] = useState("");
+  const [usernameSaving, setUsernameSaving] = useState(false);
+  const [goProOpen, setGoProOpen] = useState(false);
+  const [isDark, setIsDark] = useState(() => localStorage.getItem("studybuddy-theme") === "dark");
 
   const profileQuery = useQuery({
     queryKey: ["profile", userId],
@@ -60,7 +68,7 @@ const AccountDashboard = ({ open, onOpenChange }: AccountDashboardProps) => {
     queryFn: async (): Promise<ProfileRow | null> => {
       const { data, error } = await supabase
         .from("profiles")
-        .select("is_pro, pro_expires_at")
+        .select("is_pro, pro_expires_at, username")
         .eq("id", userId!)
         .maybeSingle();
       if (error) throw error;
@@ -69,6 +77,15 @@ const AccountDashboard = ({ open, onOpenChange }: AccountDashboardProps) => {
   });
 
   const profile = profileQuery.data ?? null;
+  useEffect(() => {
+    if (profile?.username) setUsername(profile.username);
+    else if (user?.email) setUsername(user.email.split("@")[0]);
+  }, [profile?.username, user?.email]);
+
+  useEffect(() => {
+    document.documentElement.classList.toggle("dark", isDark);
+    localStorage.setItem("studybuddy-theme", isDark ? "dark" : "light");
+  }, [isDark]);
   const isPro =
     profile?.is_pro === true &&
     (profile.pro_expires_at === null ||
@@ -109,6 +126,21 @@ const AccountDashboard = ({ open, onOpenChange }: AccountDashboardProps) => {
     }
   };
 
+  const saveUsername = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const value = username.trim();
+    if (!value || !userId) return;
+    setUsernameSaving(true);
+    const { error } = await supabase.from("profiles").update({ username: value }).eq("id", userId);
+    setUsernameSaving(false);
+    if (error) {
+      toast({ title: "Could not save username", description: error.message, variant: "destructive" });
+      return;
+    }
+    await queryClient.invalidateQueries({ queryKey: ["profile", userId] });
+    toast({ title: "Username updated" });
+  };
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
@@ -136,6 +168,14 @@ const AccountDashboard = ({ open, onOpenChange }: AccountDashboardProps) => {
               {user?.email ?? "—"}
             </p>
           </div>
+
+          <form onSubmit={saveUsername} className="space-y-2">
+            <Label htmlFor="profile-username">Username</Label>
+            <div className="flex gap-2">
+              <Input id="profile-username" value={username} onChange={(e) => setUsername(e.target.value)} maxLength={40} />
+              <Button type="submit" disabled={usernameSaving || !username.trim()}>{usernameSaving ? "Saving…" : "Save"}</Button>
+            </div>
+          </form>
 
           <div className="space-y-1">
             <p style={{
@@ -229,8 +269,20 @@ const AccountDashboard = ({ open, onOpenChange }: AccountDashboardProps) => {
               <p className="text-sm text-destructive">{redeemError}</p>
             )}
           </form>
+
+          <div className="flex flex-wrap gap-2 border-t border-border/50 pt-4">
+            {!isPro && <Button type="button" variant="outline" onClick={() => setGoProOpen(true)}><Sparkles className="mr-2 h-4 w-4" />Go Pro</Button>}
+            <Button type="button" variant="outline" onClick={() => setIsDark((value) => !value)}>
+              {isDark ? <Sun className="mr-2 h-4 w-4" /> : <Moon className="mr-2 h-4 w-4" />}
+              {isDark ? "Light theme" : "Dark theme"}
+            </Button>
+            <Button type="button" variant="ghost" onClick={async () => { await signOut(); onOpenChange(false); navigate("/"); }}>
+              <LogOut className="mr-2 h-4 w-4" />Sign out
+            </Button>
+          </div>
         </div>
       </DialogContent>
+      <GoProModal open={goProOpen} onOpenChange={setGoProOpen} />
     </Dialog>
   );
 };

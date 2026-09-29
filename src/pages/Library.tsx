@@ -19,6 +19,7 @@ import { useStudyHistory, type StudyHistoryItem } from "@/hooks/use-study-histor
 import { useSavedSheetLayer } from "@/hooks/use-sheet-layer";
 import { timeAgo } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
+import SEO from "@/components/SEO";
 
 type StudyFilter = { topic?: string; mode: "due" | "all-cards" | "deck" };
 
@@ -101,7 +102,13 @@ const Library = () => {
   };
 
   return (
-    <DashboardLayout wide>
+    <>
+      <SEO
+        title="Library · Your Study Materials"
+        description="Access your study sheets, flashcard decks, and review history. Organize and track all your medical education resources in one place."
+        keywords="medical library, study materials, flashcard decks, review history, medical education"
+      />
+    <DashboardLayout wide >
       {studyOpen && (
         <StudyMode
           dueCards={studySessionCards}
@@ -112,7 +119,7 @@ const Library = () => {
         />
       )}
 
-      <div className="space-y-8">
+      <div className="space-y-8 mx-auto sm:max-w-[86%]">
         {/* Header — same voice as Sheets: mono eyebrow, serif headline, one-line lede. */}
         <div>
           <p
@@ -341,6 +348,7 @@ const Library = () => {
         </DialogContent>
       </Dialog>
     </DashboardLayout>
+    </>
   );
 };
 

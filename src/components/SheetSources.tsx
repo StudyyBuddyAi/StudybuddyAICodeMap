@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { BookOpen, ChevronRight, ExternalLink } from "lucide-react";
 import type { SheetSource } from "@/types/generated-sheet";
+import { sanitizeUrl } from "@/lib/url";
 import {
   cleanExcerpt,
   groupSources,
@@ -213,17 +214,18 @@ const ChapterGroup = ({ chapter, query }: { chapter: SourceChapter; query: strin
       {/* No heading is a real outcome, not a gap: it means nothing in the
           chunk's own metadata could place it, and inventing one would be
           worse than leaving the passages listed under the book alone. */}
-      <span
-        style={{
-          fontFamily: "var(--font-sans)",
-          fontSize: 12,
-          fontWeight: 600,
-          color: chapter.heading ? "var(--fg)" : "var(--fg-muted)",
-          fontStyle: chapter.heading ? "normal" : "italic",
-        }}
-      >
-        {chapter.heading ?? "Location not recorded"}
-      </span>
+      {chapter.heading ? (
+        <span
+          style={{
+            fontFamily: "var(--font-sans)",
+            fontSize: 12,
+            fontWeight: 600,
+            color: "var(--fg)",
+          }}
+        >
+          {chapter.heading}
+        </span>
+      ) : <span aria-hidden="true" />}
       <span
         style={{
           flexShrink: 0,
@@ -261,6 +263,7 @@ const ChapterGroup = ({ chapter, query }: { chapter: SourceChapter; query: strin
 
 const BookGroup = ({ book, query }: { book: SourceBook; query: string }) => {
   const sourceUrl = book.chapters.flatMap((c) => c.passages).find((p) => p.sourceUrl)?.sourceUrl;
+  const safeSourceUrl = sanitizeUrl(sourceUrl);
 
   return (
     <div>
@@ -277,9 +280,9 @@ const BookGroup = ({ book, query }: { book: SourceBook; query: string }) => {
         >
           {book.title}
         </h4>
-        {sourceUrl && (
+        {safeSourceUrl && (
           <a
-            href={sourceUrl}
+            href={safeSourceUrl}
             target="_blank"
             rel="noopener noreferrer"
             title="Open the original document"
