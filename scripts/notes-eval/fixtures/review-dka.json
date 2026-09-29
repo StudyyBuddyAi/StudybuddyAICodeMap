@@ -1,0 +1,130 @@
+{
+  "topic": "Diabetic ketoacidosis",
+  "examMode": "USMLE Step 2",
+  "difficulty": "Advanced",
+  "plan": [
+    "overview",
+    "clinicalApproach",
+    "differentials",
+    "complications",
+    "keyPoints",
+    "memoryHooks",
+    "examTraps"
+  ],
+  "sections": {
+    "overview": "\nMechanism: **Absolute insulin deficiency** combined with a counter-regulatory hormone surge (glucagon, cortisol, catecholamines, GH) drives uncontrolled lipolysis and hepatic ketogenesis.\nPathophysiology: Insulin lack → **uninhibited hormone-sensitive lipase** → massive free fatty acid release → hepatic β-oxidation to **ketone bodies** (β-hydroxybutyrate, acetoacetate) → metabolic acidosis (high anion gap). Hyperglycemia from failed cellular uptake + gluconeogenesis → **osmotic diuresis** → severe volume depletion and electrolyte loss (K+, Na+, phosphate).\nKey associations:\n1. **New-onset T1DM** → first presentation in children/young adults, often precipitated by viral illness.\n2. **Infection (pneumonia, UTI)** → most common precipitant in known diabetics, driving stress hormone surge.\n3. **Missed insulin doses** → straightforward lack of basal insulin, common in adolescents.\n4. **Pump failure** → rapid DKA within hours as only short-acting insulin is delivered, no subcutaneous depot.",
+    "clinicalApproach": "\nDiagnosis: **Hyperglycemia (>250 mg/dL), metabolic acidosis (pH <7.30, bicarb <18), ketonemia/ketonuria** → anion gap >12 with positive serum ketones confirms.\nWorkup: **VBG, BMP (anion gap, K+), serum ketones (β-hydroxybutyrate preferred), glucose, UA, CBC, and search for trigger** (blood/urine cultures, CXR, troponin, ECG) → calculate anion gap and corrected Na+ to guide fluid choice.\nManagement: **IV fluids first (0.9% NaCl 15-20 mL/kg/hr), then IV regular insulin infusion (0.1 U/kg/hr) only after K+ is >3.3** → add dextrose (5%) to fluids when glucose falls to 200-250 to prevent hypoglycemia while continuing insulin to clear ketones; switch to 0.45% NaCl if corrected Na+ is normal/high.\nAvoid: **Giving insulin before checking/replacing potassium** → insulin drives K+ intracellularly and can precipitate fatal arrhythmia; **bicarbonate therapy** except in severe acidosis (pH <6.9) with hemodynamic instability.",
+    "differentials": [
+      [
+        "**Hyperosmolar hyperglycemic state (HHS)**",
+        "pH >7.30, minimal ketones, glucose often >600, profound dehydration, altered mental status",
+        "Serum osmolality >320, absent ketones, pH normal"
+      ],
+      [
+        "**Alcoholic ketoacidosis**",
+        "History of alcohol use, low or normal glucose, resolves with dextrose-containing fluids alone",
+        "History, low β-hydroxybutyrate response to dextrose, no insulin needed"
+      ],
+      [
+        "**Lactic acidosis**",
+        "Tissue hypoperfusion or sepsis, no ketones, lactate >5",
+        "Serum lactate level, absent ketones"
+      ],
+      [
+        "**Starvation ketosis**",
+        "Mild ketosis, glucose low-normal, bicarbonate rarely <18, no acidemia",
+        "Resolution with food/dextrose, pH >7.3"
+      ]
+    ],
+    "complications": [
+      "**Cerebral edema** → headache, mental status change, bradycardia, vomiting; most common in children/adolescents in first 12-24 hours of treatment; treat with mannitol and hyperventilation, avoid by gradual correction of glucose and osmolality.",
+      "**Hypokalemia** → insulin therapy shifts K+ intracellularly; monitor q2-4h and replete aggressively; can cause fatal arrhythmias if not anticipated.",
+      "**Hypoglycemia** → insulin + dextrose-free fluids; prevent by adding 5% dextense when glucose reaches 200-250 mg/dL."
+    ],
+    "keyPoints": [
+      "Corrected Na+ = measured Na+ + 1.6 × (glucose - 100) / 100 → guides fluid tonicity choice.",
+      "Anion gap closure (not glucose normalization) is the primary endpoint of insulin therapy → continue insulin until AG normal and patient can eat.",
+      "Ketone gap: β-hydroxybutyrate is the predominant ketone early; urine ketones measure acetoacetate and may lag or even rise during recovery → trust the anion gap.",
+      "If initial K+ <3.3 → hold insulin, give IV K+ first; if K+ 3.3-5.2 → give K+ with insulin; if K+ >5.2 → hold K+, recheck in 2h.",
+      "Transition to SC insulin: give SC long-acting insulin 1-2h before stopping IV infusion to prevent rebound DKA."
+    ],
+    "memoryHooks": [
+      "**FLUIDS FIRST** → the single most critical initial step; before insulin, before K+, before anything else.",
+      "Potassium rule of 3s: **<3.3 hold insulin and give K+; 3.3-5.2 give K+ with insulin; >5.2 hold K+** → prevents the two lethal errors.",
+      "Anion gap is your GPS → glucose normalizes before ketones clear; navigate by the gap, not the glucose."
+    ],
+    "examTraps": [
+      "Stopping insulin when glucose hits 200 → wrong; ketones are still being cleared → add dextrose to fluids and keep insulin running until AG closes.",
+      "Ordering urine ketones to monitor resolution → misleading; acetoacetate rises during recovery as β-hydroxybutyrate converts → use anion gap instead.",
+      "Giving bicarbonate routinely for acidosis → wrong; worsens hypokalemia, paradoxical CSF acidosis, and delays ketone clearance; reserve for pH <6.9 with instability."
+    ]
+  },
+  "branches": [
+    {
+      "anchor": "overview:7",
+      "type": "mechanism",
+      "label": "Pump failure DKA timeline",
+      "ask": "Why does insulin pump failure cause DKA within hours when a missed subcutaneous injection takes longer, and what does this imply for the residual subcutaneous insulin depot?",
+      "markdown": "**Pharmacokinetics of pump insulin.** Continuous subcutaneous insulin infusion uses only **rapid-acting analogs** (lispro, aspart), which have a subcutaneous half-life of roughly one to two hours. When a pump occludes or disconnects, no new insulin enters the subcutaneous tissue, so circulating insulin falls within hours. There is no long-acting depot to sustain basal suppression of lipolysis and ketogenesis.\n\n**Contrast with injected basal insulin.** A missed dose of **glargine** or **detemir** leaves a residual subcutaneous depot that absorbs over 18 to 24 hours. Low-level insulinemia persists, partially restraining hormone-sensitive lipase and hepatic ketogenesis. DKA therefore develops over 12 to 24 hours rather than four to six, because residual insulin still provides some anti-lipolytic and anti-ketogenic effect.\n\n**Clinical implication of no depot.** Pump patients who present with hyperglycemia and vomiting may already be in early DKA despite a glucose that seems only modestly elevated, because no residual insulin is working. Check ketones and venous pH promptly rather than assuming a missed-bolus scenario. When transitioning a pump patient off IV insulin after DKA resolution, start subcutaneous basal insulin well before stopping the infusion, as the pump itself cannot be relied upon until proven functional.",
+      "knownError": null
+    },
+    {
+      "anchor": "overview:2",
+      "type": "mechanism",
+      "label": "Total-body potassium paradox",
+      "ask": "If serum potassium is high or normal at presentation due to acidosis and insulin deficiency, what is the actual total-body potassium deficit, and what happens to serum potassium once insulin and fluids are started?",
+      "markdown": "**Total-body potassium deficit.** Osmotic diuresis causes massive urinary K+ loss throughout DKA, so total-body stores are depleted by 3–6 mEq/kg despite a normal or high serum level. Acidosis extrudes K+ from cells in exchange for H+, and insulin deficiency prevents the reuptake that normally buffers serum levels. The serum value therefore reflects redistribution, not adequacy, so any patient presenting with a normal K+ is already profoundly depleted.\n\n**Serum potassium falls with treatment.** Insulin drives K+ intracellularly within minutes, and IV fluids dilute the extracellular space, so serum K+ drops predictably once therapy begins. The fall is often 1–2 mEq/L in the first hours, so check K+ every 2 hours. If the initial K+ is 3.3–5.2, add 20–30 mEq K+ per liter of IV fluid. If it is >5.2, hold K+ but recheck within 2 hours because the level will fall.\n\n**Anticipate the rapid drop.** The patient whose K+ starts high or high-normal can still reach <3.3 within hours, so do not be reassured by the initial value. Begin K+ replacement the moment the level falls below 5.2, because insulin must continue until the anion gap closes. Stopping insulin to protect K+ is wrong unless K+ is <3.3; instead, replete K+ concurrently and keep the insulin infusion running.",
+      "knownError": null
+    },
+    {
+      "anchor": "clinicalApproach:3",
+      "type": "management",
+      "label": "Fluid resuscitation sequence",
+      "ask": "What is the full fluid resuscitation sequence — initial 0.9% NaCl rate and duration, the trigger to switch to 0.45% NaCl, and the trigger to add 5% dextrose — and what corrected Na+ threshold changes the tonicity choice?",
+      "markdown": "1. **Initial isotonic resuscitation** — Start 0.9% NaCl at 15–20 mL/kg/hr (typically 1–1.5 L in the first hour) to restore intravascular volume and improve tissue perfusion, which alone lowers glucose and ketone production.\n2. **Calculate corrected sodium** — Use corrected Na+ = measured Na+ + 1.6 × (glucose − 100)/100 after the initial liter to determine tonicity for the next phase; this is the decision point, not a fixed time interval.\n3. **Switch to 0.45% NaCl** — After the first 1–2 hours of 0.9% NaCl, change to 0.45% NaCl at 250–500 mL/hr if corrected Na+ is normal or high (>135 mEq/L), because ongoing isotonic saline would risk hypernatremia and hyperchloremic acidosis.\n4. **Continue 0.9% NaCl if hyponatremic** — If corrected Na+ is low (<135 mEq/L), keep 0.9% NaCl going even beyond the first 1–2 hours, because the patient needs the sodium load more than free water.\n5. **Add 5% dextrose** — When serum glucose falls to 200–250 mg/dL, add 5% dextrose to the chosen fluid (creating D5-0.45% NaCl or D5-0.9% NaCl) and reduce the insulin infusion if needed, so insulin can continue at a lower dose to clear ketones without causing hypoglycemia.\n6. **Maintain dual therapy until gap closes** — Continue the dextrose-containing fluid with the ongoing insulin infusion, adjusting the insulin rate to target a glucose decline of 50–75 mg/dL/hr, until the anion gap normalizes; glucose correction is not the endpoint.\n\n#### Watch for\n- Glucose dropping >75–100 mg/dL/hr → reduce insulin infusion rate by half and ensure dextrose is added early to avoid overshoot hypoglycemia.\n- Corrected Na+ rising rapidly or falling → reassess fluid tonicity; persistent hyponatremia despite isotonic saline suggests ongoing free-water loss from continued osmotic diuresis.\n- Anion gap not closing after 6–12 hours of adequate insulin and fluids → verify insulin is running (check pump, line, dose), search for ongoing infection or precipitant, and consider insulin resistance requiring higher doses.",
+      "knownError": "Blames persistent hyponatremia on ongoing free-water loss; free-water loss raises sodium — ongoing sodium loss (or retained water) is the cause."
+    },
+    {
+      "anchor": "clinicalApproach:3",
+      "type": "management",
+      "label": "Insulin infusion to SC transition",
+      "ask": "How is the transition from IV regular insulin infusion to subcutaneous insulin actually done — what long-acting dose is given, how long before stopping the infusion, and what overlap prevents rebound DKA?",
+      "markdown": "1. **Confirm DKA resolution** — Verify anion gap closed (<12), serum bicarbonate ≥15, pH >7.3, and patient able to tolerate oral intake before any transition; stopping IV insulin before ketones clear triggers rapid rebound ketogenesis within hours.\n2. **Calculate total IV insulin dose** — Sum the last 6 hours of IV regular insulin infusion to estimate 24-hour subcutaneous requirement, then split: give 50–80% as **basal insulin** (glargine or detemir) and the remainder as rapid-acting prandial/correction; this weight-and-dose-based method individualizes the transition rather than using a fixed weight-based guess.\n3. **Give long-acting subcutaneous insulin** — Administer **glargine 0.3 U/kg SC** (or 60–80% of the estimated 24-hour basal need) at least 1–2 hours before stopping the IV infusion; this creates the subcutaneous depot that will carry basal coverage once IV insulin is withdrawn.\n4. **Stop IV insulin infusion** — Discontinue the IV regular insulin drip 1–2 hours after the long-acting SC dose is given; the overlap window ensures circulating SC insulin has begun absorbing before IV insulin is removed, preventing a gap in insulin activity.\n5. **Start scheduled SC rapid-acting insulin** — Begin a scheduled rapid-acting analog (lispro/aspart) with the first meal and provide a **correction-scale** (sliding-scale) rapid-acting insulin q4–6h using the same glycemic targets used during the infusion; basal alone does not cover postprandial or residual ketone-production needs.\n6. **Continue IV fluids during overlap** — Maintain IV hydration (D5-containing fluids if glucose <250) through the 1–2 hour overlap and until oral intake is established; subcutaneous insulin requires intravascular volume for reliable absorption and ongoing glucose delivery prevents hypoglycemia while ketones finish clearing.\n\n#### Watch for\n- Rising glucose or recurrent ketonuria within 6–12 hours of stopping IV insulin → give SC rapid-acting correction dose immediately and re-evaluate for missed basal dose or inadequate overlap; if anion gap reopens, restart IV insulin infusion.\n- Hypoglycemia (glucose <70) during overlap → reduce subsequent basal dose by 20% and increase dextrose in IV fluids; the IV-to-SC conversion frequently overestimates basal need in the recovering patient.\n- Nausea or inability to tolerate oral intake after IV insulin stopped → do not rely on scheduled prandial insulin alone; continue IV insulin and dextrose-containing fluids until oral intake is reliable.",
+      "knownError": null
+    },
+    {
+      "anchor": "complications:0",
+      "type": "management",
+      "label": "Cerebral edema recognition and treatment",
+      "ask": "What are the earliest signs of cerebral edema in a child being treated for DKA, what rate of glucose or sodium correction increases its risk, and what is the immediate treatment beyond mannitol and hyperventilation?",
+      "markdown": "1. **Recognize early warning signs** — Headache, drowsiness, irritability, or new incontinence in a child during the first 12–24 hours of DKA treatment; these precede the late findings of bradycardia, vomiting, posturing, and respiratory arrest, so escalate immediately when any appear.\n2. **Limit glucose and sodium correction rates** — Keep glucose fall ≤50–75 mg/dL/hr and avoid rapid rises in corrected sodium; a steep rise in corrected Na+ during treatment signals impending osmolar shift and should prompt slowing of fluid correction.\n3. **Elevate head and reduce fluids** — Place the child with head of bed at 30° and reduce IV fluid rate to the minimum that maintains perfusion; this lowers intracranial venous pressure while preserving circulation pending definitive therapy.\n4. **Give mannitol first-line** — 0.5–1 g/kg IV bolus over 10–20 minutes; repeat once in 1–2 hours if no improvement, because it draws water from brain parenchyma into the intravascular space.\n5. **Hyperventilate if impending herniation** — Intubate and target PaCO₂ around 30 mmHg for 1–2 hours only; prolonged or excessive hyperventilation causes rebound cerebral vasoconstriction and ischemia.\n6. **Give hypertonic saline if mannitol fails** — 3% NaCl 2.5–5 mL/kg IV bolus over 10–30 minutes; it raises serum osmolality to draw water out of brain tissue and is the alternative when mannitol is contraindicated or ineffective.\n7. **Transfer to PICU and neuroimaging after stabilization** — Once osmolar therapy is running, obtain head CT or MRI to exclude hemorrhage or thrombosis; imaging must not delay treatment.\n\n#### Watch for\n- Corrected Na+ rising >2 mEq/L/hr or glucose falling >75 mg/dL/hr → slow fluid and insulin rates immediately.\n- GCS decline, new bradycardia, or abnormal pupillary response after mannitol → give 3% NaCl bolus and prepare for intubation.\n- Persistent signs of herniation despite mannitol and hypertonic saline → consider repeat osmolar therapy and urgent neurosurgical consultation.",
+      "knownError": "Treats a rising corrected sodium as the warning sign; a falling one (measured Na failing to rise as glucose falls) is."
+    },
+    {
+      "anchor": "differentials:0",
+      "type": "compare",
+      "label": "vs HHS",
+      "ask": "What clinical and laboratory features distinguish DKA from HHS at presentation, and how do the fluid, insulin, and potassium management priorities differ between the two?",
+      "versus": "Hyperosmolar hyperglycemic state (HHS)",
+      "markdown": "| | Diabetic Ketoacidosis | Hyperosmolar hyperglycemic state (HHS) |\n| --- | --- | --- |\n| Onset & precipitant | Hours to 1 day; missed insulin, pump failure, new-onset T1DM, infection | Days to weeks; infection, CVA, MI in **T2DM** elderly; insidious progressive dehydration |\n| Mental status | Alert or mildly lethargic; **rapid Kussmaul respirations** compensate for acidosis | **Markedly depressed** — stupor or coma correlates with osmolality >320; reflects degree of hyperosmolarity |\n| Glucose & osmolality | Typically 250-600; osmolality variable, often <320 | **>600 mg/dL**; effective osmolality **>320 mOsm/kg** — the defining threshold |\n| Acid-base & ketones | pH **<7.30**, bicarb **<18**, AG **>12**; serum β-hydroxybutyrate positive; large urine ketones | pH **>7.30**, bicarb >18, minimal AG elevation; **trace or absent ketones**; mild acidosis only if lactic from sepsis |\n| Fluid priority | 0.9% NaCl 15-20 mL/kg/hr first hour; switch to 0.45% if corrected Na+ normal/high; add **D5** when glucose 200-250 | More aggressive volume resuscitation — **0.9% NaCl 15-20 mL/kg/hr** for first 2-3 hours, then 0.45% to restore ~half of estimated deficit in first 12 hr; total deficit often 8-12 L |\n| Insulin priority | 0.1 U/kg/hr IV regular insulin **immediately after K+ confirmed >3.3**; primary endpoint is **anion gap closure**, not glucose; continue insulin even after glucose normalizes by adding dextrose | 0.1 U/kg/hr IV regular insulin **after K+ >3.3**; less insulin-resistant than DKA so glucose falls faster; primary endpoint is **glucose normalization** — no ketosis to clear; lower infusion rates often suffice |\n| Potassium priority | Same K+ rules apply: **<3.3 hold insulin and give K+; 3.3-5.2 give K+ with insulin; >5.2 hold K+**; total body K+ deficit large due to osmotic diuresis + intracellular shift from acidosis | Same K+ thresholds and rules; total body K+ deficit similar from prolonged osmotic diuresis; insulin still drives K+ intracellularly — monitor q2-4h |\n| Transition off IV insulin | Give SC long-acting insulin **1-2 hr before** stopping IV infusion to prevent rebound ketosis; must clear AG first | Give SC basal insulin **1-2 hr before** stopping IV; glucose stability is the endpoint — no AG closure needed; overlap less critical but still standard |\n\n> DKA is an **acidotic, ketotic** emergency at lower glucose; HHS is a **hyperosmolar, non-ketotic** coma at glucose >600 — the pH, ketones, and osmolality settle it in seconds.",
+      "knownError": "Says acidosis shifts potassium into cells; acidosis shifts it out of them (extracellular)."
+    },
+    {
+      "anchor": "complications:1",
+      "type": "management",
+      "label": "Potassium repletion specifics",
+      "ask": "What potassium replacement rate, IV concentration, and monitoring interval are used once insulin is running, and what ECG changes signal the need to hold insulin and replete more aggressively?",
+      "markdown": "1. **Add K+ to IV fluids** — Once insulin is running and K+ is 3.3–5.2, add 20–30 mEq K+ per liter of IV fluid (mix KCl and KPO4 if phosphate is low) to match the intracellular shift insulin drives; peripheral IV concentration should not exceed 40 mEq/L per line to avoid phlebitis.\n2. **Run at 10–20 mEq/hr** — Target a replacement rate of 10–20 mEq/hr through a peripheral line; 20–40 mEq/hr is reserved for a central line with continuous cardiac monitoring when K+ is critically low or falling rapidly.\n3. **Check K+ every 2 hours** — Measure serum K+ every 2 hours during active insulin infusion because the intracellular shift is fastest in the first few hours and total-body deficit is large; adjust the rate to keep K+ between 3.5 and 5.0.\n4. **Hold insulin for K+ <3.3** — If K+ drops below 3.3 at any point, stop the insulin infusion and give IV K+ 20–30 mEq/hr until K+ is ≥3.3, because continuing insulin below this threshold risks fatal ventricular arrhythmia.\n5. **Escalate for ECG signs** — If the ECG shows peaked T waves, PR prolongation, QRS widening, or U waves, hold insulin and give IV K+ at 20–40 mEq/hr via central line with continuous cardiac monitoring, because these changes signal imminent arrhythmia regardless of the serum number.\n\n#### Watch for\n- Serum K+ falling below 3.3 despite replacement → hold insulin, give 20–30 mEq/hr IV K+, recheck in 1 hour before restarting insulin.\n- Peaked T waves or QRS widening on ECG → hold insulin, switch to central-line K+ at up to 40 mEq/hr, and monitor on telemetry.\n- K+ >5.2 at any check → hold K+ replacement, recheck in 2 hours, and verify the sample is not hemolyzed before adjusting further.",
+      "knownError": "Treats peaked T waves, PR prolongation and QRS widening (hyperkalemia) as a reason to give more potassium."
+    },
+    {
+      "anchor": "differentials:1",
+      "type": "compare",
+      "label": "vs Alcoholic ketoacidosis",
+      "ask": "How does alcoholic ketoacidosis present differently from DKA in terms of glucose level, ketone ratio, and response to dextrose-only fluids without insulin?",
+      "versus": "Alcoholic ketoacidosis",
+      "markdown": "| | Diabetic Ketoacidosis | Alcoholic ketoacidosis |\n| --- | --- | --- |\n| Glucose at presentation | Typically >250 mg/dL; marked hyperglycemia from absolute insulin deficiency + counterregulatory surge | Low-normal (60–200 mg/dL); glycogen depletion + suppressed gluconeogenesis; if >250, suspect coexisting DM or another trigger |\n| β-Hydroxybutyrate : acetoacetate ratio | High early (3:1 or greater) but both ketones present; acetoacetate rises during recovery as β-OHB converts | Markedly β-OHB–predominant (often >5:1); acetoacetate low, so urine nitroprusside can be falsely low or negative despite severe ketoacidosis |\n| Response to dextrose-only fluids (no insulin) | Insulin is mandatory — dextrose alone worsens hyperglycemia and does not stop ketogenesis; add 5% dextrose only when glucose falls to 200–250 while continuing insulin to close the anion gap | Dextrose-containing fluids alone (D5NS or D5½NS with thiamine) typically resolve ketogenesis and acidosis within 12–24 h; insulin is not routinely needed unless glucose stays elevated |\n| Potassium handling | Total-body K+ depleted; insulin shifts K+ intracellularly — check before insulin, replete per the rule of 3s | Total-body K+ also depleted from vomiting/poor intake; repletion still needed, but no insulin-driven shift, so K+ falls more predictably |\n| Acidosis severity vs glucose | Acidosis proportional to hyperglycemia; pH <7.30, bicarb <18, AG >12 | Acidosis can be severe (pH <7.2, AG >20) despite near-normal glucose — the dissociation is the diagnostic clue |\n| Thiamine requirement | Not routinely required; standard DKA protocol | Give thiamine 100 mg IV before or with dextrose to prevent Wernicke encephalopathy precipitation in chronically malnourished patients |\n\n> A ketoacidotic patient with glucose <200 and a β-hydroxybutyrate–predominant profile who clears ketones on dextrose alone (no insulin) has alcoholic ketoacidosis, not DKA.",
+      "knownError": null
+    }
+  ]
+}

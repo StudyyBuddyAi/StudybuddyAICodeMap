@@ -19,6 +19,8 @@
 import { MAX_SECTIONS, asExamMode, resolvePlanFromKeys, sectionQuota, type PlannedSection } from "./sheet-plan.ts";
 import { ONE_HOME_PER_FACT, highYieldTest, schemaLine } from "./sheet-schema.ts";
 import { SECTIONS } from "./sheet-sections.ts";
+import { parseSignature, sentSections, type SheetSignature } from "./sheet-signature.ts";
+import type { SheetSectionBody } from "./sheet-text.ts";
 
 export type SectionAction = "regenerate";
 
@@ -73,6 +75,10 @@ export interface SectionRequest {
   sourceIds: string[];
   /** Proof the sheet was written as premium, for a student without Pro. */
   grant?: string;
+  /** The sheet's signatures, as the page kept them; null for a sheet saved before signing. */
+  signature: SheetSignature | null;
+  /** The sections exactly as sent, for checking against the signatures. */
+  sent: Record<string, SheetSectionBody>;
 }
 
 /** Size limits: a sheet is a few kilobytes; these stop the endpoint carrying anything else. */
@@ -158,6 +164,8 @@ export function parseSectionRequest(raw: unknown): SectionRequest | null {
     sourceIds: Array.isArray(r.sourceIds)
       ? r.sourceIds.filter((id): id is string => typeof id === "string" && UUID_RE.test(id)).slice(0, SECTION_LIMITS.sources)
       : [],
+    signature: parseSignature(r.signature),
+    sent: sentSections(rawSections, plan),
   };
   if (style === "custom") {
     const instruction = oneLine(r.instruction, SECTION_LIMITS.instruction);

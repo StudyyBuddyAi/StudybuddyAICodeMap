@@ -43,11 +43,20 @@ import { PERSONALIZE_MAX_TOKENS, isGrantId, parsePersonalizeRequest } from "./pe
 import { REASONING_HEADROOM, SECTION_MAX_TOKENS, buildSectionPrompts, parseSectionRequest } from "./sheet-section-prompts.ts";
 import {
   GROW_MAX_TOKENS,
+  REVIEW_MAX_TOKENS,
+  REVIEW_MODEL,
   SUGGEST_MAX_TOKENS,
+  branchBody,
   buildGrowPrompts,
+  buildReviewPrompts,
   buildSuggestPrompts,
   parseBranchRequest,
+  parseReview,
+  reviewShape,
+  type BranchReview,
 } from "./sheet-branch-prompts.ts";
+import { signSections, verifySections } from "./sheet-signature.ts";
+import { finishedSheetSections } from "./sheet-text.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -90,6 +99,29 @@ const SECTION_DAILY_CAP = 15;
  * to spare.
  */
 const BRANCH_DAILY_CAP = 120;
+/**
+ * The same counts for a sheet whose signatures don't check (sheet-signature.ts):
+ * one saved before sheets were signed, one the server couldn't read — or one
+ * made up to use the writer for something else. Enough to keep an old sheet
+ * growing; too little to be worth abusing. (The writer's own scope rule turns
+ * away an off-topic question on a real sheet, but a sheet made up end to end
+ * about something else talks it round — measured in QA — so this cap, not the
+ * prompt, is what holds.)
+ */
+const UNSIGNED_BRANCH_DAILY_CAP = 10;
+const UNSIGNED_SECTION_DAILY_CAP = 5;
+
+/**
+ * A branch's review is given this long, and never past REQUEST_BUDGET_MS of
+ * the whole request (the edge function's wall clock is 150s); past it the
+ * branch stands as written, marked unchecked. The page has kept the branch
+ * since it was written, so the student never waits on this.
+ */
+const REVIEW_TIMEOUT_MS = 100_000;
+const REQUEST_BUDGET_MS = 140_000;
+
+/** The key sections are signed with: its own secret where set, else the service role's, which never leaves the server. */
+const signingSecret = () => Deno.env.get("SHEET_SIGNING_SECRET") || Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
 
 /**
  * How long to wait for Corti's response headers before treating it as
@@ -410,11 +442,26 @@ export async function handleMedicalNotes(req: Request): Promise<Response> {
     // A follow-up on a sheet already on the page: grounded on its passages, no memory.
     const isFollowUp = isSection || isBranch;
 
+    // Whether the sheet a follow-up sends is one this server wrote, section by
+    // section. It decides the day's allowance, never whether the request runs.
+    const followUpRequest = branch ?? section;
+    const signed = followUpRequest
+      ? await verifySections(signingSecret(), followUpRequest.signature, followUpRequest.topic, followUpRequest.sent).catch(() => false)
+      : false;
+
     const isAnonymous =
       user.is_anonymous === true || decodeJwtPayload(token).is_anonymous === true;
     const quotaEligible = !explainMode && !enhanceMode && !isPersonalize;
     const usageKind = isBranch ? "branch" : isSection ? "section" : cardsOnly ? "cards" : "sheet";
-    const dailyCap = isBranch ? BRANCH_DAILY_CAP : isSection ? SECTION_DAILY_CAP : DAILY_CAP;
+    const dailyCap = isBranch
+      ? signed
+        ? BRANCH_DAILY_CAP
+        : UNSIGNED_BRANCH_DAILY_CAP
+      : isSection
+      ? signed
+        ? SECTION_DAILY_CAP
+        : UNSIGNED_SECTION_DAILY_CAP
+      : DAILY_CAP;
     // A sectioned JSON document, as opposed to a card deck or a prose reply.
     const isSheetMode = !cardsOnly && !explainMode && !enhanceMode && !isPersonalize && !isFollowUp;
     // High-yield or comprehensive. The sheet is written the same either way:
@@ -714,6 +761,10 @@ export async function handleMedicalNotes(req: Request): Promise<Response> {
             : await cortiStream(premiumModel, toMessages(prompts("haiku")), budget);
           if (corti.response) return { response: corti.response, modelUsed: `corti/${premiumModel}`, fallbackReason: null };
           log("corti_unavailable", { userId: user.id, reason: corti.reason });
+          // A branch is Corti's or nothing: the page tries once more by
+          // itself, then offers Try again. It is small and quick to ask for
+          // again, and the review that follows it is Corti's too.
+          if (isBranch) return { response: null, modelUsed: `corti/${premiumModel}`, fallbackReason: corti.reason };
           return {
             response: await openRouterStream(OPENROUTER_API_KEY, FALLBACK_MODEL, toMessages(prompts("haiku", true)), budget),
             modelUsed: `openrouter/${FALLBACK_MODEL}`,
@@ -814,6 +865,7 @@ export async function handleMedicalNotes(req: Request): Promise<Response> {
         section: section ? `${section.action}:${section.key}:${section.style}` : null,
         // The action and branch type only — never the sheet's text or the question.
         branch: branch ? `${branch.action}${branch.question ? `:${branch.question.type}` : ""}` : null,
+        signed: isFollowUp ? signed : null,
         sectionChunks: isFollowUp ? sectionChunks.length : null,
         archetype: archetype.archetype ?? (isSheetMode ? DEFAULT_ARCHETYPE : null),
         archetypeFallback: isSheetMode && archetype.archetype === null,
@@ -859,6 +911,63 @@ export async function handleMedicalNotes(req: Request): Promise<Response> {
       return status === 429
         ? { status: 429, error: "Rate limit exceeded. Please try again in a moment." }
         : { status: status === 400 ? 400 : 500, error: "AI service error" };
+    };
+
+    /**
+     * A grown branch, read by a clinician's eye before the student relies on
+     * it (sheet-branch-prompts.ts). Null when there is nothing to review — the
+     * writer declined the question, or its reply isn't a branch — or when the
+     * review failed or ran out of time: the branch then stands as written,
+     * marked unchecked by the page.
+     */
+    const reviewBranch = async (text: string): Promise<BranchReview | "unchecked" | null> => {
+      if (!isBranch || branch!.action !== "grow") return null;
+      const written = branchBody(text);
+      if (!written) return null;
+      const reviewStartedAt = Date.now();
+      try {
+        const prompts = buildReviewPrompts({
+          request: branch!,
+          body: written,
+          examMode: body.examMode,
+          difficulty: body.difficulty,
+          // The passages the branch was written from, already read.
+          ragChunks: await sectionChunksPromise.catch(() => [] as RagChunk[]),
+        });
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), Math.max(5_000, Math.min(REVIEW_TIMEOUT_MS, REQUEST_BUDGET_MS - since(startedAt))));
+        let reply = "";
+        try {
+          const res = await cortiChatCompletion(cortiConfigFromEnv(), {
+            model: asCortiModel(Deno.env.get("CORTI_REVIEW_MODEL"), REVIEW_MODEL),
+            messages: [
+              { role: "system", content: prompts.systemPrompt },
+              { role: "user", content: prompts.userContent },
+            ],
+            stream: false,
+            temperature: 0.1,
+            maxTokens: REVIEW_MAX_TOKENS,
+            signal: controller.signal,
+          });
+          if (!res.ok) throw new Error(`corti_${res.status}`);
+          const data = await res.json();
+          const content = data?.choices?.[0]?.message?.content;
+          reply = typeof content === "string" ? content : "";
+        } finally {
+          clearTimeout(timer);
+        }
+        const review = parseReview(reply, branch!.question!.type, written);
+        log("branch_review", {
+          verdict: review?.verdict ?? "unreadable",
+          fixes: review && review.verdict !== "ok" ? review.fixes.length : 0,
+          ms: since(reviewStartedAt),
+          ...(review ? {} : { shape: reviewShape(reply) }),
+        });
+        return review ?? "unchecked";
+      } catch (err: unknown) {
+        log("branch_review_failed", { err: err instanceof Error ? err.message : String(err), ms: since(reviewStartedAt) });
+        return "unchecked";
+      }
     };
 
     // ── Relay ───────────────────────────────────────────────────────────────
@@ -975,6 +1084,32 @@ export async function handleMedicalNotes(req: Request): Promise<Response> {
                 err: cardsErr instanceof Error ? cardsErr.message : String(cardsErr),
               });
             }
+          }
+
+          // A finished sheet's sections, signed, so a branch or a rewrite of it
+          // can later be checked as this server's writing. A rewrite is
+          // signed only when the sheet it came from checked out — otherwise a
+          // made-up sheet, rewritten once, would come back signed.
+          if (isSheetMode || (isSection && signed)) {
+            try {
+              const written = finishedSheetSections(assistantText);
+              const toSign = written && isSection ? pickKeys(written, [section!.key]) : written;
+              if (toSign && Object.keys(toSign).length) {
+                const signature = await signSections(signingSecret(), isSection ? section!.topic : notes, toSign);
+                controller.enqueue(frame({ __meta: { signature } }));
+              }
+            } catch (signErr: unknown) {
+              log("sign_failed", { err: signErr instanceof Error ? signErr.message : String(signErr) });
+            }
+          }
+
+          // A grown branch is reviewed before the stream closes. The page shows
+          // the branch as it streamed, says it is being checked, and swaps in
+          // the correction if there is one.
+          if (isBranch && branch!.action === "grow") {
+            controller.enqueue(frame({ __meta: { stage: "reviewing" } }));
+            const review = await reviewBranch(assistantText);
+            if (review) controller.enqueue(frame({ __meta: { review } }));
           }
 
           controller.enqueue(encoder.encode("data: [DONE]\n\n"));
@@ -1122,6 +1257,12 @@ export async function handleMedicalNotes(req: Request): Promise<Response> {
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
     log("error", { error: message, elapsedMs: since(startedAt) });
-    return json({ error: message }, 500);
+    // The detail is in the log; the page gets something it can say.
+    return json({ error: "Something went wrong. Please try again." }, 500);
   }
+}
+
+/** Only `keys` of a record, in its order. */
+function pickKeys<T>(record: Record<string, T>, keys: string[]): Record<string, T> {
+  return Object.fromEntries(Object.entries(record).filter(([k]) => keys.includes(k)));
 }

@@ -1,7 +1,8 @@
 import { stripFences } from "./sanitize-json";
 import { repairLlmJson } from "./repair-llm-json";
 import { parseSourceCoverage } from "./grounding";
-import { RESERVED_SHEET_KEYS, parsePlan } from "./sheet-plan";
+import { parsePlan } from "./sheet-plan";
+import { sheetSections } from "../../supabase/functions/_shared/sheet-text.ts";
 import type { Flashcard, GeneratedSheet, SectionBody } from "@/types/generated-sheet";
 
 /**
@@ -148,40 +149,11 @@ function asFlashcards(v: unknown): Flashcard[] {
 }
 
 /**
- * Every top-level key that isn't reserved metadata, coerced by the shape it
- * arrived in.
- *
- * This is what lets a sheet carry sections the six-field interface never named.
- * The old allowlist silently discarded them, so loosening the prompt alone
- * would have produced sheets with sections missing and no error anywhere.
+ * Every top-level key that isn't reserved metadata, as a section — read by the
+ * reader the edge function signs with, so what the page keeps is what the
+ * server wrote, byte for byte (supabase/functions/_shared/sheet-text.ts).
  */
-function collectSections(raw: Record<string, unknown>): Record<string, SectionBody> {
-  const sections: Record<string, SectionBody> = {};
-  for (const [key, value] of Object.entries(raw)) {
-    if (RESERVED_SHEET_KEYS.has(key)) continue;
-    if (typeof value === "string") sections[key] = dashes(value);
-    else if (Array.isArray(value)) sections[key] = asItemsOrRows(value);
-  }
-  return sections;
-}
-
-/**
- * GPT-OSS writes some labels with a non-breaking hyphen ("Second‑line"), which
- * the renderer's label pattern — and a reader's search — miss.
- */
-const dashes = (s: string) => s.replace(/[‐‑]/g, "-");
-
-/**
- * A table's rows when the array holds arrays, list items otherwise. Mid-stream
- * the last row may be short a cell or two; it is kept, and the renderer pads.
- */
-function asItemsOrRows(value: unknown[]): string[] | string[][] {
-  const rows = value.filter((v): v is unknown[] => Array.isArray(v));
-  if (rows.length && rows.length === value.length) {
-    return rows.map((row) => row.map((cell) => (typeof cell === "string" ? dashes(cell) : "")));
-  }
-  return asStringArray(value).map(dashes);
-}
+const collectSections = (raw: Record<string, unknown>): Record<string, SectionBody> => sheetSections(raw);
 
 /** Fill every field so a partial object can't crash the renderer. */
 function normalize(raw: Record<string, unknown>): GeneratedSheet {
