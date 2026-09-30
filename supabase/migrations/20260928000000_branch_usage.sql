@@ -19,6 +19,10 @@
 --   -- CHECK ((kind = ANY (ARRAY['sheet'::text, 'cards'::text, 'section'::text, 'branch'::text])))
 --   As the service role: select public.consume_usage('<user id>', 'branch', 120);  -- {"allowed": true, ...}
 
+-- Keeps every kind already allowed live: 20260911000000_add_qbank_generate_kind
+-- (applied from another branch) added qbank_generate, and dropping it would
+-- stop QBank generation counting against its quota. Checked 2026-09-30: the
+-- live constraint allowed (sheet, cards, qbank_generate).
 do $$
 declare
   c record;
@@ -35,4 +39,4 @@ begin
 end $$;
 
 alter table public.usage_records
-  add constraint usage_records_kind_check check (kind in ('sheet', 'cards', 'section', 'branch'));
+  add constraint usage_records_kind_check check (kind in ('sheet', 'cards', 'qbank_generate', 'section', 'branch'));
