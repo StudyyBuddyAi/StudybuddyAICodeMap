@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { ArrowLeft, Loader2, Mail } from "lucide-react";
 import GoogleIcon from "@/components/icons/GoogleIcon";
+import BrandMark from "@/components/brand/BrandMark";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
 
@@ -198,6 +199,7 @@ const AuthModal = ({ open, onOpenChange }: AuthModalProps) => {
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md rounded-xl">
         <DialogHeader>
+          <BrandMark size={44} className="mx-auto mb-1 sm:mx-0" />
           <DialogTitle className="text-lg font-semibold tracking-tight">Welcome</DialogTitle>
           <DialogDescription>
             Sign in or create an account to get started.

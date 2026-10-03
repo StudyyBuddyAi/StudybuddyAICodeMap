@@ -6,7 +6,8 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { MessageCircle, Mail, Sparkles, Check } from "lucide-react";
+import { MessageCircle, Mail, Check } from "lucide-react";
+import BrandMark from "@/components/brand/BrandMark";
 import { PoweredByCorti } from "@/components/PoweredByCorti";
 
 interface GoProModalProps {
@@ -20,9 +21,7 @@ const GoProModal = ({ open, onOpenChange }: GoProModalProps) => {
       <DialogContent className="max-w-sm text-center rounded-xl">
         <DialogHeader>
           <div className="flex justify-center mb-2">
-            <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-primary">
-              <Sparkles className="h-5 w-5 text-primary-foreground" />
-            </div>
+            <BrandMark size={52} />
           </div>
           <div
             style={{

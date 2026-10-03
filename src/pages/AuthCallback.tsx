@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import PageLoader from "@/components/PageLoader";
+import BrandMark from "@/components/brand/BrandMark";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
@@ -102,6 +103,7 @@ const AuthCallback = () => {
   return (
     <div className="min-h-screen bg-background px-4">
       <div className="max-w-sm mx-auto mt-24 p-6 rounded-xl bg-card border border-border shadow-sm space-y-4">
+        <BrandMark size={36} />
         <h1 className="text-lg font-semibold tracking-tight">Sign-in didn't complete</h1>
         <p className="text-sm text-muted-foreground">
           The Google sign-in was cancelled or didn't finish. You can try again from the sign in menu.

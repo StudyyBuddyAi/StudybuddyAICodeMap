@@ -422,11 +422,6 @@
       animation: skeleton-sweep 1.6s ease-in-out infinite;
     }
 
-    /* Logo pulse for PageLoader */
-    .loader-pulse {
-      animation: loader-pulse 1.2s ease-in-out infinite;
-    }
-
     /* Section reveal inside the sheet document */
     .section-reveal {
       animation: section-reveal 200ms ease-out both;
@@ -551,15 +546,6 @@
   @keyframes skeleton-sweep {
     100% {
       transform: translateX(100%);
-    }
-  }
-
-  @keyframes loader-pulse {
-    0%, 100% {
-      transform: scale(1);
-    }
-    50% {
-      transform: scale(1.05);
     }
   }
 

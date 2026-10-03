@@ -27,6 +27,7 @@ import { ruleLabel } from "@/lib/qbank-rule-labels";
 import { renderMarkdown } from "@/lib/render-markdown";
 import type { OptionKey, PlayMode, QuestionMedia } from "@/lib/qbank-types";
 import { useBackdropScene } from "@/components/backdrop/backdrop-scene";
+import { pulseBrandMark } from "@/components/brand/brandmark-motion";
 
 type AnswerState =
   | { status: "unanswered" }
@@ -895,6 +896,7 @@ const QBankSession = () => {
         return;
       }
       setPendingKey(null);
+      if (result.is_correct) pulseBrandMark();
       setTimeout(() => setDrawerOpen(true), 300);
     } finally {
       setSubmitting(false);

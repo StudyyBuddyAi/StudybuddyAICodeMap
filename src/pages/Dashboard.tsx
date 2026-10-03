@@ -15,6 +15,7 @@ import {
 import { Link, useNavigate } from "react-router-dom";
 import "./dashboard.css"
 import DashboardLayout from "@/components/dashboard/DashboardLayout";
+import BrandMark from "@/components/brand/BrandMark";
 type StatValueProps = {
   value: ReactNode;
   label: string;
@@ -92,6 +93,7 @@ function DashboardHeader() {
       <div className="dashboard-header-inner">
         <button type="button" className="dashboard-back-link" onClick={() => navigate("/")} data-testid="button-dashboard-home">
           <ArrowLeft size={15} />
+          <BrandMark size={26} />
           <span>StudyBuddy <b>AI</b></span>
         </button>
         <div className="dashboard-header-meta">

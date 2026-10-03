@@ -1,45 +1,32 @@
 import { useEffect, useState } from "react";
-import { 
-  Stethoscope, 
-  Brain, 
-  FileText, 
-  Activity, 
-  Pill, 
-  BookOpen,
-  type LucideIcon 
-} from "lucide-react";
+import BrandMark from "@/components/brand/BrandMark";
 
 type LoaderContext = "session" | "cards" | "qbank" | "sheets" | "generic";
 
-interface LoaderStep {
-  text: string;
-  icon: LucideIcon;
-}
-
-const LOADER_STEPS: Record<LoaderContext, LoaderStep[]> = {
+const LOADER_STEPS: Record<LoaderContext, string[]> = {
   session: [
-    { text: "Initializing clinical session...", icon: Stethoscope },
-    { text: "Syncing medical telemetry...", icon: Activity },
+    "Initializing clinical session...",
+    "Syncing medical telemetry...",
   ],
   cards: [
-    { text: "Fetching active flashcards...", icon: Brain },
-    { text: "Structuring spaced repetition...", icon: BookOpen },
-    { text: "Loading clinical vignettes...", icon: Stethoscope },
+    "Fetching active flashcards...",
+    "Structuring spaced repetition...",
+    "Loading clinical vignettes...",
   ],
   qbank: [
-    { text: "Preparing QBank engine...", icon: FileText },
-    { text: "Generating diagnostic cases...", icon: Activity },
-    { text: "Compiling answer rationales...", icon: Pill },
+    "Preparing QBank engine...",
+    "Generating diagnostic cases...",
+    "Compiling answer rationales...",
   ],
   sheets: [
-    { text: "Retrieving study sheets...", icon: BookOpen },
-    { text: "Organizing lecture modules...", icon: FileText },
+    "Retrieving study sheets...",
+    "Organizing lecture modules...",
   ],
   generic: [
-    { text: "Loading StudyBuddy medical suite...", icon: Stethoscope },
-    { text: "Accessing knowledge base...", icon: Brain },
-    { text: "Configuring learning environment...", icon: Activity },
-    { text: "Preparing study materials...", icon: FileText },
+    "Loading StudyBuddy medical suite...",
+    "Accessing knowledge base...",
+    "Configuring learning environment...",
+    "Preparing study materials...",
   ],
 };
 
@@ -49,7 +36,7 @@ interface PageLoaderProps {
 }
 
 /**
- * Enhanced medical-themed loader component with dynamic rotating icons and messages.
+ * The app's loader: the brand mark firing away above a rotating status line.
  */
 const PageLoader = ({ context = "generic", fullPage = true }: PageLoaderProps) => {
   const steps = LOADER_STEPS[context];
@@ -64,24 +51,20 @@ const PageLoader = ({ context = "generic", fullPage = true }: PageLoaderProps) =
     return () => window.clearInterval(id);
   }, [steps.length]);
 
-  const CurrentIcon = steps[stepIndex].icon;
-
   return (
     <div
       className={`flex flex-col items-center justify-center gap-5 ${
         fullPage ? "min-h-[60vh]" : "py-12"
       }`}
     >
-      <div className="loader-pulse flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/10 border border-primary/25 shadow-sm transition-all duration-500">
-        <CurrentIcon className="h-8 w-8 text-primary animate-pulse" />
-      </div>
+      <BrandMark size={64} activity="busy" interactive={false} />
 
       <div className="text-center">
         <p
           key={stepIndex}
           className="animate-fade-in text-xs font-medium text-muted-foreground tracking-wide"
         >
-          {steps[stepIndex].text}
+          {steps[stepIndex]}
         </p>
         <span className="text-[10px] text-muted-foreground mt-1 block tracking-wider uppercase font-semibold">
           StudyBuddy Medical

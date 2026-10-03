@@ -1,4 +1,4 @@
-import { Stethoscope } from "lucide-react";
+import BrandMark from "@/components/brand/BrandMark";
 
 interface StudyBuddyLoaderProps {
   message?: string;
@@ -15,13 +15,7 @@ const StudyBuddyLoader = ({
         fullPage ? "min-h-[60vh]" : "py-12"
       }`}
     >
-      <div className="relative flex items-center justify-center">
-        <div className="absolute h-20 w-20 rounded-2xl bg-primary/10 animate-ping opacity-40" />
-        <div className="absolute h-16 w-16 rounded-xl bg-primary/15 animate-pulse" />
-        <div className="relative flex h-14 w-14 items-center justify-center rounded-xl bg-primary shadow-lg shadow-primary/40">
-          <Stethoscope className="h-7 w-7 text-primary-foreground" />
-        </div>
-      </div>
+      <BrandMark size={64} activity="busy" interactive={false} />
 
       <div className="flex items-center gap-1.5">
         {[0, 1, 2].map((i) => (
