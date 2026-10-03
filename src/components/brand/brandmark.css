@@ -1,0 +1,49 @@
+/*
+ * The StudyBuddy mark's palette. Its own tokens rather than the app's teal,
+ * because the mark keeps the designer's cyan and copper on every surface;
+ * the dark theme only lifts the deep stops so the strands don't sink into it.
+ */
+:root {
+  --sb-mark-teal-hi: #5fd6d8;
+  --sb-mark-teal-mid: #41c3cb;
+  --sb-mark-teal-lo: #22a9b9;
+  --sb-mark-copper-hi: #f3bb85;
+  --sb-mark-copper-mid: #e8a46e;
+  --sb-mark-copper-lo: #d98a52;
+  /* The signal itself: a hot, near-white core that reads on both strands. */
+  --sb-mark-spark: #fffdf6;
+  /* Halos bloom in the strand's own colour on paper, in light at night. */
+  --sb-mark-halo-teal: #34cdd6;
+  --sb-mark-halo-copper: #f5a25a;
+}
+
+.dark {
+  --sb-mark-teal-mid: #46c9d1;
+  --sb-mark-teal-lo: #2bb3c2;
+  --sb-mark-copper-mid: #eeab74;
+  --sb-mark-copper-lo: #e0925a;
+  --sb-mark-halo-teal: #74f2f2;
+  --sb-mark-halo-copper: #ffc993;
+}
+
+.sb-mark {
+  display: block;
+  flex-shrink: 0;
+  overflow: visible;
+}
+
+/* Bulbs swell from their own centre when a signal lands. */
+.sb-mark [data-bulb],
+.sb-mark [data-halo] {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.sb-mark-signal {
+  pointer-events: none;
+}
+
+.sb-mark-signal path,
+.sb-mark-signal circle {
+  opacity: 0;
+}
