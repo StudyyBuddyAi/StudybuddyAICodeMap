@@ -9,10 +9,11 @@
     <!-- Open Graph (controls LinkedIn, WhatsApp, Facebook previews) -->
     <meta property="og:title" content="StudyBuddy AI · Study Smarter. Score Higher." />
     <meta property="og:description" content="StudyBuddy AI turns your curriculum into clinical cases, smart questions, and instant explanations. Built for medical students in MENA. Free to start." />
-    <meta property="og:image" content="/og-preview.png" />
+    <meta property="og:image" content="https://www.studyybuddyai.com/og-preview.png?v=2" />
+    <meta property="og:image:alt" content="StudyBuddy AI: a DNA helix rising into a neuron, beside the line Study smarter. Score higher. Pass." />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
-    <meta property="og:url" content="https://studdybudddyai.vercel.app/" />
+    <meta property="og:url" content="https://www.studyybuddyai.com/" />
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="StudyBuddy AI" />
 
@@ -20,9 +21,13 @@
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="StudyBuddy AI · Study Smarter. Score Higher." />
     <meta name="twitter:description" content="StudyBuddy AI turns your curriculum into clinical cases, smart questions, and instant explanations. Built for medical students in MENA. Free to start." />
-    <meta name="twitter:image" content="/og-preview.png" />
+    <meta name="twitter:image" content="https://www.studyybuddyai.com/og-preview.png?v=2" />
 
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+    <!-- ?v= busts browsers' favicon caches, which key on the URL: bump it
+         whenever scripts/brandmark/build-icons.cjs redraws the icons. -->
+    <link rel="icon" href="/favicon.ico?v=2" sizes="32x32">
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg?v=2">
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=2">
     <meta name="color-scheme" content="light dark" />
 
     <!-- Applies the stored theme before first paint. Without this every route
