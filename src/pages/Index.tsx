@@ -7,7 +7,6 @@ import {
   ChevronDown,
   CircleDot,
   FileText,
-  HeartPulse,
   Instagram,
   Laptop,
   Layers,
@@ -29,6 +28,7 @@ import {
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { ResponsiveCarousel } from "@/components/ResponsiveCarousel";
+import BrandMark from "@/components/brand/BrandMark";
 import "@/pages/index.css";
 const CONTACT_EMAIL = "mailto:osama200az@gmail.com";
 const SOCIALS = {
@@ -300,7 +300,7 @@ function App() {
       <header className={`site-header ${menuOpen ? "menu-open" : ""}`}>
         <div className="container header-inner">
           <a href="#home" className="brand" onClick={closeMenu} data-testid="link-brand-home" aria-label="StudyBuddy AI home">
-            <span className="brand-mark"><HeartPulse size={18} strokeWidth={2.25} /></span>
+            <BrandMark size={34} className="brand-mark" />
             <span className="brand-name">StudyBuddy <b>AI</b></span>
             <span className="brand-beta">BETA</span>
           </a>
@@ -490,7 +490,7 @@ function App() {
       <footer className="site-footer">
         <div className="container">
           <div className="footer-grid">
-            <div className="footer-brand"><a href="#home" className="brand" data-testid="link-footer-home"><span className="brand-mark"><HeartPulse size={18} /></span><span className="brand-name">StudyBuddy <b>AI</b></span></a><p>AI study sheets, decks, and QBank for MENA medical students.</p></div>
+            <div className="footer-brand"><a href="#home" className="brand" data-testid="link-footer-home"><BrandMark size={34} className="brand-mark" /><span className="brand-name">StudyBuddy <b>AI</b></span></a><p>AI study sheets, decks, and QBank for MENA medical students.</p></div>
             <div><h4>Product</h4><a href="#playground" data-testid="link-footer-how-it-works">How it works</a><a href="/qbank" data-testid="link-footer-qbank">QBank</a><a href="#features" data-testid="link-footer-features">Features</a><a href="#pricing" data-testid="link-footer-pricing">Pricing</a></div>
             <div><h4>Resources</h4><a href="#faq" data-testid="link-footer-faq">FAQ</a><a href="/roadmap" data-testid="link-footer-roadmap">Roadmap</a><a href={CONTACT_EMAIL} data-testid="link-footer-email"><Mail size={14} /> Email us</a></div>
             <div><h4>Connect</h4><a href={SOCIALS.instagram} target="_blank" rel="noopener noreferrer" data-testid="link-footer-instagram"><Instagram size={14} /> Instagram</a><a href={SOCIALS.linkedin} target="_blank" rel="noopener noreferrer" data-testid="link-footer-linkedin"><Linkedin size={14} /> LinkedIn</a><a href={SOCIALS.telegram} target="_blank" rel="noopener noreferrer" data-testid="link-footer-telegram"><Send size={14} /> Telegram</a></div>

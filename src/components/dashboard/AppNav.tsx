@@ -20,6 +20,7 @@ import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import ThemeToggle from "@/components/ThemeToggle";
 import GoProModal from "@/components/GoProModal";
+import BrandMark from "@/components/brand/BrandMark";
 
 interface ProfileRow {
   is_pro: boolean;
@@ -115,6 +116,7 @@ const AppNav = ({ onNavigate, onOpenAuth, onOpenAccount }: AppNavProps) => {
             className="flex items-center gap-2.5 shrink-0 no-underline"
             style={{ color: "var(--fg)" }}
           >
+            <BrandMark size={34} />
             <span
               style={{
                 fontFamily: "var(--font-display)",

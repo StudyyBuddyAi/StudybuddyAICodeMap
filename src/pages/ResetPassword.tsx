@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Loader2 } from "lucide-react";
 import PageLoader from "@/components/PageLoader";
+import BrandMark from "@/components/brand/BrandMark";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -86,6 +87,7 @@ const ResetPassword = () => {
     return (
       <div className="min-h-screen bg-background px-4">
         <div className="max-w-sm mx-auto mt-24 p-6 rounded-xl bg-card border border-border shadow-sm space-y-4">
+          <BrandMark size={36} />
           <h1 className="text-lg font-semibold tracking-tight">Link invalid or expired</h1>
           <p className="text-sm text-muted-foreground">
             Password reset links expire after 1 hour. Request a new one from the sign in page.
@@ -105,6 +107,7 @@ const ResetPassword = () => {
   return (
     <div className="min-h-screen bg-background px-4">
       <div className="max-w-sm mx-auto mt-24 p-6 rounded-xl bg-card border border-border shadow-sm space-y-4">
+        <BrandMark size={36} />
         <h1 className="text-lg font-semibold tracking-tight">Set a new password</h1>
 
         <form onSubmit={handleSubmit} className="space-y-4">

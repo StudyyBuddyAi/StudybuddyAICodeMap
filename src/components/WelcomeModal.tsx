@@ -5,7 +5,8 @@ import {
   DialogContent,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Sparkles, FileText, Layers, Brain, BookMarked } from "lucide-react";
+import { FileText, Layers, Brain, BookMarked } from "lucide-react";
+import BrandMark from "@/components/brand/BrandMark";
 
 const WelcomeModal = () => {
   const [open, setOpen] = useState(false);
@@ -28,9 +29,7 @@ const WelcomeModal = () => {
         {/* Header */}
         <div className="border-b border-border px-7 pt-7 pb-6 text-center">
           <div className="flex justify-center mb-4">
-            <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-primary">
-              <Sparkles className="h-5 w-5 text-primary-foreground" />
-            </div>
+            <BrandMark size={56} />
           </div>
           <h2 className="text-xl font-semibold text-foreground tracking-tight">
             Welcome to StudyBuddy

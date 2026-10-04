@@ -119,6 +119,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import type { PersonalProps } from "@/components/sheet/personal/personal-context";
 import { useBackdropScene } from "@/components/backdrop/backdrop-scene";
+import { pulseBrandMark } from "@/components/brand/brandmark-motion";
 
 export interface SheetGeneratorPrefill {
   input: string;
@@ -645,6 +646,7 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
         setSheetIncomplete(true);
       }
       setLoading(false);
+      pulseBrandMark();
 
       // Citation lookup — runs after stream completes. Serves from the local
       // topic cache when available (no quota consumed); otherwise the edge
