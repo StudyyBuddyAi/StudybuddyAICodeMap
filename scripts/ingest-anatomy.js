@@ -22,6 +22,8 @@ import { readdir, readFile } from "node:fs/promises";
 import { readFileSync } from "node:fs";
 import { basename, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { JSDOM } from "jsdom";
+import { extractRegions } from "./svg-regions.js";
 
 const BUCKET = "anatomy";
 const EMBEDDING_MODEL = "text-embedding-3-small";
@@ -246,6 +248,8 @@ async function main() {
       const { organ, view, title } = parseName(file);
       const labels = svg ? extractLabels(svg) : [];
       const aspectRatio = svg ? aspectFromViewBox(svg) : null;
+      // Interactive anchors, derived from the drawing's own leader lines.
+      const regions = svg ? extractRegions(svg, JSDOM) : [];
       const storagePath = `${organ}/${file}`;
 
       const bodySystem = systemFor(title, organ);
@@ -257,7 +261,7 @@ async function main() {
         const shape = aspectRatio === null ? "ratio ?" : aspectRatio < 1 ? "tall" : "wide";
         console.log(
           `· ${file}\n    title "${title}" | system ${bodySystem ?? "UNMAPPED"} | view ${view ?? "-"} | ` +
-            `${shape}${aspectRatio ? ` ${aspectRatio.toFixed(3)}` : ""} | ${labels.length} labels` +
+            `${shape} | ${labels.length} labels | ${regions.filter((r) => r.confidence === "leader").length}/${regions.length} anchored` +
             (labels.length ? `\n    ${labels.join(" · ")}` : "")
         );
         ok++;
@@ -276,6 +280,7 @@ async function main() {
           view,
           body_system: bodySystem,
           labels,
+          regions,
           aspect_ratio: aspectRatio,
           storage_path: storagePath,
           embedding: await embed(`${title}. Structures: ${labels.join(", ")}`, openRouterKey),

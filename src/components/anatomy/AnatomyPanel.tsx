@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
-import { callAnatomyExplain, type AnatomyImage } from "@/lib/callAnatomy";
+import { callAnatomyExplain, type AnatomyImage, type AnatomyRegion } from "@/lib/callAnatomy";
 import AnatomyFrame from "./AnatomyFrame";
 
 /**
@@ -197,6 +197,23 @@ export default function AnatomyPanel({
     if (pointers.current.size === 0) panFrom.current = null;
   };
 
+  /**
+   * Hover asks only after a short dwell. Without it, sweeping the pointer
+   * across fifty structures would fire fifty requests; with it, only what the
+   * reader actually pauses on is fetched — and the (diagram, part) cache makes
+   * every repeat free.
+   */
+  const dwellTimer = useRef<number | null>(null);
+  const askRef = useRef<(label: string) => void>(() => {});
+  const cancelDwell = useCallback(() => {
+    if (dwellTimer.current !== null) {
+      clearTimeout(dwellTimer.current);
+      dwellTimer.current = null;
+    }
+  }, []);
+
+  useEffect(() => cancelDwell, [cancelDwell]);
+
   const ask = useCallback(
     async (label: string) => {
       const name = label.trim();
@@ -227,8 +244,24 @@ export default function AnatomyPanel({
     [explain, image.title]
   );
 
+  const dwell = useCallback(
+    (label: string) => {
+      cancelDwell();
+      dwellTimer.current = window.setTimeout(() => askRef.current(label), 350);
+    },
+    [cancelDwell]
+  );
+
+  askRef.current = ask;
+
   const open = status !== "idle";
   const ratio = image.aspectRatio ?? FALLBACK_RATIO;
+
+  // Only leader-anchored regions sit on the drawing. A label-only anchor is out
+  // in the margin, and marking it would point at empty space.
+  const hotspots: AnatomyRegion[] = (image.regions ?? []).filter(
+    (r) => r.confidence === "leader"
+  );
 
   return (
     <AnatomyFrame
@@ -253,16 +286,53 @@ export default function AnatomyPanel({
         }
       >
         {!loaded && <div className="anatomy-skeleton" />}
-        <img
-          src={image.url}
-          alt={image.title}
-          data-loaded={loaded ? "true" : "false"}
-          onLoad={() => setLoaded(true)}
-          style={{
-            transform: `translate(${view.x}px, ${view.y}px) scale(${view.s})`,
-            transition: panFrom.current || pinchFrom.current ? "none" : undefined,
-          }}
-        />
+        {/* Image and hotspots share one transformed stage, so the markers stay
+            glued to their structures through zoom and pan. */}
+        <div
+          className="anatomy-stage"
+          style={
+            {
+              transform: `translate(${view.x}px, ${view.y}px) scale(${view.s})`,
+              transition: panFrom.current || pinchFrom.current ? "none" : undefined,
+              // Markers divide by this so they keep their size as the drawing
+              // grows — a 4x zoom would otherwise turn them into blobs.
+              "--anatomy-zoom": view.s,
+            } as CSSProperties
+          }
+        >
+          <img
+            src={image.url}
+            alt={image.title}
+            data-loaded={loaded ? "true" : "false"}
+            onLoad={() => setLoaded(true)}
+          />
+          {loaded &&
+            hotspots.map((region) => {
+              const active = part === region.label;
+              return (
+                <button
+                  key={region.label}
+                  type="button"
+                  className="anatomy-hotspot"
+                  data-active={active ? "true" : undefined}
+                  aria-pressed={active}
+                  aria-label={region.label}
+                  style={{ left: `${region.x * 100}%`, top: `${region.y * 100}%` }}
+                  onPointerEnter={() => dwell(region.label)}
+                  onPointerLeave={cancelDwell}
+                  onFocus={() => dwell(region.label)}
+                  onBlur={cancelDwell}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    ask(region.label);
+                  }}
+                >
+                  <span className="anatomy-hotspot-ring" />
+                  <span className="anatomy-hotspot-name">{region.label}</span>
+                </button>
+              );
+            })}
+        </div>
       </div>
 
       {/* Zoom controls exist because pinch and Ctrl+wheel are unreachable by keyboard. */}
@@ -290,7 +360,10 @@ export default function AnatomyPanel({
         )}
       </div>
 
-      {image.labels.length > 0 ? (
+      {/* Markers replace the chip row when the drawing carries them: the same
+          structure as both a dot and a chip is two controls with one name,
+          which is duplication for a mouse and ambiguity for a screen reader. */}
+      {hotspots.length > 0 ? null : image.labels.length > 0 ? (
         <div className="anatomy-chips">
           {image.labels.map((label, i) => {
             const active = part === label;

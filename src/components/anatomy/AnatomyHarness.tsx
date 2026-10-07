@@ -1,11 +1,13 @@
 import AnatomyPanel from "@/components/anatomy/AnatomyPanel";
 import AnatomySection from "@/components/anatomy/AnatomySection";
+import AnatomyLocalPreview from "@/components/anatomy/AnatomyLocalPreview";
 import type { AnatomyImage } from "@/lib/callAnatomy";
 
 /**
  * Development harness for the anatomy feature, mounted by /sheets?anatomy=…
  * only in a dev build (see src/pages/Sheets.tsx).
  *
+ * - `local`: a local SVG run through the region extractor, before ingest.
  * - `placeholder`: one hardcoded image, so the interaction, the tall-image
  *   layout and zoom can be exercised with no database, storage or matching.
  *   The artwork is a crude placeholder, labelled as such inside the SVG — a
@@ -31,6 +33,7 @@ const NEPHRON_HARNESS: AnatomyImage = {
 };
 
 export default function AnatomyHarness({ mode, topic }: { mode: string; topic: string }) {
+  if (mode === "local") return <AnatomyLocalPreview />;
   if (mode === "placeholder") return <AnatomyPanel image={NEPHRON_HARNESS} />;
   return <AnatomySection key={topic} topic={topic} />;
 }
