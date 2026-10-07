@@ -13,6 +13,7 @@ import DashboardLayout from "@/components/dashboard/DashboardLayout";
 import SheetGenerator from "@/components/SheetGenerator";
 import AnatomyPanel from "@/components/anatomy/AnatomyPanel";
 import AnatomySection from "@/components/anatomy/AnatomySection";
+import AnatomyLocalPreview from "@/components/anatomy/AnatomyLocalPreview";
 import type { AnatomyImage } from "@/lib/callAnatomy";
 import "@/index.css";
 // Steps shown above the generator so a first-time visitor immediately
@@ -196,7 +197,9 @@ const Sheets = () => {
           </span>
         </div>
  
-        {anatomyParam === "placeholder" ? (
+        {anatomyParam === "local" ? (
+          <AnatomyLocalPreview />
+        ) : anatomyParam === "placeholder" ? (
           <AnatomyPanel image={NEPHRON_HARNESS} />
         ) : anatomyParam === "1" ? (
           <AnatomySection key={anatomyTopic} topic={anatomyTopic} />

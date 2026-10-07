@@ -10,10 +10,26 @@ import { supabase } from "@/integrations/supabase/client";
 
 const BASE = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1`;
 
+/**
+ * One tappable structure on an illustration, extracted at ingest by following
+ * the drawing's own leader lines. Coordinates are 0-1 of the viewBox, so they
+ * hold at any rendered size.
+ */
+export interface AnatomyRegion {
+  label: string;
+  x: number;
+  y: number;
+  labelX: number;
+  labelY: number;
+  /** Only "leader" anchors sit on the structure; "label" ones sit in the margin. */
+  confidence: "leader" | "label";
+}
+
 export interface AnatomyImage {
   id: string;
   title: string;
   labels: string[];
+  regions?: AnatomyRegion[];
   url: string;
   /** width / height, captured at ingest. Null for rasters — caller falls back. */
   aspectRatio?: number | null;

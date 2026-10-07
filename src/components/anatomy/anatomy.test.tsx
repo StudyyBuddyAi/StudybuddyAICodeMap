@@ -27,7 +27,9 @@ function deferred<T>() {
 }
 
 const scaleOf = (container: HTMLElement) => {
-  const transform = container.querySelector("img")!.style.transform;
+  // Zoom lives on the stage, which carries the image and its markers together
+  // so a marker cannot drift off its structure.
+  const transform = (container.querySelector(".anatomy-stage") as HTMLElement).style.transform;
   return Number(/scale\(([\d.]+)\)/.exec(transform)?.[1] ?? "1");
 };
 
@@ -170,7 +172,8 @@ describe("AnatomyPanel — zoom", () => {
   it("produces no NaN coordinates without layout, as in jsdom", () => {
     const { container } = render(<AnatomyPanel image={IMAGE} explain={explainOk()} />);
     fireEvent.click(screen.getByRole("button", { name: "Zoom in" }));
-    expect(container.querySelector("img")!.style.transform).not.toContain("NaN");
+    expect((container.querySelector(".anatomy-stage") as HTMLElement).style.transform)
+      .not.toContain("NaN");
   });
 });
 
@@ -316,5 +319,125 @@ describe("AnatomyBoundary", () => {
     expect(screen.getByText("sheet content")).toBeInTheDocument();
     expect(container.textContent).toBe("sheet content");
     spy.mockRestore();
+  });
+});
+
+describe("AnatomyPanel — interactive structures on the drawing", () => {
+  const WITH_REGIONS: AnatomyImage = {
+    ...IMAGE,
+    regions: [
+      { label: "Left ventricle", x: 0.5, y: 0.6, labelX: 0.1, labelY: 0.6, confidence: "leader" },
+      { label: "Aorta", x: 0.45, y: 0.2, labelX: 0.1, labelY: 0.2, confidence: "leader" },
+      // No leader was found for this one, so it sits out in the margin.
+      { label: "Diaphragm", x: 0.08, y: 0.9, labelX: 0.08, labelY: 0.9, confidence: "label" },
+    ],
+  };
+
+  const ready = (container: HTMLElement) => {
+    // jsdom never loads the src, so the load event has to be fired by hand.
+    fireEvent.load(container.querySelector("img")!);
+  };
+
+  it("places a marker on each structure the leader lines found", () => {
+    const { container } = render(<AnatomyPanel image={WITH_REGIONS} explain={explainOk()} />);
+    ready(container);
+    expect(container.querySelectorAll(".anatomy-hotspot")).toHaveLength(2);
+    expect(screen.getByRole("button", { name: "Left ventricle" })).toBeInTheDocument();
+  });
+
+  it("never marks a structure it only found a label for", () => {
+    // Its anchor is the label's own position out in the margin; drawing it
+    // there would point at empty space and imply the organ is there.
+    const { container } = render(<AnatomyPanel image={WITH_REGIONS} explain={explainOk()} />);
+    ready(container);
+    expect(screen.queryByRole("button", { name: "Diaphragm" })).not.toBeInTheDocument();
+  });
+
+  it("positions each marker by its normalised coordinates", () => {
+    const { container } = render(<AnatomyPanel image={WITH_REGIONS} explain={explainOk()} />);
+    ready(container);
+    const marker = screen.getByRole("button", { name: "Left ventricle" });
+    expect(marker.style.left).toBe("50%");
+    expect(marker.style.top).toBe("60%");
+  });
+
+  it("explains the structure when a marker is clicked", async () => {
+    const explain = explainOk("Thick-walled pumping chamber.");
+    const { container } = render(<AnatomyPanel image={WITH_REGIONS} explain={explain} />);
+    ready(container);
+
+    fireEvent.click(screen.getByRole("button", { name: "Aorta" }));
+    await waitFor(() => expect(screen.getByText("Thick-walled pumping chamber.")).toBeInTheDocument());
+    expect(explain.mock.calls[0][0].part).toBe("Aorta");
+  });
+
+  it("marks the selected structure pressed, for the pulse and for screen readers", async () => {
+    const { container } = render(<AnatomyPanel image={WITH_REGIONS} explain={explainOk()} />);
+    ready(container);
+    fireEvent.click(screen.getByRole("button", { name: "Aorta" }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Aorta" })).toHaveAttribute("aria-pressed", "true")
+    );
+  });
+
+  it("asks only after the pointer rests, not on every marker it crosses", () => {
+    vi.useFakeTimers();
+    try {
+      const explain = explainOk();
+      const { container } = render(<AnatomyPanel image={WITH_REGIONS} explain={explain} />);
+      ready(container);
+
+      const marker = screen.getByRole("button", { name: "Aorta" });
+      fireEvent.pointerEnter(marker);
+      // Sweeping across fifty structures must not fire fifty requests.
+      expect(explain).not.toHaveBeenCalled();
+
+      act(() => void vi.advanceTimersByTime(400));
+      expect(explain).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("cancels the request if the pointer leaves before it rests", () => {
+    vi.useFakeTimers();
+    try {
+      const explain = explainOk();
+      const { container } = render(<AnatomyPanel image={WITH_REGIONS} explain={explain} />);
+      ready(container);
+
+      const marker = screen.getByRole("button", { name: "Aorta" });
+      fireEvent.pointerEnter(marker);
+      act(() => void vi.advanceTimersByTime(200));
+      fireEvent.pointerLeave(marker);
+      act(() => void vi.advanceTimersByTime(400));
+
+      expect(explain).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("reaches the same structures from the keyboard", () => {
+    vi.useFakeTimers();
+    try {
+      const explain = explainOk();
+      const { container } = render(<AnatomyPanel image={WITH_REGIONS} explain={explain} />);
+      ready(container);
+
+      const marker = screen.getByRole("button", { name: "Aorta" });
+      expect(marker.tagName).toBe("BUTTON");
+      fireEvent.focus(marker);
+      act(() => void vi.advanceTimersByTime(400));
+      expect(explain).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("shows no markers for an illustration with no extractable regions", () => {
+    const { container } = render(<AnatomyPanel image={IMAGE} explain={explainOk()} />);
+    ready(container);
+    expect(container.querySelectorAll(".anatomy-hotspot")).toHaveLength(0);
   });
 });
