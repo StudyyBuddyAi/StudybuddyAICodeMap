@@ -80,7 +80,7 @@ const SheetFinish = ({ topic, deck, onPractice, onExport, onShare, onNewSheet }:
     <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-border pt-4">
       <button type="button" onClick={onExport} className={LINK_CLASS}>
         <FileDown className="h-3.5 w-3.5" />
-        Export PDF
+        Export PDF or Word
       </button>
       <button type="button" onClick={onShare} className={LINK_CLASS}>
         <Share2 className="h-3.5 w-3.5" />

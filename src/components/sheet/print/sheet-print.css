@@ -1,0 +1,353 @@
+/* ─── The exported sheet ──────────────────────────────────────────────────
+   One stylesheet for the dialog's preview and for paper. It carries its own
+   palette rather than the app's tokens: paper is white whatever theme the
+   student reads in, and ink-saver swaps every fill for a line. */
+
+.sbp {
+  --sbp-ink: #14181f;
+  --sbp-soft: #4a5260;
+  --sbp-faint: #7a828e;
+  --sbp-rule: #d9dde3;
+  --sbp-accent: #0b6e69;
+  --sbp-accent-soft: #e3f2f0;
+  --sbp-panel: #f6f4ef;
+  --sbp-key: #c8ece7;
+  --sbp-confusing: #fbe3c2;
+  --sbp-memorize: #e6dcfa;
+  --sbp-size: 10.5pt;
+  --sbp-serif: "Newsreader", "Fraunces", "Source Serif Pro", Georgia, serif;
+  --sbp-sans: "Inter Tight", "DM Sans", "Helvetica Neue", Arial, sans-serif;
+  --sbp-mono: "JetBrains Mono", "IBM Plex Mono", ui-monospace, monospace;
+
+  color: var(--sbp-ink);
+  background: #fff;
+  font-family: var(--sbp-serif);
+  font-size: var(--sbp-size);
+  line-height: 1.5;
+  text-align: start;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+  font-variant-numeric: tabular-nums;
+  hyphens: auto;
+  orphans: 3;
+  widows: 3;
+}
+.sbp[data-size="small"] { --sbp-size: 9.5pt; }
+.sbp[data-size="large"] { --sbp-size: 12pt; }
+.sbp[data-ink="saver"] {
+  --sbp-accent: #14181f;
+  --sbp-accent-soft: transparent;
+  --sbp-panel: transparent;
+}
+.sbp *, .sbp *::before, .sbp *::after { box-sizing: border-box; }
+.sbp p { margin: 0; }
+
+/* ─── Title block and cover ─── */
+.sbp-eyebrow {
+  font: 600 7.5pt/1 var(--sbp-mono);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--sbp-accent);
+}
+.sbp-title {
+  margin: 6pt 0 0;
+  font: 500 2.5em/1.08 var(--sbp-serif);
+  letter-spacing: -0.015em;
+}
+.sbp-title-emoji { margin-inline-end: 0.25em; }
+.sbp-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4pt 14pt;
+  margin-top: 10pt;
+  font: 500 8pt/1.3 var(--sbp-sans);
+  color: var(--sbp-soft);
+}
+.sbp-meta dt {
+  font: 600 6.5pt/1 var(--sbp-mono);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--sbp-faint);
+  margin-bottom: 2pt;
+}
+.sbp-meta dd { margin: 0; }
+.sbp-head {
+  padding-bottom: 12pt;
+  margin-bottom: 16pt;
+  border-bottom: 1.5pt solid var(--sbp-ink);
+}
+.sbp-cover {
+  display: flex;
+  flex-direction: column;
+  min-height: 250mm;
+  break-after: page;
+}
+.sbp[data-paper="Letter"] .sbp-cover { min-height: 232mm; }
+.sbp-cover .sbp-title { font-size: 3.6em; margin-top: 40mm; }
+.sbp-cover .sbp-head { border-bottom-width: 2pt; }
+.sbp-cover-foot { margin-top: auto; }
+
+.sbp-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4pt;
+  padding: 1.5pt 6pt;
+  border: 0.75pt solid currentColor;
+  border-radius: 99pt;
+  font: 600 7pt/1.3 var(--sbp-sans);
+}
+.sbp-badge[data-level="full"] { color: var(--sbp-accent); }
+.sbp-badge[data-level="partial"] { color: #8a5a00; }
+.sbp-badge[data-level="none"] { color: var(--sbp-soft); }
+
+/* ─── Contents ─── */
+.sbp-toc { margin-top: 14pt; }
+.sbp-toc ol { list-style: none; margin: 6pt 0 0; padding: 0; }
+.sbp-toc li {
+  display: flex;
+  align-items: baseline;
+  gap: 8pt;
+  padding: 3.5pt 0;
+  border-bottom: 0.5pt dotted var(--sbp-rule);
+  font-size: 1.05em;
+}
+.sbp-toc-n { font: 500 8pt var(--sbp-mono); color: var(--sbp-accent); min-width: 16pt; }
+
+/* ─── Sections ─── */
+.sbp-body[data-layout="revision"] {
+  column-count: 2;
+  column-gap: 9mm;
+  column-rule: 0.5pt solid var(--sbp-rule);
+}
+.sbp-section { margin-bottom: 14pt; }
+.sbp-body[data-layout="study"] .sbp-section[data-kind="table"] { break-inside: avoid-page; }
+.sbp-body[data-layout="revision"] .sbp-section { margin-bottom: 10pt; }
+.sbp-body[data-layout="revision"] .sbp-section[data-kind="table"] { column-span: all; }
+
+.sbp-h2 {
+  display: flex;
+  align-items: baseline;
+  gap: 8pt;
+  margin: 0 0 6pt;
+  padding-bottom: 3pt;
+  border-bottom: 0.75pt solid var(--sbp-rule);
+  font: 600 1.25em/1.2 var(--sbp-serif);
+  letter-spacing: -0.005em;
+  break-after: avoid;
+}
+.sbp-h2-n { font: 500 8pt var(--sbp-mono); color: var(--sbp-accent); }
+
+/* Cornell-style: a ruled cue column beside the section, for writing on. */
+.sbp-section[data-margin="on"] {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 44mm;
+  column-gap: 6mm;
+}
+.sbp-section[data-margin="on"] > .sbp-h2 { grid-column: 1 / -1; }
+.sbp-cues {
+  border-inline-start: 0.75pt solid var(--sbp-rule);
+  background-image: repeating-linear-gradient(
+    to bottom,
+    transparent 0,
+    transparent calc(1.5em * 1.25 - 0.5pt),
+    var(--sbp-rule) calc(1.5em * 1.25 - 0.5pt),
+    var(--sbp-rule) calc(1.5em * 1.25)
+  );
+  min-height: 24mm;
+}
+.sbp-cues-label {
+  display: block;
+  padding-inline-start: 4pt;
+  font: 600 6.5pt/1.5 var(--sbp-mono);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--sbp-faint);
+  background: #fff;
+}
+
+/* Prose: each labelled line sets its label in a narrow column of its own. */
+.sbp-prose { display: grid; gap: 4pt; }
+.sbp-line { break-inside: avoid; }
+.sbp-line[data-label] {
+  display: grid;
+  grid-template-columns: 26mm minmax(0, 1fr);
+  column-gap: 4mm;
+}
+.sbp-label {
+  font: 600 7.5pt/1.9 var(--sbp-sans);
+  letter-spacing: 0.02em;
+  color: var(--sbp-accent);
+}
+.sbp-body[data-layout="revision"] .sbp-line[data-label] { grid-template-columns: 19mm minmax(0, 1fr); }
+
+.sbp-list { margin: 0; padding: 0; list-style: none; counter-reset: sbp-item; }
+.sbp-list > li {
+  position: relative;
+  padding-inline-start: 18pt;
+  margin-bottom: 3pt;
+  break-inside: avoid;
+  counter-increment: sbp-item;
+}
+.sbp-list > li::before {
+  content: counter(sbp-item, decimal-leading-zero);
+  position: absolute;
+  inset-inline-start: 0;
+  top: 0.2em;
+  font: 500 7.5pt var(--sbp-mono);
+  color: var(--sbp-accent);
+}
+
+.sbp-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.92em;
+  line-height: 1.4;
+}
+.sbp-table thead { display: table-header-group; } /* repeats on every page */
+.sbp-table th {
+  padding: 4pt 6pt;
+  text-align: start;
+  font: 600 7.5pt/1.3 var(--sbp-sans);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--sbp-soft);
+  border-bottom: 1pt solid var(--sbp-ink);
+}
+.sbp-table td {
+  padding: 4pt 6pt;
+  vertical-align: top;
+  border-bottom: 0.5pt solid var(--sbp-rule);
+}
+.sbp-table tr { break-inside: avoid; }
+.sbp-table td:first-child { font-weight: 600; }
+.sbp-table tbody tr:nth-child(even) td { background: var(--sbp-panel); }
+
+/* ─── The student's own layer ─── */
+.sbp strong { font-weight: 650; }
+.sbp mark { color: inherit; padding: 0 1pt; border-radius: 1.5pt; }
+.sbp mark[data-intent="key"] { background: var(--sbp-key); }
+.sbp mark[data-intent="confusing"] { background: var(--sbp-confusing); }
+.sbp mark[data-intent="memorize"] { background: var(--sbp-memorize); }
+.sbp[data-ink="saver"] mark { background: none; text-decoration-thickness: 1pt; text-underline-offset: 2pt; }
+.sbp[data-ink="saver"] mark[data-intent="key"] { text-decoration-line: underline; }
+.sbp[data-ink="saver"] mark[data-intent="confusing"] { text-decoration-line: underline; text-decoration-style: wavy; }
+.sbp[data-ink="saver"] mark[data-intent="memorize"] { text-decoration-line: underline; text-decoration-style: double; }
+
+.sbp [data-mine] { box-shadow: inset 1.5pt 0 0 var(--sbp-accent); padding-inline-start: 5pt; }
+[dir="rtl"] .sbp [data-mine] { box-shadow: inset -1.5pt 0 0 var(--sbp-accent); }
+.sbp-note {
+  margin: 2pt 0 4pt;
+  padding: 3pt 6pt;
+  border-inline-start: 1.5pt solid var(--sbp-faint);
+  background: var(--sbp-panel);
+  font: italic 0.88em/1.45 var(--sbp-serif);
+  color: var(--sbp-soft);
+  break-inside: avoid;
+}
+.sbp-note b {
+  font: 600 6.5pt var(--sbp-mono);
+  font-style: normal;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  margin-inline-end: 4pt;
+}
+.sbp-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4pt 12pt;
+  margin-top: 8pt;
+  font: 500 7pt var(--sbp-sans);
+  color: var(--sbp-soft);
+}
+.sbp-legend mark { font: inherit; }
+
+.sbp-dives { margin-top: 6pt; padding-top: 4pt; border-top: 0.5pt dashed var(--sbp-rule); font-size: 0.92em; }
+.sbp-dive { margin-top: 5pt; break-inside: avoid; }
+.sbp-dive-title { font: 600 8.5pt/1.3 var(--sbp-sans); }
+.sbp-dive-type {
+  margin-inline-start: 6pt;
+  font: 600 6.5pt var(--sbp-mono);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--sbp-faint);
+}
+.sbp-dive button { display: none !important; }
+
+/* ─── Flashcards ─── */
+.sbp-part { break-before: page; }
+.sbp-part-title {
+  margin: 0 0 4pt;
+  font: 500 1.8em/1.15 var(--sbp-serif);
+}
+.sbp-part-lede { margin-bottom: 10pt; color: var(--sbp-soft); font-size: 0.95em; }
+.sbp-cards { width: 100%; border-collapse: collapse; }
+.sbp-cards td { padding: 5pt 6pt; vertical-align: top; border-bottom: 0.5pt solid var(--sbp-rule); }
+.sbp-cards tr { break-inside: avoid; }
+.sbp-cards td:first-child { width: 22pt; font: 500 7.5pt/1.9 var(--sbp-mono); color: var(--sbp-accent); }
+.sbp-cards td:last-child { width: 40%; color: var(--sbp-soft); }
+.sbp-tag {
+  display: inline-block;
+  margin-inline-end: 5pt;
+  padding: 0.5pt 4pt;
+  border: 0.5pt solid var(--sbp-rule);
+  border-radius: 2pt;
+  font: 600 6pt/1.4 var(--sbp-mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--sbp-soft);
+  vertical-align: 1pt;
+}
+.sbp-quiz { margin: 0; padding: 0; list-style: none; }
+.sbp-quiz li { display: grid; grid-template-columns: 22pt minmax(0, 1fr); margin-bottom: 8pt; break-inside: avoid; }
+.sbp-quiz-n { font: 500 7.5pt/1.9 var(--sbp-mono); color: var(--sbp-accent); }
+.sbp-write {
+  height: 2.6em;
+  margin-top: 3pt;
+  background-image: repeating-linear-gradient(to bottom, transparent 0, transparent 1.25em, var(--sbp-rule) 1.25em, var(--sbp-rule) calc(1.25em + 0.5pt));
+}
+.sbp-key { column-count: 2; column-gap: 8mm; margin: 0; padding: 0; list-style: none; font-size: 0.92em; }
+.sbp-key li { margin-bottom: 4pt; break-inside: avoid; }
+
+/* ─── References and close ─── */
+.sbp-refs { margin: 0; padding: 0; list-style: none; }
+.sbp-refs > li { display: grid; grid-template-columns: 22pt minmax(0, 1fr); margin-bottom: 7pt; break-inside: avoid; }
+.sbp-ref-n { font: 500 7.5pt/1.9 var(--sbp-mono); color: var(--sbp-accent); }
+.sbp-ref-title { font-weight: 600; }
+.sbp-ref-ch { color: var(--sbp-soft); font-size: 0.92em; }
+.sbp-ref-url { font: 7pt var(--sbp-mono); color: var(--sbp-faint); word-break: break-all; }
+.sbp-excerpt {
+  margin: 3pt 0 0;
+  padding-inline-start: 8pt;
+  border-inline-start: 1pt solid var(--sbp-rule);
+  font-size: 0.85em;
+  color: var(--sbp-soft);
+}
+.sbp-refs-part { margin-top: 18pt; }
+.sbp-refnote { margin-bottom: 8pt; color: var(--sbp-soft); font-size: 0.92em; }
+.sbp-end {
+  margin-top: 18pt;
+  padding-top: 6pt;
+  border-top: 0.5pt solid var(--sbp-rule);
+  font: 7pt/1.5 var(--sbp-sans);
+  color: var(--sbp-faint);
+  break-inside: avoid;
+}
+
+/* ─── Screen: the preview is a sheet of paper ─── */
+@media screen {
+  .sbp-paper {
+    width: 210mm;
+    padding: 18mm 16mm;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08), 0 12px 32px rgba(15, 23, 42, 0.12);
+  }
+  .sbp-paper[data-paper="Letter"] { width: 8.5in; padding: 0.7in 0.65in; }
+  #sb-print-root { display: none; }
+}
+
+/* ─── Print: only the export reaches paper ─── */
+@media print {
+  html.sb-exporting body > *:not(#sb-print-root) { display: none !important; }
+  html.sb-exporting #sb-print-root,
+  html.sb-exporting #sb-print-root * { visibility: visible !important; }
+  html.sb-exporting body { background: #fff !important; }
+}
