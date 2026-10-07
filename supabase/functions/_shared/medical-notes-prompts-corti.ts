@@ -99,11 +99,11 @@ export function buildCortiNotesPrompts(input: NotesPromptInput): { systemPrompt:
     systemPrompt = systemPrompt
       .replace(
         /- Fill every field of the JSON output below from standard medical knowledge even where this Context\n {2}is silent\. Never leave a field empty, never truncate the sheet, and never refuse to answer — report\n {2}any gap honestly in "sourceCoverage" instead \(see the OUTPUT section below\)\./,
-        "- Where the Context is silent, still write the full deck from standard medical knowledge and tag those cards [General]. Never refuse."
+        "- Where the Context is silent, still write the full deck from standard medical knowledge and tag those cards [General]. Never refuse a real medical topic."
       )
       .replace(
         /Answer from general medical knowledge, and\nstill fill every field of the JSON output below completely — never leave a field empty, never truncate\nthe sheet, and never refuse to answer\./,
-        "Write the full deck from general medical knowledge and tag every card [General]. Never refuse."
+        "Write the full deck from general medical knowledge and tag every card [General]. Never refuse a real medical topic."
       );
     const at = systemPrompt.indexOf(CARDS_FORMAT_MARKER);
     if (at !== -1) {

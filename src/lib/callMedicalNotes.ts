@@ -25,6 +25,8 @@ export interface MedicalNotesParams {
   cardsOnly?: boolean;
   cardCount?: number;
   focusCard?: unknown;
+  /** cardsOnly: "mechanism" | "management" | "pharm"; anything else is a general deck. */
+  cardFocus?: string;
   explainMode?: boolean;
   enhanceMode?: string;
   itemText?: string;
