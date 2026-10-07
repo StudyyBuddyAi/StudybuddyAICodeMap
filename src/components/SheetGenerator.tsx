@@ -1,4 +1,4 @@
-import { useState, useEffect, useLayoutEffect, useRef } from "react";
+import { useState, useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import { AnimatePresence, LazyMotion, MotionConfig, domAnimation, m } from "motion/react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
@@ -34,6 +34,7 @@ import SheetSettings from "@/components/sheet/SheetSettings";
 import SheetTopicBar from "@/components/sheet/SheetTopicBar";
 import SheetPreparation from "@/components/sheet/SheetPreparation";
 import SheetFinish, { type SheetDeck } from "@/components/sheet/SheetFinish";
+import { ExportPdfDialog } from "@/components/sheet/print/ExportPdfDialog";
 import { TrackedSectionRail, TrackedSectionsMenu } from "@/components/sheet/SheetSections";
 import { BranchesButton, BranchesMenuItem, PanelAwareLayout } from "@/components/sheet/branches/BranchesChrome";
 import {
@@ -858,6 +859,20 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
   const entitled = pro || sheet?.premium === true;
   const sheetTopic = sheet?.topic?.trim() || firstLine(activeSettings.notes) || "this topic";
 
+  // Export PDF: the composed export for a structured sheet; a legacy text
+  // sheet, which has no structure to compose, still prints as it reads.
+  const [exportOpen, setExportOpen] = useState(false);
+  const exportPdf = () => (sheet && !legacyOutput ? setExportOpen(true) : window.print());
+  const exportContext = useMemo(
+    () => ({
+      topic: activeSettings.notes,
+      examMode: activeSettings.examMode,
+      difficulty: activeSettings.difficulty,
+      depth: activeSettings.depth,
+    }),
+    [activeSettings.notes, activeSettings.examMode, activeSettings.difficulty, activeSettings.depth]
+  );
+
   // The sheet saves itself on the first personal touch — a layer needs a row
   // to belong to — and only once, however fast the touches come.
   const savingRef = useRef<Promise<string> | null>(null);
@@ -1330,9 +1345,9 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
             Practice QBank
           </DropdownMenuItem>
           <DropdownMenuSeparator />
-          <DropdownMenuItem onSelect={() => window.print()} disabled={loading}>
+          <DropdownMenuItem onSelect={exportPdf} disabled={loading}>
             <FileDown className="mr-2 h-4 w-4" />
-            Export PDF
+            Export PDF or Word
           </DropdownMenuItem>
           <DropdownMenuItem onSelect={handleShare} disabled={loading}>
             <Share2 className="mr-2 h-4 w-4" />
@@ -1472,7 +1487,7 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
                 topic={sheet?.topic?.trim() || firstLine(activeSettings.notes) || "this sheet"}
                 deck={deck}
                 onPractice={() => practiceInQBank()}
-                onExport={() => window.print()}
+                onExport={exportPdf}
                 onShare={handleShare}
                 onNewSheet={newSheet}
               />
@@ -1528,6 +1543,15 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
 
         <AuthModal open={authModalOpen} onOpenChange={setAuthModalOpen} />
         <GoProModal open={goProOpen} onOpenChange={setGoProOpen} />
+        {sheet && !legacyOutput && (
+          <ExportPdfDialog
+            open={exportOpen}
+            onOpenChange={setExportOpen}
+            sheet={sheet}
+            layer={layerState.layer}
+            context={exportContext}
+          />
+        )}
         <AlertDialog open={!!pendingRewrite} onOpenChange={(open) => !open && setPendingRewrite(null)}>
           <AlertDialogContent>
             <AlertDialogHeader>
