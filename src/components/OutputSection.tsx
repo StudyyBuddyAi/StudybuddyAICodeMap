@@ -434,7 +434,7 @@ const SECTION_ICONS: Record<string, LucideIcon> = {
  * While "off" no request is made and the sheet is unchanged; flipping to
  * "auto" is the whole switch.
  */
-const ANATOMY_MODE = "auto" as "off" | "auto";
+const ANATOMY_MODE = "off" as "off" | "auto";
 
 const FALLBACK_SECTION_ICON = List;
 
