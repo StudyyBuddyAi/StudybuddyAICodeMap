@@ -1,7 +1,15 @@
-import { useLocation } from "react-router-dom";
+import { lazy, Suspense } from "react";
+import { useLocation, useSearchParams } from "react-router-dom";
 import DashboardLayout from "@/components/dashboard/DashboardLayout";
 import SheetGenerator, { type SheetGeneratorPrefill } from "@/components/SheetGenerator";
 import "@/index.css";
+
+// ── Development only: the anatomy harness (plan Part II) ─────────────────────
+// /sheets?anatomy=1&topic=… exercises real matching against the ingested
+// library; ?anatomy=placeholder is the offline layout fixture, which needs no
+// deployed function and no database. Gated on import.meta.env.DEV and loaded
+// lazily, so a production build carries neither the route nor its code.
+const AnatomyHarness = import.meta.env.DEV ? lazy(() => import("@/components/anatomy/AnatomyHarness")) : null;
 
 /**
  * The Sheets page is the generator: it has its own compose and reading views,
@@ -18,6 +26,19 @@ const Sheets = () => {
   const state = location.state as { topic?: string; saved?: SheetGeneratorPrefill } | null;
   const topic = state?.topic;
   const saved = state?.saved?.id ? state.saved : null;
+
+  const [searchParams] = useSearchParams();
+  const anatomy = searchParams.get("anatomy");
+
+  if (AnatomyHarness && anatomy) {
+    return (
+      <DashboardLayout>
+        <Suspense fallback={null}>
+          <AnatomyHarness mode={anatomy} topic={searchParams.get("topic") ?? "Digestive system"} />
+        </Suspense>
+      </DashboardLayout>
+    );
+  }
 
   return (
     <DashboardLayout>

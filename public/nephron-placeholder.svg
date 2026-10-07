@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 900" width="400" height="900" role="img">
+  <title>Nephron schematic — PLACEHOLDER</title>
+
+  <!-- TEMPORARY TEST FIXTURE. Drawn by an AI, deliberately crude, and not
+       anatomically reliable. It exists only to exercise the tall-image layout,
+       the label chips and zoom. Delete with the ?anatomy=1 harness. -->
+
+  <rect x="0" y="0" width="400" height="900" fill="none"/>
+
+  <g fill="none" stroke="#0D9488" stroke-width="7" stroke-linecap="round" stroke-linejoin="round">
+    <!-- glomerular tuft -->
+    <path d="M96 96c-14-10-30-2-28 13 2 14 20 10 26 20 6 10 24 8 28-4 4-13-12-20-26-29z"/>
+    <!-- Bowman's capsule -->
+    <path d="M132 70a46 46 0 1 0 0 74" stroke-width="5"/>
+    <!-- proximal convoluted tubule -->
+    <path d="M132 130c34 6 12 42 44 44s14 40 44 42"/>
+    <!-- descending + ascending limb (the long loop) -->
+    <path d="M220 216v300a52 52 0 0 0 104 0V300"/>
+    <!-- distal convoluted tubule -->
+    <path d="M324 300c-30-4-8-40-40-44"/>
+    <!-- collecting duct -->
+    <path d="M284 256h44v560" stroke-width="9"/>
+  </g>
+
+  <g font-family="system-ui, sans-serif" font-size="19" fill="#64748B">
+    <text x="16" y="52">Glomerulus</text>
+    <text x="150" y="112">Bowman's capsule</text>
+    <text x="16" y="212">Proximal convoluted tubule</text>
+    <text x="16" y="470">Loop of Henle</text>
+    <text x="150" y="286">Distal convoluted tubule</text>
+    <text x="150" y="860">Collecting duct</text>
+  </g>
+
+  <text x="200" y="890" text-anchor="middle" font-family="system-ui, sans-serif"
+        font-size="15" fill="#B45309">PLACEHOLDER — not for study</text>
+</svg>

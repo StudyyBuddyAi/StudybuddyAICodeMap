@@ -30,6 +30,7 @@ import {
 import CopyButton from "@/components/CopyButton";
 import { Button } from "@/components/ui/button";
 import FlashcardsSection from "@/components/FlashcardsSection";
+import AnatomySection from "@/components/anatomy/AnatomySection";
 import SaveButton from "@/components/SaveButton";
 import SectionSkeleton from "@/components/SectionSkeleton";
 import CitationBadgeList from "@/components/CitationBadgeList";
@@ -426,6 +427,14 @@ const SECTION_ICONS: Record<string, LucideIcon> = {
   data: BarChart3,
   compare: Columns2,
 };
+
+/**
+ * Anatomy illustrations, off until anatomy-match and anatomy-explain are
+ * deployed and the image library covers enough systems to be worth showing.
+ * While "off" no request is made and the sheet is unchanged; flipping to
+ * "auto" is the whole switch.
+ */
+const ANATOMY_MODE = "off" as "off" | "auto";
 
 const FALLBACK_SECTION_ICON = List;
 
@@ -2558,6 +2567,13 @@ const OutputSectionBody = ({
       {/* Fallback: selections that couldn't be anchored to a specific line */}
       {enhancementsByAnchor["end"]?.length ? (
         <div className="space-y-1">{renderInline("end")}</div>
+      ) : null}
+
+      {/* Anatomy sits after the generated sections, held back until the stream
+          ends so it never competes with it. It matches on its own and renders
+          nothing when no illustration fits the topic, which is most topics. */}
+      {ANATOMY_MODE === "auto" && !isStreaming && inputText?.trim() ? (
+        <AnatomySection topic={inputText} />
       ) : null}
 
       {/* The last line of the document, under its Sources. */}
