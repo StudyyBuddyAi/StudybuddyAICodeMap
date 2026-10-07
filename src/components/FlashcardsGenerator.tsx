@@ -1,23 +1,6 @@
-import { useState, useEffect, useRef } from "react";
-import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
-import {
-  Activity,
-  ArrowRight,
-  Brain,
-  BrainCircuit,
-  Check,
-  ChevronDown,
-  ChevronRight,
-  ChevronUp,
-  HeartPulse,
-  History,
-  Loader2,
-  Search,
-  Sparkles,
-  Stethoscope,
-  X,
-} from "lucide-react";
+import { useState, useEffect, useId, useRef } from "react";
+import { AlertCircle, ArrowRight, Check, ChevronRight, History, Loader2, Search, Sparkles, X } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
 import { useFlashcardDeck, type GroundingMeta } from "@/hooks/use-flashcard-deck";
 import { useUsageLimit, MAX_DAILY_CARDS } from "@/hooks/use-usage-limit";
@@ -26,12 +9,12 @@ import { usePremiumHook } from "@/hooks/use-premium-hook";
 import { useModelPreference } from "@/hooks/use-model-preference";
 import { useAuth } from "@/hooks/use-auth";
 import { callMedicalNotes } from "@/lib/callMedicalNotes";
+import { parseDecline, topicRejectionMessage, validateTopic, TOPIC_MAX_LENGTH } from "@/lib/validate-topic";
 import { parseModelUsed, type ModelUsed } from "@/lib/model-used";
 import { ModelCredit } from "@/components/PoweredByCorti";
 import { parseFlashcardsFromOutput } from "@/lib/parse-flashcards";
 import { fetchBestCitation, type CitationResult } from "@/lib/citation";
 import { saveCitationsForTopic, getCitationsForTopic } from "@/lib/citation-store";
-import CitationCTABanner from "@/components/CitationCTABanner";
 import CitationBadgeList from "@/components/CitationBadgeList";
 import GoProModal from "@/components/GoProModal";
 import AuthModal from "@/components/AuthModal";
@@ -52,48 +35,107 @@ interface FlashcardsGeneratorProps {
   onGeneratingChange?: (generating: boolean, topic: string) => void;
   /** Called with the freshly saved cards once generation completes, and the model that wrote them. */
   onGenerated?: (cards: GeneratedCard[], topic: string, model: ModelUsed | null) => void;
+  /** The topic as typed, so the page's step rail can move on from "Pick a topic". */
+  onTopicChange?: (topic: string) => void;
 }
 
 const RECENT_FLASHCARD_TOPICS_KEY = "sb_recent_flashcard_topics_v1";
 
-// Line-icon chips rather than emoji, matching QUICKSTART_TOPICS on the sheet
-// configurator — the two panes sit in the same app and were reading as two
-// different products.
+// A monogram rather than an icon: the abbreviation is what a student actually
+// calls the topic on the wards, and six near-identical line glyphs (two of them
+// the same Activity icon) said nothing about which was which.
 const POPULAR_TOPICS = [
-  { label: "Myocardial Infarction", icon: HeartPulse, category: "Cardiology" },
-  { label: "Pneumonia", icon: Activity, category: "Pulmonology" },
-  { label: "Diabetic Ketoacidosis", icon: Brain, category: "Endocrinology" },
-  { label: "Ischemic Stroke", icon: BrainCircuit, category: "Neurology" },
-  { label: "Nephrotic Syndrome", icon: Activity, category: "Nephrology" },
-  { label: "Sepsis", icon: Stethoscope, category: "Critical Care" },
+  { label: "Myocardial Infarction", short: "MI", category: "Cardiology" },
+  { label: "Pneumonia", short: "PN", category: "Pulmonology" },
+  { label: "Diabetic Ketoacidosis", short: "DKA", category: "Endocrinology" },
+  { label: "Ischemic Stroke", short: "CVA", category: "Neurology" },
+  { label: "Nephrotic Syndrome", short: "NS", category: "Nephrology" },
+  { label: "Sepsis", short: "SEP", category: "Critical Care" },
 ] as const;
 
-const CARD_COUNT_OPTIONS = [
-  { value: "5", label: "5 cards", description: "Quick review" },
-  { value: "10", label: "10 cards", description: "Standard session" },
-  { value: "20", label: "20 cards", description: "Deep dive" },
-  { value: "30", label: "30 cards", description: "Comprehensive" },
+// The edge function clamps a deck to 3-20 cards (medical-notes-prompts.ts), so
+// the old 30-card option silently produced 20.
+const CARD_COUNTS = [
+  { value: "8", label: "8" },
+  { value: "12", label: "12" },
+  { value: "20", label: "20" },
 ];
 
-const GROUNDING_OPTIONS = [
-  { value: true, label: "On", description: "Uses retrieved medical guidelines" },
-  { value: false, label: "Off", description: "General knowledge only" },
+// Labels a student recognises, mapped onto the three levels the prompt's
+// "Difficulty:" line already understands.
+const DIFFICULTIES = [
+  { value: "Basic", label: "Foundational" },
+  { value: "Intermediate", label: "Clinical" },
+  { value: "Advanced", label: "Board-style" },
 ];
 
-const EXAM_MODES = [
-  { value: "General", label: "General", description: "Broad medical knowledge" },
-  { value: "USMLE Step 1", label: "Step 1", description: "Basic sciences" },
-  { value: "USMLE Step 2", label: "Step 2", description: "Clinical knowledge" },
+// Sent as `cardFocus`; the server reads only these keys (CARD_FOCUS).
+const FOCUSES = [
+  { value: "general", label: "General" },
+  { value: "mechanism", label: "Mechanism" },
+  { value: "management", label: "Management" },
+  { value: "pharm", label: "Pharm" },
 ];
 
-const FlashcardsGenerator = ({ onGeneratingChange, onGenerated }: FlashcardsGeneratorProps) => {
+/** A labelled row of mutually exclusive pills; the pick inverts to ink. */
+function Segmented({
+  label,
+  options,
+  value,
+  onChange,
+}: {
+  label: string;
+  options: { value: string; label: string }[];
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  const id = useId();
+  return (
+    <div className="space-y-2">
+      <p id={id} className="text-xs font-semibold text-foreground">
+        {label}
+      </p>
+      <div
+        role="group"
+        aria-labelledby={id}
+        className="inline-flex max-w-full flex-wrap gap-0.5 rounded-xl border border-border bg-background p-1"
+      >
+        {options.map((opt) => {
+          const active = opt.value === value;
+          return (
+            <button
+              key={opt.value}
+              type="button"
+              aria-pressed={active}
+              onClick={() => onChange(opt.value)}
+              className={`h-8 min-w-9 rounded-lg px-3 text-xs font-medium tabular-nums transition-colors ${
+                active
+                  ? "bg-foreground text-background shadow-sm"
+                  : "text-muted-foreground hover:bg-secondary hover:text-foreground"
+              }`}
+            >
+              {opt.label}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+const FlashcardsGenerator = ({ onGeneratingChange, onGenerated, onTopicChange }: FlashcardsGeneratorProps) => {
   const [topic, setTopic] = useState("");
   const [cardCount, setCardCount] = useState("12");
-  const [examMode, setExamMode] = useState("General");
+  // Board-style is the page's own promise ("a deck of vignette cards"); the
+  // old default sent "Basic" on every request whatever the screen said.
+  const [difficulty, setDifficulty] = useState("Advanced");
+  const [cardFocus, setCardFocus] = useState("general");
   const [loading, setLoading] = useState(false);
   const [loadingMsg, setLoadingMsg] = useState("");
+  // Why the last topic was turned away — by the structural check, the server's,
+  // or the writer declining it — shown under the topic box. Cleared on edit.
+  const [topicError, setTopicError] = useState<string | null>(null);
   const [pendingCards, setPendingCards] = useState<ReturnType<typeof parseFlashcardsFromOutput> | null>(null);
-  const [showTextarea, setShowTextarea] = useState(false);
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [citationState, setCitationState] = useState<CitationState>("idle");
   const [citations, setCitations] = useState<CitationResult[]>([]);
@@ -112,11 +154,6 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated }: FlashcardsGene
   // saving the deck clears the topic input — and the source list renders after
   // that, so reading `topic` there would highlight the excerpts against "".
   const [pendingGroundingQuery, setPendingGroundingQuery] = useState("");
-  // Step 2 is a disclosure, closed by default, exactly as "Customize" is on the
-  // sheet configurator: the defaults suit most decks, and what a first visit
-  // needs to see is the topic box. The header carries the current picks so a
-  // closed panel still says what it is about to do.
-  const [customizeOpen, setCustomizeOpen] = useState(false);
   const [goProOpen, setGoProOpen] = useState(false);
   const [recentTopics, setRecentTopics] = useState<string[]>(() => {
     try {
@@ -188,15 +225,16 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated }: FlashcardsGene
   const handleGenerate = async (overrideTopic?: string, overrideCardCount?: number) => {
     const activeTopic = overrideTopic ?? topic;
     const activeCardCount = overrideCardCount ?? parseInt(cardCount, 10);
-    if (!activeTopic.trim()) {
-      toast({ title: "Please enter a topic", variant: "destructive" });
+    const rejection = validateTopic(activeTopic);
+    if (rejection) {
+      setTopicError(topicRejectionMessage(rejection));
       return;
     }
     if (isCardsLimited) {
       setGoProOpen(true);
       return;
     }
-    recordRecentTopic(activeTopic);
+    setTopicError(null);
     activeTopicRef.current = activeTopic;
     setGenerating(true, activeTopic);
     setCitationState("idle");
@@ -208,8 +246,9 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated }: FlashcardsGene
     try {
       const response = await callMedicalNotes({
         notes: activeTopic,
-        examMode,
-        difficulty: "Basic",
+        examMode: "General",
+        difficulty,
+        cardFocus,
         focus: "Quick Revision",
         length: "Concise",
         cardsOnly: true,
@@ -226,6 +265,11 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated }: FlashcardsGene
 
       if (!response.ok) {
         const err = await response.json().catch(() => ({}));
+        if (response.status === 400 && err.code === "invalid_topic") {
+          setGenerating(false, "");
+          setTopicError(err.error || topicRejectionMessage("keyboard_mash"));
+          return;
+        }
         if (response.status === 429) {
           throw new Error("You've reached today's free limit. It resets at midnight UTC.");
         }
@@ -295,6 +339,19 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated }: FlashcardsGene
         }
       }
 
+      // Well-formed, but the writer judged it not a medical topic and wrote no
+      // cards. The server has refunded the day's deck; show its reason rather
+      // than a deck defining the gibberish, and never learn it as a recent.
+      const declined = parseDecline(fullText);
+      if (declined) {
+        setGenerating(false, "");
+        setLoadingMsg("");
+        setTopicError(declined);
+        refreshUsage();
+        return;
+      }
+
+      recordRecentTopic(activeTopic);
       const parsed = parseFlashcardsFromOutput(fullText, activeTopic);
 
       // Retrieval is the ceiling; the per-card [Grounded]/[General] tags decide
@@ -402,7 +459,6 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated }: FlashcardsGene
                 title: added > 0 ? `Added ${added} new cards to your deck` : "No new cards (all duplicates)",
               });
               setTopic("");
-              setShowTextarea(false);
               setGenerating(false, "");
               setLoadingMsg("");
               window.dispatchEvent(new CustomEvent("studybuddy:deck-saved"));
@@ -419,11 +475,14 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated }: FlashcardsGene
   }, [loading]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
+    onTopicChange?.(topic);
+  }, [topic]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
     const handler = (e: Event) => {
       const detail = (e as CustomEvent<{ topic: string; cardCount?: number }>).detail;
       if (!detail?.topic) return;
       setTopic(detail.topic);
-      setShowTextarea(true);
       setCardCount(String(detail.cardCount ?? 5));
       handleGenerate(detail.topic, detail.cardCount ?? 5);
     };
@@ -431,290 +490,112 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated }: FlashcardsGene
     return () => window.removeEventListener("studybuddy:generate-flashcards", handler);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const trimmedTopic = topic.trim();
+  const panel = "rounded-2xl border border-border bg-card p-6 shadow-sm";
+
   return (
-    // Numbered panels on a plain column, not one glass card — the same shape
-    // the sheet configurator uses, so the two generators read as one system.
-    <div className="animate-fade-in space-y-6">
-        {!isLoggedIn && (
-          <CitationCTABanner onSignInClick={() => setAuthModalOpen(true)} />
-        )}
+    <div className="animate-fade-in space-y-4">
+      {/* ── Medical topic ── */}
+      <section aria-labelledby="fc-topic-heading" className={panel}>
+        <h2 id="fc-topic-heading" className="font-display text-xl font-medium tracking-[-0.01em] text-foreground">
+          Medical topic
+        </h2>
 
-        {/* ── Step 1: Topic Selection ── */}
-        <div className="rounded-[26px] border border-[color:var(--color-border)] bg-[color:var(--color-card)] p-5 shadow-[0_18px_40px_rgba(15,23,42,0.04)]">
-          <div className="space-y-4">
-          <div className="flex items-center gap-2.5">
-            <div className="flex h-7 w-7 items-center justify-center rounded-full bg-[color:var(--color-accent)] text-[10px] font-bold text-[color:var(--color-background)]">1</div>
-            <h2 className="[font-family:var(--app-font-serif)] text-lg font-medium tracking-[-0.02em] text-[color:var(--color-foreground)]">Medical Topic</h2>
-          </div>
-
-          <div className="space-y-3">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-              <Textarea
-                placeholder="Search or type a medical topic (e.g., Heart Failure, Pneumonia, Diabetes...)"
-                value={topic}
-                onChange={(e) => setTopic(e.target.value)}
-                className="min-h-[80px] pl-10 pr-10 text-sm leading-relaxed rounded-xl border-border focus:border-primary focus:ring-2 focus:ring-primary"
-              />
-              {topic && (
-                <button
-                  type="button"
-                  onClick={() => setTopic("")}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-muted-foreground hover:text-foreground transition-colors"
-                  aria-label="Clear"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              )}
-            </div>
-            
-            <div className="pt-2">
-              <p className="font-mono text-[11px] font-medium tracking-widest uppercase text-muted-foreground mb-3">Popular Topics</p>
-              <div className="grid grid-cols-2 gap-2">
-                {POPULAR_TOPICS.slice(0, 6).map(({ label, icon: Icon, category }) => (
-                  <button
-                    key={label}
-                    type="button"
-                    onClick={() => { setTopic(label); setShowTextarea(false); }}
-                    className="group flex flex-col items-center gap-1.5 p-3 rounded-xl border border-border bg-card hover:border-primary hover:shadow-sm transition-all duration-200"
-                  >
-                    {/* Inverted chip, on the sheet configurator's own token pair
-                        rather than Tailwind's `foreground`/`primary`: those are
-                        near-black ink and a dark teal, which put the glyph at
-                        ~2.2:1 and rendered these tiles as blank dark circles.
-                        Dark mode inverts the pair, so the icon takes the ink
-                        colour there rather than the accent. */}
-                    <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-[color:var(--color-foreground)] text-[color:var(--color-accent)] dark:text-[color:var(--color-accent-foreground)]">
-                      <Icon className="h-4 w-4" strokeWidth={2.2} />
-                    </span>
-                    <div className="text-center">
-                      <p className="text-xs font-medium text-foreground group-hover:text-primary leading-tight">{label}</p>
-                      <p className="text-[10px] text-muted-foreground">{category}</p>
-                    </div>
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-          </div>
-        </div>
-
-        {/* ── Step 2: Customize ── */}
-        <div className="rounded-[26px] border border-[color:var(--color-border)] bg-[color:var(--color-card)] p-5 shadow-[0_18px_40px_rgba(15,23,42,0.04)]">
-          <div className="space-y-4">
-          <button
-            type="button"
-            onClick={() => setCustomizeOpen((v) => !v)}
-            aria-expanded={customizeOpen}
-            aria-controls="flashcards-customize"
-            className="flex w-full items-center gap-2.5 text-left"
-          >
-            <div className="flex h-7 w-7 items-center justify-center rounded-full border border-[color:var(--color-border)] bg-[color:var(--color-panel)] text-[10px] font-bold text-[color:var(--color-muted-foreground)]">2</div>
-            <h2 className="[font-family:var(--app-font-serif)] text-lg font-medium tracking-[-0.02em] text-[color:var(--color-foreground)]">Customize</h2>
-            <span className="ml-auto flex min-w-0 items-center gap-2">
-              {/* Current picks, so a closed panel still says what it will do.
-                  Deliberately shorter than the sheet's three-part summary: this
-                  pane is 320px, and spelling grounding out every time truncated
-                  the whole line. Grounding is named only when it is off, which
-                  is the setting worth the space. */}
-              {!customizeOpen && (
-                <span className="hidden truncate text-[11px] text-muted-foreground sm:block">
-                  {examMode} · {cardCount} cards{useGrounding ? "" : " · Ungrounded"}
-                </span>
-              )}
-              {customizeOpen ? (
-                <ChevronUp className="h-4 w-4 shrink-0 text-muted-foreground" />
-              ) : (
-                <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
-              )}
-            </span>
-          </button>
-
-          {customizeOpen && (
-          <div id="flashcards-customize" className="animate-fade-in space-y-4">
-            {/* Exam Mode */}
-            <div className="space-y-2">
-              <label className="block font-mono text-[11px] font-medium tracking-widest uppercase text-muted-foreground">
-                Exam Mode
-              </label>
-              <div className="flex flex-wrap gap-2">
-                {EXAM_MODES.map((opt) => {
-                  const active = examMode === opt.value;
-                  return (
-                    <button
-                      key={opt.value}
-                      type="button"
-                      onClick={() => setExamMode(opt.value)}
-                      aria-pressed={active}
-                      // Exam Mode used the violet `info` token while the two
-                      // groups below it used `primary`, so one panel carried two
-                      // unrelated selection colours. Primary is the app's
-                      // selected-state colour, and the sheet's PillGroup uses it.
-                      className={`inline-flex flex-col items-start gap-1 p-3 rounded-lg border text-left transition-all duration-200 ${
-                        active
-                          ? "bg-primary/10 border-primary text-primary"
-                          : "bg-card border-border text-muted-foreground hover:border-primary hover:text-primary"
-                      }`}
-                    >
-                      <span className="text-sm font-medium">{opt.label}</span>
-                      <span className="text-[10px] text-muted-foreground">{opt.description}</span>
-                      {active && <Check className="w-3 h-3 text-primary" />}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* Number of Cards */}
-            <div className="space-y-2">
-              <label className="block font-mono text-[11px] font-medium tracking-widest uppercase text-muted-foreground">
-                Number of Cards
-              </label>
-              <div className="grid grid-cols-2 gap-2">
-                {CARD_COUNT_OPTIONS.map((opt) => {
-                  const active = cardCount === opt.value;
-                  return (
-                    <button
-                      key={opt.value}
-                      type="button"
-                      onClick={() => setCardCount(opt.value)}
-                      aria-pressed={active}
-                      className={`inline-flex flex-col items-start gap-1 p-3 rounded-lg border text-left transition-all duration-200 ${
-                        active
-                          ? "bg-primary/10 border-primary text-primary"
-                          : "bg-card border-border text-muted-foreground hover:border-primary hover:text-primary"
-                      }`}
-                    >
-                      <span className="text-sm font-medium">{opt.label}</span>
-                      <span className="text-[10px] text-muted-foreground">{opt.description}</span>
-                      {active && <Check className="w-3 h-3 text-primary" />}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* Guideline Grounding */}
-            <div className="space-y-2">
-              <label className="block font-mono text-[11px] font-medium tracking-widest uppercase text-muted-foreground">
-                Guideline Grounding
-              </label>
-              <div className="flex gap-2">
-                {GROUNDING_OPTIONS.map(({ value, label, description }) => {
-                  const active = useGrounding === value;
-                  return (
-                    <button
-                      key={String(value)}
-                      type="button"
-                      onClick={() => setUseGrounding(value)}
-                      aria-pressed={active}
-                      className={`flex-1 inline-flex flex-col items-start gap-1 p-3 rounded-lg border text-left transition-all duration-200 ${
-                        active
-                          ? "bg-primary/10 border-primary text-primary"
-                          : "bg-card border-border text-muted-foreground hover:border-primary hover:text-primary"
-                      }`}
-                    >
-                      <span className="text-sm font-medium">{label}</span>
-                      <span className="text-[10px] text-muted-foreground">{description}</span>
-                      {active && <Check className="w-3 h-3 text-primary" />}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          </div>
-          )}
-          </div>
-        </div>
-
-        {/* ── Generate CTA — outside the panels, as on the sheet configurator ── */}
-        <Button
-          className="w-full h-12 text-sm font-semibold rounded-[18px] bg-primary hover:bg-primary/90 text-primary-foreground shadow-md hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200"
-          onClick={() => handleGenerate()}
-          disabled={loading || !topic.trim()}
-        >
-          {loading ? (
-            <>
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              Generating…
-            </>
-          ) : (
-            <>
-              <Sparkles className="mr-2 h-4 w-4" />
-              Generate Flashcards
-              <ArrowRight className="ml-2 h-4 w-4" />
-            </>
-          )}
-        </Button>
-
-        {/* Usage Indicator */}
-        {!pro && (
-          <div className="rounded-lg bg-secondary border border-border p-3 text-center">
-            {isCardsLimited ? (
-              <span className="text-warning font-medium text-xs block">
-                Daily limit reached ·{" "}
-                <button
-                  type="button"
-                  className="underline hover:text-warning transition-colors"
-                  onClick={() => setGoProOpen(true)}
-                >
-                  Upgrade for unlimited
-                </button>
-              </span>
-            ) : (
-              <span className="text-muted-foreground text-xs block">
-                {remaining} / {MAX_DAILY_CARDS} cards today · Resets at midnight
-              </span>
-            )}
-            {isPremiumHookActive ? (
-              <span className="text-info font-medium text-xs block mt-1">
-                ✦ {premiumRemaining} Corti generation{premiumRemaining !== 1 ? "s" : ""} left
-              </span>
-            ) : (
-              <span className="text-muted-foreground text-xs block mt-1">
-                Free tier: GPT-OSS 20B ·{" "}
-                <button
-                  type="button"
-                  className="underline hover:text-foreground transition-colors"
-                  onClick={() => setGoProOpen(true)}
-                >
-                  Go Pro for Corti
-                </button>
-              </span>
-            )}
-          </div>
-        )}
-        {pro && (
-          <div className="rounded-lg bg-primary/10 border border-primary/30 p-3 text-center">
-            <span className="text-primary font-medium text-xs">
-              ✦ Pro: {preferredModel === "corti" ? "Corti S1 · best quality" : "GPT-OSS 20B · fastest"}
-            </span>
-            <span className="mx-2 opacity-40">·</span>
+        <div className="relative mt-4">
+          <Search className="pointer-events-none absolute start-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
+          <input
+            type="text"
+            value={topic}
+            onChange={(e) => {
+              setTopic(e.target.value);
+              if (topicError) setTopicError(null);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !loading && trimmedTopic) handleGenerate();
+            }}
+            aria-labelledby="fc-topic-heading"
+            aria-invalid={topicError ? true : undefined}
+            aria-describedby={topicError ? "fc-topic-error" : undefined}
+            maxLength={TOPIC_MAX_LENGTH}
+            placeholder="Heart failure, pneumonia, DKA…"
+            className={`h-12 w-full rounded-xl border ${topicError ? "border-danger" : "border-border"} bg-secondary/40 pe-10 ps-10 text-sm text-foreground placeholder:text-muted-foreground transition-colors focus:border-ring focus:bg-card focus:outline-none focus:ring-2 focus:ring-ring/30`}
+          />
+          {topic && (
             <button
               type="button"
-              className="underline hover:text-foreground transition-colors text-xs"
-              onClick={() => setPreferredModel(preferredModel === "corti" ? "gpt-oss" : "corti")}
-              disabled={modelSaving || modelLoading}
+              onClick={() => {
+                setTopic("");
+                setTopicError(null);
+              }}
+              className="absolute end-2.5 top-1/2 -translate-y-1/2 rounded-md p-1 text-muted-foreground transition-colors hover:text-foreground"
+              aria-label="Clear topic"
             >
-              Switch to {preferredModel === "corti" ? "GPT-OSS 20B (fastest)" : "Corti S1 (best quality)"}
+              <X className="h-4 w-4" />
             </button>
-          </div>
-        )}
-        {lastDeckModel && lastDeckModel.kind !== "unknown" && (
-          <div className="flex items-center justify-center gap-2 text-xs text-muted-foreground">
-            <span>Last deck written by</span>
-            <ModelCredit used={lastDeckModel} compact />
-          </div>
+          )}
+        </div>
+
+        {topicError && (
+          <p id="fc-topic-error" role="alert" className="mt-2 flex items-start gap-1.5 text-xs leading-snug text-danger">
+            <AlertCircle className="mt-px h-3.5 w-3.5 shrink-0" aria-hidden />
+            {topicError}
+          </p>
         )}
 
-        {/* Recent Topics */}
+        <p className="mb-2 mt-5 font-mono text-[10px] font-medium uppercase tracking-[0.16em] text-muted-foreground">
+          Popular topics
+        </p>
+        <ul className="-mx-2 space-y-0.5">
+          {POPULAR_TOPICS.map(({ label, short, category }, i) => {
+            const picked = trimmedTopic.toLowerCase() === label.toLowerCase();
+            return (
+              <li key={label}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTopic(label);
+                    setTopicError(null);
+                  }}
+                  aria-pressed={picked}
+                  className={`group flex w-full items-center gap-3 rounded-xl px-2 py-1.5 text-start transition-colors ${
+                    picked ? "bg-ring/10" : "hover:bg-secondary/60"
+                  }`}
+                >
+                  {/* Alternating tint keeps a column of round chips from reading
+                      as one grey stripe. */}
+                  <span
+                    className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full font-mono text-[10px] font-semibold tracking-tight transition-colors ${
+                      picked
+                        ? "bg-[color:var(--color-accent-ink)] text-[color:var(--color-accent-foreground)]"
+                        : i % 2 === 0
+                        ? "bg-ring/10 text-[color:var(--color-accent-ink)]"
+                        : "bg-secondary text-muted-foreground"
+                    }`}
+                    aria-hidden
+                  >
+                    {picked ? <Check className="h-4 w-4" /> : short}
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-medium text-foreground">{label}</span>
+                    <span className="block text-[11px] text-muted-foreground">{category}</span>
+                  </span>
+                  <ChevronRight
+                    className="h-4 w-4 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 rtl:rotate-180"
+                    aria-hidden
+                  />
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+
         {recentTopics.length > 0 && (
-          <div className="space-y-3 pt-4 border-t border-border">
-            <p className="flex items-center gap-2 font-mono text-[11px] font-medium tracking-widest uppercase text-muted-foreground">
-              <History className="h-3 w-3" />
-              Recent Topics
+          <div className="mt-5 border-t border-border pt-4">
+            <p className="mb-2 flex items-center gap-1.5 font-mono text-[10px] font-medium uppercase tracking-[0.16em] text-muted-foreground">
+              <History className="h-3 w-3" aria-hidden />
+              Recent · one tap to regenerate
             </p>
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap gap-1.5">
               {recentTopics.map((t) => (
                 <button
                   key={t}
@@ -722,55 +603,169 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated }: FlashcardsGene
                   disabled={loading}
                   onClick={() => {
                     setTopic(t);
-                    setShowTextarea(false);
                     handleGenerate(t);
                   }}
-                  className="max-w-full truncate inline-flex items-center gap-1.5 h-8 px-3 rounded-lg border border-border bg-card text-muted-foreground text-xs font-medium hover:border-primary hover:text-primary transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-default"
+                  className="max-w-full truncate rounded-full border border-border bg-background px-3 py-1 text-xs text-muted-foreground transition-colors hover:border-ring hover:text-[color:var(--color-accent-ink)] disabled:cursor-default disabled:opacity-50"
                 >
-                  <ChevronRight className="h-3 w-3" />
                   {t}
                 </button>
               ))}
             </div>
           </div>
         )}
+      </section>
 
-        {citationState !== "idle" && citationState !== "hidden" && (
-          <div className="pt-1">
-            <CitationBadgeList
-              state={citationState}
-              citations={citations}
-              onLockedClick={() =>
-                isLoggedIn ? setGoProOpen(true) : setAuthModalOpen(true)
-              }
-              isLoggedIn={isLoggedIn}
-            />
+      {/* ── Shape the deck ── always open: three short rows are cheaper than
+          a disclosure that hides what the button is about to do. */}
+      <section aria-labelledby="fc-shape-heading" className={`${panel} space-y-4`}>
+        <h2 id="fc-shape-heading" className="font-display text-xl font-medium tracking-[-0.01em] text-foreground">
+          Shape the deck
+        </h2>
+        <Segmented label="Cards" options={CARD_COUNTS} value={cardCount} onChange={setCardCount} />
+        <Segmented label="Difficulty" options={DIFFICULTIES} value={difficulty} onChange={setDifficulty} />
+        <Segmented label="Focus" options={FOCUSES} value={cardFocus} onChange={setCardFocus} />
+
+        <div className="flex items-start justify-between gap-4 border-t border-border pt-4">
+          <div className="min-w-0">
+            <p id="fc-grounding-label" className="text-xs font-semibold text-foreground">
+              Ground in guidelines
+            </p>
+            <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground">
+              {useGrounding
+                ? "Cards are built from the guideline library where it covers the topic."
+                : "Off — cards come from general medical knowledge only."}
+            </p>
           </div>
-        )}
+          <Switch
+            checked={useGrounding}
+            onCheckedChange={setUseGrounding}
+            aria-labelledby="fc-grounding-label"
+            className="mt-0.5 shrink-0"
+          />
+        </div>
+      </section>
 
-        {/* Grounding result for the deck that was just generated */}
-        {!loading && pendingGrounding && (
-          <div className="space-y-3 pt-1">
-            <GroundingNotice
-              level={pendingGrounding.groundingLevel}
-              reason={
-                pendingGrounding.groundingLevel !== "none"
-                  ? undefined
-                  : !pendingGroundingRequested
-                  ? "disabled"
-                  : pendingGrounding.retrievedChunks === 0
-                  ? "no-match"
-                  : "not-relevant"
-              }
-            />
-            {pendingGrounding.sources.length > 0 && (
-              <SheetSources
-                sources={pendingGrounding.sources}
-                query={pendingGroundingQuery}
-              />
+      {/* ── Generate ── names what it is about to do, so the panels above
+          read as a sentence the button finishes. */}
+      <button
+        type="button"
+        onClick={() => handleGenerate()}
+        disabled={loading || !trimmedTopic}
+        className="flex h-14 w-full items-center justify-center gap-2.5 rounded-xl bg-foreground px-5 font-display text-lg text-background shadow-md transition-all motion-safe:hover:-translate-y-0.5 hover:shadow-lg disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground disabled:shadow-none motion-safe:disabled:hover:translate-y-0"
+      >
+        {loading ? (
+          <>
+            <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden />
+            <span className="truncate">{loadingMsg || "Writing your deck…"}</span>
+          </>
+        ) : trimmedTopic ? (
+          <>
+            <Sparkles className="h-4 w-4 shrink-0 text-[color:var(--color-accent)]" aria-hidden />
+            <span className="truncate">
+              Write {cardCount} cards on {trimmedTopic}
+            </span>
+            <ArrowRight className="h-4 w-4 shrink-0 rtl:rotate-180" aria-hidden />
+          </>
+        ) : (
+          <>
+            <Sparkles className="h-4 w-4 shrink-0" aria-hidden />
+            Pick a topic to generate
+          </>
+        )}
+      </button>
+
+      {/* ── Plan line ── */}
+      <div className="space-y-1 text-center text-xs text-muted-foreground">
+        {pro ? (
+          <p>
+            <span className="font-medium text-[color:var(--color-accent-ink)]">
+              ✦ Pro · {preferredModel === "corti" ? "Corti S1, best quality" : "GPT-OSS 20B, fastest"}
+            </span>
+            {" · "}
+            <button
+              type="button"
+              className="underline underline-offset-2 transition-colors hover:text-foreground"
+              onClick={() => setPreferredModel(preferredModel === "corti" ? "gpt-oss" : "corti")}
+              disabled={modelSaving || modelLoading}
+            >
+              Switch to {preferredModel === "corti" ? "GPT-OSS 20B" : "Corti S1"}
+            </button>
+          </p>
+        ) : isCardsLimited ? (
+          <p className="font-medium text-warning">
+            Daily limit reached ·{" "}
+            <button
+              type="button"
+              className="underline underline-offset-2"
+              onClick={() => setGoProOpen(true)}
+            >
+              Upgrade for unlimited
+            </button>
+          </p>
+        ) : (
+          <p>
+            Free plan · {remaining} {remaining === 1 ? "card" : "cards"} left today ·{" "}
+            {isLoggedIn ? (
+              <button
+                type="button"
+                className="text-[color:var(--color-accent-ink)] underline underline-offset-2 transition-colors hover:text-foreground"
+                onClick={() => setGoProOpen(true)}
+              >
+                Go Pro for Corti
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="text-[color:var(--color-accent-ink)] underline underline-offset-2 transition-colors hover:text-foreground"
+                onClick={() => setAuthModalOpen(true)}
+              >
+                Sign in for citations
+              </button>
             )}
+          </p>
+        )}
+        {!pro && isPremiumHookActive && (
+          <p className="font-medium text-info">
+            ✦ {premiumRemaining} Corti generation{premiumRemaining !== 1 ? "s" : ""} left
+          </p>
+        )}
+        {lastDeckModel && lastDeckModel.kind !== "unknown" && (
+          <div className="flex items-center justify-center gap-2">
+            <span>Last deck written by</span>
+            <ModelCredit used={lastDeckModel} compact />
           </div>
         )}
+      </div>
+
+      {citationState !== "idle" && citationState !== "hidden" && (
+        <CitationBadgeList
+          state={citationState}
+          citations={citations}
+          onLockedClick={() => (isLoggedIn ? setGoProOpen(true) : setAuthModalOpen(true))}
+          isLoggedIn={isLoggedIn}
+        />
+      )}
+
+      {/* Grounding result for the deck that was just generated */}
+      {!loading && pendingGrounding && (
+        <div className="space-y-3">
+          <GroundingNotice
+            level={pendingGrounding.groundingLevel}
+            reason={
+              pendingGrounding.groundingLevel !== "none"
+                ? undefined
+                : !pendingGroundingRequested
+                ? "disabled"
+                : pendingGrounding.retrievedChunks === 0
+                ? "no-match"
+                : "not-relevant"
+            }
+          />
+          {pendingGrounding.sources.length > 0 && (
+            <SheetSources sources={pendingGrounding.sources} query={pendingGroundingQuery} />
+          )}
+        </div>
+      )}
       <AuthModal open={authModalOpen} onOpenChange={setAuthModalOpen} />
       <GoProModal open={goProOpen} onOpenChange={setGoProOpen} />
     </div>

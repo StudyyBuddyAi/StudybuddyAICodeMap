@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useBackdropScene } from "@/components/backdrop/backdrop-scene";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { ArrowRight, BookOpen, BrainCircuit, Clock, Layers, PanelLeftClose, PanelLeftOpen, PenLine, Play, Repeat, Settings2, Shuffle, SkipForward, X, Sparkles, Check, ChevronRight, RotateCcw, AlertTriangle, CheckCircle2, SlidersHorizontal } from "lucide-react";
+import { ArrowRight, BookOpen, Clock, PanelLeftClose, PanelLeftOpen, Play, Repeat, Settings2, Shuffle, SkipForward, X, Sparkles, Check, ChevronRight, RotateCcw, AlertTriangle, CheckCircle2, SlidersHorizontal } from "lucide-react";
 import DashboardLayout from "@/components/dashboard/DashboardLayout";
 import FlashcardsGenerator, { type GeneratedCard } from "@/components/FlashcardsGenerator";
 import DeckList from "@/components/DeckList";
@@ -19,77 +19,136 @@ import { formatInterval, newSrsFields, type ReviewRating } from "@/lib/spaced-re
 
 const RECENT_DECK_LIMIT = 5;
 
-// Steps shown above the generator so a first visit understands the flow before
-// touching anything: pick a topic -> the deck is written -> review on schedule.
-// Same three-card row the sheets page uses, worded for spaced repetition.
-const HOW_IT_WORKS = [
-  {
-    label: "Step 1",
-    title: "Pick a topic",
-    description: "Type any medical topic or reach for one you studied recently — the deck is built around it.",
-    icon: PenLine,
-  },
-  {
-    label: "Step 2",
-    title: "AI writes the cards",
-    description: "Vignette-style questions with one unambiguous answer, grounded in the guideline library wherever it covers your topic.",
-    icon: BrainCircuit,
-  },
-  {
-    label: "Step 3",
-    title: "Review on schedule",
-    description: "Rate each card as you go and spaced repetition brings it back exactly when you are about to forget it.",
-    icon: Repeat,
-  },
-] as const;
+// The flow, as a rail rather than three explainer cards: it says the same
+// thing in one line, and because it tracks where the reader actually is it
+// stays useful after the first visit instead of becoming furniture.
+const STEPS = ["Pick a topic", "Shape the deck", "Review on schedule"] as const;
 
-/**
- * The three-step explainer above the generator. Rendered only while no review
- * session is running: mid-session the right pane is the card being studied, and
- * a tutorial telling the reader how to start one is noise at that point.
- */
-const HowItWorks = () => (
-  // Carries the sheets page's token spelling rather than this page's Tailwind
-  // classes, so the two rows are the same object rather than an approximation
-  // of it: `--color-accent` is the bright teal the chips need, where Tailwind's
-  // `primary` is a dark teal that disappears against the ink-coloured circle.
-  <div className="relative">
-    <div className="absolute inset-x-10 top-7 hidden h-px bg-gradient-to-r from-transparent via-[color:var(--color-accent)]/60 to-transparent sm:block" />
-
-    <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-      {HOW_IT_WORKS.map(({ label, title, description, icon: Icon }, index) => (
-        <div key={title} className="relative z-10">
-          <div className="group flex items-center gap-4 rounded-[28px] border border-[color:var(--color-border)] bg-[color:var(--color-card)] p-4 shadow-[0_12px_30px_rgba(15,23,42,0.06)] transition-all duration-200 hover:-translate-y-1 hover:border-[color:var(--color-accent)]/70 hover:shadow-[0_18px_38px_rgba(19,128,134,0.12)] sm:flex-col sm:items-center sm:p-5 sm:text-center">
-            {/* Dark mode inverts the pair — the circle turns cream — so the
-                glyph takes the ink colour there rather than the accent. */}
-            <div className="relative flex h-14 w-14 shrink-0 items-center justify-center rounded-full border-4 border-[color:var(--color-card)] bg-[color:var(--color-foreground)] text-[color:var(--color-accent)] shadow-[0_10px_18px_rgba(15,23,42,0.12)] dark:text-[color:var(--color-accent-foreground)]">
-              <span className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-[color:var(--color-accent)] text-[9px] font-bold text-[color:var(--color-background)] shadow-sm">
-                {index + 1}
-              </span>
-              <Icon size={20} strokeWidth={2.2} />
-            </div>
-
-            <div className="min-w-0 flex-1 sm:flex-none">
-              <div className="mb-2 inline-flex items-center gap-1.5">
-                <span className="[font-family:var(--app-font-mono)] text-[10px] font-medium uppercase tracking-[0.14em] text-[color:var(--color-accent)]">
-                  {label}
-                </span>
-                <ArrowRight size={12} className="text-[color:var(--color-muted-foreground)] transition-transform duration-200 group-hover:translate-x-0.5" />
-              </div>
-
-              <h3 className="[font-family:var(--app-font-serif)] text-lg font-medium leading-snug tracking-[-0.02em] text-[color:var(--color-foreground)]">
-                {title}
-              </h3>
-              <p className="mt-2 text-xs leading-relaxed text-[color:var(--color-muted-foreground)]">
-                {description}
-              </p>
-            </div>
-          </div>
-        </div>
-      ))}
-    </div>
-  </div>
+const StepRail = ({ current }: { current: number }) => (
+  <ol aria-label="Steps" className="flex flex-wrap items-center gap-x-1 gap-y-2">
+    {STEPS.map((label, i) => {
+      const state = i < current ? "done" : i === current ? "active" : "todo";
+      return (
+        <li
+          key={label}
+          aria-current={state === "active" ? "step" : undefined}
+          className={`inline-flex items-center gap-2 rounded-full py-1 pe-4 ps-1 text-sm font-medium transition-colors duration-300 ${
+            state === "active" ? "bg-ring/10 text-[color:var(--color-accent-ink)]" : "text-foreground"
+          }`}
+        >
+          <span
+            className={`flex h-7 w-7 items-center justify-center rounded-full text-xs font-semibold tabular-nums transition-colors duration-300 ${
+              state === "active"
+                ? "bg-[color:var(--color-accent-ink)] text-[color:var(--color-accent-foreground)]"
+                : state === "done"
+                ? "bg-ring/15 text-[color:var(--color-accent-ink)]"
+                : "border border-border bg-card text-muted-foreground"
+            }`}
+          >
+            {state === "done" ? <Check className="h-3.5 w-3.5" aria-label="Done" /> : i + 1}
+          </span>
+          {label}
+        </li>
+      );
+    })}
+  </ol>
 );
+
+/** The idle pane's specimen: a real two-sided card the reader can flip. */
+const CardPreview = ({
+  card,
+}: {
+  card: { isSample: boolean; question: string; answer: string; answerHead?: string; topic: string };
+}) => {
+  const [flipped, setFlipped] = useState(false);
+  const faceChip =
+    "inline-flex w-fit items-center rounded-full px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em]";
+  return (
+    <section aria-labelledby="fc-preview-heading" className="animate-fade-in">
+      <div className="mb-3 flex items-baseline justify-between gap-3">
+        <h2 id="fc-preview-heading" className="font-display text-2xl font-medium tracking-[-0.01em] text-foreground">
+          {card.isSample ? "What a card looks like" : "Your latest card"}
+        </h2>
+        {card.isSample ? (
+          <span className="shrink-0 rounded-full border border-ring/50 px-3 py-0.5 text-xs font-medium text-[color:var(--color-accent-ink)]">
+            Example
+          </span>
+        ) : (
+          <span className="min-w-0 truncate text-xs text-muted-foreground">From {card.topic}</span>
+        )}
+      </div>
+
+      <button
+        type="button"
+        onClick={() => setFlipped((v) => !v)}
+        aria-label={flipped ? "Show the question" : "Show the answer"}
+        className="perspective block w-full rounded-2xl text-start focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+      >
+        <span className={`flip-card-y-inner relative block h-[260px] sm:h-[280px] ${flipped ? "flipped" : ""}`}>
+          {/* Front — the vignette, set like a page rather than a form field. */}
+          <span
+            aria-hidden={flipped}
+            className="flip-face absolute inset-0 flex flex-col rounded-2xl border border-border bg-card p-6 shadow-sm sm:p-8"
+          >
+            <span className={`${faceChip} bg-secondary text-muted-foreground`}>Question</span>
+            <span className="mt-4 line-clamp-5 font-display text-lg leading-snug text-foreground sm:text-xl">
+              {card.question}
+            </span>
+            <span className="mt-auto inline-flex items-center gap-1.5 pt-3 text-[11px] text-muted-foreground">
+              <RotateCcw className="h-3 w-3" aria-hidden />
+              Tap to turn the card
+            </span>
+          </span>
+          {/* Back — the answer leads, the reason follows. */}
+          <span
+            aria-hidden={!flipped}
+            className="flip-face flip-face-back absolute inset-0 flex flex-col rounded-2xl border border-ring/20 bg-card p-6 shadow-sm sm:p-8"
+          >
+            <span className="pointer-events-none absolute inset-0 rounded-2xl bg-ring/[0.06]" aria-hidden />
+            <span className={`${faceChip} relative bg-ring/10 text-[color:var(--color-accent-ink)]`}>Answer</span>
+            {card.answerHead ? (
+              <>
+                <span className="relative mt-4 font-display text-2xl leading-tight text-foreground sm:text-3xl">
+                  {card.answerHead}
+                </span>
+                <span className="relative mt-3 text-sm leading-relaxed text-muted-foreground">{card.answer}</span>
+              </>
+            ) : (
+              <span className="relative mt-4 line-clamp-6 font-display text-lg leading-snug text-foreground sm:text-xl">
+                {card.answer}
+              </span>
+            )}
+          </span>
+        </span>
+      </button>
+
+      {/* Illustrative only — the live controls are in the review pane. They
+          wake up once the card is turned, which is when they would matter. */}
+      <div
+        className={`mt-4 grid grid-cols-4 gap-2 transition-opacity duration-300 ${flipped ? "opacity-100" : "opacity-45"}`}
+        aria-hidden="true"
+      >
+        {[
+          ["Again", "<1 min", "bg-danger-soft text-danger"],
+          ["Hard", "6 min", "bg-warning-soft text-warning"],
+          ["Good", "1 day", "bg-success-soft text-success"],
+          ["Easy", "4 days", "bg-info-soft text-info"],
+        ].map(([label, ivl, cls]) => (
+          <div
+            key={label}
+            className={`pointer-events-none flex h-14 select-none flex-col items-center justify-center rounded-xl text-sm font-semibold ${cls}`}
+          >
+            {label}
+            <span className="text-[11px] font-normal tabular-nums opacity-80">{ivl}</span>
+          </div>
+        ))}
+      </div>
+      <p className="mt-3 text-sm text-muted-foreground">
+        After each answer you rate your recall. The rating sets when the card comes back.
+      </p>
+    </section>
+  );
+};
 
 type RightPhase = "idle" | "generating" | "reviewing";
 
@@ -156,6 +215,8 @@ const Flashcards = () => {
   // Reviewing cards is answering: the backdrop all but stops while it happens.
   useBackdropScene(rightPhase === "reviewing" ? { mode: "focus" } : null);
   const [genTopic, setGenTopic] = useState("");
+  // The topic as typed in the generator, for the step rail only.
+  const [draftTopic, setDraftTopic] = useState("");
   const [configDrawerOpen, setConfigDrawerOpen] = useState(false);
   // Desktop (lg+) left pane. Starts open; the reader collapses it once a deck
   // is on screen and the review pane takes the reclaimed width.
@@ -225,7 +286,8 @@ const Flashcards = () => {
       isSample: true,
       question:
         "A 58-year-old man has crushing chest pain radiating to the left arm. His ECG shows ST elevation in leads II, III and aVF. Which artery is occluded?",
-      answer: "The right coronary artery — this is an inferior STEMI.",
+      answerHead: "Right coronary artery",
+      answer: "ST elevation in II, III and aVF localises to the inferior wall, which the RCA supplies in most patients.",
       topic: "Cardiology",
     };
   }, [allCards]);
@@ -468,6 +530,7 @@ const Flashcards = () => {
       <FlashcardsGenerator
         onGeneratingChange={handleGeneratingChange}
         onGenerated={handleGenerated}
+        onTopicChange={setDraftTopic}
       />
     </div>
   );
@@ -483,7 +546,7 @@ const Flashcards = () => {
               <div className="w-16 h-16 rounded-full bg-primary/15 flex items-center justify-center">
                 <Sparkles className="w-8 h-8 text-primary" />
               </div>
-              <div className="absolute inset-0 rounded-full border-2 border-transparent border-t-teal-500 animate-spin" />
+              <div className="absolute inset-0 rounded-full border-2 border-transparent border-t-primary animate-spin" />
             </div>
             <div className="space-y-2">
               <h3 className="text-lg font-serif font-semibold text-foreground">
@@ -757,73 +820,9 @@ const Flashcards = () => {
       </div>
     ) : (
       <div key="idle" className="pane-crossfade space-y-6">
-        {/* Preview of the card you last added — or a worked example when there
-            is nothing to show yet. This used to be a block of grey bars that
-            read as a loading skeleton and never resolved for anyone. */}
-        <div className="rounded-2xl border border-border bg-card p-6 shadow-sm animate-fade-in">
-          <div className="flex items-center gap-2 mb-4">
-            <div className="w-8 h-8 rounded-lg bg-primary/15 flex items-center justify-center">
-              <Layers className="w-4 h-4 text-primary" />
-            </div>
-            <div>
-              <h3 className="text-sm font-serif font-semibold text-foreground">
-                {previewCard.isSample ? "What a flashcard looks like" : "Your latest card"}
-              </h3>
-              <p className="text-xs text-muted-foreground">
-                {previewCard.isSample
-                  ? "An example while your first deck is empty"
-                  : `From ${previewCard.topic}`}
-              </p>
-            </div>
-            {previewCard.isSample && (
-              <span className="ml-auto rounded-full border border-border px-2.5 py-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-                Example
-              </span>
-            )}
-          </div>
-
-          <div className="rounded-xl border border-border bg-background p-5">
-            <div className="flex items-center gap-2 mb-2">
-              <div className="w-2 h-2 rounded-full bg-primary" />
-              <span className="text-xs font-medium text-muted-foreground">Question</span>
-            </div>
-            <p className="text-sm leading-relaxed text-foreground mb-4">
-              {previewCard.question}
-            </p>
-
-            <div className="border-t border-border pt-3">
-              <div className="flex items-center gap-2 mb-2">
-                <div className="w-2 h-2 rounded-full bg-info" />
-                <span className="text-xs font-medium text-muted-foreground">Answer</span>
-              </div>
-              <p className="text-sm leading-relaxed text-muted-foreground">
-                {previewCard.answer}
-              </p>
-            </div>
-          </div>
-
-          {/* Illustrative only — the live controls are in the review pane. */}
-          <div className="mt-4 grid grid-cols-4 gap-2" aria-hidden="true">
-            {[
-              ["Again", "<1m", "border-danger/30 bg-danger-soft text-danger"],
-              ["Hard", "6m", "border-warning/30 bg-warning-soft text-warning"],
-              ["Good", "10m", "border-success/30 bg-success-soft text-success"],
-              ["Easy", "8d", "border-info/30 bg-info-soft text-info"],
-            ].map(([label, ivl, cls]) => (
-              <div
-                key={label}
-                className={`h-11 rounded-lg border flex flex-col items-center justify-center text-xs font-medium pointer-events-none select-none ${cls}`}
-              >
-                {label}
-                <span className="text-[10px] font-normal opacity-80">{ivl}</span>
-              </div>
-            ))}
-          </div>
-
-          <p className="text-center text-[11px] text-muted-foreground mt-4">
-            Select a topic on the left to generate your flashcards
-          </p>
-        </div>
+        {/* The card you last added — or a worked example when there is
+            nothing to show yet, so the pane never reads as stuck loading. */}
+        <CardPreview card={previewCard} />
 
         {totalDecks > 0 && (
           <div className="space-y-4">
@@ -859,22 +858,20 @@ const Flashcards = () => {
     <DashboardLayout wide>
       <div className="space-y-6">
         <div className="mb-6">
-          <p className="font-mono text-[11px] font-medium tracking-widest uppercase text-primary mb-2">
+          <p className="font-mono text-[11px] font-medium tracking-[0.18em] uppercase text-[color:var(--color-accent-ink)] mb-3">
             Flashcards · Spaced repetition
           </p>
-          <h1 className="text-[clamp(26px,3.5vw,36px)] font-serif font-medium leading-tight tracking-tight text-foreground">
+          <h1 className="text-[clamp(30px,4.6vw,48px)] font-display font-normal leading-[1.05] tracking-[-0.02em] text-foreground">
             Study any topic,{" "}
-            <span className="italic text-primary">lock it in.</span>
+            <span className="italic text-[color:var(--color-accent-ink)]">lock it in.</span>
           </h1>
-          <p className="mt-2.5 max-w-xl text-base leading-relaxed text-muted-foreground">
+          <p className="mt-3 max-w-2xl text-base leading-relaxed text-muted-foreground sm:text-lg">
             Enter any medical topic — a deck of vignette cards is written for it,
             then scheduled so you see each one just before it slips.
           </p>
         </div>
 
-        {/* How it works — makes the page self-explanatory at a glance. Hidden
-            once a review is running; see HowItWorks. */}
-        {!session && <HowItWorks />}
+        <StepRail current={session || rightPhase === "generating" ? 2 : draftTopic.trim() ? 1 : 0} />
 
         <div className="flex flex-col gap-6 lg:flex-row lg:gap-0 lg:items-start">
           {/* ── Left pane: configurator / session status (drawer on tablet).
@@ -886,7 +883,7 @@ const Flashcards = () => {
             id="flashcards-configurator"
             className={`min-w-0 md:max-lg:hidden lg:sticky lg:top-6 lg:self-start lg:shrink-0 lg:overflow-hidden motion-safe:lg:transition-[width,opacity] motion-safe:lg:duration-300 motion-safe:lg:ease-out ${
               configOpen
-                ? "lg:w-[380px] lg:min-w-[380px] lg:max-w-[440px] lg:pr-5 lg:opacity-100"
+                ? "lg:w-[420px] lg:min-w-[420px] lg:max-w-[440px] lg:pr-5 lg:opacity-100"
                 : "lg:invisible lg:w-0 lg:min-w-0 lg:max-w-0 lg:pr-0 lg:opacity-0"
             }`}
           >

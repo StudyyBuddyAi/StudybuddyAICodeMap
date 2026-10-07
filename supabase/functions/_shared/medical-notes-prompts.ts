@@ -13,6 +13,8 @@
  */
 import type { RagChunk } from "./rag.ts";
 import { MEMORY_FOLLOWUP_INSTRUCTION } from "./memory.ts";
+import { cardFocusLine } from "./card-focus.ts";
+import { CARDS_DECLINE_INSTRUCTION } from "./topic-decline.ts";
 import { asExamMode, resolveSheetPlan, sectionQuota, type PlannedSection } from "./sheet-plan.ts";
 import { HIGH_YIELD_ONLY, ONE_HOME_PER_FACT, highYieldTest, schemaLine, tableRulesBlock } from "./sheet-schema.ts";
 import { buildPersonalizePrompt, type PersonalizeRequest } from "./personalize.ts";
@@ -35,6 +37,8 @@ export interface NotesPromptInput {
   // Raw req.json() value; parsed with parseInt below.
   cardCount?: unknown;
   focusCard?: unknown;
+  /** Standalone deck only: which angle the cards lean towards (CARD_FOCUS). */
+  cardFocus?: unknown;
   explainMode?: boolean;
   enhanceMode?: string;
   itemText?: string;
@@ -97,6 +101,8 @@ export function buildNotesPrompts(input: NotesPromptInput): { systemPrompt: stri
         ? input.plan
         : resolveSheetPlan({ archetype: "condition", examMode: mode, difficulty: diff });
 
+    const focusLine = cardFocusLine(input.cardFocus);
+
     const retrievedChunks = ragChunks.length;
     const grounded = retrievedChunks > 0;
 
@@ -158,7 +164,9 @@ RULES: Under 180 words total. No markdown. No flashcards or full sheets. Start w
 
     const gptOssCardsPrompt = (count: number) => `You are a medical educator. Generate exactly ${count} USMLE-style flashcards on the given topic.
 
-Mode: ${mode} | Difficulty: ${diff}
+Mode: ${mode} | Difficulty: ${diff}${focusLine}
+
+${CARDS_DECLINE_INSTRUCTION}
 
 ${groundingContextBlock}
 
@@ -345,7 +353,9 @@ Write EXACTLY 2 sentences: patient presentation + clinical decision it drives. M
 
     const haikuCardsPrompt = (count: number) => `You are a medical educator. Generate exactly ${count} USMLE-style flashcards on the given topic.
 
-Mode: ${mode} | Difficulty: ${diff}
+Mode: ${mode} | Difficulty: ${diff}${focusLine}
+
+${CARDS_DECLINE_INSTRUCTION}
 
 ${groundingContextBlock}
 

@@ -34,6 +34,8 @@ import {
   type MemoryTurn,
 } from "./memory.ts";
 import { buildNotesPrompts, type NotesPromptInput } from "./medical-notes-prompts.ts";
+import { topicRejectionMessage, validateTopic } from "./validate-topic.ts";
+import { parseDecline } from "./topic-decline.ts";
 import { resolveSheetPlan, toWirePlan } from "./sheet-plan.ts";
 import { classifyArchetype } from "./archetype.ts";
 import { DEFAULT_ARCHETYPE, asDepth, type Depth } from "./sheet-sections.ts";
@@ -406,6 +408,16 @@ export async function handleMedicalNotes(req: Request): Promise<Response> {
 
     if (!notes || typeof notes !== "string" || !notes.trim()) {
       return json({ error: "Notes are required" }, 400);
+    }
+
+    // A standalone deck's topic is checked before anything is billed: markup,
+    // keyboard mash and the like need no model to reject. Whether well-formed
+    // text is a medical topic is the model's call — see topic-decline.ts.
+    if (cardsOnly) {
+      const rejection = validateTopic(notes);
+      if (rejection) {
+        return json({ error: topicRejectionMessage(rejection), code: "invalid_topic" }, 400);
+      }
     }
 
     const OPENROUTER_API_KEY = Deno.env.get("OPENROUTER_API_KEY");
@@ -1048,6 +1060,14 @@ export async function handleMedicalNotes(req: Request): Promise<Response> {
           }
         },
         async flush(controller) {
+          // The writer judged the topic not medical and wrote no cards: the
+          // day's deck goes back, as it does for any request that produced
+          // nothing. The page shows the reason instead of saving a deck.
+          if (cardsOnly && parseDecline(assistantText) !== null) {
+            log("cards_declined", { userId: user.id, elapsedMs: since(startedAt) });
+            await refund();
+          }
+
           // Book/chapter labels, raced against a timeout so a slow label call
           // can never hold the stream open. Must precede [DONE].
           if (groundingAttempted) {

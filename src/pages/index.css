@@ -43,6 +43,9 @@
   --color-muted: #ebe8df;
   --color-muted-foreground: #68727b;
   --color-accent: #0aafa9;
+  /* The accent dark enough to carry text and filled chips on cream (≈5:1);
+     --color-accent itself is a highlight colour at ≈2.6:1. */
+  --color-accent-ink: #0b7a75;
   --color-accent-foreground: #f7f4ee;
   --color-border: #dedbd1;
   --color-ring: #0aafa9;
@@ -73,6 +76,7 @@
   --color-muted: #1e3040;
   --color-muted-foreground: #aeb8bd;
   --color-accent: #15bcb5;
+  --color-accent-ink: #4fd6cf;
   --color-accent-foreground: #10212d;
   --color-border: #2a3d4a;
   --color-ring: #15bcb5;
