@@ -33,11 +33,14 @@ const SAMPLES = Math.max(1, Number(process.env.NOTES_EVAL_SAMPLES ?? 1));
 const pick = <T extends { id: string }>(all: T[], env?: string) =>
   env ? all.filter((x) => env.split(",").some((p) => x.id === p || x.id.startsWith(p))) : all;
 
-const arms: Arm[] = pick(ARMS, process.env.NOTES_EVAL_ARMS).map((a) =>
-  process.env.NOTES_EVAL_PROMPTS === "tuned" && a.provider === "corti"
-    ? { ...a, id: `${a.id}+tuned`, prompts: "tuned" }
-    : a
-);
+// The OpenRouter arms (Haiku 4.5, GPT-OSS 20B) are kept in cases.ts as the
+// record of the baselines, never run: the app moved off OpenRouter, and an
+// older deployment of the function would still spend its credit on them.
+const retired = pick(ARMS, process.env.NOTES_EVAL_ARMS).filter((a) => a.provider === "openrouter");
+if (retired.length) console.log(`skipping retired OpenRouter arms: ${retired.map((a) => a.id).join(", ")}`);
+const arms: Arm[] = pick(ARMS, process.env.NOTES_EVAL_ARMS)
+  .filter((a) => a.provider === "corti")
+  .map((a) => (process.env.NOTES_EVAL_PROMPTS === "tuned" ? { ...a, id: `${a.id}+tuned`, prompts: "tuned" } : a));
 const cases: EvalCase[] = pick(CASES, process.env.NOTES_EVAL_CASES);
 
 export interface RunRecord {

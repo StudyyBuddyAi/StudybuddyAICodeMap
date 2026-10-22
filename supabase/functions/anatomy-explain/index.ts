@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.8";
+import { asCortiModel, cortiChatCompletion, cortiConfigFromEnv, type CortiModel } from "../_shared/corti.ts";
 
 /**
  * Explains one labelled structure on one anatomical illustration.
@@ -28,7 +29,8 @@ const log = (event: string, fields: Record<string, unknown> = {}) => {
 const PART_MAX = 80;
 const DIAGRAM_MAX = 120;
 
-const MODEL = "openai/gpt-oss-20b";
+/** Three or four sentences: the small instant model. CORTI_ANATOMY_MODEL overrides. */
+const DEFAULT_MODEL: CortiModel = "corti-s1-mini-instant";
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), {
@@ -79,8 +81,8 @@ serve(async (req) => {
       return json({ text: cached.data.explanation });
     }
 
-    const apiKey = Deno.env.get("OPENROUTER_API_KEY");
-    if (!apiKey) throw new Error("OPENROUTER_API_KEY is not configured");
+    const config = cortiConfigFromEnv();
+    const model = asCortiModel(Deno.env.get("CORTI_ANATOMY_MODEL"), DEFAULT_MODEL);
 
     // The last instruction matters: a label can be noise, and a model that
     // guesses at noise produces confident nonsense.
@@ -91,19 +93,15 @@ Plain prose, no headings, no lists, no markdown.
 If the structure name is unclear or not anatomical, say so in one sentence
 instead of guessing.`;
 
-    const upstream = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: MODEL,
-        stream: false,
-        max_tokens: 400,
-        provider: { order: ["Cerebras", "Groq"], allow_fallbacks: true },
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: `Diagram: ${cleanDiagram}\nStructure: ${cleanPart}` },
-        ],
-      }),
+    const upstream = await cortiChatCompletion(config, {
+      model,
+      stream: false,
+      temperature: 0.3,
+      maxTokens: 400,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: `Diagram: ${cleanDiagram}\nStructure: ${cleanPart}` },
+      ],
     });
 
     if (!upstream.ok) {
@@ -125,13 +123,13 @@ instead of guessing.`;
         diagram: cleanDiagram,
         part: cleanPart,
         explanation: text,
-        model: MODEL,
+        model,
       },
       { onConflict: "diagram_key,part_key" }
     );
     if (stored.error) log("cache_write_failed", { error: stored.error.message });
 
-    log("explained", { model: MODEL, cached: false, elapsedMs: Date.now() - startedAt });
+    log("explained", { model, cached: false, elapsedMs: Date.now() - startedAt });
     return json({ text });
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);

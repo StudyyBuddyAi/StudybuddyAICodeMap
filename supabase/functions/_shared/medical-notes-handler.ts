@@ -2,16 +2,20 @@
  * The medical-notes request handler: study sheets, flashcard decks, explain
  * and enhance.
  *
- * Tiers decide the writer:
- *   - Premium — Pro users (unless they chose "fastest"), and free/anon users'
- *     first premium-hook generations — are written by Corti
- *     (CORTI_NOTES_MODEL, default corti-s1-instant) with the prompts adjusted
- *     for it (_shared/medical-notes-prompts-corti.ts).
- *   - Everyone else is written by GPT-OSS 20B through OpenRouter (Cerebras /
- *     Groq), with the original GPT-OSS prompts (_shared/medical-notes-prompts.ts).
- *   - If Corti cannot serve a premium request before streaming starts, Claude
- *     Haiku 4.5 answers it instead, and the response says so
+ * Every writer is Corti; tiers decide which model:
+ *   - Premium — Pro users, and free/anon users' first premium-hook
+ *     generations — are written by CORTI_NOTES_MODEL (default
+ *     corti-s1-instant).
+ *   - Everyone else is written by CORTI_NOTES_STANDARD_MODEL (default
+ *     corti-s1-mini-instant), with the standard-tier ("gptOss") prompts.
+ *   Both use the prompts adjusted for Corti (_shared/medical-notes-prompts-corti.ts).
+ *   - If a tier's model cannot serve a request before streaming starts, the
+ *     other Corti model answers it instead, and the response says so
  *     (X-Model-Fallback: corti_unavailable) so the client can show it.
+ *
+ * Nothing here calls OpenRouter for text. Its one remaining use is the
+ * grounding embedding (_shared/rag.ts), which needs OPENROUTER_API_KEY; without
+ * the key, sheets are written ungrounded, as they are whenever retrieval fails.
  *
  * Whatever the tier, which sections a sheet gets is decided by Corti: a
  * one-word archetype classification (_shared/archetype.ts).
@@ -42,7 +46,7 @@ import { DEFAULT_ARCHETYPE, asDepth, type Depth } from "./sheet-sections.ts";
 import { buildCortiNotesPrompts } from "./medical-notes-prompts-corti.ts";
 import { asCortiModel, cortiChatCompletion, cortiConfigFromEnv, type CortiModel } from "./corti.ts";
 import { PERSONALIZE_MAX_TOKENS, isGrantId, parsePersonalizeRequest } from "./personalize.ts";
-import { REASONING_HEADROOM, SECTION_MAX_TOKENS, buildSectionPrompts, parseSectionRequest } from "./sheet-section-prompts.ts";
+import { SECTION_MAX_TOKENS, buildSectionPrompts, parseSectionRequest } from "./sheet-section-prompts.ts";
 import {
   GROW_MAX_TOKENS,
   REVIEW_MAX_TOKENS,
@@ -79,11 +83,17 @@ const json = (body: unknown, status: number) =>
     headers: { ...corsHeaders, "Content-Type": "application/json" },
   });
 
-const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
-const STANDARD_MODEL = "openai/gpt-oss-20b";
-const FALLBACK_MODEL = "anthropic/claude-haiku-4.5";
 const DEFAULT_PREMIUM_MODEL: CortiModel = "corti-s1-instant";
-const SOURCE_LABEL_MODEL = "openai/gpt-oss-20b";
+/**
+ * The standard tier's writer. Measured in the provider spike as clearly more
+ * accurate than the GPT-OSS 20B it replaces, at about ten times the cost and
+ * with slower sheets (docs/corti-provider-spike.md).
+ */
+const DEFAULT_STANDARD_MODEL: CortiModel = "corti-s1-mini-instant";
+
+/** The model that answers when a tier's own cannot: the other instant model. */
+const fallbackModelFor = (model: CortiModel): CortiModel =>
+  model === "corti-s1-mini-instant" ? "corti-s1-instant" : "corti-s1-mini-instant";
 
 const ANON_PREMIUM_LIMIT = 1;
 const FREE_PREMIUM_LIMIT = 3;
@@ -135,7 +145,7 @@ const CORTI_HEADERS_TIMEOUT_MS = 15_000;
 
 /**
  * Users allowed to simulate a Corti outage with `x-simulate-corti-outage: 1`,
- * so the Haiku fallback can be exercised against deployed code. Only the eval
+ * so the fallback model can be exercised against deployed code. Only the eval
  * harness's anonymous user (scripts/notes-eval/session.ts); the header is
  * ignored for everyone else.
  */
@@ -264,37 +274,7 @@ async function hasPremiumGrant(client: SupabaseClient, userId: string, grant: st
 /** Deck size by the sheet's depth — the old Concise and Detailed counts. */
 const CARDS_BY_DEPTH: Record<Depth, number> = { highYield: 3, comprehensive: 5 };
 
-/** A whole non-streaming completion from OpenRouter, or null. */
-async function openRouterComplete(
-  apiKey: string,
-  model: string,
-  messages: { role: string; content: string }[]
-): Promise<string | null> {
-  const res = await fetch(OPENROUTER_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": `Bearer ${apiKey}`,
-      "HTTP-Referer": "https://studybuddy.app",
-      "X-Title": "StudyBuddy",
-    },
-    body: JSON.stringify({
-      model,
-      temperature: 0.7,
-      max_tokens: 2048,
-      messages,
-      provider: model.startsWith("openai/gpt-oss")
-        ? { order: ["Cerebras", "Groq"], allow_fallbacks: true }
-        : { order: ["Anthropic"], allow_fallbacks: true },
-    }),
-  });
-  if (!res.ok) return null;
-  const body = await res.json();
-  const text = body?.choices?.[0]?.message?.content;
-  return typeof text === "string" && text.trim() ? text : null;
-}
-
-/** The same, from Corti. Null on any failure so the caller can fall back. */
+/** A whole non-streaming completion from Corti. Null on any failure so the caller can fall back. */
 async function cortiComplete(
   model: CortiModel,
   messages: { role: "system" | "user" | "assistant"; content: string }[]
@@ -314,34 +294,6 @@ async function cortiComplete(
   } catch {
     return null;
   }
-}
-
-/** POSTs a streaming chat completion to OpenRouter. */
-function openRouterStream(
-  apiKey: string,
-  model: string,
-  messages: { role: string; content: string }[],
-  maxTokens = 8192
-): Promise<Response> {
-  return fetch(OPENROUTER_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": `Bearer ${apiKey}`,
-      "HTTP-Referer": "https://studybuddy.app",
-      "X-Title": "StudyBuddy",
-    },
-    body: JSON.stringify({
-      model,
-      stream: true,
-      temperature: 0.7,
-      max_tokens: maxTokens,
-      messages,
-      provider: model.startsWith("openai/gpt-oss")
-        ? { order: ["Cerebras", "Groq"], allow_fallbacks: true }
-        : { order: ["Anthropic"], allow_fallbacks: true },
-    }),
-  });
 }
 
 /**
@@ -420,8 +372,9 @@ export async function handleMedicalNotes(req: Request): Promise<Response> {
       }
     }
 
+    // Only the grounding embedding uses it (see the header). Optional: without
+    // it, retrieval is skipped and the sheet is written ungrounded.
     const OPENROUTER_API_KEY = Deno.env.get("OPENROUTER_API_KEY");
-    if (!OPENROUTER_API_KEY) throw new Error("OPENROUTER_API_KEY is not configured");
 
     // An AI action on the student's own sheet: Pro (or a premium sheet's
     // grant), uncapped, and nothing else a request does — no grounding, no
@@ -493,10 +446,15 @@ export async function handleMedicalNotes(req: Request): Promise<Response> {
     const searchString = notes.trim();
 
     const retrievalStartedAt = Date.now();
-    const retrievalPromise = groundingAttempted
+    const retrievalPromise = groundingAttempted && OPENROUTER_API_KEY
       ? retrieveWithRetry(authClient, OPENROUTER_API_KEY, searchString, groundingTopK, groundingThreshold)
           .then((r) => ({ ...r, ms: since(retrievalStartedAt) }))
-      : Promise.resolve({ chunks: [] as RagChunk[], attempts: 0, error: null, ms: 0 });
+      : Promise.resolve({
+          chunks: [] as RagChunk[],
+          attempts: 0,
+          error: groundingAttempted ? "embeddings_key_missing" : null,
+          ms: 0,
+        });
 
     // The passages the sheet was built on, by the ids it saved — so a rewrite
     // or a branch rests on what its badges vouch for, with no new embedding call.
@@ -532,26 +490,27 @@ export async function handleMedicalNotes(req: Request): Promise<Response> {
     const routingPromise = (async () => {
       const { data: profile } = await authClient
         .from("profiles")
-        .select("is_pro, pro_expires_at, preferred_model")
+        .select("is_pro, pro_expires_at")
         .eq("id", user.id)
         .maybeSingle();
 
       const isProUser =
         profile?.is_pro === true &&
         (profile.pro_expires_at === null || new Date(profile.pro_expires_at) > new Date());
-      // Pro users choose between the premium model (default) and "fastest".
-      const proWantsFastest = profile?.preferred_model === "gpt-oss";
+      // Pro is always the premium writer. The old "fastest" choice
+      // (preferred_model "gpt-oss") pointed at GPT-OSS, and the only other
+      // Corti writer is slower, not faster, so the stored value is ignored.
 
-      // A personalize action always runs on the premium writer, whatever a
-      // Pro user picked for their sheets. Without Pro it needs the grant the
-      // server recorded for a premium sheet; it never spends the hook.
-      // A section request is written by the tier that wrote its sheet: Corti
-      // for Pro (unless they chose fastest) and for a premium sheet's grant,
-      // GPT-OSS otherwise. A section by a different writer than the rest reads
-      // as a different sheet, and GPT-OSS measured least accurate.
+      // A personalize action always runs on the premium writer. Without Pro
+      // it needs the grant the server recorded for a premium sheet; it never
+      // spends the hook.
+      // A section request is written by the tier that wrote its sheet: the
+      // premium model for Pro and for a premium sheet's grant, the standard
+      // model otherwise. A section by a different writer than the rest reads
+      // as a different sheet.
       // A branch is written by the premium writer for everyone: it is where a
-      // sheet goes past what it was written with, and GPT-OSS's depth measured
-      // with clinical errors (the depth pilot).
+      // sheet goes past what it was written with, and the depth pilot measured
+      // the weaker writer's depth with clinical errors.
       const hookPromise: Promise<boolean> = isBranch
         ? Promise.resolve(true)
         : isPersonalize
@@ -560,10 +519,10 @@ export async function handleMedicalNotes(req: Request): Promise<Response> {
           : hasPremiumGrant(authClient, user.id, personalize!.grant)
         : isSection
         ? isProUser
-          ? Promise.resolve(!proWantsFastest)
+          ? Promise.resolve(true)
           : hasPremiumGrant(authClient, user.id, section!.grant)
         : isProUser
-        ? Promise.resolve(!proWantsFastest)
+        ? Promise.resolve(true)
         : enhanceMode
         ? Promise.resolve(false)
         : authClient
@@ -687,7 +646,7 @@ export async function handleMedicalNotes(req: Request): Promise<Response> {
       // Source labels: cheap formatting side call, started now and raced at
       // the end of the stream so it never delays the first byte.
       const sourceLabelsPromise: Promise<RawSourceLabel[]> = grounded
-        ? requestSourceLabels(OPENROUTER_API_KEY, SOURCE_LABEL_MODEL, ragChunks)
+        ? requestSourceLabels(ragChunks)
         : Promise.resolve([]);
       sourceLabelsPromise.catch(() => {});
 
@@ -730,6 +689,10 @@ export async function handleMedicalNotes(req: Request): Promise<Response> {
       ];
 
       const premiumModel = asCortiModel(Deno.env.get("CORTI_NOTES_MODEL"), DEFAULT_PREMIUM_MODEL);
+      const standardModel = asCortiModel(Deno.env.get("CORTI_NOTES_STANDARD_MODEL"), DEFAULT_STANDARD_MODEL);
+      /** This request's writer, and the prompt family written for its tier. */
+      const tierModel = routing.isPremium ? premiumModel : standardModel;
+      const tierFamily: "haiku" | "gptOss" = routing.isPremium ? "haiku" : "gptOss";
       // Tuned prompts won on both tiers in the round-3 eval; NOTES_PROMPTS=original reverts.
       const useTunedPrompts = Deno.env.get("NOTES_PROMPTS") !== "original";
       const notesPrompts = useTunedPrompts ? buildCortiNotesPrompts : buildNotesPrompts;
@@ -744,57 +707,44 @@ export async function handleMedicalNotes(req: Request): Promise<Response> {
           ? buildSuggestPrompts({ request: branch!, ...followUp })
           : buildGrowPrompts({ request: branch!, ...followUp })
         : null;
-      /** The prompts for a writer: tuned for Corti and GPT-OSS, the originals for the Haiku fallback. */
-      const promptsFor = (family: "haiku" | "gptOss", original = false): Prompts =>
-        sectionPrompts ?? (original ? buildNotesPrompts : notesPrompts)({ ...promptBase, family });
+      /** The prompts for a writer, in its tier's family. */
+      const promptsFor = (family: "haiku" | "gptOss"): Prompts =>
+        sectionPrompts ?? notesPrompts({ ...promptBase, family });
 
       /**
-       * Starts the tier's writer: Corti for premium, falling back to Haiku
-       * before streaming starts; GPT-OSS otherwise. GPT-OSS reasons before it
-       * writes, against the same token budget — sized for Corti, half its
-       * section requests ended at the limit with nothing written — so a
-       * section-sized budget gets headroom there.
+       * Starts the tier's writer, falling back to the other instant model
+       * before streaming starts. Null response when neither answers; the
+       * caller turns that into an error the page can retry.
        */
       const startWriter = async (
-        prompts: (family: "haiku" | "gptOss", original?: boolean) => Prompts,
+        prompts: (family: "haiku" | "gptOss") => Prompts,
         budget: number,
         withMemory: boolean
       ): Promise<{ response: Response | null; modelUsed: string; fallbackReason: string | null }> => {
-        const toMessages = (p: Prompts) =>
-          withMemory
-            ? messagesFor(p)
-            : [
-                { role: "system" as const, content: p.systemPrompt },
-                { role: "user" as const, content: p.userContent },
-              ];
-        if (routing.isPremium) {
-          const simulateOutage =
-            OUTAGE_SIMULATION_USER_IDS.includes(user.id) && req.headers.get("x-simulate-corti-outage") === "1";
-          const corti = simulateOutage
-            ? { response: null, reason: "simulated_outage" }
-            : await cortiStream(premiumModel, toMessages(prompts("haiku")), budget);
-          if (corti.response) return { response: corti.response, modelUsed: `corti/${premiumModel}`, fallbackReason: null };
-          log("corti_unavailable", { userId: user.id, reason: corti.reason });
-          // A branch is Corti's or nothing: the page tries once more by
-          // itself, then offers Try again. It is small and quick to ask for
-          // again, and the review that follows it is Corti's too.
-          if (isBranch) return { response: null, modelUsed: `corti/${premiumModel}`, fallbackReason: corti.reason };
-          return {
-            response: await openRouterStream(OPENROUTER_API_KEY, FALLBACK_MODEL, toMessages(prompts("haiku", true)), budget),
-            modelUsed: `openrouter/${FALLBACK_MODEL}`,
-            fallbackReason: corti.reason,
-          };
+        const p = prompts(tierFamily);
+        const messages = withMemory
+          ? messagesFor(p)
+          : [
+              { role: "system" as const, content: p.systemPrompt },
+              { role: "user" as const, content: p.userContent },
+            ];
+        const simulateOutage =
+          OUTAGE_SIMULATION_USER_IDS.includes(user.id) && req.headers.get("x-simulate-corti-outage") === "1";
+        const primary = simulateOutage
+          ? { response: null, reason: "simulated_outage" }
+          : await cortiStream(tierModel, messages, budget);
+        if (primary.response) return { response: primary.response, modelUsed: `corti/${tierModel}`, fallbackReason: null };
+        log("corti_unavailable", { userId: user.id, model: tierModel, reason: primary.reason });
+        // A branch has no fallback: the page tries once more by itself, then
+        // offers Try again. It is small and quick to ask for again, and the
+        // review that follows it is the premium model's too.
+        if (isBranch) return { response: null, modelUsed: `corti/${tierModel}`, fallbackReason: primary.reason };
+        const fallbackModel = fallbackModelFor(tierModel);
+        const fallback = await cortiStream(fallbackModel, messages, budget);
+        if (!fallback.response) {
+          log("corti_fallback_unavailable", { userId: user.id, model: fallbackModel, reason: fallback.reason });
         }
-        return {
-          response: await openRouterStream(
-            OPENROUTER_API_KEY,
-            STANDARD_MODEL,
-            toMessages(prompts("gptOss")),
-            budget < 8192 ? budget + REASONING_HEADROOM : budget
-          ),
-          modelUsed: `openrouter/${STANDARD_MODEL}`,
-          fallbackReason: null,
-        };
+        return { response: fallback.response, modelUsed: `corti/${fallbackModel}`, fallbackReason: primary.reason };
       };
 
       /**
@@ -826,7 +776,7 @@ export async function handleMedicalNotes(req: Request): Promise<Response> {
               cardCount: cardsForDepth,
               // The deck stands alone; prior turns would pull it off topic.
               hasMemory: false,
-              family: routing.isPremium ? "haiku" : "gptOss",
+              family: tierFamily,
             };
             const prompts = notesPrompts(cardsInput);
             const messages = [
@@ -834,15 +784,8 @@ export async function handleMedicalNotes(req: Request): Promise<Response> {
               { role: "user" as const, content: prompts.userContent },
             ];
             try {
-              if (routing.isPremium) {
-                const text = await cortiComplete(premiumModel, messages);
-                if (text) return text;
-              }
-              return await openRouterComplete(
-                OPENROUTER_API_KEY,
-                routing.isPremium ? FALLBACK_MODEL : STANDARD_MODEL,
-                messages
-              );
+              return (await cortiComplete(tierModel, messages)) ??
+                (await cortiComplete(fallbackModelFor(tierModel), messages));
             } catch (err: unknown) {
               log("flashcards_failed", { err: err instanceof Error ? err.message : String(err) });
               return null;
@@ -987,7 +930,7 @@ export async function handleMedicalNotes(req: Request): Promise<Response> {
     // ── Relay ───────────────────────────────────────────────────────────────
     /**
      * Relays the writer's stream: each content delta re-framed on its own, so
-     * no provider-specific field (Corti's `reasoning`, OpenRouter's metadata)
+     * no provider-specific field (Corti's `reasoning`)
      * reaches the client; then the book labels and the deck; then [DONE] and
      * the turn's memory.
      *

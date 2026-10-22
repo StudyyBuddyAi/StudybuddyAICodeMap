@@ -16,9 +16,10 @@
  *   - everything else (memory, rag_logs) — refused, and the handler carries on
  *     without it, as it does in production when those fail.
  *
- * LOCAL_NOTES_WRITER=corti|gpt-oss forces the tier: "corti" grants the
- * premium hook and a Pro user's Corti preference, "gpt-oss" refuses the hook
- * and reads a Pro user as having chosen fastest.
+ * LOCAL_NOTES_WRITER=premium|standard forces a free or anonymous user's tier:
+ * "premium" grants the premium hook, "standard" refuses it. ("corti" and
+ * "gpt-oss", the names from when the standard tier was GPT-OSS, still work.)
+ * A Pro user is always premium.
  */
 
 type Result = { data: unknown; error: { message: string } | null };
@@ -75,8 +76,6 @@ async function run(q: QueryState, token: string | null): Promise<Result> {
     const r = await rest(`profiles?id=eq.${id}&select=${encodeURIComponent(q.columns || "*")}`, token ?? undefined);
     if (r.error) return r;
     const row = (r.data as Record<string, unknown>[])[0] ?? null;
-    const forced = env("LOCAL_NOTES_WRITER");
-    if (row && (forced === "corti" || forced === "gpt-oss")) row.preferred_model = forced === "corti" ? "corti" : "gpt-oss";
     return { data: row, error: null };
   }
 
@@ -166,8 +165,8 @@ function rpc(name: string, args: Record<string, unknown>): Promise<Result> {
   }
   if (name === "consume_premium_hook") {
     const forced = env("LOCAL_NOTES_WRITER");
-    if (forced === "corti") return Promise.resolve({ data: { allowed: true }, error: null });
-    if (forced === "gpt-oss") return Promise.resolve({ data: { allowed: false }, error: null });
+    if (forced === "premium" || forced === "corti") return Promise.resolve({ data: { allowed: true }, error: null });
+    if (forced === "standard" || forced === "gpt-oss") return Promise.resolve({ data: { allowed: false }, error: null });
     const used = premiumUsed.get(user) ?? 0;
     if (used >= Number(args.p_limit)) return Promise.resolve({ data: { allowed: false }, error: null });
     premiumUsed.set(user, used + 1);

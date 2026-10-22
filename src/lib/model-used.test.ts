@@ -12,7 +12,17 @@ describe("parseModelUsed", () => {
     });
   });
 
-  it("reads the free tier through OpenRouter, with or without the provider prefix", () => {
+  it("reads the standard tier and a fallback to Corti's other model", () => {
+    expect(parseModelUsed(headers({ "X-Model-Used": "corti/corti-s1-mini-instant" }))).toMatchObject({
+      kind: "corti",
+      fallback: false,
+    });
+    expect(
+      parseModelUsed(headers({ "X-Model-Used": "corti/corti-s1-mini-instant", "X-Model-Fallback": "corti_unavailable" }))
+    ).toMatchObject({ kind: "corti", fallback: true });
+  });
+
+  it("reads saved output from the retired OpenRouter free tier, with or without the provider prefix", () => {
     expect(parseModelUsed(headers({ "X-Model-Used": "openrouter/openai/gpt-oss-20b" })).kind).toBe("gpt-oss");
     expect(parseModelUsed(headers({ "X-Model-Used": "openai/gpt-oss-20b" })).kind).toBe("gpt-oss");
   });

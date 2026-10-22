@@ -42,7 +42,14 @@ function metaInt(metadata: Record<string, unknown> | null, key: string): number 
   return typeof v === "number" && Number.isFinite(v) && v > 0 ? Math.round(v) : null;
 }
 
-/** Same OpenRouter-backed embeddings config rag-generate has always used. */
+/**
+ * Same OpenRouter-backed embeddings config rag-generate has always used.
+ *
+ * The one OpenRouter call the app still makes; every text model is Corti. It
+ * stays because the guideline corpus is embedded with text-embedding-3-small
+ * (1536-d), and Corti's embedder is fixed at 2560-d — moving means a halfvec
+ * column and a full re-ingest (docs/corti-provider-spike.md).
+ */
 export function makeEmbeddings(openRouterApiKey: string): OpenAIEmbeddings {
   return new OpenAIEmbeddings({
     apiKey: openRouterApiKey,

@@ -201,7 +201,9 @@ const WRITERS: Record<WriterId, Writer> = {
 };
 
 const writers = (process.env.DEPTH_PILOT_WRITERS ?? "corti").split(",").filter((w): w is WriterId => w in WRITERS).map((w) => WRITERS[w]);
-if (writers.some((w) => w.id === "gpt") && !process.env.OPENROUTER_API_KEY) throw new Error("gpt needs OPENROUTER_API_KEY");
+// The app no longer uses OpenRouter for text; the gpt writer stays only as the
+// record of what the pilot compared, and is refused rather than run.
+if (writers.some((w) => w.id === "gpt")) throw new Error("the gpt writer is retired: it spends OpenRouter credit");
 
 // ── Cases ───────────────────────────────────────────────────────────────────
 
