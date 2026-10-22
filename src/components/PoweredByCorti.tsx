@@ -49,14 +49,15 @@ export const PoweredByCorti = ({ compact = false }: { compact?: boolean }) => (
 );
 
 /**
- * Shown when a premium request could not reach Corti and another model wrote
- * the output instead — the student is told, rather than served a different
- * model silently.
+ * Shown when a request's usual Corti model was unavailable and Corti's other
+ * model wrote the output instead — the student is told, rather than served a
+ * different model silently. Legacy saved output may carry the old fallback
+ * (Claude Haiku 4.5); it gets the same notice.
  */
 export const CortiFallbackNotice = ({ used }: { used: ModelUsed }) => (
   <span
     role="note"
-    title="Corti was unavailable for this request, so a backup model wrote it. Try again later for Corti."
+    title="The usual model was unavailable for this request, so a backup model wrote it. Try again later for the usual one."
     style={{
       ...pill,
       border: "1px solid var(--border)",
@@ -65,13 +66,14 @@ export const CortiFallbackNotice = ({ used }: { used: ModelUsed }) => (
     }}
   >
     <TriangleAlert aria-hidden="true" style={{ width: 11, height: 11 }} />
-    <span>Backup model · Corti unavailable</span>
+    <span>Backup model · usual model unavailable</span>
   </span>
 );
 
 /**
  * The right credit for a response: Corti's badge, or the fallback notice.
- * The free-tier model is never named — the student can't choose it, so its
+ * Every tier is Corti now. Older saved output from the retired free-tier
+ * model (GPT-OSS) is never named — the student couldn't choose it, so its
  * name told them nothing. Renders nothing for it, or when the model is unknown.
  */
 export const ModelCredit = ({ used, compact = false }: { used: ModelUsed | null | undefined; compact?: boolean }) => {

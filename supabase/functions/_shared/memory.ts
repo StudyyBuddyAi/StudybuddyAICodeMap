@@ -119,7 +119,7 @@ function capToBudget(pairs: [MemoryTurn, MemoryTurn][]): MemoryTurn[] {
 /**
  * Claims the next turn number atomically — rolling the window over first if
  * it is already full — and inserts the user side with a placeholder ("")
- * answer. Must be called and awaited before the OpenRouter fetch, using the
+ * answer. Must be called and awaited before the writer call, using the
  * turnCount `openMemoryWindow` returned moments earlier.
  *
  * Both branches are a compare-and-swap on that turnCount: a zero-row result

@@ -1,17 +1,21 @@
 /**
  * Which model wrote a medical-notes response, read from its headers.
  *
- * `X-Model-Used` is `<provider>/<model>` — `corti/corti-s1-instant`,
- * `openrouter/openai/gpt-oss-20b`, `openrouter/anthropic/claude-haiku-4.5` — or,
- * from older deployments, the bare OpenRouter id (`openai/gpt-oss-20b`).
- * `X-Model-Fallback: corti_unavailable` marks a premium request that Corti
- * could not serve, answered by Claude Haiku 4.5 instead.
+ * `X-Model-Used` is `<provider>/<model>`. Every writer is Corti now —
+ * `corti/corti-s1-instant` (premium), `corti/corti-s1-mini-instant` (standard).
+ * `X-Model-Fallback: corti_unavailable` marks a request whose usual model was
+ * unavailable, answered by Corti's other model instead.
+ *
+ * Saved sheets and decks keep the value they were written with, so the
+ * retired OpenRouter models still parse: `openrouter/openai/gpt-oss-20b`,
+ * `openrouter/anthropic/claude-haiku-4.5`, or the bare id from older
+ * deployments (`openai/gpt-oss-20b`).
  */
 export type ModelKind = "corti" | "gpt-oss" | "claude" | "unknown";
 
 export interface ModelUsed {
   kind: ModelKind;
-  /** True when a premium request fell back from Corti to another model. */
+  /** True when the request's usual model was unavailable and another wrote it. */
   fallback: boolean;
   /** The header value as sent, for tooltips and debugging. */
   raw: string;

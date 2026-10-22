@@ -1,5 +1,11 @@
 # Corti as the AI provider for study generation — spike
 
+> **Update 2026-10-22: the app is off OpenRouter for text.** Option 3(b) below was taken: the
+> standard route is `corti-s1-mini-instant`, the Haiku fallback became a retry on the other
+> Corti instant model, and source labels, `anatomy-explain` and `rag-generate` moved to Corti.
+> Only the grounding embeddings stay on OpenRouter (§2: the 1536-d corpus vs Corti's 2560-d
+> embedder). The eval harness no longer runs the OpenRouter baseline arms.
+
 Branch: `feat/corti-provider-spike` · Status: evaluation (nothing in production calls the new code)
 
 > **Baselines below are no longer directly comparable.** Every number here was measured with the

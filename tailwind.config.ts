@@ -85,12 +85,9 @@ export default {
         sm: "calc(var(--radius) - 4px)",
       },
       fontFamily: {
-        // Two families only: DM Sans for all text, IBM Plex Mono for metadata.
-        // `display` and `serif` stay as aliases so existing classes keep working.
-        sans: ['"DM Sans"', 'system-ui', 'sans-serif'],
-        display: ['"DM Sans"', 'system-ui', 'sans-serif'],
-        serif: ['"DM Sans"', 'system-ui', 'sans-serif'],
-        mono: ['"IBM Plex Mono"', 'ui-monospace', '"SF Mono"', 'Menlo', 'Consolas', 'monospace'],
+        sans: ['"Inter Tight"', 'Inter', 'system-ui', 'sans-serif'],
+        display: ['Newsreader', '"Source Serif Pro"', 'Georgia', 'serif'],
+        mono: ['"JetBrains Mono"', 'ui-monospace', '"SF Mono"', 'Menlo', 'Consolas', 'monospace'],
       },
       keyframes: {
         "accordion-down": {

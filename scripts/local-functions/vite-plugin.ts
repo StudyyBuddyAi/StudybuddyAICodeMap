@@ -18,9 +18,13 @@
  *   - `npm:@langchain/openai` → langchain-stub.ts. Retrieval fails open, so
  *     sheets are written ungrounded.
  *
- * `Deno.env` is shimmed from the loaded env: OPENROUTER_API_KEY (.env.local)
- * for GPT-OSS, CORTI_* (.env) for Corti, LOCAL_NOTES_WRITER to force a tier.
- * Writers are called for real and spend real credit.
+ * `Deno.env` is shimmed from the loaded env: CORTI_* (.env) for the writers,
+ * LOCAL_NOTES_WRITER=premium|standard to force a free user's tier. Writers
+ * are called for real and spend real Corti credit.
+ *
+ * OPENROUTER_API_KEY is withheld from the shim even when .env.local has it, so
+ * nothing run here can reach OpenRouter. The handler's one OpenRouter use is
+ * the retrieval embedding, which is off here anyway.
  */
 import path from "node:path";
 import type { IncomingMessage, ServerResponse } from "node:http";
@@ -107,8 +111,9 @@ export function localFunctions(): Plugin {
       if (!enabled) return;
 
       // The handler and the modules it loads read their settings through Deno.env.
+      const { OPENROUTER_API_KEY: _withheld, ...localEnv } = env;
       const denoEnv: Record<string, string | undefined> = {
-        ...env,
+        ...localEnv,
         SUPABASE_URL: env.VITE_SUPABASE_URL,
         SUPABASE_SERVICE_ROLE_KEY: "local-stand-in",
         SUPABASE_ANON_KEY: env.VITE_SUPABASE_PUBLISHABLE_KEY,
@@ -120,7 +125,7 @@ export function localFunctions(): Plugin {
       say(
         `medical-notes runs locally (real handler) · writer: ${env.LOCAL_NOTES_WRITER || "production routing"} · corti: ${
           hasCorti ? "ok" : "no creds"
-        } · openrouter: ${env.OPENROUTER_API_KEY ? "ok" : "no key"} · retrieval: off`
+        } · openrouter: never (key withheld) · retrieval: off`
       );
 
       server.middlewares.use(async (req, res, next) => {

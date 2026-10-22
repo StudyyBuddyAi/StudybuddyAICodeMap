@@ -246,7 +246,7 @@ const QBank = () => {
               QBank · USMLE-style
             </p>
             <h1
-              className="[font-family:var(--app-font-sans)] text-[clamp(28px,4vw,40px)] font-medium leading-[1.1] tracking-[-0.012em]"
+              className="[font-family:var(--app-font-serif)] text-[clamp(28px,4vw,40px)] font-medium leading-[1.1] tracking-[-0.012em]"
               style={{ color: "var(--color-foreground)" }}
             >
               Questions on{" "}

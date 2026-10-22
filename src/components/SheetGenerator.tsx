@@ -46,7 +46,6 @@ import {
 import { useUsageLimit, MAX_DAILY_SHEETS } from "@/hooks/use-usage-limit";
 import { useCitationUsage } from "@/hooks/use-citation-usage";
 import { usePremiumHook } from "@/hooks/use-premium-hook";
-import { useModelPreference } from "@/hooks/use-model-preference";
 import { useAuth } from "@/hooks/use-auth";
 import { callMedicalNotes } from "@/lib/callMedicalNotes";
 import { modelUsedFrom, parseModelUsed, type ModelUsed } from "@/lib/model-used";
@@ -331,12 +330,6 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
 
   const { sheetCount, isSheetLimited, isProUser: pro, refresh: refreshUsage } = useUsageLimit();
   const { premiumRemaining, isPremiumHookActive, refetch: refetchPremium } = usePremiumHook();
-  const {
-    preferredModel,
-    setPreferredModel,
-    saving: modelSaving,
-    isLoading: modelLoading,
-  } = useModelPreference();
   const { user, isAnonymous } = useAuth();
   const {
     canUseCitation,
@@ -460,7 +453,6 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
         userId: user?.id ?? null,
         isAnonymous: isAnonymous ?? false,
         isPro: pro,
-        preferredModel: pro ? preferredModel : undefined,
       });
 
       if (!response.ok) {
@@ -1185,15 +1177,6 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
       }}
       useMemory={useMemory}
       onUseMemory={setUseMemory}
-      model={
-        pro
-          ? {
-              value: preferredModel,
-              onChange: setPreferredModel,
-              busy: modelSaving || modelLoading,
-            }
-          : undefined
-      }
       disabled={loading}
     />
   );

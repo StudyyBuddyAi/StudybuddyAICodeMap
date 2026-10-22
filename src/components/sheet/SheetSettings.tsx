@@ -2,8 +2,6 @@ import { useState, type ReactNode } from "react";
 import { Check, ChevronDown } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Slider } from "@/components/ui/slider";
-import { PoweredByCorti } from "@/components/PoweredByCorti";
-import type { ModelPreference } from "@/hooks/use-model-preference";
 import type { Depth } from "@/lib/sheet-depth";
 
 /**
@@ -47,11 +45,6 @@ const DEPTH_CHOICES: Choice<Depth>[] = [
 const SOURCE_CHOICES: Choice<"on" | "off">[] = [
   { value: "on", label: "Guideline library", hint: "Built on retrieved passages, cited" },
   { value: "off", label: "Model knowledge only", hint: "No retrieval, no sources" },
-];
-
-const MODEL_CHOICES: Choice<ModelPreference>[] = [
-  { value: "corti", label: "Corti S1", hint: "Best quality" },
-  { value: "gpt-oss", label: "GPT-OSS 20B", hint: "Fastest" },
 ];
 
 const labelOf = (choices: Choice[], value: string) =>
@@ -157,13 +150,6 @@ export interface SheetSettingsProps {
   onGrounding: (next: Partial<GroundingSettings>) => void;
   useMemory: boolean;
   onUseMemory: (value: boolean) => void;
-  /** Pro only: the model that writes the sheet. */
-  model?: {
-    value: ModelPreference;
-    onChange: (value: ModelPreference) => void;
-    /** The preference is loading or being saved. */
-    busy: boolean;
-  };
   disabled?: boolean;
 }
 
@@ -178,7 +164,6 @@ const SheetSettings = ({
   onGrounding,
   useMemory,
   onUseMemory,
-  model,
   disabled,
 }: SheetSettingsProps) => (
   <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Sheet settings">
@@ -292,34 +277,6 @@ const SheetSettings = ({
         </>
       )}
     </SettingChip>
-
-    {model && (
-      <SettingChip
-        name="Model"
-        value={labelOf(MODEL_CHOICES, model.value)}
-        disabled={disabled || model.busy}
-        width={240}
-      >
-        {(close) => (
-          <>
-            <ChoiceList
-              name="Model"
-              choices={MODEL_CHOICES}
-              value={model.value}
-              onPick={(v) => {
-                model.onChange(v);
-                close();
-              }}
-            />
-            {model.value === "corti" && (
-              <div className="flex justify-center px-2.5 pb-1.5 pt-1">
-                <PoweredByCorti compact />
-              </div>
-            )}
-          </>
-        )}
-      </SettingChip>
-    )}
   </div>
 );
 

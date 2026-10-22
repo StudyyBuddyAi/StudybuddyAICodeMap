@@ -1,25 +1,27 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
-  FlaskConical,
-  CheckCircle,
-  XCircle,
-  Clock,
   RotateCcw,
   ChevronRight,
   Flag,
   AlertTriangle,
-  MinusCircle,
   ShieldCheck,
   ImageOff,
+  ListChecks,
 } from "lucide-react";
 import DashboardLayout from "@/components/dashboard/DashboardLayout";
 import PageLoader from "@/components/PageLoader";
+import { StatusIcon } from "@/components/qbank/ItemNavigator";
+import "@/components/qbank/exam.css";
 import { useQBankContext } from "@/contexts/QBankContext";
 import { supabase } from "@/integrations/supabase/client";
-import type { PlayMode, Question, QuestionMedia, SessionAnswer } from "@/lib/qbank-types";
-import { CHALLENGE_LABELS, EXAM_MODE_LABELS } from "@/lib/qbank-types";
+import type { PlayMode, Question, QuestionMedia, SessionAnnotations, SessionAnswer } from "@/lib/qbank-types";
+import { CHALLENGE_LABELS, EXAM_MODE_LABELS, TIMED_SECONDS_PER_QUESTION } from "@/lib/qbank-types";
+import { formatClock } from "@/lib/qbank-answer";
+import { ITEM_STATUS_LABEL, type ItemStatus } from "@/lib/qbank-item-status";
 import { ruleLabel } from "@/lib/qbank-rule-labels";
+import { scoreSet } from "@/lib/qbank-score";
+import { normalizeAnnotations } from "@/lib/qbank-session-state";
 import {
   fetchGenerationReport,
   type GenerationReport,
@@ -31,10 +33,12 @@ interface SummaryData {
   answers: SessionAnswer[];
   totalTime: number;
   score: number;
+  /** Every question the set held: omitted ones count against the score. */
   total: number;
   flaggedIds: string[];
   /** Questions the set held that were never answered. */
   omitted?: number;
+  annotations?: SessionAnnotations;
 }
 
 // Raw shapes returned by the get_session_review RPC (before mapping to app types).
@@ -74,6 +78,27 @@ const REASONING_LABELS: Record<string, string> = {
   "3rd": "3rd-order",
 };
 
+const PANEL_STYLE: React.CSSProperties = {
+  border: "1px solid var(--border)",
+  borderRadius: "var(--radius-lg)",
+  background: "var(--bg-elevated)",
+};
+
+const H2_STYLE: React.CSSProperties = {
+  fontSize: 15,
+  fontWeight: 650,
+  color: "var(--fg)",
+  margin: 0,
+};
+
+const formatTime = (ms: number): string => {
+  const totalSecs = Math.floor(ms / 1000);
+  const mins = Math.floor(totalSecs / 60);
+  const secs = totalSecs % 60;
+  if (mins === 0) return `${secs}s`;
+  return `${mins}m ${secs}s`;
+};
+
 /**
  * How the set was written, from the signals every generated row already stores.
  *
@@ -105,48 +130,28 @@ const GenerationReportPanel = ({ report }: { report: GenerationReport }) => {
           : "";
 
   return (
-    <div
-      style={{
-        border: "1px solid var(--border)",
-        borderRadius: "var(--radius-lg)",
-        background: "var(--bg-elevated)",
-        padding: 20,
-      }}
-    >
+    <section style={{ ...PANEL_STYLE, padding: 20 }} aria-labelledby="qb-written-title">
       <div className="flex items-center gap-2">
-        <ShieldCheck style={{ width: 14, height: 14, color: "var(--accent)" }} />
-        <p style={{ ...MONO_EYEBROW, color: "var(--accent)" }}>How this set was written</p>
+        <ShieldCheck style={{ width: 16, height: 16, color: "var(--accent)" }} aria-hidden />
+        <h2 id="qb-written-title" style={H2_STYLE}>
+          How this set was written
+        </h2>
       </div>
 
-      <p style={{ fontSize: 13, lineHeight: 1.7, color: "var(--fg-muted)", marginTop: 10 }}>
+      <p style={{ fontSize: 14, lineHeight: 1.7, color: "var(--fg-muted)", marginTop: 10 }}>
         {report.written} question{report.written === 1 ? "" : "s"} written,{" "}
         {report.admitted} kept
         {heldBack > 0 ? `, ${heldBack} held back and rewritten` : ""}.
         {askedFor}
+        {mix.length > 0 && ` Reasoning: ${mix.map((m) => `${REASONING_LABELS[m.order] ?? m.order} ${m.n}`).join(", ")}.`}
       </p>
-
-      {mix.length > 0 && (
-        <p
-          style={{
-            fontFamily: "var(--font-mono)",
-            fontSize: 11,
-            color: "var(--fg-subtle)",
-            marginTop: 8,
-          }}
-        >
-          {mix.map((m) => `${REASONING_LABELS[m.order] ?? m.order} ${m.n}`).join(" · ")}
-        </p>
-      )}
 
       {findings.length > 0 && (
         <div style={{ marginTop: 14 }}>
-          <p style={{ ...MONO_EYEBROW, marginBottom: 6 }}>Checks that fired</p>
+          <h3 style={{ ...H2_STYLE, fontSize: 14, marginBottom: 6 }}>Checks that fired</h3>
           <ul className="flex flex-col gap-1">
             {findings.map(([rule, n]) => (
-              <li
-                key={rule}
-                style={{ fontSize: 12, lineHeight: 1.6, color: "var(--fg-muted)" }}
-              >
+              <li key={rule} style={{ fontSize: 14, lineHeight: 1.6, color: "var(--fg-muted)" }}>
                 {ruleLabel(rule)}
                 {n > 1 ? ` · ${n}` : ""}
               </li>
@@ -158,127 +163,39 @@ const GenerationReportPanel = ({ report }: { report: GenerationReport }) => {
       {report.wants_image > 0 && (
         <div
           className="flex items-start gap-2"
-          style={{ marginTop: 14, fontSize: 12, lineHeight: 1.6, color: "var(--fg-subtle)" }}
+          style={{ marginTop: 14, fontSize: 14, lineHeight: 1.6, color: "var(--fg-muted)" }}
         >
-          <ImageOff style={{ width: 13, height: 13, marginTop: 3, flexShrink: 0 }} />
+          <ImageOff style={{ width: 15, height: 15, marginTop: 3, flexShrink: 0 }} aria-hidden />
           <span>
             {report.wants_image} question{report.wants_image === 1 ? "" : "s"} would read
             better with a figure. There is no image library to draw one from yet.
           </span>
         </div>
       )}
-    </div>
+    </section>
   );
 };
 
-const ScoreRing = ({ score, total }: { score: number; total: number }) => {
-  const pct = total > 0 ? Math.round((score / total) * 100) : 0;
-  const radius = 54;
-  const circumference = 2 * Math.PI * radius;
-  const offset = circumference - (pct / 100) * circumference;
-  const color = pct >= 80 ? "#059669" : pct >= 60 ? "#d97706" : "#dc2626";
-
+/** Correct, incorrect and omitted as one bar: the composition, not a ring. */
+const ScoreBar = ({ correct, incorrect, omitted }: { correct: number; incorrect: number; omitted: number }) => {
+  const total = correct + incorrect + omitted;
+  if (total === 0) return null;
+  const seg = (n: number, background: string, border?: string) =>
+    n > 0 ? <span style={{ flex: n, background, borderRight: border }} /> : null;
   return (
-    <div className="relative flex items-center justify-center w-36 h-36">
-      <svg width="144" height="144" viewBox="0 0 144 144" className="-rotate-90">
-        <circle cx="72" cy="72" r={radius} fill="none" stroke="hsl(var(--sb-border))" strokeWidth="10" />
-        <circle cx="72" cy="72" r={radius} fill="none" stroke={color} strokeWidth="10"
-          strokeLinecap="round" strokeDasharray={circumference} strokeDashoffset={offset}
-          style={{ transition: "stroke-dashoffset 0.8s ease-out" }} />
-      </svg>
-      <div className="absolute flex flex-col items-center">
-        <span
-          style={{
-            fontFamily: "var(--font-display)",
-            fontSize: 32,
-            fontWeight: 500,
-            color,
-            lineHeight: 1,
-          }}
-        >
-          {pct}%
-        </span>
-        <span
-          style={{
-            fontFamily: "var(--font-mono)",
-            fontSize: 11,
-            color: "var(--fg-muted)",
-            marginTop: 4,
-          }}
-        >
-          {score} / {total}
-        </span>
-      </div>
+    <div
+      aria-hidden
+      className="flex h-2.5 w-full overflow-hidden rounded-full"
+      style={{ background: "var(--border)", gap: 2 }}
+    >
+      {seg(correct, "var(--qb-right)")}
+      {seg(incorrect, "var(--qb-wrong)")}
+      {seg(omitted, "var(--border-strong)")}
     </div>
   );
 };
 
-// ── OpenMed token styles ────────────────────────────────────────────────────
-
-const MONO_EYEBROW: React.CSSProperties = {
-  fontFamily: "var(--font-mono)",
-  fontSize: 11,
-  fontWeight: 500,
-  letterSpacing: "0.14em",
-  textTransform: "uppercase",
-  color: "var(--fg-muted)",
-};
-
-const PANEL_STYLE: React.CSSProperties = {
-  border: "1px solid var(--border)",
-  borderRadius: "var(--radius-lg)",
-  background: "var(--bg-elevated)",
-};
-
-/** Dark CTA — the OpenMed primary button (ink on light, parchment on dark). */
-const DARK_BUTTON_STYLE: React.CSSProperties = {
-  display: "inline-flex",
-  alignItems: "center",
-  justifyContent: "center",
-  gap: 8,
-  flex: 1,
-  height: 40,
-  borderRadius: "var(--radius-md)",
-  border: "1px solid transparent",
-  background: "var(--fg)",
-  color: "var(--bg)",
-  fontFamily: "var(--font-sans)",
-  fontSize: 14,
-  fontWeight: 500,
-  cursor: "pointer",
-};
-
-const OUTLINE_BUTTON_STYLE: React.CSSProperties = {
-  display: "inline-flex",
-  alignItems: "center",
-  justifyContent: "center",
-  gap: 8,
-  flex: 1,
-  height: 40,
-  borderRadius: "var(--radius-md)",
-  border: "1px solid var(--border)",
-  background: "transparent",
-  color: "var(--fg)",
-  fontFamily: "var(--font-sans)",
-  fontSize: 14,
-  fontWeight: 500,
-  cursor: "pointer",
-};
-
-const formatTime = (ms: number): string => {
-  const totalSecs = Math.floor(ms / 1000);
-  const mins = Math.floor(totalSecs / 60);
-  const secs = totalSecs % 60;
-  if (mins === 0) return `${secs}s`;
-  return `${mins}m ${secs}s`;
-};
-
-const performanceLabel = (pct: number): { text: string; color: string } => {
-  if (pct >= 80) return { text: "Strong performance", color: "#059669" };
-  if (pct >= 60) return { text: "Good effort", color: "#d97706" };
-  if (pct >= 40) return { text: "Keep practicing", color: "#ea580c" };
-  return { text: "Review the material", color: "#dc2626" };
-};
+type Filter = "all" | "incorrect" | "omitted" | "marked";
 
 const QBankSummary = () => {
   const navigate = useNavigate();
@@ -297,6 +214,7 @@ const QBankSummary = () => {
   const [retrying, setRetrying] = useState(false);
   const [report, setReport] = useState<GenerationReport | null>(null);
   const [sessionMode, setSessionMode] = useState<PlayMode>(lastMode);
+  const [filter, setFilter] = useState<Filter>("all");
 
   const [summaryData, setSummaryData] = useState<SummaryData | null>(null);
   const [summaryFlaggedIds, setSummaryFlaggedIds] = useState<Set<string>>(new Set());
@@ -321,10 +239,12 @@ const QBankSummary = () => {
       if (sessionId) {
         try {
           // Answer fields are REVOKE'd from direct table selects; the owner-only
-          // RPC returns the graded questions + attempts for this session.
-          const { data, error } = await supabase.rpc("get_session_review", {
-            p_session: sessionId,
-          });
+          // RPC returns the graded questions + attempts for this session. The
+          // student's own marks are on the session row, which they can read.
+          const [{ data, error }, marks] = await Promise.all([
+            supabase.rpc("get_session_review", { p_session: sessionId }),
+            supabase.from("qbank_sessions").select("annotations").eq("id", sessionId).maybeSingle(),
+          ]);
           if (cancelled) return;
           if (error) {
             console.error("get_session_review failed:", error);
@@ -390,17 +310,16 @@ const QBankSummary = () => {
 
             const flagSet = new Set(review.flagged ?? []);
 
-            const loaded = {
+            const loaded: SummaryData = {
               questions,
               answers,
               totalTime: review.session.total_time_ms,
               score: review.session.score,
-              total: review.session.total,
+              // A row ended before 20261013000000 stored attempts as its total.
+              total: Math.max(review.session.total ?? 0, questions.length),
               flaggedIds: [...flagSet],
-              omitted:
-                typeof review.session.question_count === "number"
-                  ? Math.max(0, review.session.question_count - review.session.total)
-                  : omittedQuestions.length,
+              omitted: omittedQuestions.length,
+              annotations: normalizeAnnotations(marks.data?.annotations),
             };
             setSummaryData(loaded);
             setSummaryFlaggedIds(flagSet);
@@ -461,6 +380,15 @@ const QBankSummary = () => {
     };
   }, [lastGeneration?.generationId]);
 
+  const rows = useMemo(() => {
+    if (!summaryData) return [];
+    return summaryData.questions.map((q, i) => {
+      const ans = summaryData.answers.find((a) => a.question_id === q.id) ?? null;
+      const status: ItemStatus = ans ? (ans.is_correct ? "correct" : "incorrect") : "omitted";
+      return { q, i, ans, status, marked: summaryFlaggedIds.has(q.id) };
+    });
+  }, [summaryData, summaryFlaggedIds]);
+
   if (loading) {
     return (
       <DashboardLayout wide>
@@ -472,27 +400,19 @@ const QBankSummary = () => {
   if (loadError) {
     return (
       <DashboardLayout wide>
-        <div className="mx-auto mt-16 max-w-sm space-y-3 text-center">
-          <AlertTriangle className="mx-auto h-6 w-6 text-amber-500" />
-          <p className="text-sm font-medium" style={{ color: "var(--fg)" }}>
+        <div className="qb-exam-portal mx-auto mt-16 max-w-sm space-y-3 text-center">
+          <AlertTriangle className="mx-auto h-6 w-6" style={{ color: "var(--qb-warn)" }} />
+          <p className="text-[15px] font-medium" style={{ color: "var(--fg)" }}>
             Couldn’t load your results.
           </p>
-          <p className="text-xs" style={{ color: "var(--fg-muted)" }}>
+          <p className="text-[14px]" style={{ color: "var(--fg-muted)" }}>
             {loadError}
           </p>
           <div className="flex items-center justify-center gap-2 pt-1">
-            <button
-              type="button"
-              onClick={() => setLoadAttempt((n) => n + 1)}
-              style={{ ...DARK_BUTTON_STYLE, flex: "none", padding: "0 20px" }}
-            >
-              <RotateCcw style={{ width: 16, height: 16 }} /> Try again
+            <button type="button" onClick={() => setLoadAttempt((n) => n + 1)} className="qb-btn qb-btn--primary qb-btn--lg">
+              <RotateCcw /> Try again
             </button>
-            <button
-              type="button"
-              onClick={() => navigate("/qbank")}
-              style={{ ...OUTLINE_BUTTON_STYLE, flex: "none", padding: "0 16px" }}
-            >
+            <button type="button" onClick={() => navigate("/qbank")} className="qb-btn qb-btn--outline qb-btn--lg">
               Back to QBank
             </button>
           </div>
@@ -503,8 +423,8 @@ const QBankSummary = () => {
 
   if (!summaryData) return null;
 
-  const { questions, answers, totalTime, score, total } = summaryData;
-  const omitted = summaryData.omitted ?? 0;
+  const { questions, answers, totalTime } = summaryData;
+  const score = scoreSet(answers, Math.max(summaryData.total, questions.length));
 
   // The title was hardcoded to "Cardiovascular System", which was merely
   // misleading while the bank held three systems and every session drew from
@@ -516,18 +436,25 @@ const QBankSummary = () => {
     return subjects.length === 1 ? subjects[0] : "Mixed systems";
   })();
 
-  const pct = total > 0 ? Math.round((score / total) * 100) : 0;
-  const perf = performanceLabel(pct);
-  const avgTime = total > 0
-    ? Math.round(answers.reduce((s, a) => s + (a.time_taken_ms ?? 0), 0) / total / 1000)
-    : 0;
+  const avgMs = answers.length > 0 ? answers.reduce((s, a) => s + (a.time_taken_ms ?? 0), 0) / answers.length : 0;
 
-  const difficultyBreakdown = ["Easy", "Medium", "Hard"].map((diff) => {
-    // Graded questions only: an omitted question has no result to count.
-    const qs = questions.filter((q) => q.difficulty === diff && answers.some((a) => a.question_id === q.id));
-    const correct = qs.filter((q) => answers.find((a) => a.question_id === q.id)?.is_correct).length;
-    return { diff, correct, total: qs.length };
-  }).filter((d) => d.total > 0);
+  const difficultyBreakdown = ["Easy", "Medium", "Hard"]
+    .map((diff) => {
+      const qs = rows.filter((r) => r.q.difficulty === diff);
+      return { diff, correct: qs.filter((r) => r.status === "correct").length, total: qs.length };
+    })
+    .filter((d) => d.total > 0);
+
+  const counts: Record<Filter, number> = {
+    all: rows.length,
+    incorrect: rows.filter((r) => r.status === "incorrect").length,
+    omitted: rows.filter((r) => r.status === "omitted").length,
+    marked: rows.filter((r) => r.marked).length,
+  };
+  const shown = rows.filter((r) =>
+    filter === "all" ? true : filter === "marked" ? r.marked : r.status === filter
+  );
+  const firstMissed = rows.find((r) => r.status !== "correct");
 
   /**
    * Another go at the same thing.
@@ -568,239 +495,208 @@ const QBankSummary = () => {
     }
   };
 
+  const missed = score.incorrect + score.omitted;
+  const filters: { id: Filter; label: string }[] = [
+    { id: "all", label: "All" },
+    { id: "incorrect", label: "Incorrect" },
+    { id: "omitted", label: "Omitted" },
+    { id: "marked", label: "Marked" },
+  ];
+
   return (
     <DashboardLayout wide>
-      <div className="space-y-8 animate-fade-in">
-        <div className="flex items-center gap-3">
-          <div
+      <div className="qb-exam-portal mx-auto max-w-3xl space-y-6 animate-fade-in">
+        <header>
+          <h1
             style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              width: 40,
-              height: 40,
-              borderRadius: "var(--radius-md)",
-              border: "1px solid var(--border)",
-              background: "var(--bg-elevated)",
-              flexShrink: 0,
+              fontFamily: "var(--font-display)",
+              fontSize: 30,
+              fontWeight: 500,
+              color: "var(--fg)",
+              margin: 0,
+              lineHeight: 1.15,
             }}
           >
-            <FlaskConical style={{ width: 16, height: 16, color: "var(--accent)" }} />
-          </div>
-          <div>
-            <p style={{ ...MONO_EYEBROW, color: "var(--accent)", marginBottom: 4 }}>
-              {sessionMode === "timed" ? "Timed block complete" : "Session complete"}
-            </p>
-            <h1
+            {systemLabel}
+          </h1>
+          <p style={{ fontSize: 15, color: "var(--fg-muted)", marginTop: 6 }}>
+            {sessionMode === "timed" ? "Timed block" : "Tutor block"} complete · {score.total} question
+            {score.total === 1 ? "" : "s"} · {formatTime(totalTime)}
+          </p>
+        </header>
+
+        <section style={{ ...PANEL_STYLE, padding: 24 }} aria-labelledby="qb-score-title">
+          <h2 id="qb-score-title" className="qb-sr">
+            Score
+          </h2>
+          <div className="flex flex-wrap items-end gap-x-6 gap-y-2">
+            <p
               style={{
                 fontFamily: "var(--font-display)",
-                fontSize: 24,
+                fontSize: 56,
                 fontWeight: 500,
+                lineHeight: 1,
                 color: "var(--fg)",
                 margin: 0,
-                lineHeight: 1.1,
+                fontVariantNumeric: "tabular-nums",
               }}
             >
-              {systemLabel}
-              <span style={{ color: "var(--fg-muted)" }}> · {total} questions</span>
-            </h1>
+              {score.pct}%
+            </p>
+            <p style={{ fontSize: 15, lineHeight: 1.6, color: "var(--fg)", margin: "0 0 4px" }}>
+              <strong style={{ fontWeight: 650 }}>{score.correct} correct</strong> · {score.incorrect} incorrect ·{" "}
+              {score.omitted} omitted, of {score.total}
+              {score.omitted > 0 && (
+                <span style={{ display: "block", fontSize: 14, color: "var(--fg-muted)" }}>
+                  Omitted questions count as incorrect, as on the exam.
+                </span>
+              )}
+            </p>
           </div>
-        </div>
 
-        <div style={{ ...PANEL_STYLE, padding: 24 }}>
-          <div className="flex flex-col sm:flex-row items-center gap-6">
-            <ScoreRing score={score} total={total} />
-            <div className="flex-1 space-y-4 text-center sm:text-left">
-              <div>
-                <p className="text-lg font-semibold tracking-tight" style={{ color: perf.color }}>{perf.text}</p>
-                <p className="text-sm text-muted-foreground mt-0.5">
-                  {score} correct out of {total} answered
-                  {omitted > 0 ? ` · ${omitted} omitted` : ""}
-                </p>
-              </div>
-              <div className="flex flex-wrap gap-3 justify-center sm:justify-start">
-                {[`${formatTime(totalTime)} total`, `~${avgTime}s per question`].map((label) => (
-                  <div
-                    key={label}
-                    style={{
-                      display: "inline-flex",
-                      alignItems: "center",
-                      gap: 6,
-                      borderRadius: "var(--radius-pill)",
-                      border: "1px solid var(--border)",
-                      background: "var(--bg)",
-                      padding: "6px 12px",
-                    }}
-                  >
-                    <Clock style={{ width: 13, height: 13, color: "var(--fg-muted)" }} />
-                    <span
-                      style={{
-                        fontFamily: "var(--font-mono)",
-                        fontSize: 11,
-                        color: "var(--fg-muted)",
-                      }}
-                    >
-                      {label}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
+          <div className="mt-4">
+            <ScoreBar correct={score.correct} incorrect={score.incorrect} omitted={score.omitted} />
           </div>
+
+          <dl className="qb-facts" style={{ fontSize: 14, marginTop: 14 }}>
+            <div>
+              <dt>Time</dt>
+              <dd>{formatTime(totalTime)}</dd>
+            </div>
+            {answers.length > 0 && (
+              <div>
+                <dt>Average per question</dt>
+                <dd>{formatClock(avgMs)}</dd>
+              </div>
+            )}
+            <div>
+              <dt>Exam pace</dt>
+              <dd>{formatClock(TIMED_SECONDS_PER_QUESTION * 1000)}</dd>
+            </div>
+          </dl>
 
           {difficultyBreakdown.length > 0 && (
             <div className="mt-5 pt-5" style={{ borderTop: "1px solid var(--border)" }}>
-              <p style={{ ...MONO_EYEBROW, marginBottom: 12 }}>By difficulty</p>
-              <div className="flex gap-3 flex-wrap">
-                {difficultyBreakdown.map(({ diff, correct, total: t }) => {
-                  const diffPct = t > 0 ? Math.round((correct / t) * 100) : 0;
-                  const diffColor = diff === "Easy" ? "#059669" : diff === "Medium" ? "#d97706" : "#dc2626";
-                  return (
-                    <div
-                      key={diff}
-                      className="flex-1 min-w-[80px] text-center"
-                      style={{
-                        borderRadius: "var(--radius-md)",
-                        border: "1px solid var(--border)",
-                        background: "var(--bg)",
-                        padding: 12,
-                      }}
-                    >
-                      <p
-                        style={{
-                          fontFamily: "var(--font-display)",
-                          fontSize: 20,
-                          fontWeight: 500,
-                          color: diffColor,
-                          lineHeight: 1,
-                        }}
-                      >
-                        {diffPct}%
-                      </p>
-                      <p style={{ fontSize: 11, color: "var(--fg-muted)", marginTop: 4 }}>{diff}</p>
-                      <p
-                        style={{
-                          fontFamily: "var(--font-mono)",
-                          fontSize: 10,
-                          color: "var(--fg-subtle)",
-                        }}
-                      >
-                        {correct}/{t}
-                      </p>
-                    </div>
-                  );
-                })}
-              </div>
+              <h3 style={{ ...H2_STYLE, fontSize: 14, marginBottom: 10 }}>By difficulty</h3>
+              <ul className="grid gap-2.5">
+                {difficultyBreakdown.map(({ diff, correct, total: t }) => (
+                  <li key={diff} className="grid items-center gap-3" style={{ gridTemplateColumns: "5.5rem 1fr 4.5rem" }}>
+                    <span style={{ fontSize: 14 }}>{diff}</span>
+                    <span className="h-2 overflow-hidden rounded-full" style={{ background: "var(--border)" }} aria-hidden>
+                      <span
+                        className="block h-full rounded-full"
+                        style={{ width: `${t > 0 ? (correct / t) * 100 : 0}%`, background: "var(--qb-right)" }}
+                      />
+                    </span>
+                    <span style={{ fontSize: 14, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
+                      {correct}/{t}
+                    </span>
+                  </li>
+                ))}
+              </ul>
             </div>
           )}
-        </div>
 
-        {report && report.written > 0 && (
-          <GenerationReportPanel report={report} />
-        )}
+          <div className="mt-6 flex flex-wrap gap-2">
+            {firstMissed ? (
+              <button
+                type="button"
+                className="qb-btn qb-btn--primary qb-btn--lg"
+                onClick={() => handleReviewQuestion(firstMissed.i)}
+              >
+                <ListChecks /> Review {missed} missed
+              </button>
+            ) : (
+              <button type="button" className="qb-btn qb-btn--primary qb-btn--lg" onClick={() => handleReviewQuestion(0)}>
+                <ListChecks /> Review all
+              </button>
+            )}
+            <button type="button" className="qb-btn qb-btn--outline qb-btn--lg" onClick={handleTryAgain} disabled={retrying}>
+              <RotateCcw />
+              {retrying ? "Writing…" : lastGeneration ? `Another ${lastGeneration.target} on this topic` : "New set"}
+            </button>
+            <button type="button" className="qb-btn qb-btn--lg" onClick={() => navigate("/qbank")}>
+              Back to QBank
+            </button>
+          </div>
+        </section>
 
-        <div className="space-y-3">
-          <p style={{ ...MONO_EYEBROW, paddingLeft: 4 }}>Question breakdown</p>
-          {questions.some((q) => summaryFlaggedIds.has(q.id)) && (
-            <div className="flex items-center gap-1.5 rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 text-[11px] font-medium text-amber-600 dark:text-amber-400 w-fit">
-              <Flag className="h-3 w-3" fill="currentColor" />
-              {questions.filter((q) => summaryFlaggedIds.has(q.id)).length} flagged for review
-            </div>
-          )}
-          <div className="space-y-1.5">
-            {questions.map((q, i) => {
-              const ans = answers.find((a) => a.question_id === q.id);
-              const isCorrect = ans?.is_correct ?? false;
-              const isOmitted = !ans;
-              const diffColor = q.difficulty === "Easy" ? "#059669" : q.difficulty === "Medium" ? "#d97706" : "#dc2626";
-              const stemSnippet = q.question_text.length > 80
-                ? q.question_text.slice(0, 80).trimEnd() + "…"
-                : q.question_text;
-
-              return (
+        <section className="space-y-3" aria-labelledby="qb-questions-title">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h2 id="qb-questions-title" style={H2_STYLE}>
+              Questions
+            </h2>
+            <div className="qb-filter" role="group" aria-label="Show questions">
+              {filters.map((f) => (
                 <button
-                  key={q.id}
-                  onClick={() => handleReviewQuestion(i)}
-                  className="w-full flex items-start gap-3 text-left group"
-                  style={{
-                    border: "1px solid var(--border)",
-                    borderLeft: isOmitted
-                      ? "3px solid var(--border)"
-                      : isCorrect
-                      ? "3px solid var(--accent)"
-                      : "3px solid var(--signal)",
-                    borderRadius: "var(--radius-md)",
-                    background: "var(--bg-elevated)",
-                    padding: "14px 16px",
-                    cursor: "pointer",
-                  }}
+                  key={f.id}
+                  type="button"
+                  aria-pressed={filter === f.id}
+                  disabled={f.id !== "all" && counts[f.id] === 0}
+                  onClick={() => setFilter(f.id)}
+                  style={f.id !== "all" && counts[f.id] === 0 ? { opacity: 0.5, cursor: "default" } : undefined}
                 >
-                  <div className="shrink-0 mt-0.5">
-                    {isOmitted
-                      ? <MinusCircle style={{ width: 15, height: 15, color: "var(--fg-subtle)" }} />
-                      : isCorrect
-                      ? <CheckCircle style={{ width: 15, height: 15, color: "var(--accent)" }} />
-                      : <XCircle style={{ width: 15, height: 15, color: "var(--signal)" }} />
-                    }
-                  </div>
-                  <div className="flex-1 min-w-0 space-y-0.5">
-                    <div className="flex items-center gap-2">
-                      <span className="text-[11px] font-semibold tabular-nums text-muted-foreground shrink-0">Q{i + 1}</span>
-                      {summaryFlaggedIds.has(q.id) && (
-                        <Flag className="h-3 w-3 text-amber-500 shrink-0" fill="currentColor" />
-                      )}
-                      <span className="text-[11px] text-muted-foreground">{q.domain}</span>
-                      <span className="text-[11px] font-semibold shrink-0" style={{ color: diffColor }}>{q.difficulty}</span>
-                    </div>
-                    <p className="text-[11px] text-muted-foreground leading-snug truncate">{stemSnippet}</p>
-                  </div>
-                  <div className="shrink-0 flex items-center gap-2 mt-0.5">
-                    {!isCorrect && ans && q.correct_option && (
-                      <span className="text-[10px] text-red-600 dark:text-red-400 font-medium">
-                        {ans.selected_option.toUpperCase()} → {q.correct_option.toUpperCase()}
-                      </span>
-                    )}
-                    {isOmitted && (
-                      <span className="text-[10px] text-muted-foreground font-medium">
-                        Omitted{q.correct_option ? ` · ${q.correct_option.toUpperCase()}` : ""}
-                      </span>
-                    )}
-                    {ans && (
-                      <span className="text-[10px] text-muted-foreground">
-                        {Math.round((ans.time_taken_ms ?? 0) / 1000)}s
-                      </span>
-                    )}
-                    <ChevronRight className="h-3 w-3 text-muted-foreground group-hover:text-foreground transition-colors" />
-                  </div>
+                  {f.label} <span className="qb-count">{counts[f.id]}</span>
                 </button>
+              ))}
+            </div>
+          </div>
+
+          <ul className="space-y-1.5">
+            {shown.map(({ q, i, ans, status, marked }) => {
+              const stemSnippet = q.question_text.length > 110 ? q.question_text.slice(0, 110).trimEnd() + "…" : q.question_text;
+              return (
+                <li key={q.id}>
+                  <button
+                    type="button"
+                    onClick={() => handleReviewQuestion(i)}
+                    className="group grid w-full items-center gap-x-3 gap-y-1 text-left transition-colors hover:border-[var(--border-strong)]"
+                    style={{
+                      ...PANEL_STYLE,
+                      borderRadius: "var(--radius-md)",
+                      gridTemplateColumns: "4.25rem minmax(0,1fr) auto",
+                      padding: "12px 14px",
+                    }}
+                  >
+                    <span className="flex items-center gap-2" style={{ fontSize: 14, fontWeight: 650, fontVariantNumeric: "tabular-nums" }}>
+                      <StatusIcon status={status} />
+                      Q{i + 1}
+                    </span>
+                    <span className="min-w-0">
+                      <span className="flex flex-wrap items-center gap-x-2" style={{ fontSize: 14 }}>
+                        <span style={{ fontWeight: 600 }}>{ITEM_STATUS_LABEL[status]}</span>
+                        {marked && (
+                          <span className="inline-flex items-center gap-1" style={{ color: "var(--fg-muted)" }}>
+                            <Flag className="qb-flag" aria-hidden /> Marked
+                          </span>
+                        )}
+                        <span style={{ color: "var(--fg-muted)" }}>
+                          {q.domain} · {q.difficulty}
+                        </span>
+                      </span>
+                      <span className="block truncate" style={{ fontSize: 14, color: "var(--fg-muted)", marginTop: 2 }}>
+                        {stemSnippet}
+                      </span>
+                    </span>
+                    <span className="flex items-center gap-3" style={{ fontSize: 14, color: "var(--fg-muted)", fontVariantNumeric: "tabular-nums" }}>
+                      {q.correct_option && (
+                        <span>
+                          {ans && !ans.is_correct ? `${ans.selected_option.toUpperCase()} → ` : ""}
+                          <span style={{ color: "var(--fg)", fontWeight: 600 }}>{q.correct_option.toUpperCase()}</span>
+                        </span>
+                      )}
+                      {ans && <span className="hidden sm:inline">{formatClock(ans.time_taken_ms ?? 0)}</span>}
+                      <ChevronRight className="h-4 w-4 transition-colors group-hover:text-[var(--fg)]" aria-hidden />
+                    </span>
+                  </button>
+                </li>
               );
             })}
-          </div>
-        </div>
+          </ul>
+        </section>
 
-        <div className="flex flex-col sm:flex-row gap-3 pb-8">
-          <button
-            type="button"
-            onClick={handleTryAgain}
-            disabled={retrying}
-            style={{ ...DARK_BUTTON_STYLE, opacity: retrying ? 0.5 : 1 }}
-          >
-            <RotateCcw style={{ width: 16, height: 16 }} />
-            {retrying
-              ? "Writing…"
-              : lastGeneration
-                ? `Another ${lastGeneration.target} on this topic`
-                : "Try Again"}
-          </button>
-          <button
-            type="button"
-            onClick={() => navigate("/qbank")}
-            style={OUTLINE_BUTTON_STYLE}
-          >
-            Back to QBank
-            <ChevronRight style={{ width: 16, height: 16 }} />
-          </button>
-        </div>
+        {report && report.written > 0 && <GenerationReportPanel report={report} />}
+        <div className="pb-8" />
       </div>
     </DashboardLayout>
   );

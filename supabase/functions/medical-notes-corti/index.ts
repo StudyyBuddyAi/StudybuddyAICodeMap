@@ -7,10 +7,10 @@
  * framing are the same as medical-notes, so the client cannot tell the two
  * apart except by the X-Model-Used header. What changes:
  *
- *   - The writer call goes to Corti (_shared/corti.ts) instead of OpenRouter.
- *     The premium route (where medical-notes picks Claude Haiku 4.5) and the
- *     standard route (GPT-OSS 20B) map onto two Corti models, each an env
- *     override: CORTI_NOTES_PREMIUM_MODEL / CORTI_NOTES_STANDARD_MODEL.
+ *   - The writer call goes to Corti (_shared/corti.ts). The premium and
+ *     standard routes map onto two Corti models, each an env override:
+ *     CORTI_NOTES_PREMIUM_MODEL / CORTI_NOTES_STANDARD_MODEL. (medical-notes
+ *     itself has since moved to Corti on both routes.)
  *   - Prompts come from the variant adjusted for Corti in
  *     _shared/medical-notes-prompts-corti.ts, or with CORTI_NOTES_PROMPTS=original
  *     from _shared/medical-notes-prompts.ts (a verbatim lift of medical-notes' own).
@@ -18,13 +18,16 @@
  *     models stream a separate `reasoning` field that must never reach the
  *     client's text accumulator.
  *
- * Untouched on purpose: embeddings, retrieval and the source-label side call
- * still run through OpenRouter exactly as medical-notes runs them.
+ * Embeddings and retrieval still run through OpenRouter exactly as
+ * medical-notes runs them (the one OpenRouter use left in the app); without
+ * OPENROUTER_API_KEY the request is written ungrounded. Source labels are Corti.
  *
- * EVAL MODE. A request from a user on EVAL_USER_IDS may name the provider,
- * model and prompt set in `body.eval`, which is how the comparison harness
- * (scripts/notes-eval) runs the current OpenRouter models and the Corti
- * candidates through one identical pipeline, with this function's own secrets.
+ * EVAL MODE. A request from a user on EVAL_USER_IDS may name the model and
+ * prompt set in `body.eval`, which is how the comparison harness
+ * (scripts/notes-eval) runs Corti candidates through one identical pipeline,
+ * with this function's own secrets. The OpenRouter baselines (Haiku 4.5,
+ * GPT-OSS 20B) were removed when the app moved off OpenRouter; the measured
+ * baselines are in docs/corti-provider-spike.md.
  * The credential is that user's session, held by the harness outside the repo
  * (scripts/notes-eval/session.ts). Eval mode is side-effect free: no profile
  * lookup, premium hook, quota, memory or rag_logs writes, and no source labels.
@@ -73,14 +76,11 @@ const json = (body: unknown, status: number) =>
 const DEFAULT_PREMIUM_MODEL: CortiModel = "corti-s1-instant";
 const DEFAULT_STANDARD_MODEL: CortiModel = "corti-s1-mini-instant";
 
-/** The OpenRouter models eval mode may run — exactly the two medical-notes uses. */
-const OPENROUTER_EVAL_MODELS = ["anthropic/claude-haiku-4.5", "openai/gpt-oss-20b"];
-
 type PromptSet = "original" | "tuned";
 
 interface EvalRequest {
-  provider: "openrouter" | "corti";
-  model: string;
+  provider: "corti";
+  model: CortiModel;
   family: PromptFamily;
   prompts: PromptSet;
   /** Sampling temperature, 0–1. Production uses 0.7. */
@@ -119,11 +119,8 @@ function parseEvalRequest(raw: unknown): EvalRequest | null {
   const prompts: PromptSet = r.prompts === "tuned" ? "tuned" : "original";
   const temperature =
     typeof r.temperature === "number" && r.temperature >= 0 && r.temperature <= 1 ? r.temperature : 0.7;
-  if (r.provider === "openrouter" && OPENROUTER_EVAL_MODELS.includes(r.model as string)) {
-    return { provider: "openrouter", model: r.model as string, family, prompts, temperature };
-  }
   if (r.provider === "corti" && (CORTI_MODELS as readonly string[]).includes(r.model as string)) {
-    return { provider: "corti", model: r.model as string, family, prompts, temperature };
+    return { provider: "corti", model: r.model as CortiModel, family, prompts, temperature };
   }
   return null;
 }
@@ -160,8 +157,8 @@ serve(async (req) => {
     if (evalAuthorized && !evalReq) return json({ error: "invalid_eval_request" }, 400);
     const isEval = evalReq !== null;
 
+    // Embeddings only; optional (see the header).
     const OPENROUTER_API_KEY = Deno.env.get("OPENROUTER_API_KEY");
-    if (!OPENROUTER_API_KEY) throw new Error("OPENROUTER_API_KEY is not configured");
     const cortiConfig = cortiConfigFromEnv();
 
     // ── GROUNDING (unchanged from medical-notes) ────────────────────────────
@@ -188,6 +185,7 @@ serve(async (req) => {
       ragChunks = suppliedChunks;
     } else if (groundingAttempted) {
       try {
+        if (!OPENROUTER_API_KEY) throw new Error("embeddings_key_missing");
         const embeddings = makeEmbeddings(OPENROUTER_API_KEY);
         const queryEmbedding = await embedQuery(embeddings, searchString);
         const result = await retrieveChunks(authClient, queryEmbedding, groundingTopK, groundingThreshold);
@@ -221,7 +219,7 @@ serve(async (req) => {
     const grounded = retrievedChunks > 0;
 
     const sourceLabelsPromise: Promise<RawSourceLabel[]> = grounded && !isEval
-      ? requestSourceLabels(OPENROUTER_API_KEY, "openai/gpt-oss-20b", ragChunks)
+      ? requestSourceLabels(ragChunks)
       : Promise.resolve([]);
 
     // ── MEMORY (unchanged; skipped entirely in eval mode) ───────────────────
@@ -253,18 +251,16 @@ serve(async (req) => {
     if (!isEval) {
       const { data: profile } = await authClient
         .from("profiles")
-        .select("is_pro, pro_expires_at, preferred_model")
+        .select("is_pro, pro_expires_at")
         .eq("id", user.id)
         .maybeSingle();
       isProUser =
         profile?.is_pro === true &&
         (profile.pro_expires_at === null || new Date(profile.pro_expires_at) > new Date());
-      const preferredModel = profile?.preferred_model ?? "gpt-oss";
 
-      if (enhanceMode) {
+      // Pro is always the premium writer, as in medical-notes.
+      if (enhanceMode || isProUser) {
         isPremiumGeneration = isProUser;
-      } else if (isProUser) {
-        isPremiumGeneration = preferredModel === "claude";
       } else {
         const { data: hookResult, error: hookError } = await authClient.rpc("consume_premium_hook", {
           p_user: user.id,
@@ -275,8 +271,8 @@ serve(async (req) => {
       }
     }
 
-    const provider = evalReq ? evalReq.provider : "corti";
-    const model = evalReq ? evalReq.model : isPremiumGeneration ? premiumModel : standardModel;
+    const provider = "corti";
+    const model: CortiModel = evalReq ? evalReq.model : isPremiumGeneration ? premiumModel : standardModel;
     const family: PromptFamily = evalReq ? evalReq.family : isPremiumGeneration ? "haiku" : "gptOss";
     const promptSet: PromptSet = evalReq ? evalReq.prompts : envPromptSet;
 
@@ -349,35 +345,14 @@ serve(async (req) => {
 
     let response: Response;
     try {
-      response = provider === "corti"
-        ? await cortiChatCompletion(cortiConfig, {
-            model: model as CortiModel,
-            messages,
-            stream: true,
-            streamUsage: true,
-            temperature,
-            maxTokens: 8192,
-          })
-        : await fetch("https://openrouter.ai/api/v1/chat/completions", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "Authorization": `Bearer ${OPENROUTER_API_KEY}`,
-              "HTTP-Referer": "https://studybuddy.app",
-              "X-Title": "StudyBuddy",
-            },
-            body: JSON.stringify({
-              model,
-              stream: true,
-              temperature,
-              max_tokens: 8192,
-              messages,
-              usage: { include: true },
-              provider: model.startsWith("openai/gpt-oss")
-                ? { order: ["Cerebras", "Groq"], allow_fallbacks: true }
-                : { order: ["Anthropic"], allow_fallbacks: true },
-            }),
-          });
+      response = await cortiChatCompletion(cortiConfig, {
+        model,
+        messages,
+        stream: true,
+        streamUsage: true,
+        temperature,
+        maxTokens: 8192,
+      });
     } catch (fetchErr) {
       await refund();
       throw fetchErr;
@@ -447,8 +422,7 @@ serve(async (req) => {
             if (ttfcMs === null) ttfcMs = Date.now() - callStartedAt;
             assistantText += text;
             // Re-framed rather than forwarded, so no provider-specific field
-            // (Corti's `reasoning`, OpenRouter's provider metadata) reaches the
-            // client. The client reads choices[0].delta.content and nothing else.
+            // (Corti's `reasoning`) reaches the client. The client reads choices[0].delta.content and nothing else.
             controller.enqueue(
               encoder.encode(`data: ${JSON.stringify({ choices: [{ index: 0, delta: { content: text } }] })}\n\n`)
             );

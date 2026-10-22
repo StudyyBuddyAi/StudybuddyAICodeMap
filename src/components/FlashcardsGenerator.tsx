@@ -7,7 +7,6 @@ import { useFlashcardDeck, type GroundingMeta } from "@/hooks/use-flashcard-deck
 import { useUsageLimit, MAX_DAILY_CARDS } from "@/hooks/use-usage-limit";
 import { useCitationUsage } from "@/hooks/use-citation-usage";
 import { usePremiumHook } from "@/hooks/use-premium-hook";
-import { useModelPreference } from "@/hooks/use-model-preference";
 import { useAuth } from "@/hooks/use-auth";
 import { callMedicalNotes } from "@/lib/callMedicalNotes";
 import { parseDecline, topicRejectionMessage, validateTopic, TOPIC_MAX_LENGTH } from "@/lib/validate-topic";
@@ -180,12 +179,6 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated, onTopicChange, w
   const [lastDeckModel, setLastDeckModel] = useState<ModelUsed | null>(null);
   // Mirrored in a ref: the save callback below closes over an older render.
   const lastDeckModelRef = useRef<ModelUsed | null>(null);
-  const {
-    preferredModel,
-    setPreferredModel,
-    saving: modelSaving,
-    isLoading: modelLoading,
-  } = useModelPreference();
   const { user, isAnonymous } = useAuth();
   // Same shared window as the sheet generator — see use-memory-preference.
   const { useMemory } = useMemoryPreference();
@@ -262,7 +255,6 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated, onTopicChange, w
         userId: user?.id ?? null,
         isAnonymous: isAnonymous ?? false,
         isPro: pro,
-        preferredModel: pro ? preferredModel : undefined,
       });
 
       if (!response.ok) {
@@ -698,18 +690,7 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated, onTopicChange, w
       <div className="space-y-1 text-center text-xs text-muted-foreground">
         {pro ? (
           <p>
-            <span className="font-medium text-[color:var(--color-accent-ink)]">
-              ✦ Pro · {preferredModel === "corti" ? "Corti S1, best quality" : "GPT-OSS 20B, fastest"}
-            </span>
-            {" · "}
-            <button
-              type="button"
-              className="underline underline-offset-2 transition-colors hover:text-foreground"
-              onClick={() => setPreferredModel(preferredModel === "corti" ? "gpt-oss" : "corti")}
-              disabled={modelSaving || modelLoading}
-            >
-              Switch to {preferredModel === "corti" ? "GPT-OSS 20B" : "Corti S1"}
-            </button>
+            <span className="font-medium text-[color:var(--color-accent-ink)]">✦ Pro · Corti S1</span>
           </p>
         ) : isCardsLimited ? (
           <p className="font-medium text-warning">

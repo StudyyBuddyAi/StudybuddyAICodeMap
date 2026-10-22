@@ -45,7 +45,7 @@ const SheetFinish = ({ topic, deck, onPractice, onExport, onShare, onNewSheet }:
     >
       End of sheet
     </p>
-    <h2 className="mt-1.5 [font-family:var(--app-font-sans)] text-xl font-medium leading-snug tracking-[-0.01em] text-foreground">
+    <h2 className="mt-1.5 [font-family:var(--app-font-serif)] text-xl font-medium leading-snug tracking-[-0.01em] text-foreground">
       Now make {topic} stick.
     </h2>
 
