@@ -15,14 +15,14 @@ import type {
   SessionGeneration,
   SessionState,
 } from "./qbank-types";
-import { TIMED_SECONDS_PER_QUESTION } from "./qbank-types";
+import { NOTE_MAX_LENGTH, TIMED_SECONDS_PER_QUESTION } from "./qbank-types";
 
 const OPTION_KEYS: readonly OptionKey[] = ["a", "b", "c", "d", "e"];
 
 const isOptionKey = (v: unknown): v is OptionKey =>
   typeof v === "string" && (OPTION_KEYS as readonly string[]).includes(v);
 
-export const emptyAnnotations = (): SessionAnnotations => ({ struck: {}, highlights: {} });
+export const emptyAnnotations = (): SessionAnnotations => ({ struck: {}, highlights: {}, notes: {} });
 
 export const asPlayMode = (v: unknown): PlayMode => (v === "timed" ? "timed" : "tutor");
 
@@ -34,7 +34,14 @@ export const asPlayMode = (v: unknown): PlayMode => (v === "timed" ? "timed" : "
 export const normalizeAnnotations = (raw: unknown): SessionAnnotations => {
   const out = emptyAnnotations();
   if (!raw || typeof raw !== "object") return out;
-  const r = raw as { struck?: unknown; highlights?: unknown };
+  const r = raw as { struck?: unknown; highlights?: unknown; notes?: unknown };
+
+  if (r.notes && typeof r.notes === "object") {
+    for (const [qid, text] of Object.entries(r.notes as Record<string, unknown>)) {
+      if (typeof text !== "string" || text.trim() === "") continue;
+      out.notes[qid] = text.slice(0, NOTE_MAX_LENGTH);
+    }
+  }
 
   if (r.struck && typeof r.struck === "object") {
     for (const [qid, keys] of Object.entries(r.struck as Record<string, unknown>)) {
