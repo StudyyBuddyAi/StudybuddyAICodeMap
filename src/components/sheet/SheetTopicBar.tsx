@@ -122,7 +122,7 @@ const SheetTopicBar = ({
     >
       <div className="relative border-b border-border pb-3 pt-3.5">
         <div className="flex items-center gap-3">
-          <h1 className="flex min-w-0 flex-1 items-center gap-2 [font-family:var(--app-font-sans)] text-xl font-medium leading-tight tracking-[-0.01em] text-foreground sm:text-2xl">
+          <h1 className="flex min-w-0 flex-1 items-center gap-2 [font-family:var(--app-font-serif)] text-xl font-medium leading-tight tracking-[-0.01em] text-foreground sm:text-2xl">
             <AnimatePresence initial={false}>
               {emoji && (
                 <m.span

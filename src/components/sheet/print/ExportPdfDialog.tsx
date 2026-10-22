@@ -84,7 +84,7 @@ const PRESETS: { id: string; label: string; hint: string; icon: typeof ScrollTex
 /** Page box, running header and footer. Margin boxes print in Chromium; elsewhere they are ignored. */
 function pageCss(title: string, date: string, o: PrintOptions): string {
   const box = (content: string) =>
-    `{ content: ${content}; font: 500 7.5pt "DM Sans", Arial, sans-serif; color: #7a828e; }`;
+    `{ content: ${content}; font: 500 7.5pt "Inter Tight", "DM Sans", Arial, sans-serif; color: #7a828e; }`;
   const blank = "{ content: none; }";
   return `
 @page {
