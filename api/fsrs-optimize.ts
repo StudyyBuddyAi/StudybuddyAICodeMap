@@ -93,6 +93,9 @@ export async function POST(request: Request): Promise<Response> {
       .from("review_sessions")
       .select("card_id, rating, reviewed_at")
       .eq("user_id", user.id)
+      // Reviews of deleted cards are kept for stats, but a card's history is
+      // what the optimizer learns from: without the card there is no sequence.
+      .not("card_id", "is", null)
       .order("reviewed_at", { ascending: true })
       .order("id", { ascending: true })
       .range(from, from + PAGE - 1);

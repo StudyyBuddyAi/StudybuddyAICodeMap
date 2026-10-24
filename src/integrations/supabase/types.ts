@@ -261,7 +261,7 @@ export type Database = {
       }
       review_sessions: {
         Row: {
-          card_id: string
+          card_id: string | null
           difficulty_after: number | null
           difficulty_before: number | null
           due_after: string | null
@@ -277,7 +277,7 @@ export type Database = {
           user_id: string
         }
         Insert: {
-          card_id: string
+          card_id?: string | null
           difficulty_after?: number | null
           difficulty_before?: number | null
           due_after?: string | null
@@ -293,7 +293,7 @@ export type Database = {
           user_id: string
         }
         Update: {
-          card_id?: string
+          card_id?: string | null
           difficulty_after?: number | null
           difficulty_before?: number | null
           due_after?: string | null

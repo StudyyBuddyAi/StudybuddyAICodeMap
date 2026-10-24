@@ -1077,10 +1077,9 @@ export const QBankProvider = ({ children }: { children: ReactNode }) => {
         setGeneration(null);
         sessionIdRef.current = null;
       }
-      // Attempts first, as the history delete does. Flags and timed selections
-      // go with the session row (on delete cascade).
-      const { error: attemptsError } = await supabase.from("user_attempts").delete().eq("session_id", sessionId);
-      if (attemptsError) throw attemptsError;
+      // Answers already given stay: they are study history (stats, streak),
+      // and lose only their link to the set (on delete set null). Flags and
+      // timed selections go with the session row (on delete cascade).
       const { error } = await supabase.from("qbank_sessions").delete().eq("id", sessionId);
       if (error) throw error;
       queryClient.invalidateQueries({ queryKey: ["qbank-unfinished"] });
