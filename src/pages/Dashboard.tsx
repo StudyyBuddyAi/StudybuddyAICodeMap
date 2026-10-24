@@ -11,6 +11,9 @@ import {
   ListChecks,
   LogIn,
   Sparkles,
+  CalendarClock,
+  Play,
+  Target,
 } from "lucide-react";
 import DashboardLayout from "@/components/dashboard/DashboardLayout";
 import AuthModal from "@/components/AuthModal";
@@ -28,6 +31,9 @@ import {
   type Rating,
 } from "@/hooks/use-dashboard-stats";
 import { formatRelative } from "@/lib/qbank-format";
+import { timeAgo } from "@/lib/utils";
+import { useLibraryTopics } from "@/hooks/use-library-topics";
+import { buildTodayPlan, lastSevenDays, type PlanItem } from "@/lib/today-plan";
 import { displayName } from "@/lib/display-name";
 import { MAX_DAILY_CARDS, MAX_DAILY_SHEETS, useUsageLimit } from "@/hooks/use-usage-limit";
 
@@ -37,35 +43,6 @@ const WEEKLY_SHEET_GOAL = 7;
 type Detail = "sheets" | "flashcards" | "qbank" | null;
 
 const pct = (part: number, whole: number) => (whole > 0 ? Math.round((part / whole) * 100) : 0);
-
-/** A progress ring with the number written in the middle. */
-function Ring({ value, label, tone }: { value: number; label: string; tone: string }) {
-  const r = 34;
-  const c = 2 * Math.PI * r;
-  const clamped = Math.max(0, Math.min(100, value));
-  return (
-    <div className="relative h-24 w-24 shrink-0">
-      <svg viewBox="0 0 80 80" className="h-full w-full -rotate-90" aria-hidden="true">
-        <circle cx="40" cy="40" r={r} fill="none" strokeWidth="7" className="stroke-border" />
-        <circle
-          cx="40"
-          cy="40"
-          r={r}
-          fill="none"
-          strokeWidth="7"
-          strokeLinecap="round"
-          strokeDasharray={c}
-          strokeDashoffset={c * (1 - clamped / 100)}
-          className={`${tone} transition-[stroke-dashoffset] duration-700 motion-reduce:transition-none`}
-        />
-      </svg>
-      <div className="absolute inset-0 flex flex-col items-center justify-center">
-        <span className="text-lg font-semibold tabular-nums text-foreground">{clamped}%</span>
-        <span className="text-[10px] text-muted-foreground">{label}</span>
-      </div>
-    </div>
-  );
-}
 
 /** A labelled horizontal bar: how much is done, how much is left. */
 function Bar({ label, value, total, tone }: { label: string; value: number; total: number; tone: string }) {
@@ -84,38 +61,57 @@ function Bar({ label, value, total, tone }: { label: string; value: number; tota
   );
 }
 
-function StatBox({
+/** One of the week's numbers: a line, a thin bar, and the dialog behind it. */
+function WeekRow({
   icon,
-  value,
   label,
+  value,
+  progress,
   hint,
   onClick,
 }: {
   icon: ReactNode;
-  value: ReactNode;
   label: string;
+  value: string;
+  progress: number;
   hint?: string;
-  onClick?: () => void;
+  onClick: () => void;
 }) {
-  const body = (
-    <>
-      <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-secondary text-primary">{icon}</span>
-      <div className="min-w-0 flex-1 text-start">
-        <div className="text-2xl font-semibold tabular-nums leading-none text-foreground">{value}</div>
-        <div className="mt-1 text-xs text-muted-foreground">{label}</div>
-      </div>
-      {onClick && <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />}
-    </>
-  );
-  const cls =
-    "flex w-full items-center gap-3 rounded-2xl border border-border bg-card p-4 transition-colors";
-  if (!onClick) return <div className={cls}>{body}</div>;
   return (
-    <button type="button" onClick={onClick} className={`${cls} hover:border-primary`} aria-label={hint ?? label}>
-      {body}
+    <button type="button" onClick={onClick} className="flex w-full items-center gap-3 py-3 text-start" aria-label={`${label}: ${value}. Show details`}>
+      <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-secondary text-primary" aria-hidden>
+        {icon}
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="flex items-baseline justify-between gap-2">
+          <span className="truncate text-sm text-foreground">{label}</span>
+          <span className="shrink-0 text-sm font-semibold tabular-nums text-foreground">{value}</span>
+        </span>
+        <span className="mt-1.5 block h-1.5 overflow-hidden rounded-full bg-border" aria-hidden>
+          <span className="block h-full rounded-full bg-primary" style={{ width: `${Math.max(0, Math.min(100, progress))}%` }} />
+        </span>
+        {hint && <span className="mt-1 block text-[11px] text-muted-foreground">{hint}</span>}
+      </span>
+      <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
     </button>
   );
 }
+
+const PLAN_ICON: Record<PlanItem["kind"], ReactNode> = {
+  review: <CalendarClock className="h-5 w-5" />,
+  resume: <Play className="h-5 w-5" />,
+  weak: <Target className="h-5 w-5" />,
+  next: <Sparkles className="h-5 w-5" />,
+  start: <FileText className="h-5 w-5" />,
+};
+
+const PLAN_TONE: Record<PlanItem["kind"], string> = {
+  review: "bg-warning-soft text-warning",
+  resume: "bg-info-soft text-info",
+  weak: "bg-danger-soft text-danger",
+  next: "bg-primary/10 text-primary",
+  start: "bg-primary/10 text-primary",
+};
 
 function ToolCard({
   icon,
@@ -226,7 +222,7 @@ function Dashboard() {
   const dueNow = deck.due;
 
   const activeDays = new Set(stats?.activeDays ?? []);
-  sheetsThisWeek.forEach((h) => activeDays.add(dayKey(h.timestamp)));
+  history.forEach((h) => activeDays.add(dayKey(h.timestamp)));
   const streak = computeStreak(activeDays, now);
 
   const qbank = stats?.qbank;
@@ -234,7 +230,35 @@ function Dashboard() {
   const lastSet = stats?.unfinished[0];
   const lastSetTotal = lastSet ? Math.max(lastSet.expected_total, lastSet.question_count) : 0;
 
-  const loading = <span className="text-muted-foreground">…</span>;
+  // Topics as the Library gathers them, and today's plan built from them.
+  const { topics } = useLibraryTopics();
+  const plan = useMemo(
+    () =>
+      buildTodayPlan({
+        topics,
+        dueTotal: dueNow,
+        unfinished: lastSet
+          ? {
+              id: lastSet.id,
+              topic: lastSet.topic ?? lastSet.system,
+              answered: lastSet.answered_count,
+              total: lastSetTotal,
+            }
+          : null,
+        signedIn: !isGuest,
+      }),
+    [topics, dueNow, lastSet, lastSetTotal, isGuest]
+  );
+  const runPlan = (item: PlanItem) =>
+    item.target.kind === "sign-in"
+      ? setAuthOpen(true)
+      : navigate(item.target.to, item.target.state ? { state: item.target.state } : undefined);
+  const recentTopics = useMemo(
+    () => [...topics].sort((a, b) => b.lastActivity - a.lastActivity).slice(0, 4),
+    [topics]
+  );
+  const week = lastSevenDays(activeDays, dayKey, now);
+  const studiedToday = activeDays.has(dayKey(now));
 
   // What is left of today's free allowance, on each tool's card.
   const { sheetCount, cardsCount, isProUser } = useUsageLimit();
@@ -243,7 +267,7 @@ function Dashboard() {
 
   return (
     <DashboardLayout>
-      <div className="mx-auto w-full max-w-6xl space-y-8">
+      <div className="mx-auto w-full min-w-0 max-w-6xl space-y-6 sm:space-y-8">
         {/* A greeting, on the page itself rather than in a box. Sign-in is
             already in the bar above, so for a guest it is a link in the line. */}
         <PageHeader
@@ -269,86 +293,128 @@ function Dashboard() {
           }
         />
 
-        {/* This week, in numbers. Each box opens what it counts. */}
-        <section aria-labelledby="week-title">
-          <h2 id="week-title" className="mb-3 text-sm font-semibold text-foreground">
-            Last {WINDOW_DAYS} days
-          </h2>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            <StatBox
-              icon={<FileText className="h-5 w-5" />}
-              value={sheetsThisWeek.length}
-              label="Sheets saved"
-              hint="Show the sheets saved in the last 7 days"
-              onClick={() => setDetail("sheets")}
-            />
-            <StatBox
-              icon={<Layers className="h-5 w-5" />}
-              value={isGuest ? deck.total : isLoading ? loading : cardsDone}
-              label={isGuest ? "Cards in your deck" : "Cards reviewed"}
-              hint="Show flashcard statistics"
-              onClick={() => setDetail("flashcards")}
-            />
-            <StatBox
-              icon={<FlaskConical className="h-5 w-5" />}
-              value={isGuest ? "—" : isLoading ? loading : (qbank?.answered ?? 0)}
-              label={isGuest ? "Sign in for the QBank" : "Questions answered"}
-              hint="Show QBank statistics and past sets"
-              onClick={isGuest ? () => setAuthOpen(true) : () => setDetail("qbank")}
-            />
-            <StatBox
-              icon={<Flame className="h-5 w-5" />}
-              value={streak}
-              label={streak === 1 ? "Day in a row" : "Days in a row"}
-            />
-          </div>
-        </section>
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+          {/* Today's plan: the week's numbers turned into what to do, most
+              urgent first — the same advice the Library gives per topic. */}
+          <section aria-labelledby="plan-title" className="min-w-0 rounded-2xl border border-border bg-card p-4 sm:p-5 lg:col-span-2">
+            <div className="flex items-baseline justify-between gap-3">
+              <h2 id="plan-title" className="text-base font-semibold text-foreground">
+                Today's plan
+              </h2>
+              <span className="text-xs text-muted-foreground">
+                {plan.length} {plan.length === 1 ? "thing" : "things"} to do
+              </span>
+            </div>
+            <ol className="mt-4 space-y-2.5">
+              {plan.map((item, i) => (
+                <li key={item.id}>
+                  <button
+                    type="button"
+                    onClick={() => runPlan(item)}
+                    className={`group flex w-full min-w-0 items-center gap-3 rounded-xl border p-3 text-start transition-colors hover:border-primary ${
+                      i === 0 ? "border-primary/50 bg-primary/5" : "border-border"
+                    }`}
+                  >
+                    <span
+                      className={`grid h-9 w-9 shrink-0 place-items-center rounded-xl sm:h-10 sm:w-10 ${PLAN_TONE[item.kind]}`}
+                      aria-hidden
+                    >
+                      {PLAN_ICON[item.kind]}
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-sm font-semibold text-foreground sm:truncate">{item.title}</span>
+                      <span className="block text-xs text-muted-foreground">{item.why}</span>
+                    </span>
+                    <span
+                      className={`hidden shrink-0 items-center gap-1 rounded-full px-3.5 py-2 text-xs font-semibold sm:inline-flex ${
+                        i === 0
+                          ? "bg-primary text-primary-foreground"
+                          : "border border-border text-foreground group-hover:border-primary"
+                      }`}
+                    >
+                      {item.cta}
+                      <ArrowRight className="h-3.5 w-3.5 rtl:rotate-180" aria-hidden />
+                    </span>
+                    <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground sm:hidden rtl:rotate-180" aria-hidden />
+                  </button>
+                </li>
+              ))}
+            </ol>
+          </section>
 
-        {/* The same numbers as progress: what each ring is measured against is written under it. */}
-        <section aria-labelledby="summary-title" className="rounded-2xl border border-border bg-card p-5">
-          <h2 id="summary-title" className="mb-5 text-sm font-semibold text-foreground">
-            Your progress
-          </h2>
-          <div className="grid gap-6 md:grid-cols-3">
-            <div className="flex items-center gap-4">
-              <Ring value={pct(sheetsThisWeek.length, WEEKLY_SHEET_GOAL)} label="of goal" tone="stroke-primary" />
+          {/* This week: the streak and the seven days behind it, then the
+              week's numbers — each one opens what it counts. */}
+          <section aria-labelledby="week-title" className="min-w-0 rounded-2xl border border-border bg-card p-4 sm:p-5">
+            <h2 id="week-title" className="text-base font-semibold text-foreground">
+              This week
+            </h2>
+            <div className="mt-4 flex items-center gap-3">
+              <span className="grid h-12 w-12 place-items-center rounded-2xl bg-warning-soft text-warning" aria-hidden>
+                <Flame className="h-6 w-6" />
+              </span>
               <div>
-                <p className="text-sm font-semibold text-foreground">Weekly sheets</p>
-                <p className="text-xs text-muted-foreground">
-                  {sheetsThisWeek.length} of {WEEKLY_SHEET_GOAL} — goal: one a day
+                <p className="text-2xl font-semibold leading-none tabular-nums text-foreground">
+                  {streak} {streak === 1 ? "day" : "days"}
+                </p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {streak === 0
+                    ? "Study anything today to start a streak."
+                    : studiedToday
+                    ? "In a row — today counts."
+                    : "In a row — study today to keep it."}
                 </p>
               </div>
             </div>
-            <div className="flex items-center gap-4">
-              <Ring
-                value={pct(reviewedToday, reviewedToday + dueNow)}
-                label="done"
-                tone="stroke-success"
+            <ol className="mt-4 grid grid-cols-7 gap-1" aria-label="Days studied this week">
+              {week.map((d) => (
+                <li key={d.key} className="flex flex-col items-center gap-1">
+                  <span
+                    className={`grid h-8 w-full place-items-center rounded-lg text-[10px] font-semibold ${
+                      d.active ? "bg-primary text-primary-foreground" : "bg-secondary text-muted-foreground"
+                    } ${d.today ? "ring-2 ring-primary/40 ring-offset-1 ring-offset-card" : ""}`}
+                    aria-label={`${d.date.toLocaleDateString(undefined, { weekday: "long" })}: ${d.active ? "studied" : "no study"}`}
+                  >
+                    {d.active ? "✓" : ""}
+                  </span>
+                  <span className="text-[10px] text-muted-foreground">
+                    {d.date.toLocaleDateString(undefined, { weekday: "narrow" })}
+                  </span>
+                </li>
+              ))}
+            </ol>
+            <div className="mt-4 divide-y divide-border border-t border-border">
+              <WeekRow
+                icon={<FileText className="h-4 w-4" />}
+                label="Sheets saved"
+                value={`${sheetsThisWeek.length} / ${WEEKLY_SHEET_GOAL}`}
+                progress={pct(sheetsThisWeek.length, WEEKLY_SHEET_GOAL)}
+                onClick={() => setDetail("sheets")}
               />
-              <div>
-                <p className="text-sm font-semibold text-foreground">Today's cards</p>
-                <p className="text-xs text-muted-foreground">
-                  {dueNow === 0 && reviewedToday === 0
-                    ? "No cards due today"
-                    : `${dueNow} left to review today`}
-                </p>
-              </div>
-            </div>
-            <div className="flex items-center gap-4">
-              <Ring value={accuracy} label="correct" tone="stroke-info" />
-              <div>
-                <p className="text-sm font-semibold text-foreground">QBank accuracy</p>
-                <p className="text-xs text-muted-foreground">
-                  {isGuest
+              <WeekRow
+                icon={<Layers className="h-4 w-4" />}
+                label={isGuest ? "Cards in your decks" : "Cards reviewed"}
+                value={isGuest ? String(deck.total) : isLoading ? "…" : String(cardsDone)}
+                progress={pct(reviewedToday, reviewedToday + dueNow)}
+                hint={dueNow > 0 ? `${dueNow} due today` : "Nothing due today"}
+                onClick={() => setDetail("flashcards")}
+              />
+              <WeekRow
+                icon={<FlaskConical className="h-4 w-4" />}
+                label="QBank"
+                value={isGuest ? "Sign in" : isLoading ? "…" : qbank && qbank.answered > 0 ? `${accuracy}%` : "—"}
+                progress={isGuest ? 0 : accuracy}
+                hint={
+                  isGuest
                     ? "Sign in to practise questions"
                     : qbank && qbank.answered > 0
-                    ? `${qbank.correct} of ${qbank.answered} correct this week`
-                    : "No questions answered this week"}
-                </p>
-              </div>
+                    ? `${qbank.correct} of ${qbank.answered} correct`
+                    : "No questions this week"
+                }
+                onClick={isGuest ? () => setAuthOpen(true) : () => setDetail("qbank")}
+              />
             </div>
-          </div>
-        </section>
+          </section>
+        </div>
 
         {/* The three tools, each with what is waiting in it. */}
         <section aria-labelledby="tools-title">
@@ -363,7 +429,7 @@ function Dashboard() {
               <ListChecks className="h-4 w-4" /> Topic checklist <ArrowRight className="h-4 w-4" />
             </Link>
           </div>
-          <div className="grid gap-4 md:grid-cols-3">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
             <ToolCard
               icon={<FileText className="h-4 w-4" />}
               title="Study Sheets"
@@ -410,6 +476,44 @@ function Dashboard() {
             />
           </div>
         </section>
+
+        {/* The topics behind the numbers: the latest few, as the Library shows
+            them — which tools each has been studied with, and what's next. */}
+        {recentTopics.length > 0 && (
+          <section aria-labelledby="recent-title">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <h2 id="recent-title" className="text-sm font-semibold text-foreground">
+                Recent topics
+              </h2>
+              <Link to="/library" className="text-sm font-semibold text-primary underline-offset-4 hover:underline">
+                All {topics.length} in your Library
+              </Link>
+            </div>
+            <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              {recentTopics.map((t) => (
+                <li key={t.key}>
+                  <Link
+                    to="/library"
+                    className="flex h-full flex-col rounded-2xl border border-border bg-card p-4 transition-colors hover:border-primary"
+                  >
+                    <span className="flex items-start gap-2">
+                      <span className="min-w-0 flex-1 truncate text-sm font-semibold text-foreground">{t.title}</span>
+                      <span className="mt-1 flex shrink-0 gap-1" aria-label={`${t.coverage} of 3 tools used`}>
+                        {[t.sheets.length > 0, !!t.deck, !!t.qbank].map((on, i) => (
+                          <span key={i} className={`h-1.5 w-1.5 rounded-full ${on ? "bg-primary" : "bg-border"}`} />
+                        ))}
+                      </span>
+                    </span>
+                    <span className="mt-1 text-xs text-muted-foreground">Studied {timeAgo(t.lastActivity)}</span>
+                    <span className={`mt-3 text-xs font-medium ${t.weak ? "text-danger" : "text-primary"}`}>
+                      Next: {t.next.label}
+                    </span>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
       </div>
 
       <Dialog open={detail !== null} onOpenChange={(open) => !open && setDetail(null)}>

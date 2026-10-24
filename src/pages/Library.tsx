@@ -85,14 +85,14 @@ function SummaryTile({
       type="button"
       onClick={onClick}
       aria-pressed={active}
-      className={`flex items-center gap-3 rounded-2xl border bg-card p-4 text-start transition-colors ${
+      className={`flex min-w-0 flex-col items-start gap-2 rounded-2xl border bg-card p-3 text-start transition-colors sm:flex-row sm:items-center sm:gap-3 sm:p-4 ${
         active ? "border-primary ring-2 ring-primary/20" : "border-border hover:border-primary/60"
       }`}
     >
-      <span className={`grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-secondary ${tone}`}>{icon}</span>
+      <span className={`grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-secondary sm:h-10 sm:w-10 ${tone}`}>{icon}</span>
       <span className="min-w-0">
         <span className="block text-2xl font-semibold leading-none tabular-nums text-foreground">{value}</span>
-        <span className="mt-1 block text-xs text-muted-foreground">{label}</span>
+        <span className="mt-1 block text-xs leading-snug text-muted-foreground">{label}</span>
       </span>
     </button>
   );
@@ -244,7 +244,7 @@ const Library = () => {
         />
       )}
 
-      <div className="space-y-8">
+      <div className="min-w-0 space-y-6 sm:space-y-8">
         <PageHeader
           label="Library"
           title="Your topics"
@@ -252,7 +252,7 @@ const Library = () => {
         />
 
         {topics.length === 0 ? (
-          <div className="rounded-2xl border border-border bg-card p-10 text-center">
+          <div className="rounded-2xl border border-border bg-card p-6 text-center sm:p-10">
             <span className="mx-auto grid h-12 w-12 place-items-center rounded-xl bg-primary/10 text-primary">
               <LibraryIcon className="h-5 w-5" aria-hidden />
             </span>
@@ -260,7 +260,7 @@ const Library = () => {
             <p className="mx-auto mt-1 max-w-md text-sm text-muted-foreground">
               Every sheet you save and every deck you make lands here, gathered by topic.
             </p>
-            <div className="mt-5 flex flex-wrap justify-center gap-2.5">
+            <div className="mt-5 flex flex-col justify-center gap-2.5 sm:flex-row">
               <Link to="/sheets" className="inline-flex h-11 items-center rounded-full bg-primary px-5 text-sm font-semibold text-primary-foreground">
                 Write a study sheet
               </Link>
@@ -324,11 +324,11 @@ const Library = () => {
                 />
               </div>
               <label className="flex items-center gap-2 text-sm text-muted-foreground">
-                Sort
+                <span className="shrink-0">Sort</span>
                 <select
                   value={sort}
                   onChange={(e) => setSort(e.target.value as LibrarySort)}
-                  className="h-11 rounded-xl border border-border bg-card px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                  className="h-11 w-full rounded-xl border border-border bg-card px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring sm:w-auto"
                 >
                   {SORTS.map((s) => (
                     <option key={s.value} value={s.value}>
@@ -357,7 +357,7 @@ const Library = () => {
                 )}
               </div>
             ) : (
-              <ul className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+              <ul className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
                 {shown.slice(0, visible).map((t) => (
                   <li key={t.key}>
                     <TopicCard
@@ -509,7 +509,7 @@ function TopicCard({
   const latestSet = t.qbank?.sets[0];
 
   return (
-    <article className="flex h-full flex-col rounded-2xl border border-border bg-card p-5">
+    <article className="flex h-full min-w-0 flex-col rounded-2xl border border-border bg-card p-4 sm:p-5">
       <header className="flex items-start gap-3">
         <div className="min-w-0 flex-1">
           <h2 className="truncate text-base font-semibold text-foreground" title={t.title}>

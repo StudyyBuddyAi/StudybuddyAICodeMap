@@ -38,7 +38,9 @@ const DashboardLayout = ({ children, wide = false }: DashboardLayoutProps) => {
         onOpenAccount={() => setAccountModalOpen(true)}
       />
 
-      <main className="flex-1" style={{ padding: "40px 24px 80px" }}>
+      {/* Padding as classes, not an inline style: an inline value can't change
+          with screen width, and phones need a 16px gutter rather than 24px. */}
+      <main className="min-w-0 flex-1 px-4 pb-16 pt-6 sm:px-6 sm:pb-20 sm:pt-10">
         <div
           style={{
             maxWidth: wide ? "var(--max-w, 1280px)" : "1600px",

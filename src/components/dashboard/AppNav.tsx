@@ -121,7 +121,7 @@ const AppNav = ({ onNavigate, onOpenAuth, onOpenAccount }: AppNavProps) => {
         }}
       >
         <div
-          className="flex items-center justify-between gap-4 h-full px-6"
+          className="flex items-center justify-between gap-3 h-full px-4 sm:gap-4 sm:px-6"
           style={{ maxWidth: "var(--max-w, 1280px)", margin: "0 auto" }}
         >
           {/* Brand */}
@@ -147,6 +147,7 @@ const AppNav = ({ onNavigate, onOpenAuth, onOpenAccount }: AppNavProps) => {
               <span style={{ fontStyle: "italic", color: "var(--accent)" }}> AI</span>
             </span>
             <span
+              className="hidden sm:inline"
               style={{
                 fontFamily: "var(--font-mono)",
                 fontSize: 10,
