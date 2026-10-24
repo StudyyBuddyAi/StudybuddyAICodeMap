@@ -225,7 +225,6 @@ h1, h2, h3 { letter-spacing: -0.035em; }
 /* Dark band */
 .dark-band { position: relative; overflow: hidden; padding: 117px 0; color: var(--color-primary-foreground); background: var(--color-foreground); }
 .dark-grid, .cta-grid { position: absolute; inset: 0; opacity: .4; background-image: linear-gradient(color-mix(in srgb, var(--color-primary-foreground) 7%, transparent) 1px, transparent 1px), linear-gradient(90deg, color-mix(in srgb, var(--color-primary-foreground) 7%, transparent) 1px, transparent 1px); background-size: 48px 48px; mask-image: linear-gradient(to bottom, transparent, black 22%, black 78%, transparent); }
-.dark-band::after, .final-cta::after { content: ""; position: absolute; width: 440px; height: 440px; right: -160px; top: -205px; border: 1px solid color-mix(in srgb, var(--color-accent) 23%, transparent); border-radius: 50%; box-shadow: 0 0 0 45px color-mix(in srgb, var(--color-accent) 4%, transparent), 0 0 0 90px color-mix(in srgb, var(--color-accent) 3%, transparent); }
 .dark-band-inner { position: relative; z-index: 1; text-align: center; }
 .dark-band h2 { margin-top: 21px; font: 500 clamp(35px, 5vw, 58px)/1.08 var(--app-font-sans); letter-spacing: -.05em; }
 .dark-band h2 em { color: var(--color-warm); }
@@ -250,6 +249,11 @@ h1, h2, h3 { letter-spacing: -0.035em; }
 
 /* Features — six cards, three across, so the section reads as two even rows. */
 .tinted-section { background: var(--color-panel); }
+/* The section right before the film is tinted so the two never blend: a pale
+   band in light mode, a raised one in dark mode, where the page and the film's
+   stage are otherwise both near-black navy. */
+.tools-section { background: var(--color-panel); border-bottom: 1px solid var(--color-border); }
+.dark .tools-section { background: var(--color-secondary); }
 .features, .features-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; }
 .feature, .feature-card { padding: 24px; border-radius: 16px; background: var(--color-card); border: 1px solid var(--color-border); transition: transform .2s ease, box-shadow .2s ease; }
 .feature:hover, .feature-card:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(0,0,0,0.08); }
@@ -409,8 +413,6 @@ h1, h2, h3 { letter-spacing: -0.035em; }
 .bullet-list li svg { flex: 0 0 auto; margin-top: 4px; color: var(--color-accent); }
 
 /* Final CTA — kept to one line and one button. */
-.final-cta-simple { display: flex; flex-direction: column; align-items: center; gap: 22px; padding: 56px 24px; border: 1px solid var(--color-border); border-radius: 17px; background: var(--color-panel); text-align: center; }
-.final-cta-simple h2 { font: 500 clamp(30px, 4vw, 44px)/1.1 var(--app-font-sans); }
 
 /* FAQ + final CTA + footer */
 .faq-layout { display: grid; grid-template-columns: minmax(260px, .78fr) minmax(0, 1.22fr); gap: clamp(50px, 8vw, 120px); align-items: start; }
@@ -422,12 +424,6 @@ h1, h2, h3 { letter-spacing: -0.035em; }
 .faq-plus { flex: 0 0 auto; color: var(--color-accent); font: 400 25px/1 var(--app-font-sans); transition: transform .2s ease; }
 .faq-item[open] .faq-plus { transform: rotate(45deg); }
 .faq-item p { max-width: 610px; padding: 0 35px 20px 0; color: var(--color-muted-foreground); font-size: 13px; line-height: 1.7; }
-.final-cta-section { padding-top: 92px; padding-bottom: 100px; }
-.final-cta { position: relative; overflow: hidden; min-height: 375px; display: grid; place-items: center; padding: 65px 30px; border-radius: 17px; color: var(--color-primary-foreground); background: var(--color-foreground); }
-.final-cta-inner { position: relative; z-index: 1; max-width: 650px; text-align: center; }
-.final-cta h2 { margin-top: 20px; font: 500 clamp(34px, 4.6vw, 54px)/1.07 var(--app-font-sans); letter-spacing: -.05em; }
-.final-cta h2 em { color: var(--color-warm); }
-.final-cta p { max-width: 560px; margin: 18px auto 0; color: color-mix(in srgb, var(--color-primary-foreground) 64%, transparent); font-size: 14px; line-height: 1.7; }
 .cta-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 11px; margin-top: 29px; }
 .site-footer { padding: 58px 0 26px; border-top: 1px solid var(--color-border); }
 .footer-grid { display: grid; grid-template-columns: 1.65fr 1fr 1fr 1fr; gap: 35px; }
@@ -500,8 +496,6 @@ h1, h2, h3 { letter-spacing: -0.035em; }
   .pricing-card { padding: 25px; }
   .faq-layout { grid-template-columns: 1fr; gap: 40px; }
   .faq-item summary { font-size: 16px; }
-  .final-cta-section { padding-top: 70px; padding-bottom: 76px; }
-  .final-cta { padding: 55px 21px; }
   .footer-grid { grid-template-columns: 1fr 1fr; gap: 36px 24px; }
   .footer-brand { grid-column: 1 / -1; }
   .footer-bottom { align-items: flex-start; flex-direction: column; gap: 9px; margin-top: 35px; }

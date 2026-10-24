@@ -8,7 +8,6 @@ import {
   Instagram,
   Layers,
   Linkedin,
-  Mail,
   Menu,
   Moon,
   Play,
@@ -24,10 +23,11 @@ import { useNavigate } from "react-router-dom";
 import { FilmSection, type FilmHandle } from "@/components/landing/FilmSection";
 import BrandMark from "@/components/brand/BrandMark";
 import { useAuth } from "@/hooks/use-auth";
-import { displayName } from "@/lib/display-name";
 import { readPendingUpgrade } from "@/lib/auth-upgrade";
+import { isRecoveryPending } from "@/lib/recovery-landing";
+import { useTheme } from "@/hooks/use-theme";
+import GoProModal from "@/components/GoProModal";
 import "@/pages/index.css";
-const CONTACT_EMAIL = "mailto:osama200az@gmail.com";
 const SOCIALS = {
   instagram: "https://www.instagram.com/getstudybuddyai/",
   linkedin: "https://www.linkedin.com/company/studdybuddyai",
@@ -35,8 +35,8 @@ const SOCIALS = {
 };
 
 const NAV_LINKS = [
-  { href: "#tools", label: "Tools" },
-  { href: "#film", label: "Demo" },
+  { href: "#tools", label: "Features" },
+  { href: "#film", label: "How it works" },
   { href: "#pricing", label: "Pricing" },
   { href: "#faq", label: "FAQ" },
 ];
@@ -137,7 +137,7 @@ const PLANS = [
     note: "/ month",
     features: [
       "Unlimited study sheets and flashcard decks",
-      "Our medical AI model on every sheet",
+      "Our medical AI model, whenever you choose it",
       "Unlimited PubMed citation lookups",
       "Make sheets yours: highlight, notes, AI rewrite",
       "Everything in Free",
@@ -271,31 +271,22 @@ function App() {
   const navigate = useNavigate();
   const { user, isAnonymous, loading } = useAuth();
   const signedIn = !loading && !!user && !isAnonymous;
-  const name = signedIn ? displayName(user) : null;
 
-  // A Google sign-in whose callback URL isn't allow-listed comes back to the
-  // Site URL — here — with the session already set. Finish it where it
-  // started instead of leaving the student on the landing page.
+  // The landing page is for visitors. A signed-in student goes straight to
+  // the app — unless this load is finishing something that started elsewhere:
+  // a Google sign-in or a password-reset link whose callback URL isn't
+  // allow-listed comes back to the Site URL, here, with the session set.
   useEffect(() => {
-    if (signedIn && readPendingUpgrade()) navigate("/auth/callback", { replace: true });
+    if (!signedIn) return;
+    if (isRecoveryPending()) navigate("/reset-password", { replace: true });
+    else if (readPendingUpgrade()) navigate("/auth/callback", { replace: true });
+    else navigate("/dashboard", { replace: true });
   }, [signedIn, navigate]);
-  const [isDark, setIsDark] = useState(() => {
-    try {
-      return localStorage.getItem("studybuddy-theme") === "dark";
-    } catch {
-      return false;
-    }
-  });
+  const [goProOpen, setGoProOpen] = useState(false);
+  // The same theme setting the app uses, so a choice made on either side
+  // survives a visit to the other and a reload.
+  const { isDark, toggleTheme } = useTheme();
   const [menuOpen, setMenuOpen] = useState(false);
-
-  useEffect(() => {
-    document.documentElement.classList.toggle("dark", isDark);
-    try {
-      localStorage.setItem("studybuddy-theme", isDark ? "dark" : "light");
-    } catch {
-      // Storage can be unavailable in private browsing; theme still works in-memory.
-    }
-  }, [isDark]);
 
   const startStudying = () => navigate("/dashboard?start=sheet");
   const signIn = () => navigate("/dashboard?signin=1");
@@ -306,6 +297,8 @@ function App() {
     event.preventDefault();
     filmRef.current.playFromTop();
   };
+
+  if (signedIn) return null;
 
   return (
     <div className="site-shell">
@@ -321,32 +314,21 @@ function App() {
           </a>
           <nav className="desktop-nav" aria-label="Primary navigation">
             {NAV_LINKS.map((link) => (
-              <a href={link.href} key={link.href} data-testid={`link-nav-${link.label.toLowerCase()}`}>
+              <a href={link.href} key={link.href} data-testid={`link-nav-${link.href.slice(1)}`}>
                 {link.label}
               </a>
             ))}
           </nav>
           <div className="header-actions">
-            <button className="theme-button" type="button" onClick={() => setIsDark((value) => !value)} aria-label={isDark ? "Switch to light theme" : "Switch to dark theme"} data-testid="button-theme-toggle">
+            <button className="theme-button" type="button" onClick={toggleTheme} aria-label={isDark ? "Switch to light theme" : "Switch to dark theme"} data-testid="button-theme-toggle">
               {isDark ? <Sun size={17} /> : <Moon size={17} />}
             </button>
-            {signedIn ? (
-              <>
-                <span className="header-greeting">Hi, {name}</span>
-                <ButtonLink href="/dashboard" onClick={() => navigate("/dashboard")} testId="button-header-dashboard">
-                  <span className="header-cta-label">Go to Dashboard</span><ArrowRight size={15} />
-                </ButtonLink>
-              </>
-            ) : (
-              <>
-                <ButtonLink href="/dashboard?signin=1" onClick={signIn} variant="ghost" className="header-sign-in" testId="button-header-sign-in">
-                  Sign in
-                </ButtonLink>
-                <ButtonLink href="/dashboard?start=sheet" onClick={startStudying} testId="button-header-start-free">
-                  <span className="header-cta-label">Start free</span><ArrowRight size={15} />
-                </ButtonLink>
-              </>
-            )}
+            <ButtonLink href="/dashboard?signin=1" onClick={signIn} variant="ghost" className="header-sign-in" testId="button-header-sign-in">
+              Sign in
+            </ButtonLink>
+            <ButtonLink href="/dashboard?start=sheet" onClick={startStudying} testId="button-header-start-free">
+              <span className="header-cta-label">Start free</span><ArrowRight size={15} />
+            </ButtonLink>
             <button className="menu-button" type="button" onClick={() => setMenuOpen((value) => !value)} aria-expanded={menuOpen} aria-controls="mobile-nav" aria-label={menuOpen ? "Close menu" : "Open menu"} data-testid="button-mobile-menu">
               {menuOpen ? <X size={22} /> : <Menu size={22} />}
             </button>
@@ -354,16 +336,10 @@ function App() {
         </div>
         <nav id="mobile-nav" className="mobile-nav" aria-label="Mobile navigation">
           {NAV_LINKS.map((link) => (
-            <a href={link.href} key={link.href} onClick={closeMenu} data-testid={`link-mobile-${link.label.toLowerCase()}`}>{link.label}<ArrowUpRight size={14} /></a>
+            <a href={link.href} key={link.href} onClick={closeMenu} data-testid={`link-mobile-${link.href.slice(1)}`}>{link.label}<ArrowUpRight size={14} /></a>
           ))}
-          {signedIn ? (
-            <ButtonLink href="/dashboard" onClick={() => { closeMenu(); navigate("/dashboard"); }} testId="button-mobile-dashboard">Go to Dashboard <ArrowRight size={15} /></ButtonLink>
-          ) : (
-            <>
-              <ButtonLink href="/dashboard?signin=1" onClick={() => { closeMenu(); signIn(); }} variant="ghost" testId="button-mobile-sign-in">Sign in</ButtonLink>
-              <ButtonLink href="/dashboard?start=sheet" onClick={() => { closeMenu(); startStudying(); }} testId="button-mobile-start-free">Start free <ArrowRight size={15} /></ButtonLink>
-            </>
-          )}
+          <ButtonLink href="/dashboard?signin=1" onClick={() => { closeMenu(); signIn(); }} variant="ghost" testId="button-mobile-sign-in">Sign in</ButtonLink>
+          <ButtonLink href="/dashboard?start=sheet" onClick={() => { closeMenu(); startStudying(); }} testId="button-mobile-start-free">Start free <ArrowRight size={15} /></ButtonLink>
         </nav>
       </header>
 
@@ -458,7 +434,7 @@ function App() {
                   <div className="price">{plan.price} <small>{plan.note}</small></div>
                   <ul>{plan.features.map((feature) => <li key={feature}><Check size={16} />{feature}</li>)}</ul>
                   {plan.key === "pro" ? (
-                    <ButtonLink href={CONTACT_EMAIL} variant="accent" testId="button-pricing-pro">{plan.cta} <ArrowRight size={15} /></ButtonLink>
+                    <ButtonLink href="#pricing" onClick={() => setGoProOpen(true)} variant="accent" testId="button-pricing-pro">{plan.cta} <ArrowRight size={15} /></ButtonLink>
                   ) : (
                     <ButtonLink href="/dashboard?start=sheet" onClick={plan.key === "free" ? signIn : startStudying} variant="ghost" testId={`button-pricing-${plan.key}`}>{plan.cta} <ArrowRight size={15} /></ButtonLink>
                   )}
@@ -470,21 +446,13 @@ function App() {
 
         <section id="faq" className="section tinted-section faq-section">
           <div className="container faq-layout">
-            <SectionHeading eyebrow="FAQ" title={<>Questions, <em>answered.</em></>} children="If yours isn't here, email us." />
+            <SectionHeading eyebrow="FAQ" title={<>Questions, <em>answered.</em></>} />
             <Reveal className="faq-list">
               {FAQS.map((faq, index) => <details className="faq-item" key={faq.q} open={index === 0}><summary data-testid={`button-faq-${index + 1}`}><span>{faq.q}</span><span className="faq-plus" aria-hidden="true">+</span></summary><p>{faq.a}</p></details>)}
             </Reveal>
           </div>
         </section>
 
-        <section className="section final-cta-section">
-          <Reveal className="container">
-            <div className="final-cta-simple">
-              <h2>Ready for your next topic?</h2>
-              <ButtonLink href="/dashboard?start=sheet" onClick={startStudying} testId="button-final-early-access">Get early access <ArrowRight size={16} /></ButtonLink>
-            </div>
-          </Reveal>
-        </section>
       </main>
 
       <footer className="site-footer">
@@ -492,12 +460,13 @@ function App() {
           <div className="footer-grid">
             <div className="footer-brand"><a href="#home" className="brand" data-testid="link-footer-home"><BrandMark size={34} className="brand-mark" /><span className="brand-name">StudyBuddy <b>AI</b></span></a><p>Study sheets, flashcards, and a USMLE-style QBank for medical students.</p></div>
             <div><h4>Product</h4><a href="#tools" data-testid="link-footer-tools">Tools</a><a href="#film" data-testid="link-footer-demo">Demo</a><a href="#pricing" data-testid="link-footer-pricing">Pricing</a></div>
-            <div><h4>Resources</h4><a href="#faq" data-testid="link-footer-faq">FAQ</a><a href={CONTACT_EMAIL} data-testid="link-footer-email"><Mail size={14} /> Email us</a></div>
+            <div><h4>Resources</h4><a href="#faq" data-testid="link-footer-faq">FAQ</a></div>
             <div><h4>Connect</h4><a href={SOCIALS.instagram} target="_blank" rel="noopener noreferrer" data-testid="link-footer-instagram"><Instagram size={14} /> Instagram</a><a href={SOCIALS.linkedin} target="_blank" rel="noopener noreferrer" data-testid="link-footer-linkedin"><Linkedin size={14} /> LinkedIn</a><a href={SOCIALS.telegram} target="_blank" rel="noopener noreferrer" data-testid="link-footer-telegram"><Send size={14} /> Telegram</a></div>
           </div>
           <div className="footer-bottom"><span>© {new Date().getFullYear()} StudyBuddy AI</span><span>Built in Gaza, for medical students across MENA</span></div>
         </div>
       </footer>
+      <GoProModal open={goProOpen} onOpenChange={setGoProOpen} />
     </div>
   );
 }
