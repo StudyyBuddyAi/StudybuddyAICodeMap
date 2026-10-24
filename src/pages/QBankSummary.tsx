@@ -541,15 +541,20 @@ const QBankSummary = () => {
     if (retrying) return;
     setRetrying(true);
     try {
-      if (!lastGeneration) {
+      // A set opened by id (after a reload, or from history) has no
+      // generation in memory: repeat it from what the questions say they
+      // cover, at the same size, rather than dropping the student back at an
+      // empty generator.
+      const retryTopic = lastGeneration?.topic ?? questions.find((q) => q.topic)?.topic ?? null;
+      if (!retryTopic) {
         navigate("/qbank");
         return;
       }
       const id = await startGeneratedSession(
-        lastGeneration.topic,
-        lastGeneration.target,
-        lastGeneration.challenge,
-        lastGeneration.examMode ?? "step1",
+        retryTopic,
+        lastGeneration?.target ?? Math.max(total, 5),
+        lastGeneration?.challenge ?? "balanced",
+        lastGeneration?.examMode ?? "step1",
         sessionMode
       );
       navigate(id ? `/qbank/session?session=${id}` : "/qbank/session");
@@ -788,9 +793,7 @@ const QBankSummary = () => {
             <RotateCcw style={{ width: 16, height: 16 }} />
             {retrying
               ? "Writing…"
-              : lastGeneration
-                ? `Another ${lastGeneration.target} on this topic`
-                : "Try Again"}
+              : `Another ${lastGeneration?.target ?? Math.max(total, 5)} on this topic`}
           </button>
           <button
             type="button"

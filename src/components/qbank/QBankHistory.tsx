@@ -13,6 +13,7 @@ interface SessionRow {
   total: number;
   total_time_ms: number;
   system: string;
+  topic: string | null;
   ended_at: string | null;
 }
 
@@ -32,11 +33,14 @@ const getScoreBg = (score: number, total: number) => {
 
 const PAGE_SIZE = 5;
 
+/** The typed topic lives in the session's generation JSON, not a column. */
+const HISTORY_COLUMNS: string = "id, score, total, total_time_ms, system, topic:generation->>topic, ended_at";
+
 const MONO_EYEBROW = "font-mono text-[11px] font-medium tracking-widest uppercase";
 
 /**
  * Completed QBank sets, newest first, five to a page. Opens a set's summary;
- * deletes a set and its answers. Lives on the Dashboard — the QBank page is
+ * deletes a set (its answers stay in the stats). Lives on the Dashboard — the QBank page is
  * kept to the generator.
  */
 export function QBankHistory() {
@@ -54,17 +58,17 @@ export function QBankHistory() {
     queryFn: async (): Promise<{ rows: SessionRow[]; hasMore: boolean }> => {
       const { data, error: queryError } = await supabase
         .from("qbank_sessions")
-        .select("id, score, total, total_time_ms, system, ended_at")
+        .select(HISTORY_COLUMNS)
         .eq("user_id", user!.id)
         // Unfinished sets have their own list. Left in, they sorted to the top
         // (NULL ended_at sorts first descending) with a score of zero.
         .eq("status", "completed")
-        .order("ended_at", { ascending: false })
+        .order("ended_at", { ascending: false, nullsFirst: false })
         .range(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE);
 
       if (queryError) throw queryError;
 
-      const rows = (data ?? []) as SessionRow[];
+      const rows = (data ?? []) as unknown as SessionRow[];
       return {
         rows: rows.slice(0, PAGE_SIZE),
         hasMore: rows.length > PAGE_SIZE,
@@ -75,13 +79,8 @@ export function QBankHistory() {
   const handleDeleteSession = async (sessionId: string) => {
     setIsDeleting(true);
     try {
-      const { error: attemptsError } = await supabase
-        .from("user_attempts")
-        .delete()
-        .eq("session_id", sessionId);
-
-      if (attemptsError) throw attemptsError;
-
+      // Only the set goes. Its answers stay as study history — the week's
+      // accuracy and the streak still count them (on delete set null).
       const { error: sessionError } = await supabase
         .from("qbank_sessions")
         .delete()
@@ -183,7 +182,13 @@ export function QBankHistory() {
                     </div>
 
                     <div className="flex-1 min-w-0 space-y-0.5">
-                      <p className="text-sm font-semibold text-foreground truncate">{s.system}</p>
+                      <p className="text-sm font-semibold text-foreground truncate">
+                        {/* The topic the student typed; the system it was filed under is the fallback. */}
+                        {s.topic?.trim() || s.system}
+                      </p>
+                      {s.topic?.trim() && s.topic.trim().toLowerCase() !== s.system.toLowerCase() && (
+                        <p className="truncate text-xs text-muted-foreground">{s.system}</p>
+                      )}
                       <div className="flex items-center gap-3">
                         <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
                           <Clock className="h-3 w-3" />

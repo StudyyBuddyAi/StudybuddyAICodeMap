@@ -10,6 +10,7 @@ import {
   Flag,
   Loader2,
   AlertTriangle,
+  RotateCcw,
   X,
   Undo2,
 } from "lucide-react";
@@ -403,11 +404,10 @@ interface OptionTileProps {
   answerState: AnswerState;
   struck: boolean;
   /** Absent when the question can no longer be marked. */
-  onToggleStrike?: (key: OptionKey) => void;
   onSelect: (key: OptionKey) => void;
 }
 
-const OptionTile = ({ letter, text, explanation, answerState, struck, onToggleStrike, onSelect }: OptionTileProps) => {
+const OptionTile = ({ letter, text, explanation, answerState, struck, onSelect }: OptionTileProps) => {
   const isGraded = answerState.status === "answered" || answerState.status === "revealed";
   const correctKey = isGraded ? answerState.correct : null;
   const isSelected = answerState.status === "answered" && answerState.selected === letter;
@@ -441,11 +441,6 @@ const OptionTile = ({ letter, text, explanation, answerState, struck, onToggleSt
       <button
         type="button"
         onClick={() => !isGraded && onSelect(letter)}
-        onContextMenu={(e) => {
-          if (!onToggleStrike) return;
-          e.preventDefault();
-          onToggleStrike(letter);
-        }}
         disabled={isGraded}
         aria-pressed={isPending}
         style={{
@@ -453,7 +448,7 @@ const OptionTile = ({ letter, text, explanation, answerState, struck, onToggleSt
           display: "flex",
           alignItems: "flex-start",
           gap: 12,
-          padding: onToggleStrike ? "14px 44px 14px 16px" : "14px 16px",
+          padding: "14px 16px",
           borderRadius: "var(--radius-md)",
           textAlign: "left",
           transition: "all var(--dur-micro) var(--ease-out)",
@@ -489,20 +484,6 @@ const OptionTile = ({ letter, text, explanation, answerState, struck, onToggleSt
           {text}
         </span>
       </button>
-      {onToggleStrike && (
-        <button
-          type="button"
-          onClick={() => onToggleStrike(letter)}
-          aria-label={struck ? `Restore option ${letter.toUpperCase()}` : `Strike out option ${letter.toUpperCase()}`}
-          title={struck ? "Restore (Shift+" + letter.toUpperCase() + ")" : "Strike out (Shift+" + letter.toUpperCase() + ")"}
-          className={`absolute right-2 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md transition-opacity hover:bg-[var(--bg-subtle)] ${
-            struck ? "opacity-100" : "opacity-40 group-hover:opacity-100 focus:opacity-100"
-          }`}
-          style={{ color: "var(--fg-muted)" }}
-        >
-          {struck ? <Undo2 className="h-3.5 w-3.5" /> : <X className="h-3.5 w-3.5" />}
-        </button>
-      )}
     </div>
   );
 
@@ -588,15 +569,18 @@ const MediaBlock = ({ media, context, onOpen }: MediaBlockProps) => {
 const GenerationStrip = ({
   generation,
   loaded,
+  onResume,
 }: {
   generation: GenerationState;
   loaded: number;
+  onResume: () => void;
 }) => {
   const running = generation.status === "running";
   const short = !running && loaded < generation.target;
   if (!running && !short) return null;
 
   const pct = generation.target > 0 ? Math.round((loaded / generation.target) * 100) : 0;
+  const missing = Math.max(0, generation.target - loaded);
 
   // Grouped by reason rather than listed per question. The held-back items are
   // not in the session, so they have no question number the student could match
@@ -609,42 +593,44 @@ const GenerationStrip = ({
     {}
   );
 
+  // A short set always says why, even when no wave reported an error.
+  const reason =
+    generation.error ??
+    (generation.status === "aborted"
+      ? "Writing paused when the set was left."
+      : generation.heldBackItems.length > 0
+      ? "The questions written after these didn't pass our quality checks."
+      : "The question writer couldn't finish the rest just now.");
+
   return (
     <div
-      className="mb-4 rounded-xl px-4 py-3"
-      style={{
-        border: `1px solid ${short ? "rgba(217,119,6,0.35)" : "var(--border)"}`,
-        background: short ? "rgba(217,119,6,0.06)" : "var(--bg-subtle)",
-      }}
+      role="status"
+      aria-live="polite"
+      className={`mb-4 rounded-xl border px-4 py-3 ${
+        short ? "border-warning/40 bg-warning-soft" : "border-primary/40 bg-primary/5"
+      }`}
     >
       <div className="flex items-center gap-2.5">
         {running ? (
-          <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" style={{ color: "var(--fg-muted)" }} />
+          <Loader2 className="h-4 w-4 shrink-0 animate-spin text-primary" aria-hidden />
         ) : (
-          <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-amber-500" />
+          <AlertTriangle className="h-4 w-4 shrink-0 text-warning" aria-hidden />
         )}
-        <p className="text-xs font-medium" style={{ color: short ? "#d97706" : "var(--fg-muted)" }}>
+        <p className={`text-sm font-medium ${short ? "text-warning" : "text-foreground"}`}>
           {running
-            ? `Writing your set — ${loaded} of ${generation.target} ready`
-            : `This set ended at ${loaded} of ${generation.target} questions`}
+            ? `Writing your set — ${loaded} of ${generation.target} ready. Start now; the rest appear as you go.`
+            : `This set stopped at ${loaded} of ${generation.target} questions.`}
         </p>
-        <span
-          className="ml-auto tabular-nums text-[11px]"
-          style={{ fontFamily: "var(--font-mono)", color: "var(--fg-subtle)" }}
-        >
+        <span className="ms-auto font-mono text-[11px] tabular-nums text-muted-foreground">
           {loaded}/{generation.target}
         </span>
       </div>
 
       {running && (
-        <div
-          className="mt-2 h-1 w-full overflow-hidden rounded-full"
-          style={{ background: "var(--border)" }}
-          aria-hidden
-        >
+        <div className="mt-2 h-1 w-full overflow-hidden rounded-full bg-border" aria-hidden>
           <div
-            className="h-full rounded-full transition-all duration-500 ease-out"
-            style={{ width: `${pct}%`, background: "var(--accent)" }}
+            className="h-full rounded-full bg-primary transition-all duration-500 ease-out"
+            style={{ width: `${pct}%` }}
           />
         </div>
       )}
@@ -654,17 +640,25 @@ const GenerationStrip = ({
       {generation.heldBackItems.length > 0 && (
         <ul className="mt-2 flex flex-col gap-0.5">
           {Object.entries(heldBackByReason).map(([reason, count]) => (
-            <li key={reason} className="text-[11px]" style={{ color: "var(--fg-muted)" }}>
+            <li key={reason} className="text-[11px] text-muted-foreground">
               {count} rewritten — {ruleLabel(reason).toLowerCase()}
             </li>
           ))}
         </ul>
       )}
 
-      {!running && generation.error && (
-        <p className="mt-1.5 text-[11px]" style={{ color: "var(--fg-muted)" }}>
-          {generation.error}
-        </p>
+      {short && (
+        <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+          <p className="text-xs text-muted-foreground">{reason}</p>
+          <button
+            type="button"
+            onClick={onResume}
+            className="inline-flex h-9 items-center gap-1.5 rounded-full bg-foreground px-4 text-xs font-semibold text-background"
+          >
+            <RotateCcw className="h-3.5 w-3.5" aria-hidden />
+            Write the remaining {missing}
+          </button>
+        </div>
       )}
     </div>
   );
@@ -1223,7 +1217,7 @@ const QBankSession = () => {
         )}
 
         {session?.generation && generation && !isReviewing && (
-          <GenerationStrip generation={generation} loaded={session.questions.length} />
+          <GenerationStrip generation={generation} loaded={session.questions.length} onResume={resumeGeneration} />
         )}
 
         <div className="flex gap-3 items-start">
@@ -1314,7 +1308,6 @@ const QBankSession = () => {
                       explanation={showExplanation ? q.distractor_explanations?.[key] : undefined}
                       answerState={answerState}
                       struck={struckKeys.includes(key)}
-                      onToggleStrike={canMark ? (k) => toggleStrike(q.id, k) : undefined}
                       onSelect={handleSelect}
                     />
                   ))}
