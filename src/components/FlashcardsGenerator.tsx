@@ -506,6 +506,17 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated, onTopicChange, w
   }, [topic]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
+    const onPrefill = (e: Event) => {
+      const t = (e as CustomEvent<{ topic?: string }>).detail?.topic;
+      if (!t) return;
+      setTopic(t.slice(0, TOPIC_MAX_LENGTH));
+      setTopicError(null);
+    };
+    window.addEventListener("studybuddy:prefill-flashcards", onPrefill);
+    return () => window.removeEventListener("studybuddy:prefill-flashcards", onPrefill);
+  }, []);
+
+  useEffect(() => {
     const handler = (e: Event) => {
       const detail = (e as CustomEvent<{ topic: string; cardCount?: number }>).detail;
       if (!detail?.topic) return;

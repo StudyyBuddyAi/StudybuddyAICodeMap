@@ -320,14 +320,18 @@ const Flashcards = () => {
    * and is mounted on this page, so hand the topic straight to it. The history
    * entry is then cleared so a refresh doesn't regenerate.
    */
+  // The Library hands a topic over as `prefill`: it lands in the box, and the
+  // student shapes the deck and presses Generate — nothing is spent unasked.
   useEffect(() => {
-    const topic = (location.state as { topic?: string } | null)?.topic?.trim();
-    if (!topic) return;
-    navigate(location.pathname, { replace: true, state: null });
+    const state = location.state as { topic?: string; prefill?: string } | null;
+    const topic = state?.topic?.trim();
+    const prefill = state?.prefill?.trim();
+    if (!topic && !prefill) return;
+    navigate(location.pathname + location.search, { replace: true, state: null });
     window.dispatchEvent(
-      new CustomEvent("studybuddy:generate-flashcards", {
-        detail: { topic, cardCount: 12 },
-      })
+      topic
+        ? new CustomEvent("studybuddy:generate-flashcards", { detail: { topic, cardCount: 12 } })
+        : new CustomEvent("studybuddy:prefill-flashcards", { detail: { topic: prefill } })
     );
   }, [location, navigate]);
 

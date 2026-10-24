@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { useStudyHistory } from "@/hooks/use-study-history";
 import { useFlashcardDeck } from "@/hooks/use-flashcard-deck";
+import { sameTopic } from "@/lib/topic-match";
 
 /**
  * Which curriculum topics the student has actually touched.
@@ -22,35 +23,6 @@ export interface TopicProgress {
   state: TopicState;
   /** Cards in a deck whose topic matches this one. */
   cards: number;
-}
-
-/** Lowercase, strip punctuation and collapse whitespace. */
-const normalise = (s: string) =>
-  s
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-
-/**
- * True when two topic names refer to the same thing.
- *
- * Exact match after normalising, or one fully containing the other as a whole
- * phrase — "heart failure" matches "Heart Failure" and "Chronic heart failure",
- * but "failure" alone does not match "heart failure", because a bare word
- * overlaps far too much across a medical curriculum.
- */
-function sameTopic(a: string, b: string): boolean {
-  const x = normalise(a);
-  const y = normalise(b);
-  if (!x || !y) return false;
-  if (x === y) return true;
-  // Require the shorter side to be a multi-word phrase before allowing
-  // containment, so single common words cannot carry a match.
-  const shorter = x.length <= y.length ? x : y;
-  const longer = x.length <= y.length ? y : x;
-  if (shorter.split(" ").length < 2) return false;
-  return longer.includes(shorter);
 }
 
 export function useCurriculumProgress(titles: string[]) {
