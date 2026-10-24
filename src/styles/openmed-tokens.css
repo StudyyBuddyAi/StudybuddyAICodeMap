@@ -7,9 +7,7 @@
    global: they are inert custom properties until something reads them.
    ============================================================================= */
 
-/* The whole product sets in two families: DM Sans for every heading and
-   paragraph (weights 400/500/700), IBM Plex Mono for metadata only. */
-@import url("https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400..700;1,9..40,400..700&family=IBM+Plex+Mono:wght@400;500;600&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;0,6..72,700;1,6..72,400;1,6..72,500&family=Inter+Tight:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap");
 
 /* ---------- Root tokens --------------------------------------------------- */
 :root {
@@ -75,9 +73,9 @@
     --signal-on-inverse: #F8A3A3;
 
     /* Type */
-    --font-display: "DM Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    --font-sans: "DM Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    --font-display: "Newsreader", "Source Serif Pro", Georgia, serif;
+    --font-sans: "Inter Tight", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 
     --fs-display-xl: 72px;
     --fs-display-lg: 56px;

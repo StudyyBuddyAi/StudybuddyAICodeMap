@@ -113,7 +113,7 @@ const QBankCalculator = () => {
                 ? { background: "var(--fg)", color: "var(--bg)" }
                 : key.kind
                   ? { background: "var(--accent-soft)", color: "var(--accent)" }
-                  : { background: "var(--bg-subtle)", color: "var(--fg)", border: "1px solid var(--border)" }
+                  : { background: "var(--bg)", color: "var(--fg)", border: "1px solid var(--border)" }
             }
           >
             {key.label}

@@ -12,10 +12,8 @@ import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { useNavigate } from "react-router-dom";
 import { Loader2, LogIn, LogOut, Moon, Sparkles, Sun } from "lucide-react";
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import RedeemCodeForm from "@/components/RedeemCodeForm";
 import { formatPlanDate } from "@/lib/format-plan-date";
-import { useModelPreference, type ModelPreference } from "@/hooks/use-model-preference";
 import { Switch } from "@/components/ui/switch";
 import GoProModal from "@/components/GoProModal";
 import { useTheme } from "@/hooks/use-theme";
@@ -38,11 +36,6 @@ interface ProfileRow {
 
 const SECTION_LABEL = "block font-mono text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground";
 
-const MODEL_OPTIONS: { value: ModelPreference; label: string; hint: string }[] = [
-  { value: "corti", label: "Corti S1", hint: "Built for healthcare — the best quality" },
-  { value: "gpt-oss", label: "GPT-OSS 20B", hint: "The fastest" },
-];
-
 const ThemeSwitch = ({ isDark, onToggle }: { isDark: boolean; onToggle: () => void }) => (
   <div className="flex items-center justify-between gap-3 border-t border-border/50 pt-4">
     <Label htmlFor="settings-theme" className="flex items-center gap-2 text-sm font-medium">
@@ -55,7 +48,6 @@ const ThemeSwitch = ({ isDark, onToggle }: { isDark: boolean; onToggle: () => vo
 const AccountDashboard = ({ open, onOpenChange, onOpenAuth }: AccountDashboardProps) => {
   const { user, signOut, isAnonymous } = useAuth();
   const isGuest = !user || isAnonymous;
-  const { preferredModel, setPreferredModel, saving: modelSaving } = useModelPreference();
   const [showRedeem, setShowRedeem] = useState(false);
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -233,33 +225,6 @@ const AccountDashboard = ({ open, onOpenChange, onOpenAuth }: AccountDashboardPr
               Activate another code
             </button>
           ) : null}
-
-          {isPro && (
-            <div className="space-y-2 border-t border-border/50 pt-4">
-              <p className={SECTION_LABEL}>AI model</p>
-              <p className="text-xs text-muted-foreground">Used for every sheet, deck and explanation you generate.</p>
-              <RadioGroup
-                value={preferredModel}
-                onValueChange={(v) => setPreferredModel(v as ModelPreference)}
-                disabled={modelSaving}
-                className="gap-2"
-              >
-                {MODEL_OPTIONS.map((m) => (
-                  <Label
-                    key={m.value}
-                    htmlFor={`model-${m.value}`}
-                    className="flex cursor-pointer items-center gap-3 rounded-lg border border-border p-3 font-normal has-[:checked]:border-primary"
-                  >
-                    <RadioGroupItem id={`model-${m.value}`} value={m.value} />
-                    <span>
-                      <span className="block text-sm font-medium text-foreground">{m.label}</span>
-                      <span className="block text-xs text-muted-foreground">{m.hint}</span>
-                    </span>
-                  </Label>
-                ))}
-              </RadioGroup>
-            </div>
-          )}
 
           <ThemeSwitch isDark={isDark} onToggle={toggleTheme} />
 

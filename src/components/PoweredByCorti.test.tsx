@@ -21,10 +21,15 @@ describe("ModelCredit", () => {
     expect(screen.getByRole("link")).not.toHaveTextContent(/Built for healthcare/);
   });
 
-  it("tells the student when a premium request fell back from Corti", () => {
-    render(<ModelCredit used={used("claude", true)} />);
-    expect(screen.getByRole("note")).toHaveTextContent("Backup model · Corti unavailable");
+  it("tells the student when a request fell back to Corti's other model", () => {
+    render(<ModelCredit used={used("corti", true)} />);
+    expect(screen.getByRole("note")).toHaveTextContent("Backup model · usual model unavailable");
     expect(screen.queryByRole("link")).toBeNull();
+  });
+
+  it("gives a legacy Haiku fallback the same notice", () => {
+    render(<ModelCredit used={used("claude", true)} />);
+    expect(screen.getByRole("note")).toHaveTextContent("Backup model · usual model unavailable");
   });
 
   it("never names the free-tier model", () => {

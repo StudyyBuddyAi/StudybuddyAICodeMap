@@ -16,6 +16,7 @@ import {
   type ResumeResult,
 } from "./qbank-session-state";
 import type { Question, SessionState } from "./qbank-types";
+import { NOTE_MAX_LENGTH } from "./qbank-types";
 
 const q = (id: string): Question => ({
   id,
@@ -36,7 +37,7 @@ const session = (over: Partial<SessionState> = {}): SessionState => ({
   sessionId: "s1",
   mode: "tutor",
   selections: {},
-  annotations: { struck: {}, highlights: {} },
+  annotations: { struck: {}, highlights: {}, notes: {} },
   progressSeq: 0,
   questions: [q("q1"), q("q2"), q("q3")],
   currentIndex: 0,
@@ -188,11 +189,22 @@ describe("normalizeAnnotations", () => {
       struck: { q1: ["a", "z", "a"], q2: "b" },
       highlights: { q1: [[0, 4], [5, 5], ["x", 2]], q2: [[-1, 3]] },
     });
-    expect(a).toEqual({ struck: { q1: ["a"] }, highlights: { q1: [[0, 4]] } });
+    expect(a).toEqual({ struck: { q1: ["a"] }, highlights: { q1: [[0, 4]] }, notes: {} });
   });
 
   it("tolerates nothing at all", () => {
-    expect(normalizeAnnotations(null)).toEqual({ struck: {}, highlights: {} });
+    expect(normalizeAnnotations(null)).toEqual({ struck: {}, highlights: {}, notes: {} });
+  });
+
+  it("keeps notes as text, drops anything else, and caps their length", () => {
+    const a = normalizeAnnotations({
+      notes: { q1: "rule out HHS", q2: 42, q3: "   ", q4: "x".repeat(NOTE_MAX_LENGTH + 50) },
+    });
+    expect(a.notes).toEqual({ q1: "rule out HHS", q4: "x".repeat(NOTE_MAX_LENGTH) });
+  });
+
+  it("reads a set saved before notes existed", () => {
+    expect(normalizeAnnotations({ struck: {}, highlights: {} }).notes).toEqual({});
   });
 });
 

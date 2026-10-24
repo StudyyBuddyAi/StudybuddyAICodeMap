@@ -7,7 +7,6 @@ import { useFlashcardDeck, type GroundingMeta } from "@/hooks/use-flashcard-deck
 import { useUsageLimit, MAX_DAILY_CARDS } from "@/hooks/use-usage-limit";
 import { useCitationUsage } from "@/hooks/use-citation-usage";
 import { usePremiumHook } from "@/hooks/use-premium-hook";
-import { useModelPreference } from "@/hooks/use-model-preference";
 import { useAuth } from "@/hooks/use-auth";
 import { callMedicalNotes } from "@/lib/callMedicalNotes";
 import { parseDecline, topicRejectionMessage, validateTopic, TOPIC_MAX_LENGTH } from "@/lib/validate-topic";
@@ -181,7 +180,6 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated, onTopicChange, w
   const [lastDeckModel, setLastDeckModel] = useState<ModelUsed | null>(null);
   // Mirrored in a ref: the save callback below closes over an older render.
   const lastDeckModelRef = useRef<ModelUsed | null>(null);
-  const { preferredModel } = useModelPreference();
   const { user, isAnonymous } = useAuth();
   // Same shared window as the sheet generator — see use-memory-preference.
   const { useMemory } = useMemoryPreference();
@@ -258,7 +256,6 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated, onTopicChange, w
         userId: user?.id ?? null,
         isAnonymous: isAnonymous ?? false,
         isPro: pro,
-        preferredModel: pro ? preferredModel : undefined,
       });
 
       if (!response.ok) {

@@ -55,3 +55,34 @@ export const segmentText = (text: string, ranges: HighlightRange[]): TextSegment
   if (segments.length === 0) segments.push({ text: "", start: 0, highlighted: false });
   return segments;
 };
+
+/** The highlighted runs of a stem, in reading order, as plain phrases. */
+export const findingsOf = (text: string, ranges: HighlightRange[]): { start: number; text: string }[] =>
+  normalizeRanges(ranges, text.length)
+    .map(([s, e]) => ({ start: s, text: text.slice(s, e).replace(/\s+/g, " ").trim() }))
+    .filter((f) => f.text.length > 0);
+
+/**
+ * Where the lead-in starts: the last paragraph, when it asks the question.
+ * Null when the stem has no separate question paragraph to set apart.
+ */
+export const leadInStart = (text: string): number | null => {
+  const i = text.lastIndexOf("\n\n");
+  if (i <= 0) return null;
+  const lead = text.slice(i + 2).trim();
+  return lead.length > 0 && lead.length <= 400 && lead.endsWith("?") ? i + 2 : null;
+};
+
+/** Splits segments at an offset, so the text either side of it can be styled apart. */
+export const splitSegmentsAt = (segments: TextSegment[], at: number | null): TextSegment[] => {
+  if (at === null) return segments;
+  return segments.flatMap((seg) => {
+    const end = seg.start + seg.text.length;
+    if (at <= seg.start || at >= end) return [seg];
+    const cut = at - seg.start;
+    return [
+      { ...seg, text: seg.text.slice(0, cut) },
+      { ...seg, text: seg.text.slice(cut), start: at },
+    ];
+  });
+};

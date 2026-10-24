@@ -1,9 +1,15 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.8";
-import { ChatOpenAI, OpenAIEmbeddings } from "npm:@langchain/openai@0.3.0";
+import { OpenAIEmbeddings } from "npm:@langchain/openai@0.3.0";
 import { awaitAllCallbacks } from "npm:@langchain/core@0.3.0/callbacks/promises";
-import { LangChainTracer } from "npm:@langchain/core@0.3.0/tracers/tracer_langchain";
-import { Client as LangSmithClient } from "npm:langsmith@0.3.6";
+import { asCortiModel, cortiComplete, cortiConfigFromEnv, type CortiModel } from "../_shared/corti.ts";
+
+/**
+ * The answer is written by Corti; only the query embedding still goes through
+ * OpenRouter, because the corpus was embedded with text-embedding-3-small.
+ * CORTI_RAG_MODEL overrides the writer.
+ */
+const DEFAULT_CHAT_MODEL: CortiModel = "corti-s1-mini-instant";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -38,12 +44,9 @@ const log = (event: string, fields: Record<string, unknown> = {}) => {
   console.log(JSON.stringify({ fn: "rag-generate", event, ...fields }));
 };
 
-async function flushTraces(client: LangSmithClient | null) {
+async function flushTraces() {
   try {
     await awaitAllCallbacks();
-    if (client) {
-      await client.awaitPendingTraceBatches();
-    }
     log("callbacks_flushed_ok");
   } catch (flushErr: unknown) {
     const flushMsg = flushErr instanceof Error ? flushErr.message : String(flushErr);
@@ -106,40 +109,15 @@ serve(async (req: Request) => {
       );
     }
 
-    // ── LangChain clients (عبر OpenRouter، متل ما كانوا بالـ fetch القديم) ──
+    // ── Embeddings (عبر OpenRouter) and the Corti writer ──
     const embeddings = new OpenAIEmbeddings({
       apiKey: openRouterApiKey,
       configuration: { baseURL: "https://openrouter.ai/api/v1" },
       modelName: "text-embedding-3-small",
     });
 
-    const chatModel = new ChatOpenAI({
-      apiKey: openRouterApiKey,
-      configuration: { baseURL: "https://openrouter.ai/api/v1" },
-      modelName: "gpt-4o-mini",
-      temperature: 0.3,
-    });
-
-    // Tracer صريح بدل الاعتماد على auto-detection عبر env vars
-    // (اللي ممكن ما يشتغل صح جوا بيئة Deno Edge Function)
-    const langsmithApiKey = Deno.env.get("LANGSMITH_API_KEY") ?? Deno.env.get("LANGCHAIN_API_KEY");
-    const langsmithProject =
-      Deno.env.get("LANGSMITH_PROJECT") ?? Deno.env.get("LANGCHAIN_PROJECT") ?? "default";
-
-    const langsmithClient = langsmithApiKey
-      ? new LangSmithClient({
-          apiKey: langsmithApiKey,
-          apiUrl: "https://api.smith.langchain.com",
-        })
-      : null;
-
-    const tracers = langsmithClient
-      ? [new LangChainTracer({ projectName: langsmithProject, client: langsmithClient })]
-      : [];
-
-    if (!langsmithApiKey) {
-      log("langsmith_key_missing");
-    }
+    const cortiConfig = cortiConfigFromEnv();
+    const chatModel = asCortiModel(Deno.env.get("CORTI_RAG_MODEL"), DEFAULT_CHAT_MODEL);
 
     // ── Conversation Memory: نافذة منزلقة من 10 أسئلة لكل مستخدم ─────
     // بعد السؤال العاشر، السؤال الحادي عشر بيبدأ نافذة جديدة (نسيان كامل)
@@ -205,7 +183,7 @@ serve(async (req: Request) => {
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Failed to create query embedding";
       log("embedding_failed", { err: message });
-      await flushTraces(langsmithClient);
+      await flushTraces();
       return new Response(
         JSON.stringify({
           error: { code: "EMBEDDING_FAILED", message, refundQuota: true },
@@ -264,24 +242,26 @@ serve(async (req: Request) => {
       systemPrompt += `\n\nIMPORTANT: You have access to the previous conversation history between you and this user (provided as prior user/assistant message pairs). Use this context to understand follow-up questions, resolve pronouns (e.g., "it", "that", "the same"), and maintain continuity. If the user refers to something from a previous turn, answer in that context.`;
     }
 
-    // ── 5. Call AI Provider (Chat Completion) عبر LangChain ─────────
-    log("completion_start", { grounded, matchesCount: matches.length });
+    // ── 5. Call AI Provider (Chat Completion) عبر Corti ─────────────
+    log("completion_start", { grounded, matchesCount: matches.length, model: chatModel });
 
     let answer: string;
     try {
-      const response = await chatModel.invoke(
-        [
+      answer = await cortiComplete(cortiConfig, {
+        model: chatModel,
+        temperature: 0.3,
+        maxTokens: 2048,
+        messages: [
           { role: "system", content: systemPrompt },
           ...conversationHistory,
           { role: "user", content: query },
         ],
-        { callbacks: tracers, runName: "rag-generate-completion" }
-      );
-      answer = response.content as string;
+      });
+      if (!answer.trim()) throw new Error("empty_completion");
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "AI provider request failed";
       log("completion_failed", { err: message });
-      await flushTraces(langsmithClient);
+      await flushTraces();
       return new Response(
         JSON.stringify({
           error: { code: "AI_PROVIDER_FAILED", message, refundQuota: true },
@@ -333,7 +313,7 @@ serve(async (req: Request) => {
 
     // مهم بالـ Edge Functions: ننتظر إرسال أي traces معلقة لـ LangSmith
     // قبل ما نرجع الـ response ويتقفل الـ isolate، وإلا الـ traces بتنضاع
-    await flushTraces(langsmithClient);
+    await flushTraces();
 
     // ── 7. Return Success Response ──────────────────────────────────
     return new Response(

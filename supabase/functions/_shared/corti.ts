@@ -1,11 +1,10 @@
 /**
  * Corti Models client.
  *
- * Corti is an independent provider from OpenRouter and is reached directly:
- * credentials come from the Corti Console and are held server-side. Nothing
- * here touches OPENROUTER_API_KEY, and nothing in the OpenRouter path
- * (medical-notes, get-citations, the embedding path in rag.ts) touches these.
- * The two coexist deliberately.
+ * Corti is the app's only text provider and is reached directly: credentials
+ * come from the Corti Console and are held server-side. OpenRouter remains
+ * only for the grounding embeddings (rag.ts, anatomy-match), and nothing here
+ * touches OPENROUTER_API_KEY.
  *
  * Auth is OAuth2 client_credentials against Corti's Keycloak, NOT a static
  * bearer key. The console issues client_id + client_secret + tenant, and those

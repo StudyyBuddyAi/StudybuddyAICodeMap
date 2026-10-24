@@ -1,4 +1,11 @@
 import type { RagChunk } from "./rag.ts";
+import { asCortiModel, cortiChatCompletion, cortiConfigFromEnv, type CortiModel } from "./corti.ts";
+
+/**
+ * A formatting call against a short, fixed prompt — the smallest instant
+ * model does it, in about a second. CORTI_SOURCE_LABEL_MODEL overrides.
+ */
+const DEFAULT_SOURCE_LABEL_MODEL: CortiModel = "corti-s1-mini-instant";
 
 /**
  * A label the model proposed for one retrieved passage. Deliberately untrusted
@@ -50,17 +57,14 @@ const CONTENT_PREVIEW_CHARS = 500;
 const HEADING_PREVIEW_CHARS = 200;
 
 /**
- * Asks the model to name the book and chapter behind each retrieved passage.
+ * Asks Corti to name the book and chapter behind each retrieved passage.
  *
- * Fail-open by contract: any network error, non-200, or unparseable body
- * resolves to an empty array. The source list already renders correctly from
- * the mechanical repair alone, so a failure here costs polish, never content.
+ * Fail-open by contract: missing Corti credentials, any network error,
+ * non-200, or unparseable body resolves to an empty array. The source list
+ * already renders correctly from the mechanical repair alone, so a failure
+ * here costs polish, never content.
  */
-export async function requestSourceLabels(
-  openRouterApiKey: string,
-  model: string,
-  chunks: readonly RagChunk[]
-): Promise<RawSourceLabel[]> {
+export async function requestSourceLabels(chunks: readonly RagChunk[]): Promise<RawSourceLabel[]> {
   if (chunks.length === 0) return [];
 
   const payload = chunks.map((c) => ({
@@ -71,24 +75,17 @@ export async function requestSourceLabels(
   }));
 
   try {
-    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${openRouterApiKey}`,
-        "HTTP-Referer": "https://studybuddy.app",
-        "X-Title": "StudyBuddy",
-      },
-      body: JSON.stringify({
-        model,
-        stream: false,
-        temperature: 0,
-        max_tokens: 900,
-        messages: [
-          { role: "system", content: SYSTEM_PROMPT },
-          { role: "user", content: JSON.stringify(payload) },
-        ],
-      }),
+    // No json mode: the reply is an array, and Corti's json_object mode
+    // only takes an object. parseLabelArray tolerates the prose either side.
+    const response = await cortiChatCompletion(cortiConfigFromEnv(), {
+      model: asCortiModel(Deno.env.get("CORTI_SOURCE_LABEL_MODEL"), DEFAULT_SOURCE_LABEL_MODEL),
+      stream: false,
+      temperature: 0,
+      maxTokens: 900,
+      messages: [
+        { role: "system", content: SYSTEM_PROMPT },
+        { role: "user", content: JSON.stringify(payload) },
+      ],
     });
 
     if (!response.ok) return [];

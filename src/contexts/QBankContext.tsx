@@ -15,7 +15,9 @@ import type {
   ExamMode,
   PlayMode,
   HighlightRange,
+  SessionAnnotations,
 } from "@/lib/qbank-types";
+import { NOTE_MAX_LENGTH } from "@/lib/qbank-types";
 import {
   runQbankGeneration,
   MIN_SET_SIZE,
@@ -118,6 +120,8 @@ interface SessionSummary {
   flaggedIds: string[];
   /** Questions the set held that were never answered. */
   omitted?: number;
+  /** The student's strikes, highlights and notes, shown again in review. */
+  annotations?: SessionAnnotations;
 }
 
 /**
@@ -219,6 +223,8 @@ interface QBankContextValue {
   toggleStrike: (questionId: string, key: OptionKey) => void;
   addHighlight: (questionId: string, range: HighlightRange, textLength: number) => void;
   removeHighlight: (questionId: string, offset: number) => void;
+  /** The Notes panel: replaces the question's note. Empty text removes it. */
+  setNote: (questionId: string, text: string) => void;
   skipQuestion: () => void;
   goToQuestion: (index: number) => void;
   unansweredCount: number;
@@ -1137,9 +1143,12 @@ export const QBankProvider = ({ children }: { children: ReactNode }) => {
             answers: s.answers,
             totalTime,
             score: s.answers.filter((a) => a.is_correct).length,
-            total: s.answers.length,
+            // Every question the set held: an omitted one counts against the
+            // score, as on the exam. See qbank-score.ts.
+            total: s.questions.length,
             flaggedIds: s.flaggedIds,
             omitted: s.questions.length - s.answers.length,
+            annotations: s.annotations,
           }
         : null;
 
@@ -1207,6 +1216,16 @@ export const QBankProvider = ({ children }: { children: ReactNode }) => {
       if (remaining.length > 0) highlights[questionId] = remaining;
       else delete highlights[questionId];
       return { ...prev, annotations: { ...prev.annotations, highlights } };
+    });
+  }, []);
+
+  const setNote = useCallback((questionId: string, text: string) => {
+    setSession((prev) => {
+      if (!prev) return prev;
+      const notes = { ...prev.annotations.notes };
+      if (text.trim() === "") delete notes[questionId];
+      else notes[questionId] = text.slice(0, NOTE_MAX_LENGTH);
+      return { ...prev, annotations: { ...prev.annotations, notes } };
     });
   }, []);
 
@@ -1316,6 +1335,7 @@ export const QBankProvider = ({ children }: { children: ReactNode }) => {
         toggleStrike,
         addHighlight,
         removeHighlight,
+        setNote,
         skipQuestion,
         goToQuestion,
         unansweredCount,

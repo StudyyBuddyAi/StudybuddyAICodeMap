@@ -1,15 +1,26 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Highlighter } from "lucide-react";
-import { segmentText } from "@/lib/qbank-highlights";
+import { Eraser, Highlighter } from "lucide-react";
+import { leadInStart, segmentText, splitSegmentsAt } from "@/lib/qbank-highlights";
 import type { HighlightRange } from "@/lib/qbank-types";
 
 interface HighlightableTextProps {
+  id?: string;
   text: string;
   ranges: HighlightRange[];
   onAdd?: (range: HighlightRange) => void;
   onRemove?: (offset: number) => void;
+  /** Set the closing question paragraph apart from the history above it. */
+  emphasizeLead?: boolean;
+  className?: string;
   style?: React.CSSProperties;
 }
+
+/** What the floating button will do: add the selection, or remove a highlight. */
+type Pending =
+  | { kind: "add"; range: HighlightRange; top: number; left: number }
+  | { kind: "remove"; offset: number; top: number; left: number };
+
+const BUTTON_W = 112;
 
 /**
  * The stem, rendered as text runs the student can highlight.
@@ -17,11 +28,16 @@ interface HighlightableTextProps {
  * Each run is a span carrying its start offset, and holds exactly one text
  * node, so a DOM selection maps straight back to character offsets without
  * walking the tree. Offsets, not markup, are what gets saved.
+ *
+ * Selecting text offers Highlight; clicking a highlight offers Remove. Neither
+ * acts until the button is pressed, so a stray click never wipes a mark.
  */
-const HighlightableText = ({ text, ranges, onAdd, onRemove, style }: HighlightableTextProps) => {
+const HighlightableText = ({ id, text, ranges, onAdd, onRemove, emphasizeLead, className, style }: HighlightableTextProps) => {
   const containerRef = useRef<HTMLDivElement>(null);
-  const [pending, setPending] = useState<{ range: HighlightRange; top: number; left: number } | null>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const [pending, setPending] = useState<Pending | null>(null);
   const editable = !!onAdd;
+  const lead = emphasizeLead ? leadInStart(text) : null;
 
   const offsetOf = useCallback((node: Node | null, offset: number): number | null => {
     const container = containerRef.current;
@@ -40,39 +56,41 @@ const HighlightableText = ({ text, ranges, onAdd, onRemove, style }: Highlightab
     return node.nodeType === Node.TEXT_NODE ? start + offset : start;
   }, [text.length]);
 
+  const place = useCallback((rect: DOMRect) => {
+    const box = containerRef.current!.getBoundingClientRect();
+    return {
+      top: rect.top - box.top - 40,
+      left: Math.min(Math.max(rect.left - box.left + rect.width / 2 - BUTTON_W / 2, 0), Math.max(box.width - BUTTON_W, 0)),
+    };
+  }, []);
+
   const readSelection = useCallback(() => {
     if (!editable) return;
     const sel = window.getSelection();
     if (!sel || sel.isCollapsed || sel.rangeCount === 0) {
-      setPending(null);
+      setPending((p) => (p?.kind === "add" ? null : p));
       return;
     }
     const r = sel.getRangeAt(0);
     const a = offsetOf(r.startContainer, r.startOffset);
     const b = offsetOf(r.endContainer, r.endOffset);
-    const container = containerRef.current;
-    if (a === null || b === null || !container || Math.max(a, b) <= Math.min(a, b)) {
+    if (a === null || b === null || !containerRef.current || Math.max(a, b) <= Math.min(a, b)) {
       setPending(null);
       return;
     }
-    const rect = r.getBoundingClientRect();
-    const box = container.getBoundingClientRect();
-    setPending({
-      range: [Math.min(a, b), Math.max(a, b)],
-      top: rect.top - box.top - 36,
-      left: Math.min(Math.max(rect.left - box.left + rect.width / 2 - 48, 0), Math.max(box.width - 96, 0)),
-    });
-  }, [editable, offsetOf]);
+    setPending({ kind: "add", range: [Math.min(a, b), Math.max(a, b)], ...place(r.getBoundingClientRect()) });
+  }, [editable, offsetOf, place]);
 
   const commit = useCallback(() => {
-    if (!pending || !onAdd) return;
-    onAdd(pending.range);
+    if (!pending) return;
+    if (pending.kind === "add") onAdd?.(pending.range);
+    else onRemove?.(pending.offset);
     setPending(null);
     window.getSelection()?.removeAllRanges();
-  }, [pending, onAdd]);
+  }, [pending, onAdd, onRemove]);
 
-  // "H" highlights the current selection. Registered only while there is one,
-  // so the key means nothing otherwise.
+  // "H" acts on the pending selection or highlight. Registered only while
+  // there is one, so the key means nothing otherwise.
   useEffect(() => {
     if (!pending) return;
     const onKey = (e: KeyboardEvent) => {
@@ -80,10 +98,22 @@ const HighlightableText = ({ text, ranges, onAdd, onRemove, style }: Highlightab
         e.preventDefault();
         e.stopImmediatePropagation();
         commit();
+      } else if (e.key === "Escape") {
+        setPending(null);
       }
     };
+    // A press anywhere else lets the offer go.
+    const onPointer = (e: PointerEvent) => {
+      const t = e.target as Node;
+      if (buttonRef.current?.contains(t) || containerRef.current?.contains(t)) return;
+      setPending(null);
+    };
     window.addEventListener("keydown", onKey, true);
-    return () => window.removeEventListener("keydown", onKey, true);
+    window.addEventListener("pointerdown", onPointer, true);
+    return () => {
+      window.removeEventListener("keydown", onKey, true);
+      window.removeEventListener("pointerdown", onPointer, true);
+    };
   }, [pending, commit]);
 
   // A new question clears a half-made highlight.
@@ -92,31 +122,36 @@ const HighlightableText = ({ text, ranges, onAdd, onRemove, style }: Highlightab
   return (
     <div className="relative">
       <div
+        id={id}
         ref={containerRef}
+        className={className}
+        onMouseDown={() => setPending(null)}
         onMouseUp={readSelection}
         onTouchEnd={() => window.setTimeout(readSelection, 0)}
         onKeyUp={readSelection}
         style={{ whiteSpace: "pre-line", ...style }}
       >
-        {segmentText(text, ranges).map((seg) =>
+        {splitSegmentsAt(segmentText(text, ranges), lead).map((seg) =>
           seg.highlighted ? (
             <mark
               key={seg.start}
               data-hl-start={seg.start}
-              onClick={() => {
+              onClick={(e) => {
                 if (!onRemove) return;
                 const sel = window.getSelection();
                 if (sel && !sel.isCollapsed) return;
-                onRemove(seg.start);
+                setPending({ kind: "remove", offset: seg.start, ...place(e.currentTarget.getBoundingClientRect()) });
               }}
-              title={onRemove ? "Click to remove highlight" : undefined}
-              className={onRemove ? "cursor-pointer" : undefined}
-              style={{ background: "rgba(250, 204, 21, 0.45)", color: "inherit", borderRadius: 2, padding: 0 }}
+              className={[onRemove ? "cursor-pointer" : "", lead !== null && seg.start >= lead ? "qb-lead" : ""].join(" ").trim() || undefined}
             >
               {seg.text}
             </mark>
           ) : (
-            <span key={seg.start} data-hl-start={seg.start}>
+            <span
+              key={seg.start}
+              data-hl-start={seg.start}
+              className={lead !== null && seg.start >= lead ? "qb-lead" : undefined}
+            >
               {seg.text}
             </span>
           )
@@ -125,18 +160,28 @@ const HighlightableText = ({ text, ranges, onAdd, onRemove, style }: Highlightab
 
       {pending && (
         <button
+          ref={buttonRef}
           type="button"
           onMouseDown={(e) => e.preventDefault()}
           onClick={commit}
-          className="absolute z-20 inline-flex h-8 items-center gap-1.5 rounded-full px-3 text-xs font-medium shadow-md"
+          className="absolute z-20 inline-flex h-9 items-center justify-center gap-1.5 rounded-full px-3 text-sm font-medium shadow-md"
           style={{
-            top: Math.max(pending.top, -8),
+            top: Math.max(pending.top, -12),
             left: pending.left,
+            minWidth: BUTTON_W,
             background: "var(--fg)",
             color: "var(--bg)",
           }}
         >
-          <Highlighter className="h-3.5 w-3.5" /> Highlight
+          {pending.kind === "add" ? (
+            <>
+              <Highlighter className="h-4 w-4" /> Highlight
+            </>
+          ) : (
+            <>
+              <Eraser className="h-4 w-4" /> Remove
+            </>
+          )}
         </button>
       )}
     </div>

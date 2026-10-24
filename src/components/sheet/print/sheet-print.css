@@ -15,9 +15,9 @@
   --sbp-confusing: #fbe3c2;
   --sbp-memorize: #e6dcfa;
   --sbp-size: 10.5pt;
-  --sbp-serif: "DM Sans", "Helvetica Neue", Arial, sans-serif;
-  --sbp-sans: "DM Sans", "Helvetica Neue", Arial, sans-serif;
-  --sbp-mono: "IBM Plex Mono", ui-monospace, monospace;
+  --sbp-serif: "Newsreader", "Fraunces", "Source Serif Pro", Georgia, serif;
+  --sbp-sans: "Inter Tight", "DM Sans", "Helvetica Neue", Arial, sans-serif;
+  --sbp-mono: "JetBrains Mono", "IBM Plex Mono", ui-monospace, monospace;
 
   color: var(--sbp-ink);
   background: #fff;

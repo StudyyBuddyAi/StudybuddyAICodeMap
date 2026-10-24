@@ -21,7 +21,7 @@ const PageHeader = ({
     <p className="font-mono text-[11px] font-medium uppercase tracking-[0.14em] text-[color:var(--color-accent-ink)]">
       {label}
     </p>
-    <h1 className="mt-2 text-[clamp(28px,4vw,38px)] font-semibold leading-[1.1] tracking-[-0.02em] text-foreground">
+    <h1 className="mt-2 [font-family:var(--app-font-serif)] text-[clamp(28px,4vw,40px)] font-medium leading-[1.1] tracking-[-0.012em] text-foreground">
       {title}
     </h1>
     {description && <div className="mt-2 max-w-2xl text-base text-muted-foreground">{description}</div>}

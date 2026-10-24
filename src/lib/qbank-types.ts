@@ -115,14 +115,19 @@ export const TIMED_SECONDS_PER_QUESTION = 90;
 export type HighlightRange = [number, number];
 
 /**
- * The student's marks on a set: struck-out options and highlighted stem text,
- * keyed by question id. Saved with the session's progress so they survive
- * Save & Exit and follow the student to another device.
+ * The student's marks on a set: struck-out options, highlighted stem text and
+ * scratch notes, keyed by question id. Saved with the session's progress so
+ * they survive Save & Exit and follow the student to another device.
  */
 export interface SessionAnnotations {
   struck: Record<string, OptionKey[]>;
   highlights: Record<string, HighlightRange[]>;
+  /** The exam's Notes panel: free text per question. Absent on older sets. */
+  notes: Record<string, string>;
 }
+
+/** Longest note kept per question. The server caps the whole blob at 256 KB. */
+export const NOTE_MAX_LENGTH = 4000;
 
 export interface SessionState {
   // Server session id, created up front by start_qbank_session.
