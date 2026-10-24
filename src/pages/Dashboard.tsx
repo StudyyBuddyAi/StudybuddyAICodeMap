@@ -1,4 +1,5 @@
-import { useState, type ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
+import PageHeader from "@/components/layout/PageHeader";
 import { Link, useNavigate } from "react-router-dom";
 import {
   ArrowRight,
@@ -9,6 +10,7 @@ import {
   Layers,
   ListChecks,
   LogIn,
+  Sparkles,
 } from "lucide-react";
 import DashboardLayout from "@/components/dashboard/DashboardLayout";
 import AuthModal from "@/components/AuthModal";
@@ -26,6 +28,8 @@ import {
   type Rating,
 } from "@/hooks/use-dashboard-stats";
 import { formatRelative } from "@/lib/qbank-format";
+import { displayName } from "@/lib/display-name";
+import { MAX_DAILY_CARDS, MAX_DAILY_SHEETS, useUsageLimit } from "@/hooks/use-usage-limit";
 
 /** One saved sheet a day — the goal the Sheets ring is drawn against. */
 const WEEKLY_SHEET_GOAL = 7;
@@ -119,6 +123,7 @@ function ToolCard({
   line,
   progress,
   queue,
+  allowance,
   secondary,
   primary,
 }: {
@@ -127,6 +132,7 @@ function ToolCard({
   line: ReactNode;
   progress?: number;
   queue: ReactNode;
+  allowance?: string;
   secondary: { label: string; to: string };
   primary: { label: string; to: string };
 }) {
@@ -144,6 +150,11 @@ function ToolCard({
         <div className="h-full rounded-full bg-primary" style={{ width: `${progress ?? 0}%` }} />
       </div>
       <p className="mt-3 flex-1 text-sm text-muted-foreground">{queue}</p>
+      {allowance && (
+        <p className="mt-2 flex items-center gap-1.5 text-xs font-medium text-foreground">
+          <Sparkles className="h-3.5 w-3.5 text-primary" aria-hidden /> {allowance}
+        </p>
+      )}
       <div className="mt-5 flex gap-2.5">
         <Link
           to={secondary.to}
@@ -185,7 +196,23 @@ function Dashboard() {
   const [authOpen, setAuthOpen] = useState(false);
 
   const { history } = useStudyHistory();
-  const { stats: deck, today } = useFlashcardDeck();
+  const { stats: deck, today, allCards } = useFlashcardDeck();
+
+  // Decks for the Flashcards dialog, as the QBank dialog lists its sets: one
+  // row per topic, most due first, each opening straight into its cards.
+  const deckRows = useMemo(() => {
+    const byTopic = new Map<string, { topic: string; total: number; due: number; last: number }>();
+    const nowMs = Date.now();
+    for (const c of allCards) {
+      const topic = c.topic || "Untitled";
+      const row = byTopic.get(topic) ?? { topic, total: 0, due: 0, last: 0 };
+      row.total += 1;
+      if (c.dueAt <= nowMs) row.due += 1;
+      row.last = Math.max(row.last, c.createdAt ?? 0);
+      byTopic.set(topic, row);
+    }
+    return [...byTopic.values()].sort((a, b) => b.due - a.due || b.last - a.last).slice(0, 5);
+  }, [allCards]);
   const { stats, isLoading } = useDashboardStats();
 
   const now = Date.now();
@@ -209,29 +236,44 @@ function Dashboard() {
 
   const loading = <span className="text-muted-foreground">…</span>;
 
+  // What is left of today's free allowance, on each tool's card.
+  const { sheetCount, cardsCount, isProUser } = useUsageLimit();
+  const left = (used: number, cap: number, noun: string) =>
+    isProUser ? "Unlimited with Pro" : `${Math.max(0, cap - used)} of ${cap} ${noun} left today`;
+
   return (
     <DashboardLayout>
       <div className="mx-auto w-full max-w-6xl space-y-8">
-        {isGuest && (
-          <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-border bg-card px-4 py-3 text-sm">
-            <span className="flex-1 text-muted-foreground">
-              You're studying as a guest. Sign in to keep your progress and use the QBank.
-            </span>
-            <button
-              type="button"
-              onClick={() => setAuthOpen(true)}
-              className="flex h-10 items-center gap-2 rounded-full bg-primary px-4 font-semibold text-primary-foreground"
-            >
-              <LogIn className="h-4 w-4" /> Sign in
-            </button>
-          </div>
-        )}
+        {/* A greeting, on the page itself rather than in a box. Sign-in is
+            already in the bar above, so for a guest it is a link in the line. */}
+        <PageHeader
+          label="Dashboard"
+          title={authLoading ? "\u00a0" : isGuest ? "Your dashboard" : `Welcome back, ${displayName(user)}`}
+          description={
+            <>
+              <p>Pick up where you left off, or start a new topic.</p>
+              {isGuest && (
+                <p className="mt-1 text-sm">
+                  You're studying as a guest.{" "}
+                  <button
+                    type="button"
+                    onClick={() => setAuthOpen(true)}
+                    className="font-semibold text-primary underline-offset-4 hover:underline"
+                  >
+                    Sign in
+                  </button>{" "}
+                  to save your progress and access the QBank.
+                </p>
+              )}
+            </>
+          }
+        />
 
         {/* This week, in numbers. Each box opens what it counts. */}
         <section aria-labelledby="week-title">
-          <h1 id="week-title" className="mb-3 text-sm font-semibold text-foreground">
+          <h2 id="week-title" className="mb-3 text-sm font-semibold text-foreground">
             Last {WINDOW_DAYS} days
-          </h1>
+          </h2>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <StatBox
               icon={<FileText className="h-5 w-5" />}
@@ -328,6 +370,7 @@ function Dashboard() {
               line={history[0] ? `Last: ${history[0].topic}` : "No sheets saved yet"}
               progress={pct(sheetsThisWeek.length, WEEKLY_SHEET_GOAL)}
               queue={`${sheetsThisWeek.length} of ${WEEKLY_SHEET_GOAL} this week`}
+              allowance={left(sheetCount, MAX_DAILY_SHEETS, "sheets")}
               secondary={{ label: "Library", to: "/library" }}
               primary={{ label: "New sheet", to: "/sheets" }}
             />
@@ -337,8 +380,13 @@ function Dashboard() {
               line={`${reviewedToday} studied today`}
               progress={pct(reviewedToday, reviewedToday + dueNow)}
               queue={deck.total === 0 ? "No flashcards yet" : `${dueNow} cards waiting today · ${deck.total} in your deck`}
+              allowance={left(cardsCount, MAX_DAILY_CARDS, "decks")}
               secondary={{ label: "New deck", to: "/flashcards" }}
-              primary={{ label: dueNow > 0 ? "Review" : "Open", to: "/flashcards" }}
+              primary={
+                dueNow > 0
+                  ? { label: `Review ${dueNow} due`, to: "/flashcards?review=due" }
+                  : { label: "Your decks", to: "/library" }
+              }
             />
             <ToolCard
               icon={<FlaskConical className="h-4 w-4" />}
@@ -352,6 +400,7 @@ function Dashboard() {
                   ? "Sign in to practise USMLE-style questions"
                   : "Name a topic to start a set"
               }
+              allowance={isGuest ? undefined : "No daily limit"}
               secondary={{ label: "New set", to: "/qbank" }}
               primary={
                 lastSet
@@ -406,7 +455,21 @@ function Dashboard() {
                 </DialogDescription>
               </DialogHeader>
               {isGuest ? (
-                <p className="text-sm text-muted-foreground">Sign in to see your review history.</p>
+                <div className="space-y-3 rounded-xl border border-primary/40 bg-primary/5 p-4">
+                  <p className="text-sm text-foreground">
+                    Your review history and ratings are saved once you sign in — on every device.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDetail(null);
+                      setAuthOpen(true);
+                    }}
+                    className="flex h-11 w-full items-center justify-center gap-2 rounded-full bg-primary text-sm font-semibold text-primary-foreground"
+                  >
+                    <LogIn className="h-4 w-4" /> Sign in to save your progress
+                  </button>
+                </div>
               ) : stats && stats.reviewsThisWeek > 0 ? (
                 <div className="space-y-3">
                   <p className="text-sm text-foreground">
@@ -426,12 +489,38 @@ function Dashboard() {
               ) : (
                 <p className="text-sm text-muted-foreground">No reviews this week yet.</p>
               )}
+              {deckRows.length > 0 && (
+                <div className="space-y-2">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Your decks</p>
+                  <ul className="space-y-2">
+                    {deckRows.map((d) => (
+                      <li key={d.topic}>
+                        <button
+                          type="button"
+                          onClick={() => navigate(`/flashcards?deck=${encodeURIComponent(d.topic)}`)}
+                          className="flex w-full items-center gap-3 rounded-xl border border-border bg-card px-3 py-2.5 text-start transition-colors hover:border-primary"
+                        >
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate text-sm font-medium text-foreground">{d.topic}</span>
+                            <span className="block text-xs text-muted-foreground">
+                              {d.total} cards{d.due > 0 ? ` · ${d.due} due` : ""}
+                            </span>
+                          </span>
+                          <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
               <button
                 type="button"
-                onClick={() => navigate("/flashcards")}
-                className="mt-2 h-11 w-full rounded-full bg-primary text-sm font-semibold text-primary-foreground"
+                onClick={() => navigate(dueNow > 0 ? "/flashcards?review=due" : "/library")}
+                className={`mt-2 h-11 w-full rounded-full text-sm font-semibold ${
+                  isGuest ? "border border-border text-foreground" : "bg-primary text-primary-foreground"
+                }`}
               >
-                {dueNow > 0 ? `Review ${dueNow} cards` : "Open Flashcards"}
+                {dueNow > 0 ? `Review ${dueNow} due cards` : "Open your decks"}
               </button>
             </>
           )}

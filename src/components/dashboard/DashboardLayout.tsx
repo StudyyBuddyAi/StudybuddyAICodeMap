@@ -1,6 +1,7 @@
 import { ReactNode, useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import AppNav from "@/components/dashboard/AppNav";
+import AppFooter from "@/components/layout/AppFooter";
 import AuthModal from "@/components/AuthModal";
 import AccountDashboard from "@/components/AccountDashboard";
 import { useAuth } from "@/hooks/use-auth";
@@ -31,13 +32,13 @@ const DashboardLayout = ({ children, wide = false }: DashboardLayoutProps) => {
 
   return (
     // Transparent: the app backdrop behind it paints the page colour.
-    <div className="min-h-screen">
+    <div className="flex min-h-screen flex-col">
       <AppNav
         onOpenAuth={() => setAuthModalOpen(true)}
         onOpenAccount={() => setAccountModalOpen(true)}
       />
 
-      <main style={{ padding: "40px 24px 80px" }}>
+      <main className="flex-1" style={{ padding: "40px 24px 80px" }}>
         <div
           style={{
             maxWidth: wide ? "var(--max-w, 1280px)" : "1600px",
@@ -48,8 +49,14 @@ const DashboardLayout = ({ children, wide = false }: DashboardLayoutProps) => {
         </div>
       </main>
 
+      <AppFooter />
+
       <AuthModal open={authModalOpen} onOpenChange={setAuthModalOpen} />
-      <AccountDashboard open={accountModalOpen} onOpenChange={setAccountModalOpen} />
+      <AccountDashboard
+        open={accountModalOpen}
+        onOpenChange={setAccountModalOpen}
+        onOpenAuth={() => setAuthModalOpen(true)}
+      />
     </div>
   );
 };

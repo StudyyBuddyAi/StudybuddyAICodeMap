@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import PageHeader from "@/components/layout/PageHeader";
 import {
   Activity,
   ArrowRight,
@@ -114,26 +115,7 @@ const SheetComposer = ({
 
   return (
     <div className="mx-auto w-full max-w-3xl space-y-8">
-      <header>
-        <p
-          className="mb-2 [font-family:var(--app-font-mono)] text-[11px] font-medium uppercase tracking-[0.14em]"
-          style={{ color: "var(--color-accent)" }}
-        >
-          Study Sheet · AI-Powered
-        </p>
-        <h1
-          className="[font-family:var(--app-font-sans)] text-[clamp(28px,4vw,40px)] font-medium leading-[1.1] tracking-[-0.012em]"
-          style={{ color: "var(--color-foreground)" }}
-        >
-          Generate your{" "}
-          <span className="italic" style={{ color: "var(--color-accent)" }}>
-            study sheet.
-          </span>
-        </h1>
-        <p className="mt-2.5 max-w-xl text-base leading-relaxed text-muted-foreground">
-          Name a topic or paste your notes. The sheet writes itself section by section.
-        </p>
-      </header>
+      <PageHeader label="Study sheets" title="New study sheet" description="Name a topic or paste your notes." />
 
       {/* ── The box, with usage under it ── */}
       <div className="space-y-2">

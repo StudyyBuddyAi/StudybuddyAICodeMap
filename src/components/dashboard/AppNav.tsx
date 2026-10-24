@@ -11,7 +11,14 @@ import {
   LogIn,
   Menu,
   X,
+  ChevronDown,
 } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
 import { displayName } from "@/lib/display-name";
@@ -31,14 +38,31 @@ interface AppNavProps {
 }
 
 const homeItem = { to: "/dashboard", label: "Home", icon: LayoutDashboard };
+const roadmapItem = { to: "/roadmap", label: "Roadmap", icon: MapIcon };
+const libraryItem = { to: "/library", label: "Library", icon: LibraryIcon };
 
+// The three study tools are on the dashboard already, so the bar groups them
+// under one "Tools" menu instead of spending three links on them.
 const toolItems = [
-  { to: "/roadmap", label: "Roadmap", icon: MapIcon },
-  { to: "/sheets", label: "Sheets", icon: FileText },
-  { to: "/flashcards", label: "Flashcards", icon: Layers },
-  { to: "/qbank", label: "QBank", icon: FlaskConical },
-  { to: "/library", label: "Library", icon: LibraryIcon },
+  { to: "/sheets", label: "Sheets", icon: FileText, hint: "Structured study sheets" },
+  { to: "/flashcards", label: "Flashcards", icon: Layers, hint: "Spaced-repetition decks" },
+  { to: "/qbank", label: "QBank", icon: FlaskConical, hint: "USMLE-style questions" },
 ];
+
+const NAV_LINK = "border-b px-3 pt-1.5 pb-[3px] text-sm font-medium transition-colors";
+
+const NavLinkItem = ({ to, label, active, onClick }: { to: string; label: string; active: boolean; onClick: () => void }) => (
+  <Link
+    to={to}
+    onClick={onClick}
+    aria-current={active ? "page" : undefined}
+    className={`${NAV_LINK} ${
+      active ? "border-[color:var(--accent)] text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"
+    }`}
+  >
+    {label}
+  </Link>
+);
 
 const AppNav = ({ onNavigate, onOpenAuth, onOpenAccount }: AppNavProps) => {
   const { user, isAnonymous } = useAuth();
@@ -49,7 +73,7 @@ const AppNav = ({ onNavigate, onOpenAuth, onOpenAccount }: AppNavProps) => {
   // Signed in, the brand is the way home: it opens the dashboard, so a separate
   // Home link is noise. Guests keep Home, and the brand returns them to the
   // landing page.
-  const navItems = signedIn ? toolItems : [homeItem, ...toolItems];
+  const leadItems = signedIn ? [roadmapItem] : [homeItem, roadmapItem];
   const brandTo = signedIn ? "/dashboard" : "/";
 
   const userId = user?.id ?? null;
@@ -82,6 +106,7 @@ const AppNav = ({ onNavigate, onOpenAuth, onOpenAccount }: AppNavProps) => {
   const isActive = (to: string) =>
     location.pathname === to ||
     (to !== "/" && location.pathname.startsWith(`${to}/`));
+  const toolsActive = toolItems.some((item) => isActive(item.to));
 
   return (
     <>
@@ -138,39 +163,42 @@ const AppNav = ({ onNavigate, onOpenAuth, onOpenAccount }: AppNavProps) => {
           </Link>
 
           {/* Desktop nav links */}
-          <nav className="hidden lg:flex items-center gap-1">
-            {navItems.map((item) => {
-              const active = isActive(item.to);
-              return (
-                <Link
-                  key={item.to}
-                  to={item.to}
-                  onClick={handleNav}
-                  aria-current={active ? "page" : undefined}
-                  style={{
-                    fontFamily: "var(--font-sans)",
-                    fontSize: 14,
-                    fontWeight: 500,
-                    color: active ? "var(--fg)" : "var(--fg-muted)",
-                    textDecoration: "none",
-                    padding: "6px 12px 3px",
-                    borderBottom: active
-                      ? "1px solid var(--accent)"
-                      : "1px solid transparent",
-                    transition:
-                      "color var(--dur-micro) var(--ease-out), border-color var(--dur-micro) var(--ease-out)",
-                  }}
-                  onMouseEnter={(e) => {
-                    if (!active) e.currentTarget.style.color = "var(--fg)";
-                  }}
-                  onMouseLeave={(e) => {
-                    if (!active) e.currentTarget.style.color = "var(--fg-muted)";
-                  }}
-                >
-                  {item.label}
-                </Link>
-              );
-            })}
+          <nav className="hidden lg:flex items-center gap-1" aria-label="Main">
+            {leadItems.map((item) => (
+              <NavLinkItem key={item.to} to={item.to} label={item.label} active={isActive(item.to)} onClick={handleNav} />
+            ))}
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                className={`${NAV_LINK} inline-flex items-center gap-1 ${
+                  toolsActive ? "border-[color:var(--accent)] text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                Tools
+                <ChevronDown className="h-3.5 w-3.5" aria-hidden />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="w-60">
+                {toolItems.map((item) => {
+                  const Icon = item.icon;
+                  return (
+                    <DropdownMenuItem key={item.to} asChild>
+                      <Link
+                        to={item.to}
+                        onClick={handleNav}
+                        aria-current={isActive(item.to) ? "page" : undefined}
+                        className="flex cursor-pointer items-start gap-3 py-2"
+                      >
+                        <Icon className="mt-0.5 h-4 w-4 text-primary" aria-hidden />
+                        <span>
+                          <span className="block text-sm font-medium text-foreground">{item.label}</span>
+                          <span className="block text-xs text-muted-foreground">{item.hint}</span>
+                        </span>
+                      </Link>
+                    </DropdownMenuItem>
+                  );
+                })}
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <NavLinkItem to={libraryItem.to} label={libraryItem.label} active={isActive(libraryItem.to)} onClick={handleNav} />
           </nav>
 
           {/* Desktop right actions */}
@@ -194,6 +222,16 @@ const AppNav = ({ onNavigate, onOpenAuth, onOpenAccount }: AppNavProps) => {
 
             {isAnonymous || !user ? (
               <>
+                <ThemeToggle />
+                <button
+                  type="button"
+                  onClick={onOpenAccount}
+                  aria-label="Settings"
+                  title="Settings"
+                  className="grid h-8 w-8 place-items-center rounded-md text-muted-foreground transition-colors hover:text-foreground"
+                >
+                  <Settings className="h-4 w-4" />
+                </button>
                 <button
                   onClick={onOpenAuth}
                   style={{
@@ -214,7 +252,6 @@ const AppNav = ({ onNavigate, onOpenAuth, onOpenAccount }: AppNavProps) => {
                   <LogIn style={{ width: 14, height: 14 }} />
                   Sign in
                 </button>
-                <ThemeToggle />
               </>
             ) : (
               // One account button: Go Pro, theme and sign out live in Settings.
@@ -273,31 +310,30 @@ const AppNav = ({ onNavigate, onOpenAuth, onOpenAccount }: AppNavProps) => {
             }}
           >
             <nav style={{ padding: "6px 16px 10px" }}>
-              {navItems.map((item) => {
+              {[...leadItems, ...toolItems.map((t) => ({ ...t, nested: true })), libraryItem].map((item, idx, all) => {
                 const active = isActive(item.to);
                 const Icon = item.icon;
+                const nested = "nested" in item;
+                const firstTool = nested && !("nested" in all[idx - 1]);
                 return (
-                  <Link
-                    key={item.to}
-                    to={item.to}
-                    onClick={handleNav}
-                    aria-current={active ? "page" : undefined}
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 10,
-                      padding: "13px 0",
-                      borderBottom: "1px solid var(--border)",
-                      fontFamily: "var(--font-sans)",
-                      fontSize: 15,
-                      fontWeight: 500,
-                      color: active ? "var(--accent)" : "var(--fg)",
-                      textDecoration: "none",
-                    }}
-                  >
-                    <Icon style={{ width: 16, height: 16 }} />
-                    {item.label}
-                  </Link>
+                  <div key={item.to}>
+                    {firstTool && (
+                      <p className="pt-3 pb-1 font-mono text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
+                        Tools
+                      </p>
+                    )}
+                    <Link
+                      to={item.to}
+                      onClick={handleNav}
+                      aria-current={active ? "page" : undefined}
+                      className={`flex items-center gap-2.5 border-b border-border py-3 text-[15px] font-medium ${
+                        nested ? "ps-3" : ""
+                      } ${active ? "text-[color:var(--accent)]" : "text-foreground"}`}
+                    >
+                      <Icon className="h-4 w-4" />
+                      {item.label}
+                    </Link>
+                  </div>
                 );
               })}
 
@@ -314,16 +350,28 @@ const AppNav = ({ onNavigate, onOpenAuth, onOpenAccount }: AppNavProps) => {
                     Settings · {name}
                   </button>
                 ) : (
-                  <button
-                    onClick={() => {
-                      onOpenAuth();
-                      setMobileOpen(false);
-                    }}
-                    className="flex h-11 flex-1 items-center justify-center gap-2 rounded-lg bg-foreground text-sm font-medium text-background"
-                  >
-                    <LogIn style={{ width: 14, height: 14 }} />
-                    Sign in
-                  </button>
+                  <>
+                    <button
+                      onClick={() => {
+                        onOpenAccount();
+                        setMobileOpen(false);
+                      }}
+                      className="flex h-11 items-center justify-center gap-2 rounded-lg border border-border px-4 text-sm font-medium text-foreground"
+                    >
+                      <Settings style={{ width: 14, height: 14 }} />
+                      Settings
+                    </button>
+                    <button
+                      onClick={() => {
+                        onOpenAuth();
+                        setMobileOpen(false);
+                      }}
+                      className="flex h-11 flex-1 items-center justify-center gap-2 rounded-lg bg-foreground text-sm font-medium text-background"
+                    >
+                      <LogIn style={{ width: 14, height: 14 }} />
+                      Sign in
+                    </button>
+                  </>
                 )}
               </div>
             </nav>

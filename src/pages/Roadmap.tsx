@@ -1,4 +1,5 @@
 import { validateTopic } from "@/lib/validate-topic";
+import PageHeader from "@/components/layout/PageHeader";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
@@ -182,14 +183,11 @@ const Roadmap = () => {
   return (
     <DashboardLayout wide>
       <div className="ds-stack">
-        <header>
-          <p className="ds-label ds-label-accent">Curriculum checklist</p>
-          <h1 className="ds-display mt-2">Roadmap</h1>
-          <p className="ds-subtitle mt-2.5 max-w-[54ch]">
-            Every topic in the curriculum, by system — and which ones you've
-            already covered.
-          </p>
-        </header>
+        <PageHeader
+          label="Roadmap"
+          title="Curriculum checklist"
+          description="Every topic by system, and which ones you've covered."
+        />
 
         {topicsQuery.isLoading ? (
           <PageLoader context="sheets" />

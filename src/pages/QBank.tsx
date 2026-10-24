@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import PageHeader from "@/components/layout/PageHeader";
 import { useLocation, useNavigate } from "react-router-dom";
 import {
   LogIn,
@@ -237,32 +238,11 @@ const QBank = () => {
       {/* The layout owns the page gutter; no padding of our own on top of it.
           One column: past sets live on the Dashboard, not beside the generator. */}
       <div className="mx-auto w-full max-w-3xl space-y-6 animate-fade-in">
-          {/* Header — same voice as Sheets: mono eyebrow, serif headline, one-line lede. */}
-          <div>
-            <p
-              className="mb-2 [font-family:var(--app-font-mono)] text-[11px] font-medium uppercase tracking-[0.14em]"
-              style={{ color: "var(--color-accent)" }}
-            >
-              QBank · USMLE-style
-            </p>
-            <h1
-              className="[font-family:var(--app-font-sans)] text-[clamp(28px,4vw,40px)] font-medium leading-[1.1] tracking-[-0.012em]"
-              style={{ color: "var(--color-foreground)" }}
-            >
-              Questions on{" "}
-              <span className="italic" style={{ color: "var(--color-accent)" }}>
-                anything you like.
-              </span>
-            </h1>
-            <p
-              className="mt-2.5 max-w-xl text-base leading-relaxed"
-              style={{ color: "var(--color-muted-foreground)" }}
-            >
-              Name a topic and a set is written for it, to NBME item-writing rules. You
-              start on the first question as soon as it is ready — the rest is written
-              while you work.
-            </p>
-          </div>
+          <PageHeader
+            label="QBank"
+            title="Practice questions"
+            description="USMLE-style questions on any topic. The first one is ready in seconds."
+          />
 
           {/* Sign In Card */}
           {isAnonymous || !user ? (
