@@ -1,10 +1,11 @@
 import { friendlyAuthError } from "@/lib/auth-errors";
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
-import { useLocation } from "react-router-dom";
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import type { Session, User } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
 import { isDisposableEmail } from "@/lib/email-domains";
 import { siteUrl } from "@/lib/site-url";
+import { isRecoveryPending, markRecoveryPending } from "@/lib/recovery-landing";
 import {
   applyAnonUsage,
   runPostUpgradeMigrations,
@@ -75,6 +76,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [loading, setLoading] = useState(true);
 
   const { pathname } = useLocation();
+  const navigate = useNavigate();
+  const navigateRef = useRef(navigate);
+  navigateRef.current = navigate;
   const onAuthLanding = AUTH_LANDING_ROUTES.some((route) => pathname.startsWith(route));
 
   useEffect(() => {
@@ -92,6 +96,15 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       setUser(newSession?.user ?? null);
       setLoading(false);
 
+      // A reset link opened: wherever Supabase landed the reader (the Site URL
+      // when /reset-password isn't allow-listed), the new password is set there.
+      if (event === "PASSWORD_RECOVERY") {
+        markRecoveryPending();
+        if (window.location.pathname !== "/reset-password") {
+          navigateRef.current("/reset-password", { replace: true });
+        }
+      }
+
       // If user confirms email via magic link, event will be USER_UPDATED
       // The session will be refreshed automatically by Supabase
     });
@@ -101,6 +114,14 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       subscription.subscription.unsubscribe();
     };
   }, []);
+
+  // The reset link was captured before the client consumed it, but the event
+  // may have fired before this provider subscribed: route on the flag alone.
+  useEffect(() => {
+    if (!loading && session && !session.user.is_anonymous && isRecoveryPending() && pathname !== "/reset-password") {
+      navigate("/reset-password", { replace: true });
+    }
+  }, [loading, session, pathname, navigate]);
 
   // Every visitor gets a session: anonymous until they upgrade. Kept separate
   // from the effect above so it also covers a session that goes away later

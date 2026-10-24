@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
+import { clearRecoveryPending } from "@/lib/recovery-landing";
 
 type Status = "parsing" | "invalid" | "ready" | "submitting";
 
@@ -23,6 +24,9 @@ const ResetPassword = () => {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    // Arrived: the one-time redirect is done, so leaving this page without
+    // setting a password doesn't send every later page back here.
+    clearRecoveryPending();
     // supabase-js consumes the URL fragment on load, so we can't read it manually.
     // Instead, listen for the PASSWORD_RECOVERY event which fires after the SDK
     // processes the recovery link, then fall back to getSession() for cases where
