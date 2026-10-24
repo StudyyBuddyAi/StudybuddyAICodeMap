@@ -331,12 +331,8 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
 
   const { sheetCount, isSheetLimited, isProUser: pro, refresh: refreshUsage } = useUsageLimit();
   const { premiumRemaining, isPremiumHookActive, refetch: refetchPremium } = usePremiumHook();
-  const {
-    preferredModel,
-    setPreferredModel,
-    saving: modelSaving,
-    isLoading: modelLoading,
-  } = useModelPreference();
+  // Chosen once in Settings, for every tool.
+  const { preferredModel } = useModelPreference();
   const { user, isAnonymous } = useAuth();
   const {
     canUseCitation,
@@ -1185,15 +1181,6 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
       }}
       useMemory={useMemory}
       onUseMemory={setUseMemory}
-      model={
-        pro
-          ? {
-              value: preferredModel,
-              onChange: setPreferredModel,
-              busy: modelSaving || modelLoading,
-            }
-          : undefined
-      }
       disabled={loading}
     />
   );
@@ -1210,7 +1197,7 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
         <span className="font-medium text-warning">
           Daily limit reached ·{" "}
           <button type="button" className="underline" onClick={goPro}>
-            Go Pro for Corti + unlimited
+            Go Pro for unlimited
           </button>
         </span>
       ) : (
@@ -1221,9 +1208,9 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
       {isPremiumHookActive ? (
         <span className="text-info">
           {" "}
-          · ✦ {premiumRemaining} Corti generation{premiumRemaining !== 1 ? "s" : ""} left ·{" "}
+          · ✦ {premiumRemaining} {premiumRemaining === 1 ? "sheet" : "sheets"} by our medical AI model left ·{" "}
           <button type="button" className="underline" onClick={goPro}>
-            Go Pro for unlimited Corti
+            Go Pro for more
           </button>
         </span>
       ) : !isSheetLimited ? (
@@ -1231,7 +1218,7 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
           {" "}
           · Free plan ·{" "}
           <button type="button" className="underline hover:text-foreground" onClick={goPro}>
-            Go Pro for Corti
+            Go Pro for unlimited
           </button>
         </span>
       ) : null}

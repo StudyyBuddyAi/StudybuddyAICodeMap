@@ -6,7 +6,10 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { MessageCircle, Mail, Check } from "lucide-react";
+import { useEffect, useState } from "react";
+import { MessageCircle, Check } from "lucide-react";
+import RedeemCodeForm from "@/components/RedeemCodeForm";
+import { useAuth } from "@/hooks/use-auth";
 import BrandMark from "@/components/brand/BrandMark";
 import { PoweredByCorti } from "@/components/PoweredByCorti";
 
@@ -16,6 +19,13 @@ interface GoProModalProps {
 }
 
 const GoProModal = ({ open, onOpenChange }: GoProModalProps) => {
+  const { user, isAnonymous } = useAuth();
+  const isGuest = !user || isAnonymous;
+  const [showRedeem, setShowRedeem] = useState(false);
+  useEffect(() => {
+    if (!open) setShowRedeem(false);
+  }, [open]);
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-sm text-center rounded-xl">
@@ -45,8 +55,8 @@ const GoProModal = ({ open, onOpenChange }: GoProModalProps) => {
           <DialogDescription className="text-sm text-muted-foreground pt-2">
             Everything in StudyBuddy, unlocked — with every sheet, deck and explanation
             written by Corti S1, an AI model built for healthcare. Pro access is granted
-            manually — reach out on WhatsApp or Email and we'll activate your account
-            within a few hours.
+            manually — message us on WhatsApp and we'll activate your account within a
+            few hours.
           </DialogDescription>
           <div className="flex justify-center pt-2">
             <PoweredByCorti />
@@ -84,20 +94,30 @@ const GoProModal = ({ open, onOpenChange }: GoProModalProps) => {
               Message on WhatsApp
             </Button>
           </a>
-          <a href="mailto:Osama200az@gmail.com" className="w-full">
-            <Button
-              variant="outline"
-              className="w-full h-10 rounded-lg font-medium gap-2"
-            >
-              <Mail className="h-4 w-4" />
-              Send an Email
-            </Button>
-          </a>
         </div>
 
-        <p className="text-[11px] text-muted-foreground pt-1 opacity-70">
-          Access is usually granted within a few hours.
-        </p>
+        {/* Someone sent a code already: use it here instead of hunting for Settings. */}
+        <div className="border-t border-border pt-3 text-left">
+          {!showRedeem ? (
+            <p className="text-center text-sm text-muted-foreground">
+              Already have a code?{" "}
+              <button
+                type="button"
+                onClick={() => setShowRedeem(true)}
+                className="font-semibold text-primary underline-offset-4 hover:underline"
+              >
+                Redeem it
+              </button>
+            </p>
+          ) : isGuest ? (
+            <p className="text-center text-sm text-muted-foreground">
+              Sign in first — a code unlocks Pro on your account. Use <b className="text-foreground">Sign in</b> at
+              the top of the page, then come back here.
+            </p>
+          ) : (
+            <RedeemCodeForm autoFocus onRedeemed={() => onOpenChange(false)} />
+          )}
+        </div>
       </DialogContent>
     </Dialog>
   );
