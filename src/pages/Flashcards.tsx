@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import PageHeader from "@/components/layout/PageHeader";
 import { useBackdropScene } from "@/components/backdrop/backdrop-scene";
-import { Link, useLocation, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { ArrowRight, BookOpen, Clock, PanelLeftClose, PanelLeftOpen, Play, Repeat, Settings2, Shuffle, SkipForward, X, Sparkles, Check, ChevronRight, RotateCcw, AlertTriangle, CheckCircle2, SlidersHorizontal } from "lucide-react";
 import DashboardLayout from "@/components/dashboard/DashboardLayout";
 import FlashcardsGenerator, { type GeneratedCard } from "@/components/FlashcardsGenerator";
@@ -18,7 +19,7 @@ import { useToast } from "@/hooks/use-toast";
 import { shouldSuggestOptimize } from "@/lib/fsrs-items";
 import { formatInterval, newSrsFields, type ReviewRating } from "@/lib/spaced-repetition";
 
-const RECENT_DECK_LIMIT = 5;
+const RECENT_DECK_LIMIT = 3;
 
 type RightPhase = "idle" | "generating" | "reviewing";
 
@@ -138,28 +139,90 @@ const Flashcards = () => {
 
 
   // ── Session lifecycle ─────────────────────────────────────────────────
-  const startSession = (cards: DeckCard[], topic: string) => {
+  // The open session is written into the URL (?review=due, ?review=all,
+  // ?deck=<topic>), so Back from another page — or a reload — returns to the
+  // cards rather than the empty generator, and the dashboard can link straight
+  // to today's review.
+  const [searchParams] = useSearchParams();
+  const sessionKey = searchParams.get("deck") ? `deck:${searchParams.get("deck")}` : searchParams.get("review") ? `review:${searchParams.get("review")}` : null;
+
+  const keyToSearch = (key: string) => {
+    const [kind, ...rest] = key.split(":");
+    const value = rest.join(":");
+    return kind === "deck" ? `?deck=${encodeURIComponent(value)}` : `?review=${encodeURIComponent(value)}`;
+  };
+
+  const pushedKeyRef = useRef<string | null>(null);
+  const startSession = (cards: DeckCard[], topic: string, key?: string) => {
     if (!s.start(cards, topic)) {
       toast({ title: "No cards to review", variant: "destructive" });
-      return;
+      return false;
     }
     setSlidePhase("idle");
     setRightPhase("reviewing");
     setConfigDrawerOpen(false);
+    if (key && key !== sessionKey) {
+      // Until the router reports the new URL, a render can still see none:
+      // remember it so the effect below doesn't take that for "Back".
+      pushedKeyRef.current = key;
+      navigate({ pathname: "/flashcards", search: keyToSearch(key) });
+    }
+    return true;
   };
 
   const endSession = () => {
     s.end();
     setRightPhase("idle");
     setConfigDrawerOpen(false);
+    pushedKeyRef.current = null;
+    if (sessionKey) navigate("/flashcards", { replace: true });
   };
 
-  const handleStartDue = () => startSession(dueCards, "Today's review");
+  const handleStartDue = () => startSession(dueCards, "Today's review", "review:due");
   // Studying cards that aren't due is an early review. FSRS accounts for the
   // short elapsed time, so these ratings still update the schedule honestly.
-  const handleReviewAny = () => startSession(allCards, "All cards");
-  const handleStudyDeck = (topic: string) =>
-    startSession(allCards.filter((c) => c.topic === topic), topic);
+  const handleReviewAny = () => startSession(allCards, "All cards", "review:all");
+  // A deck picks up where the student left it: the cards still due (or new)
+  // come first, and only a deck with nothing due is studied in full, as an
+  // early review. Reopening a half-done deck no longer starts it over.
+  const deckCards = (topic: string) => {
+    const deck = allCards.filter((c) => c.topic === topic);
+    const now = Date.now();
+    const due = deck.filter((c) => c.dueAt <= now);
+    return due.length > 0 ? due : deck;
+  };
+  const handleStudyDeck = (topic: string) => startSession(deckCards(topic), topic, `deck:${topic}`);
+
+  // Open the session the URL names, once the cards it needs have loaded; and
+  // close it when the URL loses it (Back out of a session).
+  const openedKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (sessionKey && pushedKeyRef.current === sessionKey) {
+      pushedKeyRef.current = null;
+      openedKeyRef.current = sessionKey;
+      return;
+    }
+    if (!sessionKey) {
+      if (pushedKeyRef.current) return;
+      openedKeyRef.current = null;
+      if (s.active) {
+        s.end();
+        setRightPhase("idle");
+      }
+      return;
+    }
+    if (s.active || openedKeyRef.current === sessionKey || allCards.length === 0) return;
+    openedKeyRef.current = sessionKey;
+    const [kind, ...rest] = sessionKey.split(":");
+    const value = rest.join(":");
+    const ok =
+      kind === "deck"
+        ? startSession(deckCards(value), value)
+        : value === "all"
+        ? startSession(allCards, "All cards")
+        : startSession(dueCards, "Today's review");
+    if (!ok) navigate("/flashcards", { replace: true });
+  }, [sessionKey, allCards, dueCards]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleDeleteDeck = (topic: string) => {
     const toDelete = allCards.filter((c) => c.topic === topic);
@@ -211,7 +274,7 @@ const Flashcards = () => {
       setRightPhase("idle");
       return;
     }
-    startSession(sessionCards, topic);
+    startSession(sessionCards, topic, `deck:${topic}`);
   };
 
   // ── Review interactions ──────────────────────────────────────────────
@@ -646,9 +709,9 @@ const Flashcards = () => {
               <div className="pl-1">
                 <Link
                   to="/library"
-                  className="inline-flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-primary transition-colors"
+                  className="inline-flex items-center gap-1 text-sm font-medium text-primary underline-offset-4 hover:underline"
                 >
-                  View all in Library
+                  See all {totalDecks} decks in your Library
                   <ArrowRight className="h-3 w-3" />
                 </Link>
               </div>
@@ -661,18 +724,7 @@ const Flashcards = () => {
   return (
     <DashboardLayout wide>
       <div className="space-y-6">
-        <div>
-          <p className="font-mono text-[11px] font-medium tracking-[0.18em] uppercase text-[color:var(--color-accent-ink)] mb-3">
-            Flashcards · Spaced repetition
-          </p>
-          <h1 className="text-[clamp(30px,4.6vw,48px)] font-display font-normal leading-[1.05] tracking-[-0.02em] text-foreground">
-            Study any topic,{" "}
-            <span className="italic text-[color:var(--color-accent-ink)]">lock it in.</span>
-          </h1>
-          <div className="mt-3">
-            <FlashcardsIntro />
-          </div>
-        </div>
+        <PageHeader label="Flashcards" title="New flashcard deck" aside={<FlashcardsIntro />} />
 
         {idle ? (
           // Nothing under way: one column with the full width — the topic and

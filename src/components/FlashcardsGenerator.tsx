@@ -161,6 +161,7 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated, onTopicChange, w
   });
 
   const activeTopicRef = useRef("");
+  const savePromiseRef = useRef<Promise<number> | null>(null);
   // Null until the server's __meta event arrives. Staying null means the edge
   // function ran ungrounded (or predates grounding) — not that it found nothing.
   const groundingResultRef = useRef<{ retrievedChunks: number; sources: SheetSource[] } | null>(null);
@@ -180,12 +181,7 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated, onTopicChange, w
   const [lastDeckModel, setLastDeckModel] = useState<ModelUsed | null>(null);
   // Mirrored in a ref: the save callback below closes over an older render.
   const lastDeckModelRef = useRef<ModelUsed | null>(null);
-  const {
-    preferredModel,
-    setPreferredModel,
-    saving: modelSaving,
-    isLoading: modelLoading,
-  } = useModelPreference();
+  const { preferredModel } = useModelPreference();
   const { user, isAnonymous } = useAuth();
   // Same shared window as the sheet generator — see use-memory-preference.
   const { useMemory } = useMemoryPreference();
@@ -380,6 +376,11 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated, onTopicChange, w
           }
         : { retrievedChunks: 0, groundingLevel: "none", sources: [] };
 
+      // Saved now, not when the progress animation finishes: the request keeps
+      // running if the student leaves the page, and the deck they spent a
+      // generation on must land in their decks either way.
+      savePromiseRef.current = saveCards(parsed, groundingMeta);
+      savePromiseRef.current.catch(() => {});
       setPendingCards(parsed);
       setPendingGrounding(groundingMeta);
       setPendingGroundingQuery(activeTopic);
@@ -429,6 +430,18 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated, onTopicChange, w
     }
   };
 
+  // Closing or reloading the tab is the one way to lose a deck mid-write:
+  // the browser asks first.
+  useEffect(() => {
+    if (!loading) return;
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [loading]);
+
   useEffect(() => {
     if (loading) {
       startTopProgress();
@@ -466,7 +479,8 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated, onTopicChange, w
           if (pending !== null) {
             clearInterval(interval);
             (async () => {
-              const added = await saveCards(pending, pendingGroundingRef.current ?? undefined);
+              const added = await (savePromiseRef.current ?? saveCards(pending, pendingGroundingRef.current ?? undefined));
+              savePromiseRef.current = null;
               localStorage.setItem("sb_first_deck_seen", "1");
               toast({
                 title: added > 0 ? `Added ${added} new cards to your deck` : "No new cards (all duplicates)",
@@ -508,9 +522,9 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated, onTopicChange, w
 
   return (
     <div className="animate-fade-in space-y-4">
-      {/* Topic, then the options — both before anything else, so the student
-          sees what the deck will be before they press the button. */}
-      <div className={wide ? "grid gap-4 lg:grid-cols-2 lg:items-start" : "space-y-4"}>
+      {/* One column, in the order a deck is made: the topic (or a popular
+          one), then how the deck is shaped, then the button. */}
+      <div className="space-y-4">
       {/* ── Medical topic ── */}
       <section aria-labelledby="fc-topic-heading" className={panel}>
         <h2 id="fc-topic-heading" className="font-display text-xl font-medium tracking-[-0.01em] text-foreground">
@@ -563,7 +577,7 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated, onTopicChange, w
         <p className="mb-2 mt-5 font-mono text-[10px] font-medium uppercase tracking-[0.16em] text-muted-foreground">
           Popular topics
         </p>
-        <ul className={`grid gap-2 ${wide ? "sm:grid-cols-2" : ""}`}>
+        <ul className={`grid gap-2 ${wide ? "sm:grid-cols-2 lg:grid-cols-3" : ""}`}>
           {POPULAR.map(({ label, short, topic: value, system }) => {
             const picked = trimmedTopic.toLowerCase() === value.toLowerCase();
             return (
@@ -697,20 +711,7 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated, onTopicChange, w
       {/* ── Plan line ── */}
       <div className="space-y-1 text-center text-xs text-muted-foreground">
         {pro ? (
-          <p>
-            <span className="font-medium text-[color:var(--color-accent-ink)]">
-              ✦ Pro · {preferredModel === "corti" ? "Corti S1, best quality" : "GPT-OSS 20B, fastest"}
-            </span>
-            {" · "}
-            <button
-              type="button"
-              className="underline underline-offset-2 transition-colors hover:text-foreground"
-              onClick={() => setPreferredModel(preferredModel === "corti" ? "gpt-oss" : "corti")}
-              disabled={modelSaving || modelLoading}
-            >
-              Switch to {preferredModel === "corti" ? "GPT-OSS 20B" : "Corti S1"}
-            </button>
-          </p>
+          <p className="font-medium text-[color:var(--color-accent-ink)]">✦ Pro · unlimited decks</p>
         ) : isCardsLimited ? (
           <p className="font-medium text-warning">
             Daily limit reached ·{" "}
@@ -724,14 +725,14 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated, onTopicChange, w
           </p>
         ) : (
           <p>
-            Free plan · {remaining} {remaining === 1 ? "card" : "cards"} left today ·{" "}
+            Free plan · {remaining} {remaining === 1 ? "deck" : "decks"} left today ·{" "}
             {isLoggedIn ? (
               <button
                 type="button"
                 className="text-[color:var(--color-accent-ink)] underline underline-offset-2 transition-colors hover:text-foreground"
                 onClick={() => setGoProOpen(true)}
               >
-                Go Pro for Corti
+                Go Pro for unlimited
               </button>
             ) : (
               <button
@@ -746,7 +747,7 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated, onTopicChange, w
         )}
         {!pro && isPremiumHookActive && (
           <p className="font-medium text-info">
-            ✦ {premiumRemaining} Corti generation{premiumRemaining !== 1 ? "s" : ""} left
+            ✦ {premiumRemaining} {premiumRemaining === 1 ? "deck" : "decks"} by our medical AI model left today
           </p>
         )}
         {lastDeckModel && lastDeckModel.kind === "corti" && (
