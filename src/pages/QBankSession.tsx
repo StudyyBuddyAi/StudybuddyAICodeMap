@@ -739,6 +739,7 @@ const QBankSession = () => {
               {!wide && showExplanation && isGradedState(answerState) && (
                 <AnswerReview
                   ref={verdictRef}
+                  sessionId={session?.sessionId ?? sessionIdParam}
                   inline
                   question={q}
                   correct={answerState.correct}
@@ -800,6 +801,7 @@ const QBankSession = () => {
               {showExplanation && panelTab === "explanation" && isGradedState(answerState) ? (
                 <AnswerReview
                   ref={verdictRef}
+                  sessionId={session?.sessionId ?? sessionIdParam}
                   question={q}
                   correct={answerState.correct}
                   selected={answerState.status === "answered" ? answerState.selected : null}

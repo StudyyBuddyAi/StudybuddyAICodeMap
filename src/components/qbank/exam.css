@@ -720,6 +720,49 @@
 
 .qb-domain { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 
+/* Report a problem: a quiet link under the explanation, a small dialog. */
+.qb-report { padding-top: 4px; }
+.qb-report-link,
+.qb-report-done {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--fg-muted);
+}
+.qb-report-link { background: none; border: 0; padding: 0; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+.qb-report-link:hover { color: var(--fg); }
+.qb-report-link svg,
+.qb-report-done svg { width: 14px; height: 14px; }
+.qb-report-done svg { color: var(--qb-right); }
+.qb-report-reason {
+  display: grid;
+  gap: 2px;
+  text-align: left;
+  padding: 10px 12px;
+  border: 1px solid var(--qb-line);
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+  cursor: pointer;
+  transition: border-color var(--dur-fast, 120ms) ease;
+}
+.qb-report-reason:hover { border-color: var(--qb-line-strong); }
+.qb-report-reason[data-on] { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.qb-report-reason-label { font-size: 14px; font-weight: 600; color: var(--fg); }
+.qb-report-reason-hint { font-size: 13px; color: var(--fg-muted); }
+.qb-report-note {
+  width: 100%;
+  resize: vertical;
+  padding: 8px 10px;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--fg);
+  background: var(--bg-elevated);
+  border: 1px solid var(--qb-line);
+  border-radius: var(--radius-md);
+}
+.qb-report-note:focus { outline: none; border-color: var(--accent); }
+
 @keyframes qb-reveal {
   from { opacity: 0; transform: translateY(6px); }
   to { opacity: 1; transform: none; }

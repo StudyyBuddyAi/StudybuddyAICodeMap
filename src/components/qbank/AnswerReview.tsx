@@ -4,6 +4,7 @@ import { renderMarkdown } from "@/lib/render-markdown";
 import { choiceLabel as choice, formatClock } from "@/lib/qbank-answer";
 import { TIMED_SECONDS_PER_QUESTION, type OptionKey, type Question, type QuestionMedia } from "@/lib/qbank-types";
 import { MediaBlock } from "./QuestionMedia";
+import ReportQuestion from "./ReportQuestion";
 
 /**
  * What a graded question opens onto: the result, with the difficulty columns
@@ -22,8 +23,10 @@ const AnswerReview = forwardRef<
     onOpenMedia: (items: QuestionMedia[], index: number) => void;
     /** Under the answers, on its own card, rather than in the side column. */
     inline?: boolean;
+    /** The set this question was served in, recorded with a report. */
+    sessionId?: string | null;
   }
->(({ question: q, correct, selected, timeTakenMs, onOpenMedia, inline }, headingRef) => {
+>(({ question: q, correct, selected, timeTakenMs, onOpenMedia, inline, sessionId }, headingRef) => {
   const result = selected === null ? "omitted" : selected === correct ? "correct" : "wrong";
   const Icon = result === "correct" ? CheckCircle2 : result === "wrong" ? XCircle : MinusCircle;
   const title = result === "correct" ? "Correct" : result === "wrong" ? "Incorrect" : "Omitted";
@@ -86,6 +89,8 @@ const AnswerReview = forwardRef<
           {q.subject && <span className="qb-chip">{q.subject}</span>}
         </div>
       )}
+
+      <ReportQuestion questionId={q.id} sessionId={sessionId} />
     </section>
   );
 });
