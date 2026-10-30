@@ -906,6 +906,19 @@ export type Database = {
         Args: { p_generation_id: string }
         Returns: Json
       }
+      report_question: {
+        Args: {
+          p_question: string
+          p_reason: string
+          p_note?: string | null
+          p_session?: string | null
+        }
+        Returns: Json
+      }
+      get_qbank_review_queue: {
+        Args: Record<PropertyKey, never>
+        Returns: Json
+      }
     }
     Enums: {
       [_ in never]: never

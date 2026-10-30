@@ -459,17 +459,60 @@ function checkLeadIn(q: CheckableQuestion, findings: QaFinding[]): void {
  *
  * A warn, not a block, because the prompt deliberately encourages low-stakes
  * honesty here ("buzzword from memory, unconfirmed"). Blocking would teach the
- * model to stop flagging, which costs more than it saves.
+ * model to stop flagging, which costs more than it saves. An ordinary flag is
+ * settled downstream instead: the edge function sends every flagged item that
+ * survives the gate and the blind read to a fact check (qbank-verify
+ * checkWriterFlag), and holds it back unless the check confirms the key.
+ *
+ * The exception is a writer reporting a fault in its own item. Measured on the
+ * live table (2026-10-30): flags such as "CRITICAL: correctOption is wrong" and
+ * "options a and b are identical duplicates" were stored as warns and stopped
+ * only because another rule happened to fire on the same item. An item its own
+ * author says is broken is not a judgement call, so that is a block.
  */
 function checkReviewerFlag(q: CheckableQuestion, findings: QaFinding[]): void {
   const flag = (q.reviewerFlag ?? "").trim();
   if (!flag || /^none\.?$/i.test(flag)) return;
+
+  if (isCriticalFlag(flag)) {
+    findings.push({
+      rule: "writer-critical",
+      severity: "block",
+      detail: `The writer reported a fault in its own item: ${flag}`,
+    });
+    return;
+  }
 
   findings.push({
     rule: "writer-flagged",
     severity: "warn",
     detail: `The writer flagged this item: ${flag}`,
   });
+}
+
+/**
+ * The self-reports that mean the item is broken rather than uncertain: a key
+ * the writer says is wrong, options it says are duplicates, or an explicit
+ * instruction to regenerate. Patterns, not a keyword list — "critical" alone
+ * appears in ordinary medicine ("critical aortic stenosis"), so it counts only
+ * as the flag's opening word, which is how the writer uses it as a label.
+ */
+const CRITICAL_FLAG_PATTERNS: RegExp[] = [
+  /^\W*critical\b\s*[:\-–—]/i,
+  /\bcorrect\s*option\s+is\s+(?:wrong|incorrect|inconsistent|mis-?keyed)\b/i,
+  /\b(?:answer\s+)?key\s+is\s+(?:wrong|incorrect)\b/i,
+  /\boptions?\s+[a-e]\s+and\s+[a-e]\s+are\s+(?:identical|duplicates?|the same)\b/i,
+  /\b(?:must|should|needs\s+to)\s+be\s+regenerated\b/i,
+];
+
+export function isCriticalFlag(flag: string): boolean {
+  return CRITICAL_FLAG_PATTERNS.some((p) => p.test(flag));
+}
+
+/** True when the writer raised any concern at all — the fact check's trigger. */
+export function hasWriterFlag(flag: string | undefined | null): boolean {
+  const trimmed = (flag ?? "").trim();
+  return !!trimmed && !/^none\.?$/i.test(trimmed);
 }
 
 /** Checks one question against every self-contained rule. */

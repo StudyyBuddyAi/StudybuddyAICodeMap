@@ -1,4 +1,5 @@
 import { sameTopic, normaliseTopic } from "@/lib/topic-match";
+import { REVIEW_SET_SYSTEM } from "@/lib/qbank-review-queue";
 
 /**
  * The Library's unit is the topic, not the tool.
@@ -33,6 +34,8 @@ export interface LibraryCard {
 export interface LibraryQBankSet {
   id: string;
   topic: string | null;
+  /** A mixed set: several topics, no single one to file it under. */
+  mixed?: boolean;
   system: string;
   score: number;
   total: number;
@@ -168,6 +171,12 @@ export function buildLibraryTopics(
     if (!b.titles.some((t) => t.text === topic)) b.titles.push({ text: topic, weight: 2 });
   }
   for (const set of input.sets) {
+    // A review set re-sits questions from many topics, each already counted
+    // under its own; filed by its system label it would invent a "Review" topic.
+    if (!set.topic?.trim() && set.system === REVIEW_SET_SYSTEM) continue;
+    // Likewise a mixed set: its score belongs to several topics at once, and
+    // filing it under its "A · B" label would invent a topic nobody studied.
+    if (set.mixed) continue;
     const topic = set.topic?.trim() || set.system;
     if (!topic) continue;
     const b = bucketFor(buckets, topic);

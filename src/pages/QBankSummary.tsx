@@ -14,6 +14,8 @@ import PageLoader from "@/components/PageLoader";
 import { StatusIcon } from "@/components/qbank/ItemNavigator";
 import "@/components/qbank/exam.css";
 import { useQBankContext } from "@/contexts/QBankContext";
+import { useUsageLimit } from "@/hooks/use-usage-limit";
+import { REVIEW_SET_SYSTEM } from "@/lib/qbank-review-queue";
 import { supabase } from "@/integrations/supabase/client";
 import type { PlayMode, Question, QuestionMedia, SessionAnnotations, SessionAnswer } from "@/lib/qbank-types";
 import { CHALLENGE_LABELS, EXAM_MODE_LABELS, TIMED_SECONDS_PER_QUESTION } from "@/lib/qbank-types";
@@ -141,7 +143,7 @@ const GenerationReportPanel = ({ report }: { report: GenerationReport }) => {
       <p style={{ fontSize: 14, lineHeight: 1.7, color: "var(--fg-muted)", marginTop: 10 }}>
         {report.written} question{report.written === 1 ? "" : "s"} written,{" "}
         {report.admitted} kept
-        {heldBack > 0 ? `, ${heldBack} held back and rewritten` : ""}.
+        {heldBack > 0 ? `, ${heldBack} held back and replaced` : ""}.
         {askedFor}
         {mix.length > 0 && ` Reasoning: ${mix.map((m) => `${REASONING_LABELS[m.order] ?? m.order} ${m.n}`).join(", ")}.`}
       </p>
@@ -202,6 +204,7 @@ const QBankSummary = () => {
   const [searchParams] = useSearchParams();
   const sessionId = searchParams.get("session");
 
+  const { qbankRemaining } = useUsageLimit();
   const {
     lastSummary,
     startGeneratedSession,
@@ -215,6 +218,8 @@ const QBankSummary = () => {
   const [report, setReport] = useState<GenerationReport | null>(null);
   const [sessionMode, setSessionMode] = useState<PlayMode>(lastMode);
   const [filter, setFilter] = useState<Filter>("all");
+  /** A re-sit from the review queue: it has no single topic to write more of. */
+  const [isReviewSet, setIsReviewSet] = useState(false);
 
   const [summaryData, setSummaryData] = useState<SummaryData | null>(null);
   const [summaryFlaggedIds, setSummaryFlaggedIds] = useState<Set<string>>(new Set());
@@ -243,7 +248,7 @@ const QBankSummary = () => {
           // student's own marks are on the session row, which they can read.
           const [{ data, error }, marks] = await Promise.all([
             supabase.rpc("get_session_review", { p_session: sessionId }),
-            supabase.from("qbank_sessions").select("annotations").eq("id", sessionId).maybeSingle(),
+            supabase.from("qbank_sessions").select("annotations, system").eq("id", sessionId).maybeSingle(),
           ]);
           if (cancelled) return;
           if (error) {
@@ -323,6 +328,7 @@ const QBankSummary = () => {
             };
             setSummaryData(loaded);
             setSummaryFlaggedIds(flagSet);
+            setIsReviewSet(marks.data?.system === REVIEW_SET_SYSTEM);
             loadSummary(loaded);
             setLoading(false);
             return;
@@ -438,12 +444,17 @@ const QBankSummary = () => {
 
   const avgMs = answers.length > 0 ? answers.reduce((s, a) => s + (a.time_taken_ms ?? 0), 0) / answers.length : 0;
 
-  const difficultyBreakdown = ["Easy", "Medium", "Hard"]
-    .map((diff) => {
-      const qs = rows.filter((r) => r.q.difficulty === diff);
-      return { diff, correct: qs.filter((r) => r.status === "correct").length, total: qs.length };
+  // By discipline rather than by difficulty. The difficulty column is the
+  // writer's own label, and measured against real answers it carried no
+  // signal — students scored 41% on "Easy" and 57% on "Hard" (live data,
+  // 2026-10-30; docs/qbank/research-2026-10.md). The discipline is a fact
+  // about the question, so a weak row here means something.
+  const disciplineBreakdown = [...new Set(rows.map((r) => r.q.domain).filter(Boolean))]
+    .map((domain) => {
+      const qs = rows.filter((r) => r.q.domain === domain);
+      return { domain, correct: qs.filter((r) => r.status === "correct").length, total: qs.length };
     })
-    .filter((d) => d.total > 0);
+    .sort((a, b) => b.total - a.total || a.domain.localeCompare(b.domain));
 
   const counts: Record<Filter, number> = {
     all: rows.length,
@@ -471,14 +482,16 @@ const QBankSummary = () => {
       // A set opened by id (after a reload, or from history) has no
       // generation in memory: repeat it from what its questions cover, at the
       // same size, rather than dropping the student at an empty generator.
-      const retryTopic = lastGeneration?.topic ?? summaryData?.questions.find((q) => q.topic)?.topic ?? null;
+      // A mixed set repeats as the same mix, not as its "A · B" label.
+      const retryTopic: string | string[] | null =
+        lastGeneration?.topics ?? lastGeneration?.topic ?? summaryData?.questions.find((q) => q.topic)?.topic ?? null;
       if (!retryTopic) {
         navigate("/qbank");
         return;
       }
       const id = await startGeneratedSession(
         retryTopic,
-        lastGeneration?.target ?? Math.max(summaryData?.total ?? 0, 5),
+        againSize,
         lastGeneration?.challenge ?? "balanced",
         lastGeneration?.examMode ?? "step1",
         sessionMode
@@ -500,6 +513,9 @@ const QBankSummary = () => {
   };
 
   const missed = score.incorrect + score.omitted;
+  // The same size again, inside a free account's allowance for today.
+  const wantedAgain = lastGeneration?.target ?? Math.max(summaryData?.total ?? 0, 5);
+  const againSize = qbankRemaining === null ? wantedAgain : Math.min(wantedAgain, qbankRemaining);
   const filters: { id: Filter; label: string }[] = [
     { id: "all", label: "All" },
     { id: "incorrect", label: "Incorrect" },
@@ -579,13 +595,13 @@ const QBankSummary = () => {
             </div>
           </dl>
 
-          {difficultyBreakdown.length > 0 && (
+          {disciplineBreakdown.length > 1 && (
             <div className="mt-5 pt-5" style={{ borderTop: "1px solid var(--border)" }}>
-              <h3 style={{ ...H2_STYLE, fontSize: 14, marginBottom: 10 }}>By difficulty</h3>
+              <h3 style={{ ...H2_STYLE, fontSize: 14, marginBottom: 10 }}>By discipline</h3>
               <ul className="grid gap-2.5">
-                {difficultyBreakdown.map(({ diff, correct, total: t }) => (
-                  <li key={diff} className="grid items-center gap-3" style={{ gridTemplateColumns: "5.5rem 1fr 4.5rem" }}>
-                    <span style={{ fontSize: 14 }}>{diff}</span>
+                {disciplineBreakdown.map(({ domain, correct, total: t }) => (
+                  <li key={domain} className="grid items-center gap-3" style={{ gridTemplateColumns: "minmax(5.5rem, 10rem) 1fr 4.5rem" }}>
+                    <span className="truncate" style={{ fontSize: 14 }}>{domain}</span>
                     <span className="h-2 overflow-hidden rounded-full" style={{ background: "var(--border)" }} aria-hidden>
                       <span
                         className="block h-full rounded-full"
@@ -615,14 +631,29 @@ const QBankSummary = () => {
                 <ListChecks /> Review all
               </button>
             )}
-            <button type="button" className="qb-btn qb-btn--outline qb-btn--lg" onClick={handleTryAgain} disabled={retrying}>
-              <RotateCcw />
-              {retrying ? "Writing…" : `Another ${lastGeneration?.target ?? Math.max(summaryData?.total ?? 0, 5)} on this topic`}
-            </button>
+            {againSize > 0 && !isReviewSet && (
+              <button type="button" className="qb-btn qb-btn--outline qb-btn--lg" onClick={handleTryAgain} disabled={retrying}>
+                <RotateCcw />
+                {retrying
+                  ? "Writing…"
+                  : `Another ${againSize} on ${lastGeneration?.topics && lastGeneration.topics.length > 1 ? "these topics" : "this topic"}`}
+              </button>
+            )}
             <button type="button" className="qb-btn qb-btn--lg" onClick={() => navigate("/qbank")}>
               Back to QBank
             </button>
           </div>
+
+          {(score.incorrect > 0 || counts.marked > 0) && (
+            <p style={{ fontSize: 14, lineHeight: 1.6, color: "var(--fg-muted)", marginTop: 12 }}>
+              {score.incorrect > 0 &&
+                `The ${score.incorrect} you missed come${score.incorrect === 1 ? "s" : ""} back in your review queue tomorrow`}
+              {score.incorrect > 0 && counts.marked > 0 ? "; " : ""}
+              {counts.marked > 0 &&
+                `${score.incorrect > 0 ? "the" : "The"} ${counts.marked} you marked ${counts.marked === 1 ? "is" : "are"} there now`}
+              . Retries are free.
+            </p>
+          )}
         </section>
 
         <section className="space-y-3" aria-labelledby="qb-questions-title">
@@ -674,9 +705,7 @@ const QBankSummary = () => {
                             <Flag className="qb-flag" aria-hidden /> Marked
                           </span>
                         )}
-                        <span style={{ color: "var(--fg-muted)" }}>
-                          {q.domain} · {q.difficulty}
-                        </span>
+                        <span style={{ color: "var(--fg-muted)" }}>{q.domain}</span>
                       </span>
                       <span className="block truncate" style={{ fontSize: 14, color: "var(--fg-muted)", marginTop: 2 }}>
                         {stemSnippet}

@@ -31,6 +31,8 @@ export const RULE_LABELS: Record<string, string> = {
   "missing-distractor-explanation": "A distractor went unexplained",
   "distractor-explains-key": "The item contradicted its own answer",
   "writer-flagged": "The writer raised a concern",
+  "writer-critical": "The writer reported a fault in its own question",
+  "flag-unconfirmed": "A fact check could not clear the writer's doubt",
 };
 
 /**

@@ -1,6 +1,7 @@
 import { callQbankGenerate } from "./callQbankGenerate";
 import { parsePartialQuestions } from "./parse-partial-questions";
 import { DISPUTED_REASON } from "./qbank-rule-labels";
+import { firstItemStage, type WritingStage } from "./qbank-writing-stage";
 import type { GeneratedQuestionDraft } from "./qbank-types";
 
 /**
@@ -99,6 +100,24 @@ export interface HeldBackItem {
   reason: string;
 }
 
+/**
+ * One row of the set's plan, as the waiting screen may show it: the topic and
+ * the reasoning steps. Deliberately not the plan row itself, which also names
+ * the letter the answer will be moved to.
+ */
+export interface BlueprintRow {
+  index: number;
+  reasoningOrder: string;
+  focus: string | null;
+}
+
+/** Where the writer is with the wave's first question. Never derived from content. */
+export interface WritingProgress {
+  stage: WritingStage;
+  /** Characters streamed so far in this wave — a size, not a text. */
+  chars: number;
+}
+
 export interface GenerationProgress {
   delivered: number;
   /** Written and paid for, but withheld by the gate or the second read. */
@@ -117,6 +136,8 @@ export interface GenerationProgress {
   nextIndex: number;
   /** Subtopics covered so far, so a resumed run keeps the duplication guard. */
   covered: string[];
+  /** A mixed set: each topic's system, once routed, for the waves after. */
+  systems: (string | null)[] | null;
 }
 
 export interface GenerationOutcome {
@@ -130,18 +151,38 @@ export interface GenerationOutcome {
   systemName: string | null;
   /** Set for "failed", and for "short" when a reason is known. */
   error: string | null;
+  /**
+   * The run stopped because a free account used its daily allowance. Not a
+   * failure to retry: "write the remaining" would only be refused again, so
+   * the player offers Pro instead.
+   */
+  capReached?: boolean;
 }
 
 export interface RunGenerationOptions {
   topic: string;
+  /** A mixed set's topics; `topic` is then their label. */
+  topics?: string[];
+  /** Resuming or pre-routed: each topic's system, aligned with `topics`. */
+  systems?: (string | null)[] | null;
   target: number;
   generationId: string;
   signal: AbortSignal;
   waveSize?: number;
   /** Injected in tests. Defaults to the real edge-function call. */
   call?: typeof callQbankGenerate;
-  /** The resolved system and model, once the first wave reports them. */
-  onMeta?: (meta: { systemName: string; model: string }) => void;
+  /**
+   * The resolved system and model once the first wave reports them, with the
+   * set's blueprint and per-topic systems when the frame carries them.
+   */
+  onMeta?: (meta: {
+    systemName: string;
+    model: string;
+    blueprint?: BlueprintRow[];
+    focuses?: { topic: string; systemName: string }[];
+  }) => void;
+  /** The first question's stage as it is written, for the waiting screen. */
+  onWriting?: (progress: WritingProgress) => void;
   /** In-flight drafts for the progress display. Never rendered as questions. */
   onDrafts?: (drafts: GeneratedQuestionDraft[]) => void;
   /** Awaited, so the first question can start a session before the next lands. */
@@ -180,11 +221,15 @@ interface WaveResult {
   subtopics: string[];
   system: string | null;
   systemName: string | null;
+  /** A mixed set's per-topic systems, as the server routed them. */
+  systems: (string | null)[] | null;
   streamError: string | null;
   /** Non-retryable. Ends the whole run rather than the wave. */
   fatal: string | null;
   /** The wave closed with a waveComplete frame — proof the server speaks this protocol. */
   completed: boolean;
+  /** Refused because the account's daily allowance is used up. Always fatal. */
+  capReached: boolean;
 }
 
 /** Shown when the server cannot write this set at all; the cause goes to the console. */
@@ -211,6 +256,8 @@ const isAbort = (err: unknown) =>
 async function runWave(
   params: {
     topic: string;
+    topics?: string[];
+    systems?: (string | null)[] | null;
     count: number;
     generationId: string;
     system: string | null;
@@ -231,9 +278,11 @@ async function runWave(
     subtopics: [],
     system: params.system,
     systemName: null,
+    systems: params.systems ?? null,
     streamError: null,
     fatal: null,
     completed: false,
+    capReached: false,
   };
 
   // A stall watchdog layered over the caller's signal, so a hung upstream ends
@@ -249,6 +298,17 @@ async function runWave(
   };
 
   let drafts: GeneratedQuestionDraft[] = [];
+  // Reported on a change of stage, or every ~400 characters within one.
+  let lastStage: WritingStage | null = null;
+  let lastChars = 0;
+  const reportWriting = (content: string) => {
+    if (!opts.onWriting) return;
+    const stage = firstItemStage(content, drafts.length);
+    if (stage === lastStage && content.length - lastChars < 400) return;
+    lastStage = stage;
+    lastChars = content.length;
+    opts.onWriting({ stage, chars: content.length });
+  };
   // Whether the wave closed the way this client's protocol says it should. A
   // stream that ends cleanly without ever sending one is not a failed wave, it
   // is a server that does not speak this protocol — see the check below.
@@ -259,6 +319,9 @@ async function runWave(
     const response = await call(
       {
         topic: params.topic,
+        ...(params.topics && params.topics.length > 1
+          ? { topics: params.topics, ...(params.systems ? { systems: params.systems } : {}) }
+          : {}),
         count: params.count,
         generationId: params.generationId,
         system: params.system ?? undefined,
@@ -273,6 +336,14 @@ async function runWave(
     if (!response.ok || !response.body) {
       const body = await response.json().catch(() => null);
       const message = body?.error ?? `Generation failed (${response.status})`;
+      // The free allowance is spent. A 429 is otherwise a rate limit worth
+      // retrying, so this is told apart by its code, not its status.
+      if (body?.code === "daily_cap") {
+        result.fatal = message;
+        result.capReached = true;
+        result.streamError = message;
+        return result;
+      }
       // 401, 400 and 422 will fail identically however many times they are
       // retried: an expired token, a malformed request or a topic the router
       // declined as not medical is not a transient condition.
@@ -310,13 +381,33 @@ async function runWave(
 
         const meta = parsed.__meta as Record<string, unknown> | undefined;
         if (meta) {
+          if (Array.isArray(meta.systems)) {
+            result.systems = meta.systems.map((x) => (typeof x === "string" ? x : null));
+          }
           if (typeof meta.systemName === "string") {
             result.systemName = meta.systemName;
             if (typeof meta.system === "string") result.system = meta.system;
+            // Only the topic and the reasoning steps leave this function; the
+            // plan rows also carry the letter each answer will sit on.
+            const blueprint = Array.isArray(meta.plan)
+              ? (meta.plan as Record<string, unknown>[]).map((row) => ({
+                  index: Number(row.index) || 0,
+                  reasoningOrder: typeof row.reasoningOrder === "string" ? row.reasoningOrder : "",
+                  focus: typeof row.focus === "string" ? row.focus : null,
+                }))
+              : undefined;
+            const focuses = Array.isArray(meta.focuses)
+              ? (meta.focuses as Record<string, unknown>[])
+                  .filter((x) => typeof x.topic === "string")
+                  .map((x) => ({ topic: x.topic as string, systemName: typeof x.systemName === "string" ? x.systemName : "" }))
+              : undefined;
             opts.onMeta?.({
               systemName: meta.systemName,
               model: typeof meta.model === "string" ? meta.model : "",
+              ...(blueprint ? { blueprint } : {}),
+              ...(focuses ? { focuses } : {}),
             });
+            reportWriting(content);
           }
 
           // The server re-ran a wave that had produced nothing. The partial JSON
@@ -326,6 +417,8 @@ async function runWave(
             content = "";
             drafts = [];
             opts.onDrafts?.([]);
+            lastStage = null;
+            reportWriting(content);
             continue;
           }
 
@@ -358,6 +451,9 @@ async function runWave(
             }
             if (typeof summary.system === "string") result.system = summary.system;
             if (typeof summary.systemName === "string") result.systemName = summary.systemName;
+            if (Array.isArray(summary.systems)) {
+              result.systems = summary.systems.map((x) => (typeof x === "string" ? x : null));
+            }
             if (typeof summary.streamError === "string") result.streamError = summary.streamError;
 
             /**
@@ -397,6 +493,7 @@ async function runWave(
           content += delta;
           drafts = parsePartialQuestions(content);
           opts.onDrafts?.(drafts);
+          reportWriting(content);
         }
       }
     }
@@ -474,6 +571,7 @@ export async function runQbankGeneration(
   let emptyStreak = 0;
   let nextIndex = Math.max(1, Math.round(opts.startIndex ?? 1));
   let system: string | null = opts.system ?? null;
+  let systems: (string | null)[] | null = opts.systems ?? null;
   let systemName: string | null = null;
   let lastError: string | null = null;
   const covered = new Set<string>(opts.alreadyCovered ?? []);
@@ -498,6 +596,8 @@ export async function runQbankGeneration(
         wave = await runWave(
           {
             topic: opts.topic,
+            topics: opts.topics,
+            systems,
             count: want,
             generationId: opts.generationId,
             system,
@@ -517,6 +617,15 @@ export async function runQbankGeneration(
         lastError = err instanceof Error ? err.message : String(err);
       }
 
+      if (wave?.capReached) {
+        // A set the allowance cut short is short, not failed: what it already
+        // delivered is a playable set.
+        return {
+          status: delivered > 0 ? "short" : "failed",
+          delivered, heldBack, heldBackItems, target, waves, systemName,
+          error: wave.fatal, capReached: true,
+        };
+      }
       if (wave?.fatal) {
         return { status: "failed", delivered, heldBack, heldBackItems, target, waves, systemName, error: wave.fatal };
       }
@@ -540,6 +649,7 @@ export async function runQbankGeneration(
 
     if (wave.completed) serverProven = true;
     system = wave.system ?? system;
+    systems = wave.systems ?? systems;
     systemName = wave.systemName ?? systemName;
     if (wave.streamError) lastError = wave.streamError;
     wave.subtopics.forEach((s) => covered.add(s));
@@ -563,6 +673,7 @@ export async function runQbankGeneration(
       systemName,
       nextIndex,
       covered: [...covered],
+      systems,
     });
   }
 

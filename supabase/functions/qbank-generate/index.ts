@@ -7,20 +7,27 @@ import {
   cortiComplete,
 } from "../_shared/corti.ts";
 import {
-  QBANK_SYSTEM_PROMPTS,
   SYSTEM_ROUTER_PROMPT,
   SYSTEM_NAMES,
   SYSTEM_KEYS,
   buildBatchPlan,
   buildUserMessage,
+  systemPromptFor,
   asChallengeLevel,
   asExamMode,
   type BatchPlan,
+  type PlanFocus,
   type SystemKey,
 } from "../_shared/qbank-prompt.ts";
 import { prepareBatch, persistOne, type PersistInput } from "../_shared/qbank-persist.ts";
-import { verifyOne, type VerificationResult } from "../_shared/qbank-verify.ts";
-import type { QaResult } from "../_shared/qbank-qa.ts";
+import {
+  verifyOne,
+  checkWriterFlag,
+  type FlagCheckResult,
+  type VerificationResult,
+} from "../_shared/qbank-verify.ts";
+import { hasWriterFlag, type QaResult } from "../_shared/qbank-qa.ts";
+import { FREE_DAILY_QBANK_QUESTIONS, QBANK_USAGE_KIND } from "../_shared/qbank-allowance.ts";
 
 /**
  * On-demand QBank generation — one wave of a set.
@@ -96,6 +103,15 @@ const MAX_WAVE_COUNT = 8;
 const DEFAULT_COUNT = 5;
 
 /**
+ * A mixed set's topics. The composer lets a student name up to five; an exam
+ * block assembled from the curriculum carries up to twenty, but those arrive
+ * with their systems already resolved, so the router is never asked about
+ * more than MAX_ROUTED_TOPICS at once.
+ */
+const MAX_FOCUSES = 20;
+const MAX_ROUTED_TOPICS = 5;
+
+/**
  * Output ceiling for one wave. Far above the ~7.9k a full wave uses, so a wave
  * is never silently truncated mid-question.
  */
@@ -161,6 +177,16 @@ serve(async (req) => {
 
   const startedAt = Date.now();
 
+  /**
+   * A free account's reservation for this wave, and the hand-back of whatever
+   * it does not deliver. Declared out here so every exit — an upstream that
+   * never answered, a stream that died, an unhandled throw — can release it.
+   * Idempotent: the first call settles it.
+   */
+  let reservation: { granted: number; date: string; remainingAfter: number } | null = null;
+  let delivered = 0;
+  let releaseReservation: () => Promise<number> = () => Promise.resolve(0);
+
   try {
     // ── JWT verification ─────────────────────────────────────────────────────
     const authHeader = req.headers.get("Authorization") ?? "";
@@ -175,12 +201,32 @@ serve(async (req) => {
     if (authError || !user) return json({ error: "invalid_token" }, 401);
 
     const body = await req.json();
-    const topic = body?.topic;
     const generationId = body?.generationId;
-    const requestedSystem = body?.system;
 
-    if (!topic || typeof topic !== "string" || !topic.trim()) {
+    // One topic, or a mixed set of several. `topics` is the mixed shape;
+    // `topic` is what every earlier client sends, and still means one topic.
+    // De-duplicated without regard to case, in the order given.
+    const rawTopics: unknown[] =
+      Array.isArray(body?.topics) && body.topics.length > 0 ? body.topics : [body?.topic];
+    const rawSystems: unknown[] = Array.isArray(body?.systems) ? body.systems : [body?.system];
+    const topics: string[] = [];
+    const givenSystems: (SystemKey | null)[] = [];
+    rawTopics.forEach((t, i) => {
+      if (typeof t !== "string" || !t.trim()) return;
+      const clean = t.trim().slice(0, 300);
+      if (topics.some((x) => x.toLowerCase() === clean.toLowerCase())) return;
+      topics.push(clean);
+      givenSystems.push(SYSTEM_KEYS.includes(rawSystems[i] as SystemKey) ? (rawSystems[i] as SystemKey) : null);
+    });
+
+    if (topics.length === 0) {
       return json({ error: "Topic is required" }, 400);
+    }
+    if (topics.length > MAX_FOCUSES) {
+      return json({ error: `A set can mix at most ${MAX_FOCUSES} topics.`, code: "too_many_topics" }, 400);
+    }
+    if (givenSystems.filter((g) => g === null).length > MAX_ROUTED_TOPICS) {
+      return json({ error: `Pick at most ${MAX_ROUTED_TOPICS} topics for one set.`, code: "too_many_topics" }, 400);
     }
     // The generation id is the client's, and it is the only thread tying a row
     // back to the set it belongs to. Without one a question could be written and
@@ -191,12 +237,20 @@ serve(async (req) => {
     }
 
     const requested = Number(body?.count) || DEFAULT_COUNT;
-    const waveCount = Math.min(Math.max(1, Math.round(requested)), MAX_WAVE_COUNT);
-    const cleanTopic = topic.trim().slice(0, 300);
-    const rejection = validateTopic(cleanTopic);
-    if (rejection) {
-      return json({ error: topicRejectionMessage(rejection), code: "invalid_topic" }, 400);
+    // Not const: a free account's wave is trimmed to what it has left today.
+    let waveCount = Math.min(Math.max(1, Math.round(requested)), MAX_WAVE_COUNT);
+    for (const t of topics) {
+      const rejection = validateTopic(t);
+      if (rejection) {
+        const message = topicRejectionMessage(rejection);
+        return json(
+          { error: topics.length > 1 ? `“${t}”: ${message}` : message, code: "invalid_topic" },
+          400
+        );
+      }
     }
+    // The label the set is stored and logged under.
+    const cleanTopic = topics.join(" · ");
     const waveStart = Math.max(1, Math.round(Number(body?.startIndex) || 1));
 
     // Capped and de-duplicated: this goes into the prompt, and a set that has
@@ -224,20 +278,36 @@ serve(async (req) => {
       return json({ error: "Question generation is not configured" }, 500);
     }
 
-    const routed = SYSTEM_KEYS.includes(requestedSystem)
-      ? { system: requestedSystem as SystemKey, confidence: null }
-      : await resolveSystem(config, cleanTopic);
-    if (routed.notMedical) {
-      log("topic_declined", { topicLength: cleanTopic.length });
+    // Each topic routed on its own, in parallel — a mixed set's topics can sit
+    // in different systems, and each item is written against its own brief.
+    // Later waves pass the systems back, so the brief never changes mid-set.
+    const routedList = await Promise.all(
+      topics.map((t, i) =>
+        givenSystems[i]
+          ? Promise.resolve({ system: givenSystems[i] as SystemKey, confidence: null as number | null })
+          : resolveSystem(config, t)
+      )
+    );
+    const declinedAt = routedList.findIndex((r) => (r as { notMedical?: boolean }).notMedical);
+    if (declinedAt >= 0) {
+      log("topic_declined", { topicLength: topics[declinedAt].length, topicCount: topics.length });
       return json(
         {
-          error: "That doesn't look like a medical topic. Try something like “heart failure” or “DKA”.",
+          error:
+            topics.length > 1
+              ? `“${topics[declinedAt]}” doesn't look like a medical topic. Remove it, or try something like “heart failure”.`
+              : "That doesn't look like a medical topic. Try something like “heart failure” or “DKA”.",
           code: "not_medical_topic",
         },
         422
       );
     }
-    const system = routed.system;
+    const focuses: PlanFocus[] = topics.map((t, i) => ({ topic: t, system: routedList[i].system }));
+    const routed = routedList[0];
+    const system = focuses[0].system;
+    const setSystems = [...new Set(focuses.map((x) => x.system))];
+    // What the set is filed under: its one system, or "Mixed" across several.
+    const setSystemName = setSystems.length > 1 ? "Mixed" : SYSTEM_NAMES[system];
 
     // Unknown or absent values fall back to the default rather than 400ing:
     // the level changes the shape of a set, never whether it can be written.
@@ -246,16 +316,84 @@ serve(async (req) => {
     // the only thing it could have been asking for.
     const examMode = asExamMode(body?.examMode);
 
+    // ── Free-tier allowance ──────────────────────────────────────────────────
+    // Settled after routing, so a declined topic never touches the counter,
+    // and before the plan, because the plan is sized by what was granted.
+    // Reserve the whole wave, release what it does not deliver — see
+    // 20261030000000_qbank_free_daily_cap.sql. Anonymous accounts count as
+    // free: the page needs a sign-in, but the endpoint must not rely on that.
+    const { data: profile } = await authClient
+      .from("profiles")
+      .select("is_pro, pro_expires_at")
+      .eq("id", user.id)
+      .maybeSingle();
+    const isPro =
+      (user as { is_anonymous?: boolean }).is_anonymous !== true &&
+      profile?.is_pro === true &&
+      (!profile.pro_expires_at || new Date(profile.pro_expires_at) > new Date());
+
+    if (!isPro) {
+      const { data: reserved, error: reserveError } = await authClient.rpc("reserve_usage", {
+        p_user: user.id,
+        p_kind: QBANK_USAGE_KIND,
+        p_want: waveCount,
+        p_cap: FREE_DAILY_QBANK_QUESTIONS,
+      });
+      // Fails closed, as medical-notes' quota does: an unreadable counter is
+      // not a licence to generate without one.
+      if (reserveError || !reserved) {
+        log("allowance_failed", { message: reserveError?.message ?? "no result" });
+        return json({ error: "quota_check_failed" }, 500);
+      }
+      const granted = Number(reserved.granted) || 0;
+      if (granted <= 0) {
+        log("allowance_exhausted", { limit: FREE_DAILY_QBANK_QUESTIONS });
+        return json(
+          {
+            error: `You've used today's ${FREE_DAILY_QBANK_QUESTIONS} free questions. They reset at midnight UTC — or go Pro for unlimited sets.`,
+            code: "daily_cap",
+            limit: FREE_DAILY_QBANK_QUESTIONS,
+            remaining: 0,
+          },
+          429
+        );
+      }
+      reservation = { granted, date: String(reserved.date), remainingAfter: Number(reserved.remaining) || 0 };
+      waveCount = Math.min(waveCount, granted);
+
+      let settled = false;
+      releaseReservation = async () => {
+        if (settled || !reservation) return 0;
+        settled = true;
+        const unused = Math.max(0, reservation.granted - delivered);
+        if (unused === 0) return 0;
+        const { error: releaseError } = await authClient.rpc("release_usage", {
+          p_user: user.id,
+          p_kind: QBANK_USAGE_KIND,
+          p_n: unused,
+          p_date: reservation.date,
+        });
+        if (releaseError) {
+          log("allowance_release_failed", { unused, message: releaseError.message });
+          return 0;
+        }
+        return unused;
+      };
+    }
+
     const plan: BatchPlan = buildBatchPlan(
       system,
       waveCount,
       Math.random,
       waveStart,
       challenge,
-      examMode
+      examMode,
+      focuses.length > 1 ? focuses : []
     );
     log("generating", {
       system,
+      topicCount: topics.length,
+      systemCount: setSystems.length,
       confidence: routed.confidence,
       count: waveCount,
       startIndex: waveStart,
@@ -273,8 +411,10 @@ serve(async (req) => {
         maxTokens: MAX_OUTPUT_TOKENS,
         json: true,
         messages: [
-          // Per mode, and static within a mode, so each stays cacheable.
-          { role: "system", content: QBANK_SYSTEM_PROMPTS[examMode] },
+          // Per mode, and static within a mode, so each stays cacheable. A
+          // set holding a Communication & Ethics or Biostatistics item reads
+          // the family variant; every other set the measured baseline.
+          { role: "system", content: systemPromptFor(plan) },
           {
             role: "user",
             content: buildUserMessage({ topic: cleanTopic, plan, avoidSubtopics: avoid }),
@@ -291,6 +431,7 @@ serve(async (req) => {
       // corti_auth_failed comes from the token exchange, which names its own
       // reason — worth separating from a model-side failure in the response.
       const isAuth = message.startsWith("corti_auth_failed");
+      await releaseReservation();
       return json(
         { error: isAuth ? "Question generation is not configured" : "AI service unreachable" },
         isAuth ? 500 : 502
@@ -300,6 +441,7 @@ serve(async (req) => {
     if (!upstream.ok || !upstream.body) {
       const text = await upstream.text().catch(() => "");
       log("upstream_status", { status: upstream.status, bodyLength: text.length });
+      await releaseReservation();
       if (upstream.status === 429) {
         return json({ error: "Rate limit exceeded. Please try again in a moment." }, 429);
       }
@@ -327,6 +469,7 @@ serve(async (req) => {
     let persistedIds: string[] = [];
     let qaResults: QaResult[] = [];
     let verifications: VerificationResult[] = [];
+    let flagChecks: FlagCheckResult[] = [];
     let subtopics: string[] = [];
     let insertFailures = 0;
     /**
@@ -342,6 +485,7 @@ serve(async (req) => {
       system,
       plan,
       topic: cleanTopic,
+      ...(topics.length > 1 ? { topics } : {}),
       model: config.model,
       generationId,
     });
@@ -362,9 +506,14 @@ serve(async (req) => {
      */
     const dispatchReady = (controller: ReadableStreamDefaultController<Uint8Array>) => {
       const prepared = prepareBatch(content, plan);
-      if (prepared.questions.length <= dispatched) return;
+      // Nothing past the plan is written. A model that over-produces would
+      // otherwise hand a free account more than its allowance granted, and
+      // number the extras into the next wave's range (waveStart + i), which
+      // is what claim_generated_questions orders the set by.
+      const usable = Math.min(prepared.questions.length, plan.questions.length);
+      if (usable <= dispatched) return;
 
-      for (let i = dispatched; i < prepared.questions.length; i++) {
+      for (let i = dispatched; i < usable; i++) {
         const question = prepared.questions[i];
         const qaResult = prepared.qa[i];
 
@@ -386,17 +535,43 @@ serve(async (req) => {
             const verdict = await verifyOne(config, question, question.examTrack);
             verifications.push(verdict);
 
+            // An item its writer was unsure of is admitted only if a fact
+            // check clears the doubt. Run last, and only on items still in
+            // play: one the gate blocked or the probe disputed is held back
+            // already, and checking it would be paying to confirm a no. The
+            // block is recorded on the gate's own result so the row's
+            // qaBlocked — what claim_generated_questions filters on — says so.
+            let flagCheck: FlagCheckResult | null = null;
+            if (qaResult && !qaResult.blocked && verdict.agreed && hasWriterFlag(question.reviewerFlag)) {
+              flagCheck = await checkWriterFlag(config, question, question.examTrack);
+              flagChecks.push(flagCheck);
+              if (!flagCheck.confirmed) {
+                qaResult.findings.push({
+                  rule: "flag-unconfirmed",
+                  severity: "block",
+                  detail: `The writer's concern could not be cleared (${flagCheck.verdict})${
+                    flagCheck.note ? `: ${flagCheck.note}` : "."
+                  }`,
+                });
+                qaResult.blocked = true;
+              }
+            }
+
             const { id, error: rowError } = await persistOne(
               authClient,
               user.id,
               persistInput(),
               question,
               qaResult,
-              [verdict]
+              [verdict],
+              flagCheck
             );
 
             if (id) {
               persistedIds.push(id);
+              // What the allowance charges for: committed AND playable — the
+              // same three tests claim_generated_questions applies.
+              if (!qaResult?.blocked && verdict.agreed) delivered++;
             } else {
               insertFailures++;
               if (!insertError) insertError = rowError;
@@ -440,7 +615,7 @@ serve(async (req) => {
         );
       }
 
-      dispatched = prepared.questions.length;
+      dispatched = usable;
     };
 
     /**
@@ -502,7 +677,11 @@ serve(async (req) => {
           frame({
             __meta: {
               system,
-              systemName: SYSTEM_NAMES[system],
+              systemName: setSystemName,
+              // Per topic, in order, so the client can send them back on the
+              // next wave and label each topic with where it routed.
+              systems: focuses.map((x) => x.system),
+              focuses: focuses.map((x) => ({ topic: x.topic, system: x.system, systemName: SYSTEM_NAMES[x.system] })),
               model: config.model,
               examMode,
               plan: plan.questions,
@@ -563,7 +742,9 @@ serve(async (req) => {
             persistedIds = [];
             qaResults = [];
             verifications = [];
+            flagChecks = [];
             subtopics = [];
+            delivered = 0;
             insertFailures = 0;
             insertError = null;
             controller.enqueue(frame({ __meta: { restart: true } }));
@@ -583,6 +764,10 @@ serve(async (req) => {
         const blocked = qaResults.filter((r) => r?.blocked).length;
         const disputed = verifications.filter((v) => !v.agreed).length;
 
+        // Hand back what the wave reserved and did not deliver, before the
+        // summary, so the allowance it reports is the settled one.
+        const released = await releaseReservation();
+
         log("wave_complete", {
           ms: Date.now() - startedAt,
           persisted: persistedIds.length,
@@ -596,6 +781,11 @@ serve(async (req) => {
           insertFailures,
           insertError,
           verifierErrors: verifications.filter((v) => v.error).length,
+          flagChecks: flagChecks.length,
+          flagChecksCleared: flagChecks.filter((f) => f.confirmed).length,
+          flagCheckErrors: flagChecks.filter((f) => f.error).length,
+          delivered,
+          allowanceReleased: released,
         });
 
         controller.enqueue(
@@ -622,9 +812,17 @@ serve(async (req) => {
                 // and the client agree about where the set is.
                 nextIndex: waveStart + waveCount,
                 system,
-                systemName: SYSTEM_NAMES[system],
+                systemName: setSystemName,
+                systems: focuses.map((x) => x.system),
                 subtopics,
                 streamError,
+                // A free account's settled allowance for today; null for Pro.
+                allowance: reservation
+                  ? {
+                      limit: FREE_DAILY_QBANK_QUESTIONS,
+                      remaining: reservation.remainingAfter + released,
+                    }
+                  : null,
               },
               questionIds: persistedIds,
               qa: qaResults,
@@ -650,6 +848,7 @@ serve(async (req) => {
       ms: Date.now() - startedAt,
       message: err instanceof Error ? err.message : String(err),
     });
+    await releaseReservation().catch(() => 0);
     return json({ error: "Internal error" }, 500);
   }
 });

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { checkQuestion, checkBatch } from "./qbank-qa";
+import { checkQuestion, checkBatch, hasWriterFlag, isCriticalFlag } from "./qbank-qa";
 import type { GeneratedQuestionDraft } from "./qbank-types";
 
 /** A clean item: every mechanical check should pass on it. */
@@ -326,6 +326,40 @@ describe("checkQuestion", () => {
     // A flag is a reviewer's problem, not a reason to withhold the item.
     expect(checkQuestion(flagged).blocked).toBe(false);
     expect(rules(draft({ reviewerFlag: "None." }))).not.toContain("writer-flagged");
+  });
+
+  // Real flags from the live table (2026-10-30). Each reached the table as a
+  // warn and was stopped only because another rule fired on the same item.
+  it.each([
+    "CRITICAL: correctOption is wrong. The explanation and all distractor logic identify the ambulatory external monitor for two weeks (option d) as the answer",
+    "CRITICAL: options b and c are identical duplicates, violating the rule on five distinct options.",
+    "CRITICAL: correctOption is inconsistent. The explanation and distractor analysis clearly identify IV furosemide (option c)",
+    "Options a and b are identical duplicates — the item must be regenerated before use.",
+    "The answer key is wrong: option c is correct per the explanation.",
+  ])("blocks a writer reporting a fault in its own item: %s", (reviewerFlag) => {
+    const result = checkQuestion(draft({ reviewerFlag }));
+    expect(result.findings.map((f) => f.rule)).toContain("writer-critical");
+    expect(result.findings.map((f) => f.rule)).not.toContain("writer-flagged");
+    expect(result.blocked).toBe(true);
+  });
+
+  it.each([
+    "Guideline from memory, unconfirmed — AASLD surveillance criteria for HBV carriers should be verified.",
+    "Critical aortic stenosis threshold quoted from memory; reviewer to verify.",
+    "Some references teach bedside echo before pericardiocentesis even in unstable patients.",
+  ])("keeps an ordinary doubt as a warn for the fact check: %s", (reviewerFlag) => {
+    const result = checkQuestion(draft({ reviewerFlag }));
+    expect(result.findings.map((f) => f.rule)).toContain("writer-flagged");
+    expect(result.blocked).toBe(false);
+  });
+
+  it("knows a flag from no flag", () => {
+    expect(hasWriterFlag("None.")).toBe(false);
+    expect(hasWriterFlag(" none ")).toBe(false);
+    expect(hasWriterFlag("")).toBe(false);
+    expect(hasWriterFlag(undefined)).toBe(false);
+    expect(hasWriterFlag("Buzzword from memory, unconfirmed.")).toBe(true);
+    expect(isCriticalFlag("Critical aortic stenosis is the tested lesion.")).toBe(false);
   });
 });
 

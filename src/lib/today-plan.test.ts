@@ -23,6 +23,23 @@ describe("buildTodayPlan", () => {
     { now: NOW }
   );
 
+  it("puts QBank retries after the unfinished set, and only for accounts", () => {
+    const plan = buildTodayPlan({
+      topics,
+      dueTotal: 2,
+      unfinished: { id: "u1", topic: "Anatomy", answered: 1, total: 10 },
+      signedIn: true,
+      qbankDue: 7,
+    });
+    expect(plan.map((p) => p.kind).slice(0, 3)).toEqual(["review", "resume", "retry"]);
+    expect(plan[2]).toMatchObject({ title: "Retry 7 QBank questions", target: { kind: "route", to: "/qbank" } });
+
+    const guest = buildTodayPlan({ topics, dueTotal: 0, unfinished: null, signedIn: false, qbankDue: 7 });
+    expect(guest.map((p) => p.kind)).not.toContain("retry");
+    const none = buildTodayPlan({ topics, dueTotal: 0, unfinished: null, signedIn: true, qbankDue: 0 });
+    expect(none.map((p) => p.kind)).not.toContain("retry");
+  });
+
   it("puts due cards first, then the unfinished set, weak spots and next steps", () => {
     const plan = buildTodayPlan({
       topics,

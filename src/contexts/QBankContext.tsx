@@ -22,10 +22,14 @@ import {
   runQbankGeneration,
   MIN_SET_SIZE,
   MAX_SET_SIZE,
+  type BlueprintRow,
   type GenerationOutcome,
   type GenerationStatus,
   type HeldBackItem,
+  type WritingProgress,
 } from "@/lib/qbank-wave-runner";
+import { MAX_REVIEW_SET, REVIEW_SET_SYSTEM } from "@/lib/qbank-review-queue";
+import { REVIEW_QUEUE_KEY } from "@/hooks/use-qbank-review-queue";
 import {
   buildProgressPayload,
   elapsedMs as elapsedAt,
@@ -109,6 +113,19 @@ export interface GenerationState {
   heldBackItems: HeldBackItem[];
   /** Set when the run failed outright, or ended short for a known reason. */
   error: string | null;
+  /**
+   * The run stopped on a free account's daily allowance. The player offers Pro
+   * rather than "write the remaining", which the server would only refuse.
+   */
+  capReached: boolean;
+  /**
+   * For the waiting screen: the set's plan as topics and reasoning steps, each
+   * topic's system, and where the writer is with the first question. None of
+   * it is derived from question content.
+   */
+  blueprint: BlueprintRow[] | null;
+  focuses: { topic: string; systemName: string }[] | null;
+  writing: WritingProgress | null;
 }
 
 interface SessionSummary {
@@ -175,12 +192,21 @@ interface QBankContextValue {
    * being written.
    */
   startGeneratedSession: (
-    topic: string,
+    /** One topic, or a mixed set's topics (up to five from the composer). */
+    topic: string | string[],
     target: number,
     challenge?: ChallengeLevel,
     examMode?: ExamMode,
-    mode?: PlayMode
+    mode?: PlayMode,
+    /** Systems already known for the topics — a curriculum-built block. */
+    opts?: { systems?: (string | null)[] }
   ) => Promise<string>;
+  /**
+   * Re-sits questions from the review queue — the student's own misses and
+   * marks. Nothing is generated, so it never touches the free allowance.
+   * Resolves with the new session's id.
+   */
+  startReviewSession: (questionIds: string[], mode?: PlayMode) => Promise<string>;
   /** Cancels an in-flight set. Whatever landed stays playable. */
   stopGeneration: () => void;
   /**
@@ -727,6 +753,9 @@ export const QBankProvider = ({ children }: { children: ReactNode }) => {
     (cfg: {
       generationId: string;
       topic: string;
+      /** A mixed set's topics; `topic` is then their label. */
+      topics?: string[];
+      systems?: (string | null)[] | null;
       /** Questions this RUN must deliver, which after a resume is the shortfall. */
       remaining: number;
       /** Questions the SET is for, for display. */
@@ -752,6 +781,8 @@ export const QBankProvider = ({ children }: { children: ReactNode }) => {
       const meta: SessionGeneration = {
         generationId: cfg.generationId,
         topic: cfg.topic,
+        ...(cfg.topics && cfg.topics.length > 1 ? { topics: cfg.topics } : {}),
+        ...(cfg.systems ? { systems: cfg.systems } : {}),
         system: cfg.system,
         systemName: cfg.systemName,
         target: cfg.setTarget,
@@ -771,10 +802,16 @@ export const QBankProvider = ({ children }: { children: ReactNode }) => {
         heldBack: heldBackBase,
         heldBackItems: heldBackItemsBase,
         error: null,
+        capReached: false,
+        blueprint: null,
+        focuses: null,
+        writing: null,
       });
 
       const run = runQbankGeneration({
         topic: cfg.topic,
+        topics: cfg.topics,
+        systems: cfg.systems,
         target: cfg.remaining,
         generationId: cfg.generationId,
         signal: controller.signal,
@@ -784,9 +821,25 @@ export const QBankProvider = ({ children }: { children: ReactNode }) => {
         challenge: cfg.challenge,
         examMode: cfg.examMode,
         shouldContinue: () => !controller.signal.aborted,
-        onMeta: ({ systemName }) => {
+        onMeta: ({ systemName, blueprint, focuses }) => {
           meta.systemName = systemName;
-          setGeneration((prev) => (prev ? { ...prev, systemName } : prev));
+          setGeneration((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  systemName,
+                  // The first wave's plan is the one the waiting screen shows.
+                  blueprint: prev.blueprint ?? blueprint ?? null,
+                  focuses: prev.focuses ?? focuses ?? null,
+                }
+              : prev
+          );
+        },
+        onWriting: (writing) => {
+          // Only while nothing is playable yet: once the session is open the
+          // waiting screen is gone, and later waves need not re-render the page.
+          if (ownSessionId) return;
+          setGeneration((prev) => (prev ? { ...prev, writing } : prev));
         },
         onQuestionReady: async (event) => {
           // Withheld questions are not playable: the gate blocked it, the blind
@@ -811,6 +864,7 @@ export const QBankProvider = ({ children }: { children: ReactNode }) => {
           meta.systemName = progress.systemName ?? meta.systemName;
           meta.nextIndex = progress.nextIndex;
           meta.covered = progress.covered;
+          if (progress.systems) meta.systems = progress.systems;
           setGeneration((prev) =>
             prev
               ? {
@@ -844,6 +898,10 @@ export const QBankProvider = ({ children }: { children: ReactNode }) => {
           genRunningRef.current = false;
         }
 
+        // The server counted what this run delivered against the free
+        // allowance; the pages that show it re-read today's usage.
+        queryClient.invalidateQueries({ queryKey: ["usage"] });
+
         heldBackRef.current = heldBackBase + outcome.heldBack;
         heldBackItemsRef.current = [...heldBackItemsBase, ...outcome.heldBackItems];
         setGeneration((prev) =>
@@ -852,6 +910,7 @@ export const QBankProvider = ({ children }: { children: ReactNode }) => {
                 ...prev,
                 status: outcome.status,
                 error: outcome.error,
+                capReached: outcome.capReached ?? false,
                 heldBack: heldBackRef.current,
                 heldBackItems: heldBackItemsRef.current,
                 systemName: outcome.systemName ?? prev.systemName,
@@ -872,25 +931,40 @@ export const QBankProvider = ({ children }: { children: ReactNode }) => {
         return outcome;
       });
     },
-    [claimGenerated]
+    [claimGenerated, queryClient]
   );
 
   const startGeneratedSession = useCallback(
     async (
-      topic: string,
+      topicInput: string | string[],
       target: number,
       challenge: ChallengeLevel = "balanced",
       examMode: ExamMode = "step1",
-      mode: PlayMode = "tutor"
+      mode: PlayMode = "tutor",
+      opts: { systems?: (string | null)[] } = {}
     ): Promise<string> => {
+      // A mixed set is several topics in the order its questions take them;
+      // one topic is the set it has always been. De-duplicated ignoring case.
+      const list = (Array.isArray(topicInput) ? topicInput : [topicInput])
+        .map((t) => t.trim())
+        .filter(Boolean);
+      const topics = list.filter(
+        (t, i) => list.findIndex((x) => x.toLowerCase() === t.toLowerCase()) === i
+      );
+      const topic = topics.join(" · ");
+      const mixed = topics.length > 1;
+      const systems =
+        mixed && opts.systems && opts.systems.length === topics.length ? opts.systems : null;
       stopGeneration();
       sessionIdRef.current = null;
       heldBackRef.current = 0;
       heldBackItemsRef.current = [];
       setReviewIndex(null);
 
+      // Floored at one, not at the smallest picker size: a free account with
+      // three questions left today is offered a set of three.
       const setTarget = Math.min(
-        Math.max(MIN_SET_SIZE, Math.round(target) || MIN_SET_SIZE),
+        Math.max(1, Math.round(target) || MIN_SET_SIZE),
         MAX_SET_SIZE
       );
       const generationId = newGenerationId();
@@ -903,11 +977,12 @@ export const QBankProvider = ({ children }: { children: ReactNode }) => {
       const done = beginGeneration({
         generationId,
         topic,
+        ...(mixed ? { topics, systems } : {}),
         remaining: setTarget,
         setTarget,
         startIndex: 1,
         covered: [],
-        system: null,
+        system: !mixed && opts.systems?.[0] ? opts.systems[0] : null,
         systemName: null,
         challenge,
         examMode,
@@ -946,6 +1021,28 @@ export const QBankProvider = ({ children }: { children: ReactNode }) => {
     [beginGeneration, startSession, stopGeneration]
   );
 
+  const startReviewSession = useCallback(
+    async (questionIds: string[], mode: PlayMode = "tutor"): Promise<string> => {
+      const ids = [...new Set(questionIds)].slice(0, MAX_REVIEW_SET);
+      if (ids.length === 0) throw new Error("Nothing is due for review yet.");
+      // A re-sit replaces whatever was playing, as a new generated set does.
+      stopGeneration();
+      sessionIdRef.current = null;
+      heldBackRef.current = 0;
+      heldBackItemsRef.current = [];
+      setGeneration(null);
+      setReviewIndex(null);
+      return startSession({
+        domains: [],
+        limit: ids.length,
+        questionIds: ids,
+        system: REVIEW_SET_SYSTEM,
+        mode,
+      });
+    },
+    [startSession, stopGeneration]
+  );
+
   const resumeGeneration = useCallback(() => {
     const current = sessionRef.current;
     if (!current?.sessionId || !current.generation) return;
@@ -976,6 +1073,8 @@ export const QBankProvider = ({ children }: { children: ReactNode }) => {
       void beginGeneration({
         generationId: meta.generationId,
         topic: meta.topic,
+        topics: meta.topics,
+        systems: meta.systems ?? null,
         remaining,
         setTarget: meta.target,
         startIndex: meta.nextIndex,
@@ -1132,6 +1231,8 @@ export const QBankProvider = ({ children }: { children: ReactNode }) => {
       }
       queryClient.invalidateQueries({ queryKey: ["qbank-sessions"] });
       queryClient.invalidateQueries({ queryKey: ["qbank-unfinished"] });
+      // What was missed or marked in this set changes what is due.
+      queryClient.invalidateQueries({ queryKey: [REVIEW_QUEUE_KEY] });
     }
 
     // Tutor mode can summarise from memory. A timed set has no grades on the
@@ -1308,6 +1409,7 @@ export const QBankProvider = ({ children }: { children: ReactNode }) => {
         lastMode,
         progress,
         startGeneratedSession,
+        startReviewSession,
         stopGeneration,
         resumeGeneration,
         resumeSession,

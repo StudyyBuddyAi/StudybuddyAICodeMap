@@ -34,12 +34,12 @@ function sseResponse(frames: unknown[]): Response {
 }
 
 /** A Response that never streams — the edge function refusing the request. */
-function errorResponse(status: number, error: string): Response {
+function errorResponse(status: number, error: string, code?: string): Response {
   return {
     ok: false,
     status,
     body: null,
-    json: async () => ({ error }),
+    json: async () => ({ error, ...(code ? { code } : {}) }),
   } as unknown as Response;
 }
 
@@ -85,6 +85,8 @@ interface WaveSpec {
   insertFailures?: number;
   /** The database's reason, as the edge function relays it. */
   insertError?: string;
+  /** A mixed set's per-topic systems, as the server routed them. */
+  systems?: string[];
 }
 
 function waveFrames(spec: WaveSpec, startIndex: number): unknown[] {
@@ -96,6 +98,7 @@ function waveFrames(spec: WaveSpec, startIndex: number): unknown[] {
         model: "corti-s1-instant",
         plan: [],
         startIndex,
+        ...(spec.systems ? { systems: spec.systems } : {}),
       },
     },
   ];
@@ -188,6 +191,117 @@ const baseOpts = () => ({
   onQuestionReady: vi.fn(),
   // Tests must not sit through the real backoff.
   retryBackoffMs: [0, 0],
+});
+
+describe("runQbankGeneration — free daily allowance", () => {
+  const capped = () => errorResponse(429, "You've used today's 10 free questions.", "daily_cap");
+
+  it("stops at once when the allowance is spent, without retrying", async () => {
+    const { call, calls } = fakeCall([capped()]);
+
+    const outcome = await runQbankGeneration({ ...baseOpts(), target: 5, call });
+
+    expect(outcome.status).toBe("failed");
+    expect(outcome.capReached).toBe(true);
+    expect(outcome.error).toContain("10 free questions");
+    // A plain 429 is retried; the allowance is not a transient condition.
+    expect(calls).toHaveLength(1);
+  });
+
+  it("keeps what landed before the allowance ran out, as a short set", async () => {
+    const { call, calls } = fakeCall([{ delivers: 3 }, capped()]);
+
+    const outcome = await runQbankGeneration({ ...baseOpts(), target: 5, call });
+
+    expect(outcome.status).toBe("short");
+    expect(outcome.delivered).toBe(3);
+    expect(outcome.capReached).toBe(true);
+    expect(calls).toHaveLength(2);
+  });
+
+  it("still retries an ordinary rate limit", async () => {
+    const { call, calls } = fakeCall([errorResponse(429, "Rate limit exceeded."), { delivers: 5 }]);
+
+    const outcome = await runQbankGeneration({ ...baseOpts(), target: 5, call });
+
+    expect(outcome.status).toBe("complete");
+    expect(outcome.capReached).toBeFalsy();
+    expect(calls).toHaveLength(2);
+  });
+});
+
+describe("runQbankGeneration — the waiting screen's signals", () => {
+  it("reports the first question's stage from field names, and a blueprint without answer letters", async () => {
+    const item = {
+      index: 1, system: "Renal", domain: "Physiology", subtopic: "RTA", competency: "Foundational Science",
+      difficulty: "Medium", reasoningOrder: "2nd", reasoningChain: "chain",
+      vignette: "A 30-year-old has a low bicarbonate.", leadIn: "Which is most likely?",
+      options: { a: "One", b: "Two", c: "Three", d: "Four", e: "Five" }, correctOption: "b",
+      explanation: "**x**", distractorExplanations: { a: "n", c: "n", d: "n", e: "n" }, teachingPoint: "t",
+    };
+    const doc = JSON.stringify({ batchPlan: { system: "renal" }, questions: [item] });
+    const cut = (key: string) => doc.indexOf(`"${key}"`) + key.length + 4;
+    const pieces = [cut("index"), cut("vignette"), cut("leadIn"), cut("explanation"), doc.length];
+    const deltas = pieces.map((end, i) => doc.slice(i === 0 ? 0 : pieces[i - 1], end));
+
+    const frames: unknown[] = [
+      {
+        __meta: {
+          system: "renal", systemName: "Renal & Urinary", model: "m", startIndex: 1,
+          plan: [{ index: 1, answerLetter: "d", reasoningOrder: "2nd", examTrack: "step1" }],
+        },
+      },
+      ...deltas.map((d) => ({ choices: [{ delta: { content: d } }] })),
+      { __meta: { questionReady: { id: "q1", index: 1, blocked: false, difficulty: "Medium", reasoningOrder: "2nd", agreed: true } } },
+      { __meta: { waveComplete: { requested: 1, persisted: 1, insertFailures: 0, system: "renal", systemName: "Renal & Urinary", subtopics: [] } } },
+    ];
+    const metas: unknown[] = [];
+    const stages: string[] = [];
+
+    await runQbankGeneration({
+      ...baseOpts(),
+      target: 1,
+      call: async () => sseResponse(frames),
+      onMeta: (m) => metas.push(m),
+      onWriting: (w) => stages.push(w.stage),
+    });
+
+    expect(metas[0]).toEqual({ systemName: "Renal & Urinary", model: "m", blueprint: [{ index: 1, reasoningOrder: "2nd", focus: null }] });
+    expect(JSON.stringify(metas)).not.toContain("answerLetter");
+    expect([...new Set(stages)]).toEqual(["planning", "reasoning", "case", "question", "explanation", "checking"]);
+  });
+});
+
+describe("runQbankGeneration — mixed sets", () => {
+  it("sends every topic, then hands the routed systems back on the next wave", async () => {
+    const { call, calls } = fakeCall([
+      { delivers: 5, systems: ["cardiovascular", "renal"] },
+      { delivers: 5, systems: ["cardiovascular", "renal"] },
+    ]);
+    const progress: (string | null)[][] = [];
+
+    const outcome = await runQbankGeneration({
+      ...baseOpts(),
+      topic: "Heart failure · Nephrotic syndrome",
+      topics: ["Heart failure", "Nephrotic syndrome"],
+      target: 10,
+      call,
+      onProgress: (p) => p.systems && progress.push(p.systems),
+    });
+
+    expect(outcome.status).toBe("complete");
+    expect(calls[0].topics).toEqual(["Heart failure", "Nephrotic syndrome"]);
+    expect(calls[0].systems).toBeUndefined();
+    expect(calls[1].systems).toEqual(["cardiovascular", "renal"]);
+    expect(progress.at(-1)).toEqual(["cardiovascular", "renal"]);
+  });
+
+  it("sends a single topic exactly as before", async () => {
+    const { call, calls } = fakeCall([{ delivers: 5 }]);
+    await runQbankGeneration({ ...baseOpts(), target: 5, call });
+    expect(calls[0].topics).toBeUndefined();
+    expect(calls[0].systems).toBeUndefined();
+  });
 });
 
 describe("runQbankGeneration", () => {

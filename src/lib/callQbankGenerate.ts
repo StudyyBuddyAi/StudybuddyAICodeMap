@@ -1,10 +1,28 @@
 import { supabase } from "@/integrations/supabase/client";
 
-const QBANK_GENERATE_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/qbank-generate`;
+// `npm run dev:qbank` runs the handler inside the dev server
+// (scripts/local-functions/vite-plugin.ts). DEV-gated so a stray env var can't
+// point a production build at a route that doesn't exist.
+const QBANK_GENERATE_URL =
+  import.meta.env.DEV && import.meta.env.VITE_LOCAL_QBANK === "1"
+    ? "/__local-fns/qbank-generate"
+    : `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/qbank-generate`;
 
 export interface QbankGenerateParams {
   /** Free text, exactly as the student typed it. Resolved to a system server-side. */
   topic: string;
+  /**
+   * A mixed set: every topic, in the order the questions take them in turn.
+   * Sent alongside `topic` (its label) so an older function still writes
+   * something sensible.
+   */
+  topics?: string[];
+  /**
+   * Each topic's system, aligned with `topics`, once the first wave resolved
+   * them — or up front, for a set assembled from the curriculum. A null asks
+   * the server to route that topic.
+   */
+  systems?: (string | null)[];
   /**
    * Questions in THIS wave, not in the set. Defaults to 5 server-side and is
    * capped at 8 there — a set larger than one wave is several sequential calls.

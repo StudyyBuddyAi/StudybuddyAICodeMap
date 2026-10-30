@@ -16,7 +16,7 @@ export type PlanTarget =
 
 export interface PlanItem {
   id: string;
-  kind: "review" | "resume" | "weak" | "next" | "start";
+  kind: "review" | "resume" | "retry" | "weak" | "next" | "start";
   title: string;
   why: string;
   cta: string;
@@ -39,8 +39,11 @@ export function buildTodayPlan(input: {
   dueTotal: number;
   unfinished: UnfinishedSetInput | null;
   signedIn: boolean;
+  /** QBank questions due back from the review queue (missed or marked). */
+  qbankDue?: number;
 }): PlanItem[] {
   const { topics, dueTotal, unfinished, signedIn } = input;
+  const qbankDue = input.qbankDue ?? 0;
   const items: PlanItem[] = [];
   const used = new Set<string>();
 
@@ -66,6 +69,19 @@ export function buildTodayPlan(input: {
       why: `${unfinished.answered} of ${unfinished.total} answered — pick up at question ${unfinished.answered + 1}.`,
       cta: "Resume",
       target: { kind: "route", to: `/qbank/session?session=${unfinished.id}` },
+    });
+  }
+
+  // Missed questions are back once they are a day old, marked ones at once.
+  // After cards and an unfinished set: it is the same kind of debt, smaller.
+  if (signedIn && qbankDue > 0) {
+    items.push({
+      id: "qbank-retry",
+      kind: "retry",
+      title: `Retry ${qbankDue} QBank question${qbankDue === 1 ? "" : "s"}`,
+      why: "Ones you missed or marked — a day later is when a retry tests what stuck. Free.",
+      cta: "Retry",
+      target: { kind: "route", to: "/qbank" },
     });
   }
 

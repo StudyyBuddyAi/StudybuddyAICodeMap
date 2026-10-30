@@ -1,0 +1,4 @@
+# The Step 1 prompt identity test compares this fixture byte for byte with a
+# template literal, which JavaScript normalises to LF. A CRLF checkout
+# (core.autocrlf=true) made the test fail on Windows with no real change.
+src/lib/__fixtures__/*.txt text eol=lf
