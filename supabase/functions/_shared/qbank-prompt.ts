@@ -77,6 +77,22 @@
  * verbatim, header included — do not reword, retypo or reflow them.
  */
 
+/**
+ * System keys and names live in qbank-systems.ts so the browser can use them
+ * without bundling these prompts; re-exported here for the server modules
+ * that have always imported them from this file.
+ */
+import {
+  SYSTEM_NAMES,
+  SYSTEM_KEYS,
+  FAMILY_KEYS,
+  isFamily,
+  type SystemKey,
+  type FamilyKey,
+} from "./qbank-systems.ts";
+export { SYSTEM_NAMES, SYSTEM_KEYS, FAMILY_KEYS, isFamily };
+export type { SystemKey, FamilyKey };
+
 export type OptionLetter = "a" | "b" | "c" | "d" | "e";
 export type ReasoningOrder = "1st" | "2nd" | "3rd";
 
@@ -123,46 +139,6 @@ export function asChallengeLevel(value: unknown): ChallengeLevel {
     ? (value as ChallengeLevel)
     : DEFAULT_CHALLENGE;
 }
-
-/**
- * System keys. The display names match `curriculum_topics.system` exactly so
- * generated items can be linked to the roadmap later without a mapping table,
- * and so the three systems that already hold curated questions
- * (Cardiovascular / Gastrointestinal / Respiratory) keep their existing
- * `questions.subject` values.
- */
-export type SystemKey =
-  | "cardiovascular"
-  | "respiratory"
-  | "gastrointestinal"
-  | "renal"
-  | "endocrine"
-  | "heme_onc"
-  | "repro"
-  | "msk_derm"
-  | "neuro"
-  | "psych"
-  | "infectious_disease"
-  | "immune"
-  | "peds_dev";
-
-export const SYSTEM_NAMES: Record<SystemKey, string> = {
-  cardiovascular: "Cardiovascular",
-  respiratory: "Respiratory",
-  gastrointestinal: "Gastrointestinal",
-  renal: "Renal & Urinary",
-  endocrine: "Endocrinology",
-  heme_onc: "Hematology & Oncology",
-  repro: "Reproductive & Obstetrics/Gynecology",
-  msk_derm: "Musculoskeletal, Skin & Subcutaneous Tissue",
-  neuro: "Neurology & Neurological Surgery",
-  psych: "Psychiatry & Behavioral Health",
-  infectious_disease: "Infectious Disease",
-  immune: "Blood, Lymphoreticular & Immune System",
-  peds_dev: "Human Development & Pediatrics",
-};
-
-export const SYSTEM_KEYS = Object.keys(SYSTEM_NAMES) as SystemKey[];
 
 /** The domain enum items must use. Mirrors v13's Domain line. */
 export const DOMAINS = [
@@ -765,6 +741,86 @@ export const QBANK_SYSTEM_PROMPTS: Record<ExamMode, string> = {
   mixed: assembleSystemPrompt(MIXED),
 };
 
+// ── Communication & Ethics and Biostatistics ────────────────────────────────
+// The Step 1 prompt's scope is organ-system science only — "Test only:
+// mechanisms…" — and would reject an ethics item outright. Rather than reword
+// that prompt (it is byte-identical to the measured baseline and guarded by
+// the identity test), a set that contains a family item is written against a
+// VARIANT: the same prompt with this addendum after the scope. Sets without
+// one keep the exact baseline prompt.
+
+const FAMILY_STEP1_BULLETS = `- Communication & Ethics: test the ethical principle or the communication skill the physician applies to the patient in the stem — consent and capacity, confidentiality and its exceptions, disclosure of error, surrogates and advance directives, minors, breaking bad news, responding to emotion, boundaries and conflicts of interest, patient safety. The lead-in asks what the physician should say or do; the key is chosen on principle; every distractor is a recognisable wrong instinct — deferring to the family over a capable patient, paternalism, false reassurance, withholding the truth, breaching confidentiality without a duty to.
+- Biostatistics & Epidemiology: test calculation and interpretation — a 2x2 table, predictive values and prevalence, measures of association and effect, number needed to treat, study design and its biases, confounding, hypothesis testing, error and power, confidence intervals. Give every number the reader needs in the stem; make each distractor a specific miscalculation — the inverse ratio, the wrong denominator, the relative difference in place of the absolute one.
+- Options for these items are short, parallel actions or values of comparable length. Vignettes are 4-8 sentences. Set "domain" to "Communication & Ethics" or "Biostatistics & Epidemiology", and "competency" to "Communication and Interpersonal Skills" or "Practice-based Learning & Improvement".`;
+
+const FAMILY_STEP2_BULLETS = `- Communication & Ethics: the legal or ethical decision, the professional action or the patient-safety step the situation calls for — what the physician should say or do next. The key is chosen on principle and on the current standard of professional practice; every distractor is a recognisable wrong instinct.
+- Biostatistics & Epidemiology: interpreting a test result, a trial or a study for the patient or population in the stem, and the decision that follows. Give every number the reader needs; make each distractor a specific misreading.
+- Options are short, parallel actions or values of comparable length. Set "domain" to "Communication & Ethics" or "Biostatistics & Epidemiology", and "competency" to "Professionalism" or "Systems-based Practice & Patient Safety" for an ethics or safety item, and "Practice-based Learning & Improvement" for a statistics item.`;
+
+const FAMILY_SCOPE: Record<ExamMode, string> = {
+  step1: `## Communication & Ethics and Biostatistics items — an exception to the scope above
+
+When the System Brief or a plan row names Communication & Ethics or Biostatistics & Epidemiology, the item is a USMLE Step 1 Social Sciences or Biostatistics item, and for that item the "Test only" and "Never Test" lists above are replaced by this:
+
+${FAMILY_STEP1_BULLETS}
+
+`,
+  step2ck: `## Communication & Ethics and Biostatistics items
+
+When the System Brief or a plan row names Communication & Ethics or Biostatistics & Epidemiology, the item tests the physician task that family covers rather than an organ-system decision:
+
+${FAMILY_STEP2_BULLETS}
+
+`,
+  mixed: `## Communication & Ethics and Biostatistics items — an exception to the track scopes above
+
+When the System Brief or a plan row names Communication & Ethics or Biostatistics & Epidemiology, the item tests that family rather than an organ system, on its row's track, and the Step 1 "Test only" and "must NEVER be the tested concept" lists do not apply to it.
+
+For a Step 1 row:
+${FAMILY_STEP1_BULLETS}
+
+For a Step 2 CK row:
+${FAMILY_STEP2_BULLETS}
+
+`,
+};
+
+/** The variant prompts, one per mode, as static as the baselines so they cache. */
+export const QBANK_FAMILY_PROMPTS: Record<ExamMode, string> = {
+  step1: assembleSystemPrompt({ ...STEP1, scope: STEP1.scope + FAMILY_SCOPE.step1 }),
+  step2ck: assembleSystemPrompt({ ...STEP2CK, scope: STEP2CK.scope + FAMILY_SCOPE.step2ck }),
+  mixed: assembleSystemPrompt({ ...MIXED, scope: MIXED.scope + FAMILY_SCOPE.mixed }),
+};
+
+/**
+ * Where a family item files itself. The organ-system enums have no home for
+ * it — a Step 1 ethics item is neither "Pathology" nor "Foundational Science" —
+ * so persistence pins these regardless of what the model wrote, keeping its
+ * own value only when it is one of the allowed competencies.
+ */
+export const FAMILY_ENUMS: Record<FamilyKey, { domain: string; competencies: Record<ExamTrack, string[]> }> = {
+  social_sciences: {
+    domain: "Communication & Ethics",
+    competencies: {
+      step1: ["Communication and Interpersonal Skills"],
+      step2ck: ["Professionalism", "Systems-based Practice & Patient Safety"],
+    },
+  },
+  biostats_epi: {
+    domain: "Biostatistics & Epidemiology",
+    competencies: {
+      step1: ["Practice-based Learning & Improvement"],
+      step2ck: ["Practice-based Learning & Improvement"],
+    },
+  },
+};
+
+/** The system prompt a wave is written against: the baseline unless it holds a family item. */
+export function systemPromptFor(plan: BatchPlan): string {
+  const hasFamily = isFamily(plan.system) || plan.questions.some((q) => isFamily(q.system));
+  return (hasFamily ? QBANK_FAMILY_PROMPTS : QBANK_SYSTEM_PROMPTS)[plan.examMode];
+}
+
 /**
  * System Briefs.
  *
@@ -879,6 +935,23 @@ TIER 3: newborn screening biochemistry; adolescent physiology; failure to thrive
 PHARMACOLOGY: agents affecting the ductus arteriosus, surfactant, drugs crossing the placenta or entering milk, age-dependent pharmacokinetic differences. MOA and mechanism-based effects only.
 OVERLAP: Repro (fetal development, teratogens), Cardiovascular (congenital heart disease, fetal shunts), Endocrine (growth axis, congenital adrenal hyperplasia), Neuro (neurodevelopment).
 SYSTEM DRIFT TRAPS: immunisation schedules; growth chart thresholds and referral; neonatal resuscitation protocols; feeding and fluid protocols; developmental screening intervals.`,
+
+  // The two families are not organ systems: see qbank-systems.ts, and the
+  // FAMILY_SCOPE addendum below that lifts the Step 1 scope for their rows.
+  social_sciences: `CONTENT DISTRIBUTION: Ethical and legal principles 45%, Communication and interpersonal skills 35%, Patient safety and quality 20%.
+TIER 1: informed consent — its elements, decision-making capacity, and when consent is not required; confidentiality and the duties that override it; a capable patient who refuses treatment; surrogate decision-making and advance directives; disclosure of a medical error; breaking bad news.
+TIER 2: minors — when they may consent alone, emancipation, parental refusal of life-saving care; responding to anger, grief and requests the physician should not grant; interpreters and health literacy; gifts, conflicts of interest and professional boundaries; the impaired colleague.
+TIER 3: research ethics and the IRB; elder and intimate-partner abuse; requests for non-beneficial treatment; the principle of double effect; error analysis — root cause analysis and the swiss cheese model.
+SKILLS: open-ended questions, empathic statements, teach-back, the SPIKES sequence, naming and validating emotion, shared decision-making.
+OVERLAP: Psych (capacity, involuntary admission), Peds (consent for minors, abuse reporting), Repro (confidential reproductive care for adolescents).
+SYSTEM DRIFT TRAPS: a legal detail that varies by jurisdiction as the tested point; disease management wearing an ethics label; an answer that turns on the diagnosis rather than on the principle.`,
+
+  biostats_epi: `CONTENT DISTRIBUTION: Test performance 30%, Measures of association and effect 25%, Study design and bias 25%, Statistical inference 20%.
+TIER 1: sensitivity, specificity, positive and negative predictive value from a 2x2 table, and how prevalence moves predictive values; relative risk, odds ratio, attributable risk, absolute and relative risk reduction, number needed to treat and to harm; cohort, case-control, cross-sectional and randomized designs and the measure each yields; selection, recall, measurement, lead-time and length-time bias; confounding and how randomization and matching control it.
+TIER 2: incidence versus prevalence; likelihood ratios; moving a test cutoff along the ROC curve; type I and type II error, power and sample size; p-values and confidence intervals, including whether an interval crossing 1 or 0 is significant; intention-to-treat analysis.
+TIER 3: precision versus accuracy; reliability and validity; the Hawthorne and Pygmalion effects; clinical trial phases; standard deviation and the normal distribution; survival curves.
+OVERLAP: ID (outbreaks and attack rate), Heme/Onc (screening tests), Psych (rating scale reliability).
+SYSTEM DRIFT TRAPS: arithmetic with no interpretation; an answer that depends on rounding; a calculation that needs a number the stem withholds.`,
 };
 
 /**
@@ -1008,6 +1081,24 @@ DIAGNOSTICS: growth chart interpretation, developmental milestone screening inst
 MANAGEMENT: immunisation catch-up rules and contraindications, empiric antibiotics in the febrile neonate and infant, phototherapy and exchange transfusion thresholds, supportive care in bronchiolitis and dexamethasone in croup, oral rehydration therapy, amoxicillin dosing in otitis media and the observation option, prostaglandin E1 for duct-dependent lesions, air enema for intussusception, pyloromyotomy, mandatory reporting, contraception and confidentiality in adolescents.
 OVERLAP: Repro (neonatal transition, maternal conditions affecting the newborn), Respiratory (bronchiolitis, asthma), ID (paediatric infections, vaccine-preventable disease), Endocrine (type 1 diabetes, growth and puberty).
 DRIFT TRAPS: germ layer and pharyngeal arch derivatives; the enzyme deficient in an inborn error rather than the screening result and what to do about it; fetal circulation physiology as the end point; teratogen mechanism; the histology of a paediatric tumour rather than its initial workup.`,
+
+  social_sciences: `CONTENT DISTRIBUTION: Legal and ethical decisions 40%, Professionalism and communication 30%, Systems-based practice and patient safety 30%.
+TIER 1: the capable patient who refuses treatment; consent in an emergency and for an incapacitated patient without a surrogate; confidentiality, its exceptions and mandatory reporting — reportable infections, abuse, the duty to warn, the unsafe driver; disclosing an error; breaking bad news; advance directives, code status and goals-of-care conversations.
+TIER 2: medical error — near misses, sentinel events, root cause analysis and reporting systems; handoffs and closed-loop communication; quality improvement — PDSA cycles, process and outcome measures; the impaired or unprofessional colleague; requests for unnecessary tests or treatment; confidential care for adolescents — contraception, sexually transmitted infection, substance use.
+TIER 3: palliative care and hospice eligibility; withdrawing life support and brain death; working with interpreters; conflict with a family over treatment; triage and resource allocation; documentation.
+DIAGNOSTICS: decision-making capacity — understanding, appreciation, reasoning, expressing a choice.
+MANAGEMENT: the next thing the physician says or does — explore the patient's understanding, respond to emotion, involve the ethics committee or risk management, report through the institutional system, document.
+OVERLAP: Psych (involuntary holds, capacity), Peds (abuse reporting, consent), Repro (adolescent confidential care), ID (reportable diseases, partner notification).
+DRIFT TRAPS: a clinical management question with an ethics label; a jurisdiction-specific legal threshold as the tested point; an answer that turns on the diagnosis rather than on the principle or the communication skill.`,
+
+  biostats_epi: `CONTENT DISTRIBUTION: Interpreting diagnostic tests 35%, Interpreting and applying trial results 35%, Study design and bias 20%, Population health and screening 10%.
+TIER 1: sensitivity, specificity and predictive values applied to the patient in the stem, and how pretest probability changes them; number needed to treat and to harm from a trial's results; reading a results table — relative versus absolute effect, confidence intervals, statistical versus clinical significance; which study design answers a question; the bias that threatens a described study.
+TIER 2: likelihood ratios and post-test probability; evaluating a screening program — lead-time, length-time and overdiagnosis; intention-to-treat versus per-protocol; noninferiority trials; subgroup analyses; whether a trial's result applies to this patient.
+TIER 3: meta-analysis and heterogeneity; survival curves and hazard ratios; cost-effectiveness; quality measures; outbreak investigation.
+DIAGNOSTICS: the test's characteristics, the patient's pretest probability, and what the result changes.
+MANAGEMENT: the decision the numbers support for this patient — treat, test further, screen, or not.
+OVERLAP: ID (outbreaks), Onc (screening), Cardiology (therapy decisions drawn from trials).
+DRIFT TRAPS: computation with no decision attached; the formula as the end point rather than what the number means for this patient; a trial result applied to a patient the trial excluded.`,
 };
 
 /** The brief each track reads for a system. */
@@ -1026,6 +1117,19 @@ export interface PlannedQuestion {
    * persistence stores — see examTrackMix.
    */
   examTrack: ExamTrack;
+  /**
+   * Mixed sets only: the topic this item is written on, and the system that
+   * topic routed to. Absent on a single-topic set, whose every item is on the
+   * one topic and the plan's system.
+   */
+  focus?: string;
+  system?: SystemKey;
+}
+
+/** One topic of a mixed set and the system it routed to. */
+export interface PlanFocus {
+  topic: string;
+  system: SystemKey;
 }
 
 export interface BatchPlan {
@@ -1034,6 +1138,8 @@ export interface BatchPlan {
   challenge: ChallengeLevel;
   examMode: ExamMode;
   questions: PlannedQuestion[];
+  /** The set's topics, when it has more than one. */
+  focuses?: PlanFocus[];
 }
 
 const LETTERS: OptionLetter[] = ["a", "b", "c", "d", "e"];
@@ -1146,23 +1252,36 @@ export function buildBatchPlan(
   random: () => number = Math.random,
   startIndex = 1,
   challenge: ChallengeLevel = DEFAULT_CHALLENGE,
-  examMode: ExamMode = DEFAULT_EXAM_MODE
+  examMode: ExamMode = DEFAULT_EXAM_MODE,
+  focuses: PlanFocus[] = []
 ): BatchPlan {
   const letters = shuffledLetters(random);
   const orders = reasoningOrderMix(count, random, challenge);
   const tracks = examTrackMix(count, random, examMode);
+  // A mixed set takes its topics in turn by INDEX, not by position in this
+  // wave: row n is topics[(n - 1) mod T]. A pure function of the index, so
+  // every wave — a resumed one included — agrees about which topic each
+  // question is on, and the set comes out interleaved (A B C A B C…) without
+  // anyone having to shuffle it. Uneven counts fall out of the modulus.
+  const mixed = focuses.length >= 2;
 
   return {
     system,
     systemName: SYSTEM_NAMES[system],
     challenge,
     examMode,
-    questions: Array.from({ length: count }, (_, i) => ({
-      index: startIndex + i,
-      answerLetter: letters[i % letters.length],
-      reasoningOrder: orders[i],
-      examTrack: tracks[i],
-    })),
+    ...(mixed ? { focuses } : {}),
+    questions: Array.from({ length: count }, (_, i) => {
+      const index = startIndex + i;
+      const focus = mixed ? focuses[(index - 1) % focuses.length] : null;
+      return {
+        index,
+        answerLetter: letters[i % letters.length],
+        reasoningOrder: orders[i],
+        examTrack: tracks[i],
+        ...(focus ? { focus: focus.topic, system: focus.system } : {}),
+      };
+    }),
   };
 }
 
@@ -1284,22 +1403,78 @@ export interface UserMessageInput {
  * would fight every Step 2 CK item, which is why this is per track rather
  * than shared.
  */
-function systemBrief(plan: BatchPlan, track: ExamTrack, titleSuffix = ""): string {
-  const brief = TRACK_BRIEFS[track][plan.system];
+function systemBrief(plan: BatchPlan, track: ExamTrack, titleSuffix = "", system: SystemKey = plan.system): string {
+  const brief = TRACK_BRIEFS[track][system];
+  const systemName = SYSTEM_NAMES[system];
   if (track === "step1") {
-    return `## System Brief — ${plan.systemName}${titleSuffix}
+    return `## System Brief — ${systemName}${titleSuffix}
 
-SYSTEM: ${plan.systemName}
-CONTENT SCOPE: Official 2025 USMLE Content Outline, ${plan.systemName} System
+SYSTEM: ${systemName}
+CONTENT SCOPE: Official 2025 USMLE Content Outline, ${systemName} System
 COMPETENCY BREAKDOWN: 60-70% Foundational Science; 20-25% Diagnosis tied to mechanism; 10% Management limited to drug or intervention MOA — why it works, never which protocol.
 ${brief}`;
   }
-  return `## System Brief — ${plan.systemName}${titleSuffix}
+  return `## System Brief — ${systemName}${titleSuffix}
 
-SYSTEM: ${plan.systemName}
-CONTENT SCOPE: Official 2025 USMLE Step 2 CK Content Outline, ${plan.systemName} System
+SYSTEM: ${systemName}
+CONTENT SCOPE: Official 2025 USMLE Step 2 CK Content Outline, ${systemName} System
 COMPETENCY BREAKDOWN: 40-50% Diagnosis, including the diagnostic study to order and how to read it; 30-35% Management — pharmacotherapy, clinical interventions and the next best step; 15-20% Prognosis, health maintenance, patient safety and professionalism.
 ${brief}`;
+}
+
+/**
+ * The user message for a MIXED set: one brief per system the wave's rows
+ * touch (per track, in mixed mode), each row naming its topic and system, and
+ * every topic listed. A wave of five holds at most five systems, so at most
+ * five briefs — the same order of size as mixed mode's two.
+ */
+function buildMixedTopicMessage(plan: BatchPlan, avoidSubtopics: string[]): string {
+  const examMixed = plan.examMode === "mixed";
+  const systems = [...new Set(plan.questions.map((q) => q.system ?? plan.system))];
+  const tracks: ExamTrack[] = examMixed ? ["step1", "step2ck"] : [plan.examMode === "step2ck" ? "step2ck" : "step1"];
+
+  const briefs = systems
+    .flatMap((system) =>
+      tracks.map((track) =>
+        systemBrief(plan, track, examMixed ? ` (${EXAM_TRACK_NAMES[track]} track)` : "", system)
+      )
+    )
+    .join("\n\n");
+
+  const planRows = plan.questions
+    .map((q) => {
+      const where = `focus: ${q.focus ?? "any of the topics"} (${SYSTEM_NAMES[q.system ?? plan.system]})`;
+      return examMixed
+        ? `- Question ${q.index}: ${EXAM_TRACK_NAMES[q.examTrack]} item, reasoning order ${q.reasoningOrder} — ${where}`
+        : `- Question ${q.index}: reasoning order ${q.reasoningOrder} — ${where}`;
+    })
+    .join("\n");
+
+  const trackNote = examMixed
+    ? "\nEach plan row names its track. Write a Step 1 item to the Step 1 brief and a Step 2 CK item to the Step 2 CK brief, and set examTrack to the track the row assigned.\n"
+    : "";
+
+  const avoidBlock = avoidSubtopics.length
+    ? `\n## Already covered — do not duplicate\n${avoidSubtopics.map((s) => `- ${s}`).join("\n")}\n`
+    : "";
+
+  const topics = (plan.focuses ?? []).map((f, i) => `${i + 1}. ${f.topic} (${SYSTEM_NAMES[f.system]})`).join("\n");
+
+  return `${briefs}
+
+## Batch Plan — ${plan.questions.length} questions
+
+${planRows}
+
+Write each item at the reasoning order assigned to it, on the topic its row names, within that topic's system and brief, and put its correct answer on whichever option is correct.
+${trackNote}
+${CHALLENGE_BRIEFS[plan.challenge]}
+${avoidBlock}
+## Requested topics — a mixed set
+
+${topics}
+
+This set mixes these topics on purpose, so the student has to switch between them. Write every item squarely on its row's topic; where two topics are easily confused, a distractor drawn from the other topic is fair, but the item must still be answerable from its own stem. Generate ${plan.questions.length} questions. Return the JSON object only.`;
 }
 
 /**
@@ -1310,6 +1485,7 @@ ${brief}`;
  * Mixed injects both briefs and labels each plan row with its track.
  */
 export function buildUserMessage({ topic, plan, avoidSubtopics = [] }: UserMessageInput): string {
+  if (plan.focuses && plan.focuses.length >= 2) return buildMixedTopicMessage(plan, avoidSubtopics);
   const mixed = plan.examMode === "mixed";
 
   // Answer letters are deliberately NOT sent. They are applied after the fact
@@ -1375,6 +1551,6 @@ ${SYSTEM_KEYS.map((k) => `- ${k}: ${SYSTEM_NAMES[k]}`).join("\n")}
 
 Return ONE JSON object: {"system": "<key>", "confidence": <0-1>}
 
-Use the key exactly as written above. Pick the system whose content outline the topic primarily belongs to, not one it merely touches — a topic about anaemia of chronic kidney disease is heme_onc if it is about the anaemia and renal if it is about the kidney. If the topic is too vague to place, return the closest system with a low confidence rather than refusing.
+Use the key exactly as written above. Communication, ethics, consent, capacity, confidentiality, breaking bad news, professionalism and patient safety belong to social_sciences; statistics, test characteristics, study design, bias and epidemiology belong to biostats_epi — even when the example in the topic is a disease. Otherwise pick the system whose content outline the topic primarily belongs to, not one it merely touches — a topic about anaemia of chronic kidney disease is heme_onc if it is about the anaemia and renal if it is about the kidney. If the topic is too vague to place, return the closest system with a low confidence rather than refusing.
 
 If the input is not a medical, clinical or health-science topic at all — random letters, a made-up or meaningless word, or a request unrelated to medicine — return {"system": "not_medical", "confidence": 1}. Real but unusual medical terms, abbreviations (MI, DKA), eponyms, drugs, misspellings of real terms and topics in any language are medical.`;

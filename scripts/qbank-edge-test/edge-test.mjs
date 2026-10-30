@@ -62,7 +62,9 @@ const BATCH = {
 };
 
 // ── Fake Corti ───────────────────────────────────────────────────────────────
-const calls = { stream: 0, verify: 0, flagCheck: 0 };
+const calls = { stream: 0, verify: 0, flagCheck: 0, router: [] };
+let lastStreamBody = null;
+const ROUTES = { "heart failure": "cardiovascular", "nephrotic syndrome": "renal", "spikes protocol": "social_sciences", "banana bread": "not_medical" };
 let streamStatus = 200;
 const realFetch = globalThis.fetch;
 globalThis.fetch = async (url, init = {}) => {
@@ -74,6 +76,7 @@ globalThis.fetch = async (url, init = {}) => {
     const body = JSON.parse(init.body);
     if (body.stream) {
       calls.stream++;
+      lastStreamBody = body;
       if (streamStatus !== 200) return new Response("boom", { status: streamStatus });
       const text = JSON.stringify(BATCH);
       const chunks = text.match(/[\s\S]{1,180}/g);
@@ -91,7 +94,10 @@ globalThis.fetch = async (url, init = {}) => {
     const user = body.messages[1].content;
     const n = Number(/Case (\d+)/.exec(user)?.[1]);
     let content;
-    if (system.includes("board-certified physician")) {
+    if (system.startsWith("You classify a medical study topic")) {
+      calls.router.push(user);
+      content = JSON.stringify({ system: ROUTES[user.toLowerCase()] ?? "cardiovascular", confidence: 0.9 });
+    } else if (system.includes("board-certified physician")) {
       calls.flagCheck++;
       content = JSON.stringify({ verdict: n === 5 ? "outdated" : "confirmed", note: "test" });
     } else {
@@ -229,6 +235,59 @@ const check = (name, fn) => {
   check("upstream failure → 502", () => assert.equal(status, 502));
   check("upstream failure releases all five", () => assert.equal(release?.args.p_n, 5));
   streamStatus = 200;
+}
+
+// 6. A mixed set: each topic routed on its own, the family prompt chosen,
+//    each question filed under its own system, the set labelled "Mixed".
+{
+  globalThis.__fakeClient = fakeClient({ isPro: true });
+  calls.router = [];
+  const { status, metas } = await run({ topic: undefined, system: undefined, topics: ["Heart failure", "Nephrotic syndrome", "SPIKES protocol"] });
+  const open = metas.find((m) => m.plan);
+  const inserts = globalThis.__fakeClient.log.inserts;
+  check("mixed set streams", () => assert.equal(status, 200));
+  check("router asked once per topic", () => assert.equal(calls.router.length, 3));
+  check("set labelled Mixed", () => assert.equal(open?.systemName, "Mixed"));
+  check("per-topic systems reported", () => assert.deepEqual(open?.systems, ["cardiovascular", "renal", "social_sciences"]));
+  check("plan rows rotate through the topics", () =>
+    assert.deepEqual(open?.plan.map((r) => r.focus), ["Heart failure", "Nephrotic syndrome", "SPIKES protocol", "Heart failure", "Nephrotic syndrome"]));
+  check("family prompt used when an ethics item is in the set", () =>
+    assert.ok(lastStreamBody.messages[0].content.includes("Communication & Ethics and Biostatistics items")));
+  check("user message briefs each system", () => {
+    const user = lastStreamBody.messages[1].content;
+    assert.ok(user.includes("## System Brief — Renal & Urinary") && user.includes("## System Brief — Communication & Ethics"));
+  });
+  check("each question filed under its own system", () =>
+    assert.deepEqual(inserts.slice(0, 3).map((r) => r.subject).sort(), ["Cardiovascular", "Communication & Ethics", "Renal & Urinary"].sort()));
+  check("ethics row pinned to its family domain", () =>
+    assert.equal(inserts.find((r) => r.generation_meta.focus === "SPIKES protocol")?.domain, "Communication & Ethics"));
+  check("topics recorded on the row", () =>
+    assert.deepEqual(inserts[0].generation_meta.topics, ["Heart failure", "Nephrotic syndrome", "SPIKES protocol"]));
+}
+
+// 7. Later waves pass the systems back: no routing at all.
+{
+  globalThis.__fakeClient = fakeClient({ isPro: true });
+  calls.router = [];
+  await run({ topic: undefined, system: undefined, topics: ["Heart failure", "Nephrotic syndrome"], systems: ["cardiovascular", "renal"], startIndex: 6 });
+  check("resolved systems skip the router", () => assert.equal(calls.router.length, 0));
+}
+
+// 8. One junk topic in a mix is named and refused.
+{
+  globalThis.__fakeClient = fakeClient({ isPro: true });
+  const streamsBefore = calls.stream;
+  const { status, text } = await run({ topic: undefined, system: undefined, topics: ["Heart failure", "banana bread"] });
+  check("junk topic in a mix → 422", () => assert.equal(status, 422));
+  check("the refusal names the topic", () => assert.ok(JSON.parse(text).error.includes("banana bread")));
+  check("nothing generated for a refused mix", () => assert.equal(calls.stream, streamsBefore));
+}
+
+// 9. Too many un-routed topics.
+{
+  globalThis.__fakeClient = fakeClient({ isPro: true });
+  const { status } = await run({ topic: undefined, system: undefined, topics: ["a1 heart", "b2 kidney", "c3 lung", "d4 liver", "e5 brain", "f6 skin"] });
+  check("more than five topics to route → 400", () => assert.equal(status, 400));
 }
 
 console.log(results.join("\n"));

@@ -7,15 +7,16 @@ import {
   cortiComplete,
 } from "../_shared/corti.ts";
 import {
-  QBANK_SYSTEM_PROMPTS,
   SYSTEM_ROUTER_PROMPT,
   SYSTEM_NAMES,
   SYSTEM_KEYS,
   buildBatchPlan,
   buildUserMessage,
+  systemPromptFor,
   asChallengeLevel,
   asExamMode,
   type BatchPlan,
+  type PlanFocus,
   type SystemKey,
 } from "../_shared/qbank-prompt.ts";
 import { prepareBatch, persistOne, type PersistInput } from "../_shared/qbank-persist.ts";
@@ -100,6 +101,15 @@ const log = (event: string, fields: Record<string, unknown> = {}) => {
  */
 const MAX_WAVE_COUNT = 8;
 const DEFAULT_COUNT = 5;
+
+/**
+ * A mixed set's topics. The composer lets a student name up to five; an exam
+ * block assembled from the curriculum carries up to twenty, but those arrive
+ * with their systems already resolved, so the router is never asked about
+ * more than MAX_ROUTED_TOPICS at once.
+ */
+const MAX_FOCUSES = 20;
+const MAX_ROUTED_TOPICS = 5;
 
 /**
  * Output ceiling for one wave. Far above the ~7.9k a full wave uses, so a wave
@@ -191,12 +201,32 @@ serve(async (req) => {
     if (authError || !user) return json({ error: "invalid_token" }, 401);
 
     const body = await req.json();
-    const topic = body?.topic;
     const generationId = body?.generationId;
-    const requestedSystem = body?.system;
 
-    if (!topic || typeof topic !== "string" || !topic.trim()) {
+    // One topic, or a mixed set of several. `topics` is the mixed shape;
+    // `topic` is what every earlier client sends, and still means one topic.
+    // De-duplicated without regard to case, in the order given.
+    const rawTopics: unknown[] =
+      Array.isArray(body?.topics) && body.topics.length > 0 ? body.topics : [body?.topic];
+    const rawSystems: unknown[] = Array.isArray(body?.systems) ? body.systems : [body?.system];
+    const topics: string[] = [];
+    const givenSystems: (SystemKey | null)[] = [];
+    rawTopics.forEach((t, i) => {
+      if (typeof t !== "string" || !t.trim()) return;
+      const clean = t.trim().slice(0, 300);
+      if (topics.some((x) => x.toLowerCase() === clean.toLowerCase())) return;
+      topics.push(clean);
+      givenSystems.push(SYSTEM_KEYS.includes(rawSystems[i] as SystemKey) ? (rawSystems[i] as SystemKey) : null);
+    });
+
+    if (topics.length === 0) {
       return json({ error: "Topic is required" }, 400);
+    }
+    if (topics.length > MAX_FOCUSES) {
+      return json({ error: `A set can mix at most ${MAX_FOCUSES} topics.`, code: "too_many_topics" }, 400);
+    }
+    if (givenSystems.filter((g) => g === null).length > MAX_ROUTED_TOPICS) {
+      return json({ error: `Pick at most ${MAX_ROUTED_TOPICS} topics for one set.`, code: "too_many_topics" }, 400);
     }
     // The generation id is the client's, and it is the only thread tying a row
     // back to the set it belongs to. Without one a question could be written and
@@ -209,11 +239,18 @@ serve(async (req) => {
     const requested = Number(body?.count) || DEFAULT_COUNT;
     // Not const: a free account's wave is trimmed to what it has left today.
     let waveCount = Math.min(Math.max(1, Math.round(requested)), MAX_WAVE_COUNT);
-    const cleanTopic = topic.trim().slice(0, 300);
-    const rejection = validateTopic(cleanTopic);
-    if (rejection) {
-      return json({ error: topicRejectionMessage(rejection), code: "invalid_topic" }, 400);
+    for (const t of topics) {
+      const rejection = validateTopic(t);
+      if (rejection) {
+        const message = topicRejectionMessage(rejection);
+        return json(
+          { error: topics.length > 1 ? `“${t}”: ${message}` : message, code: "invalid_topic" },
+          400
+        );
+      }
     }
+    // The label the set is stored and logged under.
+    const cleanTopic = topics.join(" · ");
     const waveStart = Math.max(1, Math.round(Number(body?.startIndex) || 1));
 
     // Capped and de-duplicated: this goes into the prompt, and a set that has
@@ -241,20 +278,36 @@ serve(async (req) => {
       return json({ error: "Question generation is not configured" }, 500);
     }
 
-    const routed = SYSTEM_KEYS.includes(requestedSystem)
-      ? { system: requestedSystem as SystemKey, confidence: null }
-      : await resolveSystem(config, cleanTopic);
-    if (routed.notMedical) {
-      log("topic_declined", { topicLength: cleanTopic.length });
+    // Each topic routed on its own, in parallel — a mixed set's topics can sit
+    // in different systems, and each item is written against its own brief.
+    // Later waves pass the systems back, so the brief never changes mid-set.
+    const routedList = await Promise.all(
+      topics.map((t, i) =>
+        givenSystems[i]
+          ? Promise.resolve({ system: givenSystems[i] as SystemKey, confidence: null as number | null })
+          : resolveSystem(config, t)
+      )
+    );
+    const declinedAt = routedList.findIndex((r) => (r as { notMedical?: boolean }).notMedical);
+    if (declinedAt >= 0) {
+      log("topic_declined", { topicLength: topics[declinedAt].length, topicCount: topics.length });
       return json(
         {
-          error: "That doesn't look like a medical topic. Try something like “heart failure” or “DKA”.",
+          error:
+            topics.length > 1
+              ? `“${topics[declinedAt]}” doesn't look like a medical topic. Remove it, or try something like “heart failure”.`
+              : "That doesn't look like a medical topic. Try something like “heart failure” or “DKA”.",
           code: "not_medical_topic",
         },
         422
       );
     }
-    const system = routed.system;
+    const focuses: PlanFocus[] = topics.map((t, i) => ({ topic: t, system: routedList[i].system }));
+    const routed = routedList[0];
+    const system = focuses[0].system;
+    const setSystems = [...new Set(focuses.map((x) => x.system))];
+    // What the set is filed under: its one system, or "Mixed" across several.
+    const setSystemName = setSystems.length > 1 ? "Mixed" : SYSTEM_NAMES[system];
 
     // Unknown or absent values fall back to the default rather than 400ing:
     // the level changes the shape of a set, never whether it can be written.
@@ -334,10 +387,13 @@ serve(async (req) => {
       Math.random,
       waveStart,
       challenge,
-      examMode
+      examMode,
+      focuses.length > 1 ? focuses : []
     );
     log("generating", {
       system,
+      topicCount: topics.length,
+      systemCount: setSystems.length,
       confidence: routed.confidence,
       count: waveCount,
       startIndex: waveStart,
@@ -355,8 +411,10 @@ serve(async (req) => {
         maxTokens: MAX_OUTPUT_TOKENS,
         json: true,
         messages: [
-          // Per mode, and static within a mode, so each stays cacheable.
-          { role: "system", content: QBANK_SYSTEM_PROMPTS[examMode] },
+          // Per mode, and static within a mode, so each stays cacheable. A
+          // set holding a Communication & Ethics or Biostatistics item reads
+          // the family variant; every other set the measured baseline.
+          { role: "system", content: systemPromptFor(plan) },
           {
             role: "user",
             content: buildUserMessage({ topic: cleanTopic, plan, avoidSubtopics: avoid }),
@@ -427,6 +485,7 @@ serve(async (req) => {
       system,
       plan,
       topic: cleanTopic,
+      ...(topics.length > 1 ? { topics } : {}),
       model: config.model,
       generationId,
     });
@@ -618,7 +677,11 @@ serve(async (req) => {
           frame({
             __meta: {
               system,
-              systemName: SYSTEM_NAMES[system],
+              systemName: setSystemName,
+              // Per topic, in order, so the client can send them back on the
+              // next wave and label each topic with where it routed.
+              systems: focuses.map((x) => x.system),
+              focuses: focuses.map((x) => ({ topic: x.topic, system: x.system, systemName: SYSTEM_NAMES[x.system] })),
               model: config.model,
               examMode,
               plan: plan.questions,
@@ -749,7 +812,8 @@ serve(async (req) => {
                 // and the client agree about where the set is.
                 nextIndex: waveStart + waveCount,
                 system,
-                systemName: SYSTEM_NAMES[system],
+                systemName: setSystemName,
+                systems: focuses.map((x) => x.system),
                 subtopics,
                 streamError,
                 // A free account's settled allowance for today; null for Pro.

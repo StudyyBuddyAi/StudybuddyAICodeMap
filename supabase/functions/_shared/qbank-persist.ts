@@ -3,7 +3,9 @@ import {
   SYSTEM_NAMES,
   TRACK_ENUMS,
   EXAM_TRACKS,
+  FAMILY_ENUMS,
   PROMPT_VERSION,
+  isFamily,
   permuteToPlannedLetter,
   buildDistractorExplanations,
   type BatchPlan,
@@ -61,6 +63,12 @@ export interface ParsedQuestion {
    * "did the track instruction take?" metric.
    */
   examTrackReported: ExamTrack | null;
+  /**
+   * Mixed sets: the topic and system the item's plan row assigned. Absent on a
+   * single-topic set, where the wave's system applies.
+   */
+  focus?: string;
+  system?: SystemKey;
   domain: string;
   subtopic: string;
   competency: string;
@@ -206,7 +214,19 @@ function toQuestion(raw: Record<string, unknown>, fallbackIndex: number): Parsed
  * now coerce the same way, with a fallback that belongs to the track rather
  * than a Step 1 value stamped on a Step 2 CK item.
  */
-function withTrackEnums(question: ParsedQuestion, track: ExamTrack): ParsedQuestion {
+function withTrackEnums(question: ParsedQuestion, track: ExamTrack, system?: SystemKey): ParsedQuestion {
+  // A family item has no home in the organ-system enums: pin its domain, and
+  // keep the model's competency only when it is one the family allows.
+  if (isFamily(system)) {
+    const family = FAMILY_ENUMS[system];
+    const allowed = family.competencies[track];
+    return {
+      ...question,
+      examTrack: track,
+      domain: family.domain,
+      competency: allowed.includes(question.competency) ? question.competency : allowed[0],
+    };
+  }
   const enums = TRACK_ENUMS[track];
   return {
     ...question,
@@ -265,6 +285,8 @@ export interface PersistInput {
   system: SystemKey;
   plan: BatchPlan;
   topic: string;
+  /** Mixed sets: every topic the student asked for. */
+  topics?: string[];
   model: string;
   /**
    * Ties every row of one generation together, across the several waves a large
@@ -309,7 +331,11 @@ export function prepareBatch(content: string, plan: BatchPlan): PreparedBatch {
     // The track comes from the row, never from the model's examTrack field.
     // The row is the instruction; the field is the model's report of having
     // followed it, and the two are stored side by side so they can be compared.
-    const tracked = withTrackEnums(question, row?.examTrack ?? planTrack);
+    const system = row?.system ?? plan.system;
+    const tracked = {
+      ...withTrackEnums(question, row?.examTrack ?? planTrack, system),
+      ...(row?.focus ? { focus: row.focus, system: row.system } : {}),
+    };
     return row ? permuteToPlannedLetter(tracked, row.answerLetter) : tracked;
   });
 
@@ -334,7 +360,9 @@ function buildRow(
   flagCheck: FlagCheckResult | null = null
 ) {
   return {
-    subject: SYSTEM_NAMES[input.system],
+    // The item's own system on a mixed set, so a cross-system set files each
+    // question where it belongs.
+    subject: SYSTEM_NAMES[question.system ?? input.system],
     domain: question.domain,
     topic: question.subtopic,
     difficulty: question.difficulty,
@@ -362,7 +390,9 @@ function buildRow(
       model: input.model,
       promptVersion: PROMPT_VERSION,
       requestedTopic: input.topic,
-      system: input.system,
+      ...(input.topics && input.topics.length > 1 ? { topics: input.topics } : {}),
+      ...(question.focus ? { focus: question.focus } : {}),
+      system: question.system ?? input.system,
       challenge: input.plan.challenge,
       examMode: input.plan.examMode,
       examTrack: question.examTrack,
