@@ -13,6 +13,7 @@ import {
   Sparkles,
   CalendarClock,
   Play,
+  RotateCcw,
   Target,
 } from "lucide-react";
 import DashboardLayout from "@/components/dashboard/DashboardLayout";
@@ -33,6 +34,7 @@ import {
 import { formatRelative } from "@/lib/qbank-format";
 import { timeAgo } from "@/lib/utils";
 import { useLibraryTopics } from "@/hooks/use-library-topics";
+import { useQBankReviewQueue } from "@/hooks/use-qbank-review-queue";
 import { buildTodayPlan, lastSevenDays, type PlanItem } from "@/lib/today-plan";
 import { displayName } from "@/lib/display-name";
 import { MAX_DAILY_CARDS, MAX_DAILY_SHEETS, useUsageLimit } from "@/hooks/use-usage-limit";
@@ -100,6 +102,7 @@ function WeekRow({
 const PLAN_ICON: Record<PlanItem["kind"], ReactNode> = {
   review: <CalendarClock className="h-5 w-5" />,
   resume: <Play className="h-5 w-5" />,
+  retry: <RotateCcw className="h-5 w-5" />,
   weak: <Target className="h-5 w-5" />,
   next: <Sparkles className="h-5 w-5" />,
   start: <FileText className="h-5 w-5" />,
@@ -108,6 +111,7 @@ const PLAN_ICON: Record<PlanItem["kind"], ReactNode> = {
 const PLAN_TONE: Record<PlanItem["kind"], string> = {
   review: "bg-warning-soft text-warning",
   resume: "bg-info-soft text-info",
+  retry: "bg-warning-soft text-warning",
   weak: "bg-danger-soft text-danger",
   next: "bg-primary/10 text-primary",
   start: "bg-primary/10 text-primary",
@@ -232,6 +236,7 @@ function Dashboard() {
 
   // Topics as the Library gathers them, and today's plan built from them.
   const { topics } = useLibraryTopics();
+  const { queue: reviewQueue } = useQBankReviewQueue();
   const plan = useMemo(
     () =>
       buildTodayPlan({
@@ -246,8 +251,9 @@ function Dashboard() {
             }
           : null,
         signedIn: !isGuest,
+        qbankDue: reviewQueue.dueCount,
       }),
-    [topics, dueNow, lastSet, lastSetTotal, isGuest]
+    [topics, dueNow, lastSet, lastSetTotal, isGuest, reviewQueue.dueCount]
   );
   const runPlan = (item: PlanItem) =>
     item.target.kind === "sign-in"
