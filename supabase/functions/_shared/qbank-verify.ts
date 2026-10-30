@@ -159,6 +159,146 @@ export async function verifyOne(
   }
 }
 
+// ── Writer-flag fact check ──────────────────────────────────────────────────
+
+/**
+ * What the fact check decided about an item its own writer was unsure of.
+ *
+ * Only `confirmed` admits the item. Every other verdict holds it back, and the
+ * wave loop writes a replacement — the same path a gate block takes.
+ */
+export type FlagCheckVerdict =
+  | "confirmed"
+  | "outdated"
+  | "contested"
+  | "wrong_key"
+  | "unsolvable"
+  | "error";
+
+export interface FlagCheckResult {
+  index: number;
+  verdict: FlagCheckVerdict;
+  confirmed: boolean;
+  /** The checker's reason, under ~25 words; "" when it gave none. */
+  note: string;
+  /** Set when the check could not be reached or parsed. */
+  error: string | null;
+}
+
+const FLAG_VERDICTS: FlagCheckVerdict[] = ["confirmed", "outdated", "contested", "wrong_key", "unsolvable"];
+
+/**
+ * Not blind, unlike the probe above, and on purpose: the question here is not
+ * "can a student answer this" but "is the writer's doubt material". That needs
+ * the key, the explanation and the doubt itself in front of the checker.
+ *
+ * Measured motivation (live table, 2026-10-30): one Step 2 CK item in four
+ * carried a writer flag, almost all "guideline from memory, unconfirmed", and
+ * 63 of them reached students with nothing to say the author was unsure — SGLT2
+ * inhibitors in HFpEF, AASLD thresholds, ICD criteria, empiric endocarditis
+ * cover. Those are the items where a confident error does the most harm.
+ */
+const flagCheckPrompt = (track: ExamTrack) =>
+  `You are a board-certified physician reviewing a USMLE ${EXAM_TRACK_NAMES[track]} practice item before it reaches students. The item's writer raised a concern about its own item. You are shown the stem, the options, the keyed answer, the explanation and the writer's concern.
+
+Decide whether the keyed answer is the single best answer${
+    track === "step2ck"
+      ? " under the current US standard of care and the current major society guideline for this decision"
+      : " under current First Aid-level teaching"
+  }, and whether the writer's concern changes that.
+
+Return ONE JSON object and nothing else:
+{"verdict":"confirmed"|"outdated"|"contested"|"wrong_key"|"unsolvable","note":string}
+
+- confirmed: the keyed answer is correct and current, and the concern does not change it — for example a trial name or a number the answer does not depend on.
+- outdated: the keyed answer reflects superseded guidance.
+- contested: major guidelines or current practice disagree, so more than one option is defensible.
+- wrong_key: a different option is the best answer.
+- unsolvable: the stem lacks data needed to choose one answer.
+- note: your reason in under 25 words.`;
+
+function renderForFlagCheck(question: FlagCheckableQuestion): string {
+  const options = LETTERS.map((k) => `${k.toUpperCase()}. ${question.options[k]}`).join("\n");
+  return `${question.vignette}
+
+${question.leadIn}
+
+${options}
+
+Keyed answer: ${question.correctOption.toUpperCase()}
+
+Explanation: ${question.explanation}
+
+Writer's concern: ${question.reviewerFlag}`;
+}
+
+export interface FlagCheckableQuestion extends VerifiableQuestion {
+  explanation: string;
+  reviewerFlag: string;
+}
+
+/** Reads the checker's reply. Null when it is not one of the verdicts. */
+export function parseFlagCheck(raw: string): { verdict: Exclude<FlagCheckVerdict, "error">; note: string } | null {
+  try {
+    const parsed = JSON.parse(raw.replace(/^```(?:json)?\s*/i, "").replace(/```$/, "").trim());
+    const verdict = String(parsed?.verdict ?? "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+    if (!FLAG_VERDICTS.includes(verdict as FlagCheckVerdict)) return null;
+    const note = typeof parsed?.note === "string" ? parsed.note.trim().slice(0, 300) : "";
+    return { verdict: verdict as Exclude<FlagCheckVerdict, "error">, note };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Settles a writer flag on an item that already passed the gate and the blind
+ * read.
+ *
+ * It fails CLOSED, the opposite of the probe. The probe checks an item nobody
+ * has doubted, so an outage there should not cost the student a question. This
+ * runs only on items the author itself was unsure of; when the doubt cannot be
+ * cleared, the honest outcome is a replacement item, which the wave loop writes
+ * anyway, and a free student is never charged for it (the cap counts delivered
+ * questions only).
+ *
+ * `complete` is injectable so the tests can drive it without a network.
+ */
+export async function checkWriterFlag(
+  config: CortiConfig,
+  question: FlagCheckableQuestion,
+  track: ExamTrack = question.examTrack ?? "step1",
+  complete: typeof cortiComplete = cortiComplete
+): Promise<FlagCheckResult> {
+  const base = { index: question.index, confirmed: false, note: "" };
+  try {
+    const raw = await complete(config, {
+      model: config.verifierModel,
+      temperature: 0,
+      maxTokens: VERIFIER_MAX_TOKENS,
+      json: true,
+      messages: [
+        { role: "system", content: flagCheckPrompt(track) },
+        { role: "user", content: renderForFlagCheck(question) },
+      ],
+      signal: AbortSignal.timeout(VERIFIER_TIMEOUT_MS),
+    });
+
+    const parsed = parseFlagCheck(raw);
+    if (!parsed) {
+      return { ...base, verdict: "error", error: `unparseable verdict: ${raw.slice(0, 40)}` };
+    }
+    return {
+      index: question.index,
+      verdict: parsed.verdict,
+      confirmed: parsed.verdict === "confirmed",
+      note: parsed.note,
+      error: null,
+    };
+  } catch (err) {
+    return { ...base, verdict: "error", error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
 /**
  * Answers every item in the batch blind, in parallel.
  *

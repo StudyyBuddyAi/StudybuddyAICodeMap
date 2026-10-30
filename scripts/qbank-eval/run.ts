@@ -37,7 +37,8 @@ const {
 } = await import(path.join(ROOT, "supabase/functions/_shared/qbank-prompt.ts"));
 const { parseBatchContent, prepareBatch } =
   await import(path.join(ROOT, "supabase/functions/_shared/qbank-persist.ts"));
-const { verifyBatch } = await import(path.join(ROOT, "supabase/functions/_shared/qbank-verify.ts"));
+const { verifyBatch, checkWriterFlag } = await import(path.join(ROOT, "supabase/functions/_shared/qbank-verify.ts"));
+const { hasWriterFlag } = await import(path.join(ROOT, "supabase/functions/_shared/qbank-qa.ts"));
 const { cortiConfigFromEnv, cortiChatCompletion, cortiComplete } =
   await import(path.join(ROOT, "supabase/functions/_shared/corti.ts"));
 const { parsePartialQuestions } =
@@ -247,6 +248,22 @@ for (const [i, spec] of SELECTED.entries()) {
       ms: verifyMs,
     }));
 
+    // The writer-flag fact check, exactly as the edge function runs it: only
+    // on flagged items the gate and the probe both admitted, and a check that
+    // does not confirm the key turns into a gate block.
+    const flagChecks = await Promise.all(
+      drafts.map(async (d, n: number) => {
+        const agreed = verification.find((v) => v.index === d.index)?.agreed ?? true;
+        if (!qa[n] || qa[n].blocked || !agreed || !hasWriterFlag(d.reviewerFlag)) return null;
+        const check = await checkWriterFlag(config, d, d.examTrack);
+        if (!check.confirmed) {
+          qa[n].findings.push({ rule: "flag-unconfirmed", severity: "block", detail: `${check.verdict}: ${check.note}` });
+          qa[n].blocked = true;
+        }
+        return check;
+      })
+    );
+
     record.stream = {
       ttfbMs: gen.ttfbMs, ttfcMs: gen.ttfcMs, totalMs: gen.totalMs,
       frames: gen.frames, contentDeltas: gen.contentDeltas,
@@ -256,6 +273,7 @@ for (const [i, spec] of SELECTED.entries()) {
     record.parse = { serverPersisted: rawParsed.length, clientDrafts: drafts.length, requested: COUNT };
     record.qa = qa;
     record.cold = cold;
+    record.flagChecks = flagChecks.filter(Boolean);
     record.verifyMs = verifyMs;
     // How far the permutation had to move each key, and therefore how much of
     // the flat letter distribution is now bought after the fact.

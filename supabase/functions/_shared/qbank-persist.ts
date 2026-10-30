@@ -12,7 +12,7 @@ import {
   type SystemKey,
 } from "./qbank-prompt.ts";
 import { checkBatch, type QaResult } from "./qbank-qa.ts";
-import type { VerificationResult } from "./qbank-verify.ts";
+import type { FlagCheckResult, VerificationResult } from "./qbank-verify.ts";
 
 /**
  * Parsing and persisting a generated batch, server-side.
@@ -330,7 +330,8 @@ function buildRow(
   userId: string,
   input: PersistInput,
   qaResult: QaResult | undefined,
-  verification: VerificationResult[]
+  verification: VerificationResult[],
+  flagCheck: FlagCheckResult | null = null
 ) {
   return {
     subject: SYSTEM_NAMES[input.system],
@@ -380,6 +381,9 @@ function buildRow(
       qa: qaResult?.findings ?? [],
       qaBlocked: qaResult?.blocked ?? false,
       verification: verification.find((v) => v.index === question.index) ?? null,
+      // The fact check on a writer flag, when the item carried one and was
+      // still in play. Null otherwise — not "passed": nothing was checked.
+      flagCheck,
       generatedAt: new Date().toISOString(),
     },
   };
@@ -468,11 +472,12 @@ export async function persistOne(
   input: PersistInput,
   question: ParsedQuestion,
   qaResult: QaResult | undefined,
-  verification: VerificationResult[] = []
+  verification: VerificationResult[] = [],
+  flagCheck: FlagCheckResult | null = null
 ): Promise<PersistOneResult> {
   const { data, error } = await client
     .from("questions")
-    .insert(buildRow(question, userId, input, qaResult, verification))
+    .insert(buildRow(question, userId, input, qaResult, verification, flagCheck))
     .select("id")
     .single();
 

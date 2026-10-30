@@ -19,8 +19,13 @@ import {
   type SystemKey,
 } from "../_shared/qbank-prompt.ts";
 import { prepareBatch, persistOne, type PersistInput } from "../_shared/qbank-persist.ts";
-import { verifyOne, type VerificationResult } from "../_shared/qbank-verify.ts";
-import type { QaResult } from "../_shared/qbank-qa.ts";
+import {
+  verifyOne,
+  checkWriterFlag,
+  type FlagCheckResult,
+  type VerificationResult,
+} from "../_shared/qbank-verify.ts";
+import { hasWriterFlag, type QaResult } from "../_shared/qbank-qa.ts";
 
 /**
  * On-demand QBank generation — one wave of a set.
@@ -327,6 +332,7 @@ serve(async (req) => {
     let persistedIds: string[] = [];
     let qaResults: QaResult[] = [];
     let verifications: VerificationResult[] = [];
+    let flagChecks: FlagCheckResult[] = [];
     let subtopics: string[] = [];
     let insertFailures = 0;
     /**
@@ -386,13 +392,36 @@ serve(async (req) => {
             const verdict = await verifyOne(config, question, question.examTrack);
             verifications.push(verdict);
 
+            // An item its writer was unsure of is admitted only if a fact
+            // check clears the doubt. Run last, and only on items still in
+            // play: one the gate blocked or the probe disputed is held back
+            // already, and checking it would be paying to confirm a no. The
+            // block is recorded on the gate's own result so the row's
+            // qaBlocked — what claim_generated_questions filters on — says so.
+            let flagCheck: FlagCheckResult | null = null;
+            if (qaResult && !qaResult.blocked && verdict.agreed && hasWriterFlag(question.reviewerFlag)) {
+              flagCheck = await checkWriterFlag(config, question, question.examTrack);
+              flagChecks.push(flagCheck);
+              if (!flagCheck.confirmed) {
+                qaResult.findings.push({
+                  rule: "flag-unconfirmed",
+                  severity: "block",
+                  detail: `The writer's concern could not be cleared (${flagCheck.verdict})${
+                    flagCheck.note ? `: ${flagCheck.note}` : "."
+                  }`,
+                });
+                qaResult.blocked = true;
+              }
+            }
+
             const { id, error: rowError } = await persistOne(
               authClient,
               user.id,
               persistInput(),
               question,
               qaResult,
-              [verdict]
+              [verdict],
+              flagCheck
             );
 
             if (id) {
@@ -563,6 +592,7 @@ serve(async (req) => {
             persistedIds = [];
             qaResults = [];
             verifications = [];
+            flagChecks = [];
             subtopics = [];
             insertFailures = 0;
             insertError = null;
@@ -596,6 +626,9 @@ serve(async (req) => {
           insertFailures,
           insertError,
           verifierErrors: verifications.filter((v) => v.error).length,
+          flagChecks: flagChecks.length,
+          flagChecksCleared: flagChecks.filter((f) => f.confirmed).length,
+          flagCheckErrors: flagChecks.filter((f) => f.error).length,
         });
 
         controller.enqueue(

@@ -22,4 +22,6 @@ export type {
 export {
   checkQuestion,
   checkBatch,
+  isCriticalFlag,
+  hasWriterFlag,
 } from "../../supabase/functions/_shared/qbank-qa.ts";
