@@ -179,3 +179,31 @@ Effort: S ≈ a day or less, M ≈ several days, L ≈ a week or more.
 - Practice questions and spaced repetition vs Step 1 (associational): https://pmc.ncbi.nlm.nih.gov/articles/PMC4673073
 - Certainty-based marking: https://impressions.manipal.edu/open-access-archive/11604
 - Open medical image licensing: https://libguides.uams.edu/open-access-medical-images/creative-commons
+
+---
+
+## 8. Built on `qbank-research` (2026-10-30) — not yet deployed
+
+| Item | What shipped | Key files | Tested by |
+|---|---|---|---|
+| A1 writer flags | `writer-critical` gate block; non-blind fact check (`checkWriterFlag`) on every flagged item still in play, fails closed, verdict stored as `generation_meta.flagCheck` | `_shared/qbank-qa.ts`, `_shared/qbank-verify.ts`, `qbank-generate/index.ts`, `scripts/qbank-eval/run.ts` | unit tests; live Corti on 12 real flagged items (12 confirmed) and a wrong-key control (12/12 `wrong_key`) |
+| C3 free cap | 10 delivered questions/day, Pro unlimited; `reserve_usage`/`release_usage`; client picker sized to what is left; capped run ends "short" with a Go Pro offer | `20261030000000_qbank_free_daily_cap.sql`, `_shared/qbank-allowance.ts`, `use-usage-limit.ts`, `qbank-wave-runner.ts`, `QBank.tsx`, `QBankSession.tsx` | SQL rehearsal on live (rolled back); runner tests; offline handler test |
+| C1 exam block | preset: 20 Q · timed · 30 min (free: 10 Q · 15 min) | `_shared/qbank-allowance.ts`, `QBank.tsx` | unit tests |
+| C2 report a problem | `question_reports` + `report_question` (served-only, one per student per question); link + dialog under every explanation | `20261030000100_question_reports.sql`, `components/qbank/ReportQuestion.tsx` | SQL rehearsal (RLS, refusals, upsert); component tests |
+| B1 review queue | `get_qbank_review_queue`: misses due after 20 h, marks at once, reported/unreachable excluded; QBank card, summary note, Dashboard plan item; re-sits labelled `Review`, free under the cap; Library ignores review sets | `20261030000200_qbank_review_queue.sql`, `lib/qbank-review-queue.ts`, `hooks/use-qbank-review-queue.ts`, `QBankContext.tsx` | SQL rehearsal with 8 seeded cases; unit tests |
+| C4 honesty | "replaced" not "rewritten"; model difficulty label removed from view; summary by discipline | `QBankSession.tsx`, `QBankSummary.tsx`, `AnswerReview.tsx` | typecheck, tests |
+| Fix | dispatch stops at the wave's plan (over-production could exceed the cap and collide indices) | `qbank-generate/index.ts` | `scripts/qbank-edge-test` (23 checks) |
+| Housekeeping | `.gitattributes` keeps the prompt fixture LF; `src/types/edge-runtime.d.ts` types `Deno.env` for shared modules under test | | identity test passes on Windows; typecheck clean |
+
+Run the offline handler test any time:
+`node --import ./scripts/qbank-edge-test/loader.mjs scripts/qbank-edge-test/edge-test.mjs`
+
+### Deploy order (needs the owner's go-ahead)
+
+1. `npx supabase db push --linked` — applies exactly the three `20261030*` migrations (dry run
+   confirmed). `20261030000200` depends on `20261030000100`.
+2. Frontend (merge to `main` → Vercel), so clients understand `daily_cap` before it is enforced.
+3. `npx supabase functions deploy qbank-generate`. It fails closed without `reserve_usage`, so never
+   before step 1. No new environment variables.
+4. Re-run `baseline-queries.sql` after a week and compare with §2: writer-flagged items admitted
+   (should fall to near zero unconfirmed), held-back rate, report rate, review-queue use.
