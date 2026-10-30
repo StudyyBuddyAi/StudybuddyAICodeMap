@@ -1,6 +1,7 @@
 # QBank topic selection — research and design (2026-10-30)
 
-Status: **researched and designed, not built.** The owner asked, before the shared pool: how should
+Status: **T1–T3 and the Communication & Ethics / Biostatistics families built on `qbank-research`
+(2026-10-30), tested locally, not deployed** — see §9. The owner asked, before the shared pool: how should
 a student choose what to practise — one topic, several, a mixed block — what scenarios exist, and
 how do we put inviting, challenging topics in front of them. Companion docs: `research-2026-10.md`,
 `shared-pool-design.md` (the pool makes several of these entry points cheaper, but none of them
@@ -267,6 +268,34 @@ small project; the composer can list both families as "coming soon" until then.
    student's chosen level?
 4. Is the **Communication & Ethics** family (prompt work, eval run) worth doing in T1 rather than T4,
    given students are already asking for it?
+
+## 9. Built (2026-10-30)
+
+Owner decisions: max **5** topics; "Studying for" is a **remembered page setting**; cards run at
+**their own level**; the families come **now**, not in T4.
+
+| Piece | Where |
+|---|---|
+| Mixed-topic plan (topics[] → per-row focus + system, rotation by index, per-system briefs) | `_shared/qbank-prompt.ts` (`buildBatchPlan`, `buildMixedTopicMessage`), `qbank-generate/index.ts` |
+| Families: `social_sciences`, `biostats_epi` — briefs, router lines, variant prompt (`QBANK_FAMILY_PROMPTS`, `systemPromptFor`), pinned domain/competency | `_shared/qbank-systems.ts`, `_shared/qbank-prompt.ts`, `_shared/qbank-persist.ts` |
+| Client: topics/systems through the wave runner, session metadata and resume | `qbank-wave-runner.ts`, `QBankContext.tsx`, `qbank-types.ts` |
+| Page: composer, browse by system, For you, quick starts, Studying for | `pages/QBank.tsx`, `components/qbank/TopicComposer.tsx`, `SystemBrowser.tsx`, `SuggestionCards.tsx` |
+| Logic: autocomplete, catalogue, ranking, exam-weighted block | `lib/topic-suggest.ts`, `qbank-challenges.ts`, `qbank-suggestions.ts`, `qbank-exam-block.ts` |
+| Run the function locally | `npm run dev:qbank` (`scripts/local-functions/`) |
+
+Tested: unit tests for every piece (plan rotation and resume, briefs, family prompt choice,
+persistence, autocomplete, ranking, apportionment, composer, page launch), the offline handler test
+(38 checks), and a live Corti run — a mixed Step 1 set (heart failure + nephrotic + SPIKES) and a
+Step 2 CK biostatistics set, 6/6 admitted, routing correct.
+
+Known limits: Library and weak-spot detection ignore mixed sets (their score belongs to several
+topics; a per-topic breakdown needs the question-level `focus` and is a follow-up). Shelf mode (T4)
+still needs the clerkship tags.
+
+**Deploy order (reversed from last time):** `functions deploy qbank-generate` FIRST — it is
+backward-compatible (an old client sends `topic` and gets the old behaviour) — THEN the frontend,
+because the new page sends `topics[]`, which the deployed v8 would ignore (it would route the
+"A · B" label as one topic). No migrations.
 
 ## Sources
 

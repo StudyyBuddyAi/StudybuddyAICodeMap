@@ -9,11 +9,16 @@ import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 
 const ref = fs.readFileSync("supabase/.temp/project-ref", "utf8").trim();
-const npx = process.platform === "win32" ? "npx.cmd" : "npx";
+if (!/^[a-z0-9]{20}$/.test(ref)) {
+  console.error("dev:qbank — supabase/.temp/project-ref does not hold a project ref. Run supabase link first.");
+  process.exit(1);
+}
 
-const keys = spawnSync(npx, ["--no-install", "supabase", "projects", "api-keys", "--project-ref", ref, "-o", "json"], {
+// One command string through the shell (npx is a .cmd on Windows): passing an
+// argument array with shell:true is deprecated, and the ref is checked above.
+const keys = spawnSync(`npx --no-install supabase projects api-keys --project-ref ${ref} -o json`, {
   encoding: "utf8",
-  shell: process.platform === "win32",
+  shell: true,
 });
 let serviceKey = "";
 try {
@@ -29,9 +34,9 @@ if (!serviceKey) {
 }
 
 console.log(`dev:qbank — qbank-generate runs locally against project ${ref} (service-role key in memory only)`);
-const child = spawn(npx, ["--no-install", "vite"], {
+const child = spawn("npx --no-install vite", {
   stdio: "inherit",
-  shell: process.platform === "win32",
+  shell: true,
   env: { ...process.env, SUPABASE_SERVICE_ROLE_KEY: serviceKey, VITE_LOCAL_QBANK: "1", VITE_LOCAL_FUNCTIONS: "1" },
 });
 child.on("exit", (code) => process.exit(code ?? 0));
