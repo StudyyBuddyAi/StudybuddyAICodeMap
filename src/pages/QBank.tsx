@@ -23,6 +23,7 @@ import TopicComposer from "@/components/qbank/TopicComposer";
 import SystemBrowser from "@/components/qbank/SystemBrowser";
 import SuggestionCards from "@/components/qbank/SuggestionCards";
 import ExamSwitch from "@/components/qbank/ExamSwitch";
+import DifficultyScale from "@/components/qbank/DifficultyScale";
 import WritingOverlay from "@/components/qbank/WritingOverlay";
 import { EXAM_THEME } from "@/lib/qbank-exam-theme";
 import { useUsageLimit, MAX_DAILY_QBANK_QUESTIONS } from "@/hooks/use-usage-limit";
@@ -55,7 +56,6 @@ import { formatRelative } from "@/lib/qbank-format";
 import { topicRejectionMessage, validateTopic } from "@/lib/validate-topic";
 import {
   CHALLENGE_LABELS,
-  CHALLENGE_BLURBS,
   EXAM_MODE_LABELS,
   PLAY_MODE_LABELS,
   PLAY_MODE_BLURBS,
@@ -88,8 +88,6 @@ const SET_SIZES = Array.from(
 
 /** Topics the student can mix in one set (owner decision, 2026-10-30). */
 const MAX_TOPICS = 5;
-
-const CHALLENGE_ORDER: ChallengeLevel[] = ["foundations", "balanced", "challenge"];
 
 const PLAY_MODE_ORDER: PlayMode[] = ["tutor", "timed"];
 
@@ -405,11 +403,15 @@ const QBank = () => {
     <DashboardLayout wide>
       {/* The layout owns the page gutter; no padding of our own on top of it.
           One column: past sets live on the Dashboard, not beside the generator. */}
-      <div className="mx-auto w-full max-w-3xl space-y-6 animate-fade-in">
+      <div className="mx-auto w-full max-w-5xl space-y-6 animate-fade-in">
           <PageHeader
-            label="QBank"
-            title="Practice questions"
-            description="One topic, a mix of several, or a ready-made challenge. The first question is ready in seconds."
+            label="QBank · USMLE-style"
+            title={
+              <>
+                Questions on <em className="text-[color:var(--color-accent)]">anything you like.</em>
+              </>
+            }
+            description="Built on NBME item-writing rules. Name a topic — or mix up to five — and a set is written for it; you start on the first question as soon as it is ready, and the rest is written while you work."
           />
 
           {/* Sign In Card */}
@@ -615,7 +617,7 @@ const QBank = () => {
                 </div>
 
                 {showOptions && (
-                  <div id="qbank-customize" className="grid gap-5 sm:grid-cols-3">
+                  <div id="qbank-customize" className="grid gap-5 sm:grid-cols-2">
                     {/* Mode — how the set is sat, not what it is written for. */}
                     <div>
                       <p className={`${MONO_EYEBROW} text-muted-foreground mb-2`}>Mode</p>
@@ -668,28 +670,11 @@ const QBank = () => {
 
                     {/* Difficulty — a reasoning-order dial underneath, not a
                         difficulty one. Reasoning order is what the batch plan
-                        actually controls; the wire parameter stays `challenge`. */}
-                    <div>
+                        actually controls; the wire parameter stays `challenge`.
+                        Full width, so the three steps sit on one row in order. */}
+                    <div className="sm:col-span-2">
                       <p className={`${MONO_EYEBROW} text-muted-foreground mb-2`}>Difficulty</p>
-                      <div className="flex flex-wrap gap-2">
-                        {CHALLENGE_ORDER.map((level) => {
-                          const active = level === challenge;
-                          return (
-                            <button
-                              key={level}
-                              type="button"
-                              onClick={() => setChallenge(level)}
-                              disabled={isStarting}
-                              aria-pressed={active}
-                              className={`${PILL_BASE} ${active ? PILL_ON : PILL_OFF}`}
-                            >
-                              {active && <Check className="w-4 h-4" />}
-                              {CHALLENGE_LABELS[level]}
-                            </button>
-                          );
-                        })}
-                      </div>
-                      <p className="mt-2 text-[11px] text-muted-foreground">{CHALLENGE_BLURBS[challenge]}</p>
+                      <DifficultyScale value={challenge} onChange={setChallenge} disabled={isStarting} />
                     </div>
                   </div>
                 )}
