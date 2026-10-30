@@ -482,7 +482,9 @@ const QBankSummary = () => {
       // A set opened by id (after a reload, or from history) has no
       // generation in memory: repeat it from what its questions cover, at the
       // same size, rather than dropping the student at an empty generator.
-      const retryTopic = lastGeneration?.topic ?? summaryData?.questions.find((q) => q.topic)?.topic ?? null;
+      // A mixed set repeats as the same mix, not as its "A · B" label.
+      const retryTopic: string | string[] | null =
+        lastGeneration?.topics ?? lastGeneration?.topic ?? summaryData?.questions.find((q) => q.topic)?.topic ?? null;
       if (!retryTopic) {
         navigate("/qbank");
         return;
@@ -632,7 +634,9 @@ const QBankSummary = () => {
             {againSize > 0 && !isReviewSet && (
               <button type="button" className="qb-btn qb-btn--outline qb-btn--lg" onClick={handleTryAgain} disabled={retrying}>
                 <RotateCcw />
-                {retrying ? "Writing…" : `Another ${againSize} on this topic`}
+                {retrying
+                  ? "Writing…"
+                  : `Another ${againSize} on ${lastGeneration?.topics && lastGeneration.topics.length > 1 ? "these topics" : "this topic"}`}
               </button>
             )}
             <button type="button" className="qb-btn qb-btn--lg" onClick={() => navigate("/qbank")}>

@@ -182,11 +182,14 @@ interface QBankContextValue {
    * being written.
    */
   startGeneratedSession: (
-    topic: string,
+    /** One topic, or a mixed set's topics (up to five from the composer). */
+    topic: string | string[],
     target: number,
     challenge?: ChallengeLevel,
     examMode?: ExamMode,
-    mode?: PlayMode
+    mode?: PlayMode,
+    /** Systems already known for the topics — a curriculum-built block. */
+    opts?: { systems?: (string | null)[] }
   ) => Promise<string>;
   /**
    * Re-sits questions from the review queue — the student's own misses and
@@ -740,6 +743,9 @@ export const QBankProvider = ({ children }: { children: ReactNode }) => {
     (cfg: {
       generationId: string;
       topic: string;
+      /** A mixed set's topics; `topic` is then their label. */
+      topics?: string[];
+      systems?: (string | null)[] | null;
       /** Questions this RUN must deliver, which after a resume is the shortfall. */
       remaining: number;
       /** Questions the SET is for, for display. */
@@ -765,6 +771,8 @@ export const QBankProvider = ({ children }: { children: ReactNode }) => {
       const meta: SessionGeneration = {
         generationId: cfg.generationId,
         topic: cfg.topic,
+        ...(cfg.topics && cfg.topics.length > 1 ? { topics: cfg.topics } : {}),
+        ...(cfg.systems ? { systems: cfg.systems } : {}),
         system: cfg.system,
         systemName: cfg.systemName,
         target: cfg.setTarget,
@@ -789,6 +797,8 @@ export const QBankProvider = ({ children }: { children: ReactNode }) => {
 
       const run = runQbankGeneration({
         topic: cfg.topic,
+        topics: cfg.topics,
+        systems: cfg.systems,
         target: cfg.remaining,
         generationId: cfg.generationId,
         signal: controller.signal,
@@ -825,6 +835,7 @@ export const QBankProvider = ({ children }: { children: ReactNode }) => {
           meta.systemName = progress.systemName ?? meta.systemName;
           meta.nextIndex = progress.nextIndex;
           meta.covered = progress.covered;
+          if (progress.systems) meta.systems = progress.systems;
           setGeneration((prev) =>
             prev
               ? {
@@ -896,12 +907,25 @@ export const QBankProvider = ({ children }: { children: ReactNode }) => {
 
   const startGeneratedSession = useCallback(
     async (
-      topic: string,
+      topicInput: string | string[],
       target: number,
       challenge: ChallengeLevel = "balanced",
       examMode: ExamMode = "step1",
-      mode: PlayMode = "tutor"
+      mode: PlayMode = "tutor",
+      opts: { systems?: (string | null)[] } = {}
     ): Promise<string> => {
+      // A mixed set is several topics in the order its questions take them;
+      // one topic is the set it has always been. De-duplicated ignoring case.
+      const list = (Array.isArray(topicInput) ? topicInput : [topicInput])
+        .map((t) => t.trim())
+        .filter(Boolean);
+      const topics = list.filter(
+        (t, i) => list.findIndex((x) => x.toLowerCase() === t.toLowerCase()) === i
+      );
+      const topic = topics.join(" · ");
+      const mixed = topics.length > 1;
+      const systems =
+        mixed && opts.systems && opts.systems.length === topics.length ? opts.systems : null;
       stopGeneration();
       sessionIdRef.current = null;
       heldBackRef.current = 0;
@@ -924,11 +948,12 @@ export const QBankProvider = ({ children }: { children: ReactNode }) => {
       const done = beginGeneration({
         generationId,
         topic,
+        ...(mixed ? { topics, systems } : {}),
         remaining: setTarget,
         setTarget,
         startIndex: 1,
         covered: [],
-        system: null,
+        system: !mixed && opts.systems?.[0] ? opts.systems[0] : null,
         systemName: null,
         challenge,
         examMode,
@@ -1019,6 +1044,8 @@ export const QBankProvider = ({ children }: { children: ReactNode }) => {
       void beginGeneration({
         generationId: meta.generationId,
         topic: meta.topic,
+        topics: meta.topics,
+        systems: meta.systems ?? null,
         remaining,
         setTarget: meta.target,
         startIndex: meta.nextIndex,

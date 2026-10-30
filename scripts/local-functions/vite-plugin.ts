@@ -25,6 +25,15 @@
  * OPENROUTER_API_KEY is withheld from the shim even when .env.local has it, so
  * nothing run here can reach OpenRouter. The handler's one OpenRouter use is
  * the retrieval embedding, which is off here anyway.
+ *
+ * qbank-generate runs here too, but only under `npm run dev:qbank`
+ * (scripts/local-functions/dev-qbank.mjs), and differently: its questions must
+ * land in the real `questions` table, because the session finds them there
+ * through claim_generated_questions. So it gets the REAL supabase-js and the
+ * service-role key that launcher puts in this process's environment (never on
+ * disk), and the deno std `serve` is swapped for deno-serve-stub.ts. Its
+ * writer, probe and fact check spend real Corti credit; its rows and usage
+ * counts are real.
  */
 import path from "node:path";
 import type { IncomingMessage, ServerResponse } from "node:http";
@@ -32,6 +41,7 @@ import { loadEnv, type Plugin } from "vite";
 
 const PREFIX = "/__local-fns";
 const HANDLER = "/supabase/functions/_shared/medical-notes-handler.ts";
+const QBANK_HANDLER = "/supabase/functions/qbank-generate/index.ts";
 
 const tag = "\x1b[36m[local-fns]\x1b[0m";
 const say = (msg: string) => console.log(`${tag} ${msg}`);
@@ -89,6 +99,15 @@ export function localFunctions(): Plugin {
     ["npm:@langchain/openai@0.3.0", "/scripts/local-functions/langchain-stub.ts"],
   ];
   const shared = path.join(root, "supabase", "functions", "_shared").replace(/\\/g, "/");
+  const qbankEntry = path.join(root, "supabase", "functions", "qbank-generate", "index.ts").replace(/\\/g, "/");
+  // The QBank function's own imports: the real client, and a serve() that
+  // hands over its handler instead of listening.
+  const qbankSwaps: [string, string][] = [
+    ["https://esm.sh/@supabase/supabase-js@2.39.8", "@supabase/supabase-js"],
+    ["https://deno.land/std@0.168.0/http/server.ts", "/scripts/local-functions/deno-serve-stub.ts"],
+  ];
+  let qbankEnabled = false;
+  let serviceKey = "";
 
   return {
     name: "studybuddy-local-functions",
@@ -96,13 +115,21 @@ export function localFunctions(): Plugin {
     enforce: "pre",
     config(_config, { mode }) {
       env = loadEnv(mode, root, "");
-      enabled = env.VITE_LOCAL_FUNCTIONS === "1";
+      enabled = env.VITE_LOCAL_FUNCTIONS === "1" || process.env.VITE_LOCAL_FUNCTIONS === "1";
+      serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
+      qbankEnabled = process.env.VITE_LOCAL_QBANK === "1" && !!serviceKey;
     },
     // Rewritten in the source rather than resolved: Vite's SSR loader hands an
     // https: import straight to Node, which cannot load it, before any
     // resolveId hook is asked.
     transform(code, id) {
-      if (!enabled || !id.replace(/\\/g, "/").startsWith(shared)) return null;
+      const file = id.replace(/\\/g, "/");
+      if (qbankEnabled && file === qbankEntry) {
+        let out = code;
+        for (const [from, to] of qbankSwaps) out = out.split(`"${from}"`).join(`"${to}"`);
+        return out === code ? null : { code: out, map: null };
+      }
+      if (!enabled || !file.startsWith(shared)) return null;
       let out = code;
       for (const [from, to] of swaps) out = out.split(`"${from}"`).join(`"${to}"`);
       return out === code ? null : { code: out, map: null };
@@ -115,7 +142,9 @@ export function localFunctions(): Plugin {
       const denoEnv: Record<string, string | undefined> = {
         ...localEnv,
         SUPABASE_URL: env.VITE_SUPABASE_URL,
-        SUPABASE_SERVICE_ROLE_KEY: "local-stand-in",
+        // Real only under dev:qbank, where qbank-generate needs it; the
+        // medical-notes handler talks to the fake client either way.
+        SUPABASE_SERVICE_ROLE_KEY: serviceKey || "local-stand-in",
         SUPABASE_ANON_KEY: env.VITE_SUPABASE_PUBLISHABLE_KEY,
       };
       const g = globalThis as unknown as { Deno?: unknown };
@@ -126,6 +155,11 @@ export function localFunctions(): Plugin {
         `medical-notes runs locally (real handler) · writer: ${env.LOCAL_NOTES_WRITER || "production routing"} · corti: ${
           hasCorti ? "ok" : "no creds"
         } · openrouter: never (key withheld) · retrieval: off`
+      );
+      say(
+        qbankEnabled
+          ? "qbank-generate runs locally (real handler, real database, real Corti)"
+          : "qbank-generate: deployed function (run `npm run dev:qbank` to run it locally)"
       );
 
       server.middlewares.use(async (req, res, next) => {
@@ -139,6 +173,25 @@ export function localFunctions(): Plugin {
           return res.end(JSON.stringify({ error: "local functions are loopback-only" }));
         }
         const pathname = url.split("?")[0].slice(PREFIX.length);
+        if (pathname === "/qbank-generate" && qbankEnabled && (req.method === "POST" || req.method === "OPTIONS")) {
+          const startedAt = Date.now();
+          try {
+            await server.ssrLoadModule(QBANK_HANDLER);
+            const handler = (globalThis as unknown as { __localServeHandler?: (r: Request) => Promise<Response> })
+              .__localServeHandler;
+            if (!handler) throw new Error("qbank-generate did not register a handler");
+            const response = await handler(await toRequest(req));
+            await sendResponse(response, res);
+            say(`qbank-generate ${response.status} in ${((Date.now() - startedAt) / 1000).toFixed(1)}s`);
+          } catch (err) {
+            say(`qbank-generate crashed — ${err instanceof Error ? err.stack : String(err)}`);
+            if (!res.headersSent) {
+              res.statusCode = 500;
+              res.end(JSON.stringify({ error: "local function error" }));
+            } else res.end();
+          }
+          return;
+        }
         if (pathname !== "/medical-notes" || (req.method !== "POST" && req.method !== "OPTIONS")) {
           res.statusCode = 404;
           return res.end(JSON.stringify({ error: "not_found" }));

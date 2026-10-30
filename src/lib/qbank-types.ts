@@ -64,10 +64,20 @@ export interface SessionAnswer {
  */
 export interface SessionGeneration {
   generationId: string;
-  /** The student's topic, verbatim — a resumed run needs it to keep writing. */
+  /**
+   * The student's topic, verbatim — a resumed run needs it to keep writing. A
+   * mixed set stores the label its topics are shown under ("A · B · C").
+   */
   topic: string;
+  /**
+   * A mixed set's topics, in the order its questions take them in turn. Absent
+   * on a single-topic set (and on every set saved before mixing existed).
+   */
+  topics?: string[];
   /** The system the first wave routed to. Every later wave reuses it. */
   system: string | null;
+  /** Each topic's system, aligned with `topics`, once the first wave routed them. */
+  systems?: (string | null)[];
   systemName: string | null;
   /** How many questions the set is meant to end with. */
   target: number;

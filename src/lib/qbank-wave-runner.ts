@@ -117,6 +117,8 @@ export interface GenerationProgress {
   nextIndex: number;
   /** Subtopics covered so far, so a resumed run keeps the duplication guard. */
   covered: string[];
+  /** A mixed set: each topic's system, once routed, for the waves after. */
+  systems: (string | null)[] | null;
 }
 
 export interface GenerationOutcome {
@@ -140,6 +142,10 @@ export interface GenerationOutcome {
 
 export interface RunGenerationOptions {
   topic: string;
+  /** A mixed set's topics; `topic` is then their label. */
+  topics?: string[];
+  /** Resuming or pre-routed: each topic's system, aligned with `topics`. */
+  systems?: (string | null)[] | null;
   target: number;
   generationId: string;
   signal: AbortSignal;
@@ -186,6 +192,8 @@ interface WaveResult {
   subtopics: string[];
   system: string | null;
   systemName: string | null;
+  /** A mixed set's per-topic systems, as the server routed them. */
+  systems: (string | null)[] | null;
   streamError: string | null;
   /** Non-retryable. Ends the whole run rather than the wave. */
   fatal: string | null;
@@ -219,6 +227,8 @@ const isAbort = (err: unknown) =>
 async function runWave(
   params: {
     topic: string;
+    topics?: string[];
+    systems?: (string | null)[] | null;
     count: number;
     generationId: string;
     system: string | null;
@@ -239,6 +249,7 @@ async function runWave(
     subtopics: [],
     system: params.system,
     systemName: null,
+    systems: params.systems ?? null,
     streamError: null,
     fatal: null,
     completed: false,
@@ -268,6 +279,9 @@ async function runWave(
     const response = await call(
       {
         topic: params.topic,
+        ...(params.topics && params.topics.length > 1
+          ? { topics: params.topics, ...(params.systems ? { systems: params.systems } : {}) }
+          : {}),
         count: params.count,
         generationId: params.generationId,
         system: params.system ?? undefined,
@@ -327,6 +341,9 @@ async function runWave(
 
         const meta = parsed.__meta as Record<string, unknown> | undefined;
         if (meta) {
+          if (Array.isArray(meta.systems)) {
+            result.systems = meta.systems.map((x) => (typeof x === "string" ? x : null));
+          }
           if (typeof meta.systemName === "string") {
             result.systemName = meta.systemName;
             if (typeof meta.system === "string") result.system = meta.system;
@@ -375,6 +392,9 @@ async function runWave(
             }
             if (typeof summary.system === "string") result.system = summary.system;
             if (typeof summary.systemName === "string") result.systemName = summary.systemName;
+            if (Array.isArray(summary.systems)) {
+              result.systems = summary.systems.map((x) => (typeof x === "string" ? x : null));
+            }
             if (typeof summary.streamError === "string") result.streamError = summary.streamError;
 
             /**
@@ -491,6 +511,7 @@ export async function runQbankGeneration(
   let emptyStreak = 0;
   let nextIndex = Math.max(1, Math.round(opts.startIndex ?? 1));
   let system: string | null = opts.system ?? null;
+  let systems: (string | null)[] | null = opts.systems ?? null;
   let systemName: string | null = null;
   let lastError: string | null = null;
   const covered = new Set<string>(opts.alreadyCovered ?? []);
@@ -515,6 +536,8 @@ export async function runQbankGeneration(
         wave = await runWave(
           {
             topic: opts.topic,
+            topics: opts.topics,
+            systems,
             count: want,
             generationId: opts.generationId,
             system,
@@ -566,6 +589,7 @@ export async function runQbankGeneration(
 
     if (wave.completed) serverProven = true;
     system = wave.system ?? system;
+    systems = wave.systems ?? systems;
     systemName = wave.systemName ?? systemName;
     if (wave.streamError) lastError = wave.streamError;
     wave.subtopics.forEach((s) => covered.add(s));
@@ -589,6 +613,7 @@ export async function runQbankGeneration(
       systemName,
       nextIndex,
       covered: [...covered],
+      systems,
     });
   }
 

@@ -34,13 +34,14 @@ describe("buildLibraryTopics", () => {
     expect(t.next.kind).toBe("review");
   });
 
-  it("does not invent a topic out of review sets", () => {
+  it("does not invent a topic out of review or mixed sets", () => {
     const topics = buildLibraryTopics(
       {
         sheets: [],
         cards: [],
         sets: [
           { id: "r1", topic: null, system: "Review", score: 3, total: 4, endedAt: NOW },
+          { id: "m1", topic: "Asthma · DKA", mixed: true, system: "Mixed", score: 2, total: 6, endedAt: NOW },
           { id: "q1", topic: "Asthma", system: "Respiratory", score: 1, total: 5, endedAt: NOW },
         ],
       },

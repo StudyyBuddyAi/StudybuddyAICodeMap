@@ -85,6 +85,8 @@ interface WaveSpec {
   insertFailures?: number;
   /** The database's reason, as the edge function relays it. */
   insertError?: string;
+  /** A mixed set's per-topic systems, as the server routed them. */
+  systems?: string[];
 }
 
 function waveFrames(spec: WaveSpec, startIndex: number): unknown[] {
@@ -96,6 +98,7 @@ function waveFrames(spec: WaveSpec, startIndex: number): unknown[] {
         model: "corti-s1-instant",
         plan: [],
         startIndex,
+        ...(spec.systems ? { systems: spec.systems } : {}),
       },
     },
   ];
@@ -224,6 +227,38 @@ describe("runQbankGeneration — free daily allowance", () => {
     expect(outcome.status).toBe("complete");
     expect(outcome.capReached).toBeFalsy();
     expect(calls).toHaveLength(2);
+  });
+});
+
+describe("runQbankGeneration — mixed sets", () => {
+  it("sends every topic, then hands the routed systems back on the next wave", async () => {
+    const { call, calls } = fakeCall([
+      { delivers: 5, systems: ["cardiovascular", "renal"] },
+      { delivers: 5, systems: ["cardiovascular", "renal"] },
+    ]);
+    const progress: (string | null)[][] = [];
+
+    const outcome = await runQbankGeneration({
+      ...baseOpts(),
+      topic: "Heart failure · Nephrotic syndrome",
+      topics: ["Heart failure", "Nephrotic syndrome"],
+      target: 10,
+      call,
+      onProgress: (p) => p.systems && progress.push(p.systems),
+    });
+
+    expect(outcome.status).toBe("complete");
+    expect(calls[0].topics).toEqual(["Heart failure", "Nephrotic syndrome"]);
+    expect(calls[0].systems).toBeUndefined();
+    expect(calls[1].systems).toEqual(["cardiovascular", "renal"]);
+    expect(progress.at(-1)).toEqual(["cardiovascular", "renal"]);
+  });
+
+  it("sends a single topic exactly as before", async () => {
+    const { call, calls } = fakeCall([{ delivers: 5 }]);
+    await runQbankGeneration({ ...baseOpts(), target: 5, call });
+    expect(calls[0].topics).toBeUndefined();
+    expect(calls[0].systems).toBeUndefined();
   });
 });
 

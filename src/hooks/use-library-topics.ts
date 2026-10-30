@@ -8,7 +8,7 @@ import { isMature } from "@/lib/spaced-repetition";
 import { buildLibraryTopics, type LibraryQBankSet } from "@/lib/library-topics";
 
 /** The typed topic lives in the session's generation JSON, not a column. */
-const SET_COLUMNS: string = "id, score, total, system, ended_at, topic:generation->>topic";
+const SET_COLUMNS: string = "id, score, total, system, ended_at, topic:generation->>topic, topics:generation->topics";
 
 interface SetRow {
   id: string;
@@ -17,6 +17,7 @@ interface SetRow {
   system: string | null;
   ended_at: string | null;
   topic: string | null;
+  topics: unknown;
 }
 
 /**
@@ -47,6 +48,7 @@ export function useLibraryTopics() {
         .map((r) => ({
           id: r.id,
           topic: r.topic,
+          mixed: Array.isArray(r.topics) && r.topics.length > 1,
           system: r.system ?? "QBank",
           score: r.score ?? 0,
           total: r.total ?? 0,

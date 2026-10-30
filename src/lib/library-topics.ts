@@ -34,6 +34,8 @@ export interface LibraryCard {
 export interface LibraryQBankSet {
   id: string;
   topic: string | null;
+  /** A mixed set: several topics, no single one to file it under. */
+  mixed?: boolean;
   system: string;
   score: number;
   total: number;
@@ -172,6 +174,9 @@ export function buildLibraryTopics(
     // A review set re-sits questions from many topics, each already counted
     // under its own; filed by its system label it would invent a "Review" topic.
     if (!set.topic?.trim() && set.system === REVIEW_SET_SYSTEM) continue;
+    // Likewise a mixed set: its score belongs to several topics at once, and
+    // filing it under its "A · B" label would invent a topic nobody studied.
+    if (set.mixed) continue;
     const topic = set.topic?.trim() || set.system;
     if (!topic) continue;
     const b = bucketFor(buckets, topic);
