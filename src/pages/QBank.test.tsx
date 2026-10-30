@@ -4,6 +4,7 @@ import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 const startGeneratedSession = vi.fn();
+const stopGeneration = vi.fn();
 const navigateMock = vi.fn();
 
 vi.mock("react-router-dom", async (orig) => ({
@@ -19,6 +20,7 @@ vi.mock("@/contexts/QBankContext", () => ({
     session: null,
     resumeSession: vi.fn(),
     discardSession: vi.fn(),
+    stopGeneration,
   }),
 }));
 vi.mock("@/hooks/use-usage-limit", () => ({
@@ -82,7 +84,7 @@ describe("QBank page", () => {
     fireEvent.keyDown(box, { key: "Enter" });
     fireEvent.change(box, { target: { value: "sepsis" } });
     expect(screen.getByText(/Mixed: 5 questions across 2 topics \(3 · 2\)/)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /start 5 questions/i }));
+    fireEvent.click(screen.getByRole("button", { name: /start 5 step 1 questions/i }));
 
     await waitFor(() => expect(startGeneratedSession).toHaveBeenCalled());
     expect(startGeneratedSession).toHaveBeenCalledWith(["asthma", "sepsis"], 5, "balanced", "step1", "tutor", {});
@@ -91,7 +93,7 @@ describe("QBank page", () => {
 
   it("starts a card with its own topics, systems and level, inside the free allowance", async () => {
     renderPage();
-    fireEvent.click(screen.getByRole("radio", { name: "Step 2 CK" }));
+    fireEvent.click(screen.getByRole("radio", { name: /^Step 2 CK/ }));
     const card = screen.getByText("Today's challenge").closest("button")!;
     fireEvent.click(card);
 
@@ -103,6 +105,38 @@ describe("QBank page", () => {
     expect(Array.isArray(topics) ? topics.length : 1).toBe(opts.systems.length);
     // The target is remembered.
     expect(localStorage.getItem("sb_qbank_target_v1")).toBe("step2ck");
+  });
+
+  it("makes the exam unmistakable: tiles say what each tests, and the Start button carries it", () => {
+    renderPage();
+    const step1 = screen.getByRole("radio", { name: /^Step 1/ });
+    expect(step1).toHaveAttribute("aria-checked", "true");
+    expect(step1).toHaveTextContent("Mechanisms — why it happens.");
+    expect(screen.getByRole("radio", { name: /^Step 2 CK/ })).toHaveTextContent("what to do next");
+    expect(screen.getByRole("combobox")).toHaveAttribute("placeholder", expect.stringContaining("the RAAS"));
+
+    fireEvent.click(screen.getByRole("radio", { name: /^Step 2 CK/ }));
+    expect(screen.getByRole("radio", { name: /^Step 2 CK/ })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByRole("button", { name: /start 5 step 2 ck questions/i })).toBeInTheDocument();
+    expect(screen.getByRole("combobox")).toHaveAttribute("placeholder", expect.stringContaining("chest pain in the ED"));
+  });
+
+  it("shows the writing screen while the first question is written, and cancels cleanly", async () => {
+    startGeneratedSession.mockImplementation(() => new Promise(() => {}));
+    renderPage();
+    const box = screen.getByRole("combobox");
+    fireEvent.change(box, { target: { value: "asthma" } });
+    fireEvent.keyDown(box, { key: "Enter" });
+    fireEvent.click(screen.getByRole("button", { name: /start 5 step 1 questions/i }));
+
+    const dialog = await screen.findByRole("dialog", { name: /writing your first question/i });
+    expect(dialog).toHaveTextContent("Routing your topics");
+    expect(dialog).toHaveTextContent(/high, low or normal/i);
+    expect(dialog).toHaveTextContent(/Step 1 tip/);
+
+    fireEvent.click(screen.getByRole("button", { name: /cancel this set/i }));
+    expect(stopGeneration).toHaveBeenCalled();
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: /writing your first question/i })).not.toBeInTheDocument());
   });
 
   it("builds an exam block with one pre-routed topic per question, timed", async () => {

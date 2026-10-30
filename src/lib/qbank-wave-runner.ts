@@ -1,6 +1,7 @@
 import { callQbankGenerate } from "./callQbankGenerate";
 import { parsePartialQuestions } from "./parse-partial-questions";
 import { DISPUTED_REASON } from "./qbank-rule-labels";
+import { firstItemStage, type WritingStage } from "./qbank-writing-stage";
 import type { GeneratedQuestionDraft } from "./qbank-types";
 
 /**
@@ -99,6 +100,24 @@ export interface HeldBackItem {
   reason: string;
 }
 
+/**
+ * One row of the set's plan, as the waiting screen may show it: the topic and
+ * the reasoning steps. Deliberately not the plan row itself, which also names
+ * the letter the answer will be moved to.
+ */
+export interface BlueprintRow {
+  index: number;
+  reasoningOrder: string;
+  focus: string | null;
+}
+
+/** Where the writer is with the wave's first question. Never derived from content. */
+export interface WritingProgress {
+  stage: WritingStage;
+  /** Characters streamed so far in this wave — a size, not a text. */
+  chars: number;
+}
+
 export interface GenerationProgress {
   delivered: number;
   /** Written and paid for, but withheld by the gate or the second read. */
@@ -152,8 +171,18 @@ export interface RunGenerationOptions {
   waveSize?: number;
   /** Injected in tests. Defaults to the real edge-function call. */
   call?: typeof callQbankGenerate;
-  /** The resolved system and model, once the first wave reports them. */
-  onMeta?: (meta: { systemName: string; model: string }) => void;
+  /**
+   * The resolved system and model once the first wave reports them, with the
+   * set's blueprint and per-topic systems when the frame carries them.
+   */
+  onMeta?: (meta: {
+    systemName: string;
+    model: string;
+    blueprint?: BlueprintRow[];
+    focuses?: { topic: string; systemName: string }[];
+  }) => void;
+  /** The first question's stage as it is written, for the waiting screen. */
+  onWriting?: (progress: WritingProgress) => void;
   /** In-flight drafts for the progress display. Never rendered as questions. */
   onDrafts?: (drafts: GeneratedQuestionDraft[]) => void;
   /** Awaited, so the first question can start a session before the next lands. */
@@ -269,6 +298,17 @@ async function runWave(
   };
 
   let drafts: GeneratedQuestionDraft[] = [];
+  // Reported on a change of stage, or every ~400 characters within one.
+  let lastStage: WritingStage | null = null;
+  let lastChars = 0;
+  const reportWriting = (content: string) => {
+    if (!opts.onWriting) return;
+    const stage = firstItemStage(content, drafts.length);
+    if (stage === lastStage && content.length - lastChars < 400) return;
+    lastStage = stage;
+    lastChars = content.length;
+    opts.onWriting({ stage, chars: content.length });
+  };
   // Whether the wave closed the way this client's protocol says it should. A
   // stream that ends cleanly without ever sending one is not a failed wave, it
   // is a server that does not speak this protocol — see the check below.
@@ -347,10 +387,27 @@ async function runWave(
           if (typeof meta.systemName === "string") {
             result.systemName = meta.systemName;
             if (typeof meta.system === "string") result.system = meta.system;
+            // Only the topic and the reasoning steps leave this function; the
+            // plan rows also carry the letter each answer will sit on.
+            const blueprint = Array.isArray(meta.plan)
+              ? (meta.plan as Record<string, unknown>[]).map((row) => ({
+                  index: Number(row.index) || 0,
+                  reasoningOrder: typeof row.reasoningOrder === "string" ? row.reasoningOrder : "",
+                  focus: typeof row.focus === "string" ? row.focus : null,
+                }))
+              : undefined;
+            const focuses = Array.isArray(meta.focuses)
+              ? (meta.focuses as Record<string, unknown>[])
+                  .filter((x) => typeof x.topic === "string")
+                  .map((x) => ({ topic: x.topic as string, systemName: typeof x.systemName === "string" ? x.systemName : "" }))
+              : undefined;
             opts.onMeta?.({
               systemName: meta.systemName,
               model: typeof meta.model === "string" ? meta.model : "",
+              ...(blueprint ? { blueprint } : {}),
+              ...(focuses ? { focuses } : {}),
             });
+            reportWriting(content);
           }
 
           // The server re-ran a wave that had produced nothing. The partial JSON
@@ -360,6 +417,8 @@ async function runWave(
             content = "";
             drafts = [];
             opts.onDrafts?.([]);
+            lastStage = null;
+            reportWriting(content);
             continue;
           }
 
@@ -434,6 +493,7 @@ async function runWave(
           content += delta;
           drafts = parsePartialQuestions(content);
           opts.onDrafts?.(drafts);
+          reportWriting(content);
         }
       }
     }

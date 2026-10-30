@@ -230,6 +230,48 @@ describe("runQbankGeneration — free daily allowance", () => {
   });
 });
 
+describe("runQbankGeneration — the waiting screen's signals", () => {
+  it("reports the first question's stage from field names, and a blueprint without answer letters", async () => {
+    const item = {
+      index: 1, system: "Renal", domain: "Physiology", subtopic: "RTA", competency: "Foundational Science",
+      difficulty: "Medium", reasoningOrder: "2nd", reasoningChain: "chain",
+      vignette: "A 30-year-old has a low bicarbonate.", leadIn: "Which is most likely?",
+      options: { a: "One", b: "Two", c: "Three", d: "Four", e: "Five" }, correctOption: "b",
+      explanation: "**x**", distractorExplanations: { a: "n", c: "n", d: "n", e: "n" }, teachingPoint: "t",
+    };
+    const doc = JSON.stringify({ batchPlan: { system: "renal" }, questions: [item] });
+    const cut = (key: string) => doc.indexOf(`"${key}"`) + key.length + 4;
+    const pieces = [cut("index"), cut("vignette"), cut("leadIn"), cut("explanation"), doc.length];
+    const deltas = pieces.map((end, i) => doc.slice(i === 0 ? 0 : pieces[i - 1], end));
+
+    const frames: unknown[] = [
+      {
+        __meta: {
+          system: "renal", systemName: "Renal & Urinary", model: "m", startIndex: 1,
+          plan: [{ index: 1, answerLetter: "d", reasoningOrder: "2nd", examTrack: "step1" }],
+        },
+      },
+      ...deltas.map((d) => ({ choices: [{ delta: { content: d } }] })),
+      { __meta: { questionReady: { id: "q1", index: 1, blocked: false, difficulty: "Medium", reasoningOrder: "2nd", agreed: true } } },
+      { __meta: { waveComplete: { requested: 1, persisted: 1, insertFailures: 0, system: "renal", systemName: "Renal & Urinary", subtopics: [] } } },
+    ];
+    const metas: unknown[] = [];
+    const stages: string[] = [];
+
+    await runQbankGeneration({
+      ...baseOpts(),
+      target: 1,
+      call: async () => sseResponse(frames),
+      onMeta: (m) => metas.push(m),
+      onWriting: (w) => stages.push(w.stage),
+    });
+
+    expect(metas[0]).toEqual({ systemName: "Renal & Urinary", model: "m", blueprint: [{ index: 1, reasoningOrder: "2nd", focus: null }] });
+    expect(JSON.stringify(metas)).not.toContain("answerLetter");
+    expect([...new Set(stages)]).toEqual(["planning", "reasoning", "case", "question", "explanation", "checking"]);
+  });
+});
+
 describe("runQbankGeneration — mixed sets", () => {
   it("sends every topic, then hands the routed systems back on the next wave", async () => {
     const { call, calls } = fakeCall([

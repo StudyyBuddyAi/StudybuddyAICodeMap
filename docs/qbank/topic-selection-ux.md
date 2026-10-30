@@ -297,6 +297,39 @@ backward-compatible (an old client sends `topic` and gets the old behaviour) —
 because the new page sends `topics[]`, which the deployed v8 would ignore (it would route the
 "A · B" label as one topic). No migrations.
 
+## 10. Exam identity and the first-question wait (2026-10-30)
+
+Owner feedback after trying the page: the Step 1 / Step 2 CK difference did not stand out, and the
+~20 s before the first question felt like dead time.
+
+**Exam identity.** Three tiles at the top of the topic card, each saying what it tests — Step 1
+(violet, flask): "Mechanisms — why it happens"; Step 2 CK (green, stethoscope): "Diagnosis and
+management — what to do next"; Both. The colour carries through: the card's border, the
+"What do you want to practise? · Step 2 CK" label, an exam-worded placeholder, the Start button
+("Start 5 Step 2 CK questions"), a badge on every suggestion card, the waiting screen and a chip in
+the question player. One source: `src/lib/qbank-exam-theme.ts`.
+
+**The wait.** Research on waiting: an explained, bounded wait feels shorter than an uncertain one,
+and occupied time passes faster than empty time; a bar that slows near the end feels longer than one
+that keeps moving. So the waiting screen (`WritingOverlay`) gives:
+- real stages for question one — routing, planning, reasoning, the case, the question and options,
+  the explanation, quality checks — read off the stream by field NAME only
+  (`lib/qbank-writing-stage.ts`), with a bar that never runs backwards;
+- the set's blueprint: topics and each question's reasoning steps (the runner strips the planned
+  answer letters before anything reaches the UI);
+- a "high, low or normal?" lab-values lightning round from the player's own reference ranges
+  (`lib/lab-quiz.ts`) — exam-shaped, free, offline;
+- one exam-specific test-taking tip at a time, and Cancel.
+
+Noted while building it: the raw generation stream (pre-existing) carries each question in full,
+and the opening frame names each question's planned answer letter. Nothing renders them, but a
+student could read them in devtools. Closing that means the server sending stage frames instead of
+relaying the model's output — a change to `qbank-generate`, worth doing with the pool work.
+
+Sources: occupied vs unoccupied waiting and temporal/distractor cues —
+https://aisel.aisnet.org/jais/vol18/iss3/1 ; progress-indicator pacing —
+https://smart-interface-design-patterns.com/articles/designing-better-loading-progress-ux/
+
 ## Sources
 
 - UWorld: create test by subject/system, question modes, test from Reports —

@@ -26,6 +26,7 @@ const SuggestionCards = ({
   startingId,
   disabled,
   sizeFor,
+  badge,
 }: {
   suggestions: Suggestion[];
   onStart: (s: Suggestion) => void;
@@ -34,6 +35,8 @@ const SuggestionCards = ({
   disabled?: boolean;
   /** The size a card will actually run at — inside a free allowance. */
   sizeFor: (s: Suggestion) => number;
+  /** The exam every card is written for, shown on each. */
+  badge?: { label: string; className: string };
 }) => {
   if (suggestions.length === 0) return null;
   return (
@@ -65,6 +68,11 @@ const SuggestionCards = ({
                 <span className="flex items-center gap-2">
                   <span className={`h-1.5 w-1.5 rounded-full ${TONE[s.kind]}`} aria-hidden />
                   <span className={`${MONO_EYEBROW} text-[10px] text-muted-foreground`}>{s.eyebrow}</span>
+                  {badge && (
+                    <span className={`ml-auto rounded-full px-2 py-0.5 text-[10px] font-semibold ${badge.className}`}>
+                      {badge.label}
+                    </span>
+                  )}
                 </span>
                 <span className="text-[15px] font-semibold leading-snug text-foreground">{s.title}</span>
                 <span className="text-xs leading-relaxed text-muted-foreground">{s.hook}</span>

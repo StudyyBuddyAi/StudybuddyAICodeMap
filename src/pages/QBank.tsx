@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import PageHeader from "@/components/layout/PageHeader";
 import { useLocation, useNavigate } from "react-router-dom";
 import {
@@ -8,8 +8,6 @@ import {
   AlertTriangle,
   Loader2,
   Check,
-  Compass,
-  PenLine,
   PlayCircle,
   Timer,
   RotateCcw,
@@ -24,6 +22,9 @@ import GoProModal from "@/components/GoProModal";
 import TopicComposer from "@/components/qbank/TopicComposer";
 import SystemBrowser from "@/components/qbank/SystemBrowser";
 import SuggestionCards from "@/components/qbank/SuggestionCards";
+import ExamSwitch from "@/components/qbank/ExamSwitch";
+import WritingOverlay from "@/components/qbank/WritingOverlay";
+import { EXAM_THEME } from "@/lib/qbank-exam-theme";
 import { useUsageLimit, MAX_DAILY_QBANK_QUESTIONS } from "@/hooks/use-usage-limit";
 import { allowedSetSizes, examBlockFor } from "../../supabase/functions/_shared/qbank-allowance.ts";
 import { useQBankReviewQueue } from "@/hooks/use-qbank-review-queue";
@@ -92,11 +93,6 @@ const CHALLENGE_ORDER: ChallengeLevel[] = ["foundations", "balanced", "challenge
 
 const PLAY_MODE_ORDER: PlayMode[] = ["tutor", "timed"];
 
-const TARGETS: { id: ExamTarget; label: string }[] = [
-  { id: "step1", label: "Step 1" },
-  { id: "step2ck", label: "Step 2 CK" },
-  { id: "mixed", label: "Both" },
-];
 
 /**
  * The pill classes shared by every option group in the generator card. A
@@ -108,8 +104,6 @@ const PILL_BASE =
   "inline-flex items-center gap-2 h-8 px-4 rounded-lg text-sm font-medium transition-all duration-200 border disabled:cursor-not-allowed disabled:opacity-50";
 const PILL_ON = "bg-primary border-primary text-primary-foreground shadow-md";
 const PILL_OFF = "bg-card border-border text-muted-foreground hover:border-primary hover:text-primary";
-
-type StepState = "pending" | "active" | "done";
 
 /**
  * How a set splits across its topics: they take turns by question, so the
@@ -146,6 +140,7 @@ const QBank = () => {
     session,
     resumeSession,
     discardSession,
+    stopGeneration,
   } = useQBankContext();
   const queryClient = useQueryClient();
   const { toast } = useToast();
@@ -160,6 +155,7 @@ const QBank = () => {
   // The exam the student prepares for — a remembered page setting, not a pill
   // on every set.
   const [target, setTarget] = useQBankTarget();
+  const theme = EXAM_THEME[target];
 
   // The free allowance: ten delivered questions a day (Pro: null, unlimited).
   // The picker never offers a set the server would cut short.
@@ -214,6 +210,9 @@ const QBank = () => {
   const [isStarting, setIsStarting] = useState(false);
   const [startingId, setStartingId] = useState<string | null>(null);
   const [startedSize, setStartedSize] = useState(MIN_SET_SIZE);
+  const [startedTopics, setStartedTopics] = useState<string[]>([]);
+  /** Set by Cancel, so the run's refusal is not reported as a failure. */
+  const cancelledRef = useRef(false);
   const [error, setError] = useState<string | null>(null);
   const [elapsed, setElapsed] = useState(0);
 
@@ -293,9 +292,11 @@ const QBank = () => {
       const size = fit(spec.size);
       if (size <= 0) return;
 
+      cancelledRef.current = false;
       setIsStarting(true);
       setStartingId(spec.id ?? null);
       setStartedSize(size);
+      setStartedTopics(spec.topics);
       setError(null);
       try {
         // Resolves the moment the first question exists and the session is
@@ -311,11 +312,14 @@ const QBank = () => {
         queryClient.invalidateQueries({ queryKey: ["qbank-unfinished"] });
         navigate(id ? `/qbank/session?session=${id}` : "/qbank/session");
       } catch (err) {
+        setIsStarting(false);
+        setStartingId(null);
+        // A cancelled run ends without a session, which reads as a failure;
+        // the student asked for it, so say nothing.
+        if (cancelledRef.current) return;
         const message = err instanceof Error ? err.message : "Generation failed";
         setError(message);
         toast({ title: "Could not generate questions", description: message, variant: "destructive" });
-        setIsStarting(false);
-        setStartingId(null);
       }
     },
     [isStarting, outOfQuestions, fit, startGeneratedSession, target, playMode, queryClient, navigate, toast]
@@ -387,32 +391,15 @@ const QBank = () => {
     }
   };
 
-  const routed = !!generation?.systemName;
+  const cancelWriting = () => {
+    cancelledRef.current = true;
+    stopGeneration();
+    setIsStarting(false);
+    setStartingId(null);
+  };
+
   const mixing = pendingTopics.length >= 2;
   const quickBusy = isStarting || outOfQuestions;
-
-  const targetSwitch = !isAnonymous && user && (
-    <div className="flex flex-wrap items-center gap-2">
-      <span className="text-xs text-muted-foreground">Studying for</span>
-      <div role="radiogroup" aria-label="Studying for" className="inline-flex rounded-full border border-border p-0.5">
-        {TARGETS.map((t) => (
-          <button
-            key={t.id}
-            type="button"
-            role="radio"
-            aria-checked={target === t.id}
-            onClick={() => setTarget(t.id)}
-            disabled={isStarting}
-            className={`h-7 rounded-full px-3 text-xs font-semibold transition-colors ${
-              target === t.id ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
-    </div>
-  );
 
   return (
     <DashboardLayout wide>
@@ -423,7 +410,6 @@ const QBank = () => {
             label="QBank"
             title="Practice questions"
             description="One topic, a mix of several, or a ready-made challenge. The first question is ready in seconds."
-            aside={targetSwitch || undefined}
           />
 
           {/* Sign In Card */}
@@ -537,9 +523,20 @@ const QBank = () => {
 
               {/* Composer — one topic, or several mixed; the set's shape folds
                   into one line until the student wants to change it. */}
-              <div className="space-y-4 rounded-[26px] border border-[color:var(--color-border)] bg-[color:var(--color-card)] p-5 shadow-[0_18px_40px_rgba(15,23,42,0.04)]">
+              <div
+                className={`space-y-4 rounded-[26px] border-2 ${theme.border} bg-[color:var(--color-card)] p-5 shadow-[0_18px_40px_rgba(15,23,42,0.04)] transition-colors`}
+              >
+                {/* The exam first: it decides what kind of question is written. */}
                 <div>
-                  <p className={`${MONO_EYEBROW} text-muted-foreground mb-2`}>What do you want to practise?</p>
+                  <p className={`${MONO_EYEBROW} text-muted-foreground mb-2`}>Studying for</p>
+                  <ExamSwitch value={target} onChange={setTarget} disabled={isStarting} />
+                </div>
+
+                <div>
+                  <p className={`${MONO_EYEBROW} mb-2`}>
+                    <span className="text-muted-foreground">What do you want to practise?</span>{" "}
+                    <span className={theme.text}>· {theme.label === "Both" ? "Step 1 + Step 2 CK" : theme.label}</span>
+                  </p>
                   <TopicComposer
                     topics={topics}
                     onChange={(next) => {
@@ -556,6 +553,7 @@ const QBank = () => {
                     disabled={isStarting}
                     onSubmit={generate}
                     onBrowse={() => setBrowseOpen(true)}
+                    placeholder={theme.placeholder}
                   />
                   {mixing && (
                     <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
@@ -591,7 +589,7 @@ const QBank = () => {
                   <div className="min-w-0 flex-1 text-sm text-foreground">
                     <span className="font-medium tabular-nums">{setSize} questions</span>
                     <span className="text-muted-foreground">
-                      {" "}· {PLAY_MODE_LABELS[playMode]} · {CHALLENGE_LABELS[challenge]} · {EXAM_MODE_LABELS[target as ExamMode]}
+                      {" "}· {PLAY_MODE_LABELS[playMode]} · {CHALLENGE_LABELS[challenge]}
                     </span>
                     <button
                       type="button"
@@ -607,10 +605,12 @@ const QBank = () => {
                     type="button"
                     onClick={generate}
                     disabled={isStarting || pendingTopics.length === 0 || outOfQuestions}
-                    className="flex h-12 shrink-0 items-center justify-center gap-2 rounded-[14px] bg-[color:var(--color-foreground)] px-6 text-sm font-semibold text-[color:var(--color-background)] shadow-[0_16px_32px_rgba(15,23,42,0.12)] transition-all duration-200 hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:translate-y-0"
+                    className={`flex h-12 shrink-0 items-center justify-center gap-2 rounded-[14px] px-6 text-sm font-semibold shadow-[0_16px_32px_rgba(15,23,42,0.12)] transition-all duration-200 hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:translate-y-0 ${theme.solid}`}
                   >
                     {isStarting && !startingId ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
-                    {isStarting && !startingId ? "Writing…" : `Start ${setSize} questions`}
+                    {isStarting && !startingId
+                      ? "Writing…"
+                      : `Start ${setSize} ${target === "mixed" ? "mixed-exam" : theme.label} questions`}
                   </button>
                 </div>
 
@@ -702,40 +702,6 @@ const QBank = () => {
                 </div>
               )}
 
-              {/* Console — rendered whenever a run is under way, error or not. It
-                  used to be hidden the moment anything went wrong, which took
-                  the progress and the way forward down with it. */}
-              {isStarting && (
-                <div className="rounded-2xl border border-[color:var(--color-border)] bg-[color:var(--color-card)] p-5 shadow-[0_12px_30px_rgba(15,23,42,0.05)]">
-                  <div className="flex items-center justify-between gap-3">
-                    <p className={`${MONO_EYEBROW} text-muted-foreground`}>Writing</p>
-                    <span className={`${MONO_EYEBROW} text-muted-foreground tabular-nums`}>
-                      {elapsed}s
-                    </span>
-                  </div>
-
-                  <ol className="mt-4 flex flex-col gap-2.5">
-                    <Step
-                      state={routed ? "done" : "active"}
-                      icon={Compass}
-                      label="Topics routed"
-                      detail={generation?.systemName ?? "choosing systems"}
-                    />
-                    <Step
-                      state={routed ? "active" : "pending"}
-                      icon={PenLine}
-                      label="First question"
-                      detail={routed ? "writing" : "waiting on the blueprint"}
-                    />
-                  </ol>
-
-                  <p className="mt-4 text-[11px] text-muted-foreground">
-                    The session opens as soon as the first question is ready. The other{" "}
-                    {startedSize - 1} are written while you answer it, and appear as they land.
-                  </p>
-                </div>
-              )}
-
               {/* For you — personal first, then challenges for this exam. */}
               <SuggestionCards
                 suggestions={suggestions}
@@ -744,6 +710,7 @@ const QBank = () => {
                 startingId={startingId}
                 disabled={quickBusy}
                 sizeFor={(s) => fit(s.size)}
+                badge={{ label: theme.label === "Both" ? "Step 1 + 2 CK" : theme.label, className: theme.badge }}
               />
 
               {/* Quick starts — no topic needed. */}
@@ -773,7 +740,7 @@ const QBank = () => {
                   <QuickStart
                     icon={Shuffle}
                     title="Surprise me"
-                    detail={`A random challenge for ${TARGETS.find((t) => t.id === target)?.label ?? "your exam"}`}
+                    detail={`A random challenge for ${target === "mixed" ? "Step 1 and Step 2 CK" : theme.label}`}
                     busy={startingId === "surprise"}
                     disabled={quickBusy}
                     onClick={startSurprise}
@@ -854,6 +821,15 @@ const QBank = () => {
             </>
           )}
       </div>
+      <WritingOverlay
+        open={isStarting}
+        target={target}
+        generation={generation}
+        elapsed={elapsed}
+        size={startedSize}
+        topics={startedTopics}
+        onCancel={cancelWriting}
+      />
       <SystemBrowser
         open={browseOpen}
         onOpenChange={setBrowseOpen}
@@ -909,42 +885,6 @@ const QuickStart = ({
       <span className="block text-xs leading-relaxed text-muted-foreground">{detail}</span>
     </span>
   </button>
-);
-
-const Step = ({
-  state,
-  icon: Icon,
-  label,
-  detail,
-}: {
-  state: StepState;
-  icon: typeof Compass;
-  label: string;
-  detail: string;
-}) => (
-  <li className="flex items-center gap-2.5">
-    <span
-      className={`grid h-5 w-5 shrink-0 place-items-center rounded-full ${
-        state === "done"
-          ? "bg-primary text-primary-foreground"
-          : "border border-border text-muted-foreground"
-      }`}
-    >
-      {state === "done" ? (
-        <Check size={12} strokeWidth={3} />
-      ) : state === "active" ? (
-        <Loader2 size={11} className="animate-spin" />
-      ) : (
-        <Icon size={11} />
-      )}
-    </span>
-    <span
-      className={`text-sm ${state === "pending" ? "text-muted-foreground" : "text-foreground"}`}
-    >
-      {label}
-    </span>
-    <span className="ml-auto text-xs text-muted-foreground">{detail}</span>
-  </li>
 );
 
 export default QBank;

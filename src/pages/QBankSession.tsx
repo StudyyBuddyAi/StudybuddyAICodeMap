@@ -28,6 +28,7 @@ import { liveItemCells, reviewItemCells } from "@/lib/qbank-item-status";
 import { ruleLabel } from "@/lib/qbank-rule-labels";
 import type { OptionKey, PlayMode, QuestionMedia } from "@/lib/qbank-types";
 import { PLAY_MODE_LABELS } from "@/lib/qbank-types";
+import { EXAM_THEME } from "@/lib/qbank-exam-theme";
 import { useBackdropScene } from "@/components/backdrop/backdrop-scene";
 import { pulseBrandMark } from "@/components/brand/brandmark-motion";
 
@@ -602,6 +603,9 @@ const QBankSession = () => {
   const timeTaken = isReviewing ? displayAnswer?.time_taken_ms : currentAnswer?.time_taken_ms;
   const endOfBlockReady = inSession && mode === "tutor" && isGraded && atEndOfWritten && !isAwaitingMore;
   const modeLabel = isReviewing ? "Review" : `${PLAY_MODE_LABELS[mode]} mode`;
+  // The exam the set was written for, in the colour the QBank page gave it.
+  const examMode = inSession ? session?.generation?.examMode : undefined;
+  const examChip = examMode ? EXAM_THEME[examMode] : null;
 
   const tools: ExamTools = {
     labsOpen,
@@ -685,6 +689,14 @@ const QBankSession = () => {
                   <h2 id="qb-case-label" className="qb-label">
                     Clinical vignette
                   </h2>
+                  {examChip && (
+                    <span
+                      className="qb-chip"
+                      style={{ color: examChip.hsl, background: examChip.hslSoft, borderColor: "transparent" }}
+                    >
+                      {examMode === "mixed" ? "Step 1 + 2 CK" : examChip.label}
+                    </span>
+                  )}
                   {q.subject && <span className="qb-chip qb-chip--accent">{q.subject}</span>}
                 </header>
                 <div className="qb-case-body">

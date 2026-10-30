@@ -22,9 +22,11 @@ import {
   runQbankGeneration,
   MIN_SET_SIZE,
   MAX_SET_SIZE,
+  type BlueprintRow,
   type GenerationOutcome,
   type GenerationStatus,
   type HeldBackItem,
+  type WritingProgress,
 } from "@/lib/qbank-wave-runner";
 import { MAX_REVIEW_SET, REVIEW_SET_SYSTEM } from "@/lib/qbank-review-queue";
 import { REVIEW_QUEUE_KEY } from "@/hooks/use-qbank-review-queue";
@@ -116,6 +118,14 @@ export interface GenerationState {
    * rather than "write the remaining", which the server would only refuse.
    */
   capReached: boolean;
+  /**
+   * For the waiting screen: the set's plan as topics and reasoning steps, each
+   * topic's system, and where the writer is with the first question. None of
+   * it is derived from question content.
+   */
+  blueprint: BlueprintRow[] | null;
+  focuses: { topic: string; systemName: string }[] | null;
+  writing: WritingProgress | null;
 }
 
 interface SessionSummary {
@@ -793,6 +803,9 @@ export const QBankProvider = ({ children }: { children: ReactNode }) => {
         heldBackItems: heldBackItemsBase,
         error: null,
         capReached: false,
+        blueprint: null,
+        focuses: null,
+        writing: null,
       });
 
       const run = runQbankGeneration({
@@ -808,9 +821,25 @@ export const QBankProvider = ({ children }: { children: ReactNode }) => {
         challenge: cfg.challenge,
         examMode: cfg.examMode,
         shouldContinue: () => !controller.signal.aborted,
-        onMeta: ({ systemName }) => {
+        onMeta: ({ systemName, blueprint, focuses }) => {
           meta.systemName = systemName;
-          setGeneration((prev) => (prev ? { ...prev, systemName } : prev));
+          setGeneration((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  systemName,
+                  // The first wave's plan is the one the waiting screen shows.
+                  blueprint: prev.blueprint ?? blueprint ?? null,
+                  focuses: prev.focuses ?? focuses ?? null,
+                }
+              : prev
+          );
+        },
+        onWriting: (writing) => {
+          // Only while nothing is playable yet: once the session is open the
+          // waiting screen is gone, and later waves need not re-render the page.
+          if (ownSessionId) return;
+          setGeneration((prev) => (prev ? { ...prev, writing } : prev));
         },
         onQuestionReady: async (event) => {
           // Withheld questions are not playable: the gate blocked it, the blind

@@ -22,6 +22,7 @@ const TopicComposer = ({
   disabled,
   onSubmit,
   onBrowse,
+  placeholder,
 }: {
   topics: string[];
   onChange: (topics: string[]) => void;
@@ -33,6 +34,8 @@ const TopicComposer = ({
   /** Enter on an empty input with at least one topic: start the set. */
   onSubmit: () => void;
   onBrowse: () => void;
+  /** Example topics, worded for the exam the set is for. */
+  placeholder?: string;
 }) => {
   const listId = useId();
   const inputRef = useRef<HTMLInputElement>(null);
@@ -167,7 +170,7 @@ const TopicComposer = ({
             full
               ? `Up to ${max} topics`
               : topics.length === 0
-                ? "Type a topic — heart failure, DKA, breaking bad news…"
+                ? placeholder ?? "Type a topic — heart failure, DKA, breaking bad news…"
                 : "Add another to mix them"
           }
           className="h-9 min-w-[10rem] flex-1 bg-transparent px-1.5 text-sm text-foreground outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed"
