@@ -15,6 +15,7 @@ import { StatusIcon } from "@/components/qbank/ItemNavigator";
 import "@/components/qbank/exam.css";
 import { useQBankContext } from "@/contexts/QBankContext";
 import { useUsageLimit } from "@/hooks/use-usage-limit";
+import { REVIEW_SET_SYSTEM } from "@/lib/qbank-review-queue";
 import { supabase } from "@/integrations/supabase/client";
 import type { PlayMode, Question, QuestionMedia, SessionAnnotations, SessionAnswer } from "@/lib/qbank-types";
 import { CHALLENGE_LABELS, EXAM_MODE_LABELS, TIMED_SECONDS_PER_QUESTION } from "@/lib/qbank-types";
@@ -217,6 +218,8 @@ const QBankSummary = () => {
   const [report, setReport] = useState<GenerationReport | null>(null);
   const [sessionMode, setSessionMode] = useState<PlayMode>(lastMode);
   const [filter, setFilter] = useState<Filter>("all");
+  /** A re-sit from the review queue: it has no single topic to write more of. */
+  const [isReviewSet, setIsReviewSet] = useState(false);
 
   const [summaryData, setSummaryData] = useState<SummaryData | null>(null);
   const [summaryFlaggedIds, setSummaryFlaggedIds] = useState<Set<string>>(new Set());
@@ -245,7 +248,7 @@ const QBankSummary = () => {
           // student's own marks are on the session row, which they can read.
           const [{ data, error }, marks] = await Promise.all([
             supabase.rpc("get_session_review", { p_session: sessionId }),
-            supabase.from("qbank_sessions").select("annotations").eq("id", sessionId).maybeSingle(),
+            supabase.from("qbank_sessions").select("annotations, system").eq("id", sessionId).maybeSingle(),
           ]);
           if (cancelled) return;
           if (error) {
@@ -325,6 +328,7 @@ const QBankSummary = () => {
             };
             setSummaryData(loaded);
             setSummaryFlaggedIds(flagSet);
+            setIsReviewSet(marks.data?.system === REVIEW_SET_SYSTEM);
             loadSummary(loaded);
             setLoading(false);
             return;
@@ -625,7 +629,7 @@ const QBankSummary = () => {
                 <ListChecks /> Review all
               </button>
             )}
-            {againSize > 0 && (
+            {againSize > 0 && !isReviewSet && (
               <button type="button" className="qb-btn qb-btn--outline qb-btn--lg" onClick={handleTryAgain} disabled={retrying}>
                 <RotateCcw />
                 {retrying ? "Writing…" : `Another ${againSize} on this topic`}
@@ -635,6 +639,17 @@ const QBankSummary = () => {
               Back to QBank
             </button>
           </div>
+
+          {(score.incorrect > 0 || counts.marked > 0) && (
+            <p style={{ fontSize: 14, lineHeight: 1.6, color: "var(--fg-muted)", marginTop: 12 }}>
+              {score.incorrect > 0 &&
+                `The ${score.incorrect} you missed come${score.incorrect === 1 ? "s" : ""} back in your review queue tomorrow`}
+              {score.incorrect > 0 && counts.marked > 0 ? "; " : ""}
+              {counts.marked > 0 &&
+                `${score.incorrect > 0 ? "the" : "The"} ${counts.marked} you marked ${counts.marked === 1 ? "is" : "are"} there now`}
+              . Retries are free.
+            </p>
+          )}
         </section>
 
         <section className="space-y-3" aria-labelledby="qb-questions-title">

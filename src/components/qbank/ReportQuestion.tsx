@@ -10,9 +10,9 @@ import {
 } from "@/components/ui/dialog";
 import { supabase } from "@/integrations/supabase/client";
 
-export type ReportReason = "wrong_key" | "outdated" | "unclear" | "typo" | "other";
+type ReportReason = "wrong_key" | "outdated" | "unclear" | "typo" | "other";
 
-export const REPORT_REASONS: { id: ReportReason; label: string; hint: string }[] = [
+const REPORT_REASONS: { id: ReportReason; label: string; hint: string }[] = [
   { id: "wrong_key", label: "The answer is wrong", hint: "A different option is the best answer." },
   { id: "outdated", label: "It's out of date", hint: "Current guidelines or teaching say otherwise." },
   { id: "unclear", label: "It's unclear or has two answers", hint: "The stem is missing data, or two options fit." },

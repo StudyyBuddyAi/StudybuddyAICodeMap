@@ -12,6 +12,7 @@ import {
   PenLine,
   PlayCircle,
   Timer,
+  RotateCcw,
 } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import DashboardLayout from "@/components/dashboard/DashboardLayout";
@@ -19,6 +20,8 @@ import AuthModal from "@/components/AuthModal";
 import GoProModal from "@/components/GoProModal";
 import { useUsageLimit, MAX_DAILY_QBANK_QUESTIONS } from "@/hooks/use-usage-limit";
 import { allowedSetSizes, examBlockFor } from "../../supabase/functions/_shared/qbank-allowance.ts";
+import { useQBankReviewQueue } from "@/hooks/use-qbank-review-queue";
+import { describeReviewQueue, pickReviewIds } from "@/lib/qbank-review-queue";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -115,6 +118,7 @@ const QBank = () => {
   const { user, isAnonymous } = useAuth();
   const {
     startGeneratedSession,
+    startReviewSession,
     generation,
     session,
     resumeSession,
@@ -137,6 +141,11 @@ const QBank = () => {
   const sizes = allowedSetSizes(remaining, SET_SIZES);
   const outOfQuestions = remaining === 0;
   const examBlock = examBlockFor(remaining);
+
+  // Missed and marked questions that are due back. Re-sits are free.
+  const { queue } = useQBankReviewQueue();
+  const reviewIds = pickReviewIds(queue);
+  const [startingReview, setStartingReview] = useState(false);
 
   // A sheet hands its topic over (and what the student marked on it), as the
   // Roadmap hands one to Sheets. The student still chooses the set and starts it.
@@ -249,6 +258,22 @@ const QBank = () => {
   }, [topic, setSize, challenge, examMode, playMode, isStarting, outOfQuestions, startGeneratedSession, navigate, toast, queryClient]);
 
 
+  const startReview = async () => {
+    if (startingReview || reviewIds.length === 0) return;
+    setStartingReview(true);
+    try {
+      const id = await startReviewSession(reviewIds, playMode);
+      navigate(id ? `/qbank/session?session=${id}` : "/qbank/session");
+    } catch (err) {
+      toast({
+        title: "Could not start the review",
+        description: err instanceof Error ? err.message : "Please try again.",
+        variant: "destructive",
+      });
+      setStartingReview(false);
+    }
+  };
+
   const routed = !!generation?.systemName;
   const estimatedMinutes = Math.max(1, Math.round((setSize * 18) / 60));
 
@@ -332,6 +357,44 @@ const QBank = () => {
                   <PlayCircle size={15} />
                   A set is still being written — go back to it
                 </button>
+              )}
+
+              {/* Review queue — missed questions once they are a day old, marked
+                  ones straight away. Shown only when something is waiting. */}
+              {(queue.dueCount > 0 || queue.upcoming > 0) && (
+                <div className="flex flex-col gap-3 rounded-[26px] border border-[color:var(--color-border)] bg-[color:var(--color-card)] p-5 shadow-[0_18px_40px_rgba(15,23,42,0.04)] sm:flex-row sm:items-center">
+                  <div className="min-w-0 flex-1">
+                    <p className={`${MONO_EYEBROW} text-muted-foreground`}>Review queue</p>
+                    {queue.dueCount > 0 ? (
+                      <>
+                        <p className="mt-1 text-base font-semibold text-foreground">
+                          {queue.dueCount} question{queue.dueCount === 1 ? "" : "s"} to retry
+                        </p>
+                        <p className="mt-0.5 text-xs text-muted-foreground">
+                          {describeReviewQueue(queue)}
+                          {queue.upcoming > 0 ? ` · ${queue.upcoming} more tomorrow` : ""} · free, never counts toward
+                          your daily questions
+                        </p>
+                      </>
+                    ) : (
+                      <p className="mt-1 text-sm text-foreground">
+                        {queue.upcoming} missed question{queue.upcoming === 1 ? " comes" : "s come"} back tomorrow —
+                        spaced, so the retry tests what you learned.
+                      </p>
+                    )}
+                  </div>
+                  {queue.dueCount > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => void startReview()}
+                      disabled={startingReview || isStarting}
+                      className="flex h-11 shrink-0 items-center justify-center gap-2 rounded-[14px] bg-primary px-5 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-60"
+                    >
+                      {startingReview ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCcw className="h-4 w-4" />}
+                      Retry {reviewIds.length} · {PLAY_MODE_LABELS[playMode]}
+                    </button>
+                  )}
+                </div>
               )}
 
               {/* Generator Card — the topic and the button that starts the set

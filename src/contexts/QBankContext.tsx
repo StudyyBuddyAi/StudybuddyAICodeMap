@@ -26,6 +26,8 @@ import {
   type GenerationStatus,
   type HeldBackItem,
 } from "@/lib/qbank-wave-runner";
+import { MAX_REVIEW_SET, REVIEW_SET_SYSTEM } from "@/lib/qbank-review-queue";
+import { REVIEW_QUEUE_KEY } from "@/hooks/use-qbank-review-queue";
 import {
   buildProgressPayload,
   elapsedMs as elapsedAt,
@@ -186,6 +188,12 @@ interface QBankContextValue {
     examMode?: ExamMode,
     mode?: PlayMode
   ) => Promise<string>;
+  /**
+   * Re-sits questions from the review queue — the student's own misses and
+   * marks. Nothing is generated, so it never touches the free allowance.
+   * Resolves with the new session's id.
+   */
+  startReviewSession: (questionIds: string[], mode?: PlayMode) => Promise<string>;
   /** Cancels an in-flight set. Whatever landed stays playable. */
   stopGeneration: () => void;
   /**
@@ -959,6 +967,28 @@ export const QBankProvider = ({ children }: { children: ReactNode }) => {
     [beginGeneration, startSession, stopGeneration]
   );
 
+  const startReviewSession = useCallback(
+    async (questionIds: string[], mode: PlayMode = "tutor"): Promise<string> => {
+      const ids = [...new Set(questionIds)].slice(0, MAX_REVIEW_SET);
+      if (ids.length === 0) throw new Error("Nothing is due for review yet.");
+      // A re-sit replaces whatever was playing, as a new generated set does.
+      stopGeneration();
+      sessionIdRef.current = null;
+      heldBackRef.current = 0;
+      heldBackItemsRef.current = [];
+      setGeneration(null);
+      setReviewIndex(null);
+      return startSession({
+        domains: [],
+        limit: ids.length,
+        questionIds: ids,
+        system: REVIEW_SET_SYSTEM,
+        mode,
+      });
+    },
+    [startSession, stopGeneration]
+  );
+
   const resumeGeneration = useCallback(() => {
     const current = sessionRef.current;
     if (!current?.sessionId || !current.generation) return;
@@ -1145,6 +1175,8 @@ export const QBankProvider = ({ children }: { children: ReactNode }) => {
       }
       queryClient.invalidateQueries({ queryKey: ["qbank-sessions"] });
       queryClient.invalidateQueries({ queryKey: ["qbank-unfinished"] });
+      // What was missed or marked in this set changes what is due.
+      queryClient.invalidateQueries({ queryKey: [REVIEW_QUEUE_KEY] });
     }
 
     // Tutor mode can summarise from memory. A timed set has no grades on the
@@ -1321,6 +1353,7 @@ export const QBankProvider = ({ children }: { children: ReactNode }) => {
         lastMode,
         progress,
         startGeneratedSession,
+        startReviewSession,
         stopGeneration,
         resumeGeneration,
         resumeSession,
