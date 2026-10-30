@@ -447,9 +447,14 @@ serve(async (req) => {
      */
     const dispatchReady = (controller: ReadableStreamDefaultController<Uint8Array>) => {
       const prepared = prepareBatch(content, plan);
-      if (prepared.questions.length <= dispatched) return;
+      // Nothing past the plan is written. A model that over-produces would
+      // otherwise hand a free account more than its allowance granted, and
+      // number the extras into the next wave's range (waveStart + i), which
+      // is what claim_generated_questions orders the set by.
+      const usable = Math.min(prepared.questions.length, plan.questions.length);
+      if (usable <= dispatched) return;
 
-      for (let i = dispatched; i < prepared.questions.length; i++) {
+      for (let i = dispatched; i < usable; i++) {
         const question = prepared.questions[i];
         const qaResult = prepared.qa[i];
 
@@ -551,7 +556,7 @@ serve(async (req) => {
         );
       }
 
-      dispatched = prepared.questions.length;
+      dispatched = usable;
     };
 
     /**
