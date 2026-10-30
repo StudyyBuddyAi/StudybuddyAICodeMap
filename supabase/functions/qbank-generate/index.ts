@@ -26,6 +26,7 @@ import {
   type VerificationResult,
 } from "../_shared/qbank-verify.ts";
 import { hasWriterFlag, type QaResult } from "../_shared/qbank-qa.ts";
+import { FREE_DAILY_QBANK_QUESTIONS, QBANK_USAGE_KIND } from "../_shared/qbank-allowance.ts";
 
 /**
  * On-demand QBank generation — one wave of a set.
@@ -166,6 +167,16 @@ serve(async (req) => {
 
   const startedAt = Date.now();
 
+  /**
+   * A free account's reservation for this wave, and the hand-back of whatever
+   * it does not deliver. Declared out here so every exit — an upstream that
+   * never answered, a stream that died, an unhandled throw — can release it.
+   * Idempotent: the first call settles it.
+   */
+  let reservation: { granted: number; date: string; remainingAfter: number } | null = null;
+  let delivered = 0;
+  let releaseReservation: () => Promise<number> = () => Promise.resolve(0);
+
   try {
     // ── JWT verification ─────────────────────────────────────────────────────
     const authHeader = req.headers.get("Authorization") ?? "";
@@ -196,7 +207,8 @@ serve(async (req) => {
     }
 
     const requested = Number(body?.count) || DEFAULT_COUNT;
-    const waveCount = Math.min(Math.max(1, Math.round(requested)), MAX_WAVE_COUNT);
+    // Not const: a free account's wave is trimmed to what it has left today.
+    let waveCount = Math.min(Math.max(1, Math.round(requested)), MAX_WAVE_COUNT);
     const cleanTopic = topic.trim().slice(0, 300);
     const rejection = validateTopic(cleanTopic);
     if (rejection) {
@@ -251,6 +263,71 @@ serve(async (req) => {
     // the only thing it could have been asking for.
     const examMode = asExamMode(body?.examMode);
 
+    // ── Free-tier allowance ──────────────────────────────────────────────────
+    // Settled after routing, so a declined topic never touches the counter,
+    // and before the plan, because the plan is sized by what was granted.
+    // Reserve the whole wave, release what it does not deliver — see
+    // 20261030000000_qbank_free_daily_cap.sql. Anonymous accounts count as
+    // free: the page needs a sign-in, but the endpoint must not rely on that.
+    const { data: profile } = await authClient
+      .from("profiles")
+      .select("is_pro, pro_expires_at")
+      .eq("id", user.id)
+      .maybeSingle();
+    const isPro =
+      (user as { is_anonymous?: boolean }).is_anonymous !== true &&
+      profile?.is_pro === true &&
+      (!profile.pro_expires_at || new Date(profile.pro_expires_at) > new Date());
+
+    if (!isPro) {
+      const { data: reserved, error: reserveError } = await authClient.rpc("reserve_usage", {
+        p_user: user.id,
+        p_kind: QBANK_USAGE_KIND,
+        p_want: waveCount,
+        p_cap: FREE_DAILY_QBANK_QUESTIONS,
+      });
+      // Fails closed, as medical-notes' quota does: an unreadable counter is
+      // not a licence to generate without one.
+      if (reserveError || !reserved) {
+        log("allowance_failed", { message: reserveError?.message ?? "no result" });
+        return json({ error: "quota_check_failed" }, 500);
+      }
+      const granted = Number(reserved.granted) || 0;
+      if (granted <= 0) {
+        log("allowance_exhausted", { limit: FREE_DAILY_QBANK_QUESTIONS });
+        return json(
+          {
+            error: `You've used today's ${FREE_DAILY_QBANK_QUESTIONS} free questions. They reset at midnight UTC — or go Pro for unlimited sets.`,
+            code: "daily_cap",
+            limit: FREE_DAILY_QBANK_QUESTIONS,
+            remaining: 0,
+          },
+          429
+        );
+      }
+      reservation = { granted, date: String(reserved.date), remainingAfter: Number(reserved.remaining) || 0 };
+      waveCount = Math.min(waveCount, granted);
+
+      let settled = false;
+      releaseReservation = async () => {
+        if (settled || !reservation) return 0;
+        settled = true;
+        const unused = Math.max(0, reservation.granted - delivered);
+        if (unused === 0) return 0;
+        const { error: releaseError } = await authClient.rpc("release_usage", {
+          p_user: user.id,
+          p_kind: QBANK_USAGE_KIND,
+          p_n: unused,
+          p_date: reservation.date,
+        });
+        if (releaseError) {
+          log("allowance_release_failed", { unused, message: releaseError.message });
+          return 0;
+        }
+        return unused;
+      };
+    }
+
     const plan: BatchPlan = buildBatchPlan(
       system,
       waveCount,
@@ -296,6 +373,7 @@ serve(async (req) => {
       // corti_auth_failed comes from the token exchange, which names its own
       // reason — worth separating from a model-side failure in the response.
       const isAuth = message.startsWith("corti_auth_failed");
+      await releaseReservation();
       return json(
         { error: isAuth ? "Question generation is not configured" : "AI service unreachable" },
         isAuth ? 500 : 502
@@ -305,6 +383,7 @@ serve(async (req) => {
     if (!upstream.ok || !upstream.body) {
       const text = await upstream.text().catch(() => "");
       log("upstream_status", { status: upstream.status, bodyLength: text.length });
+      await releaseReservation();
       if (upstream.status === 429) {
         return json({ error: "Rate limit exceeded. Please try again in a moment." }, 429);
       }
@@ -426,6 +505,9 @@ serve(async (req) => {
 
             if (id) {
               persistedIds.push(id);
+              // What the allowance charges for: committed AND playable — the
+              // same three tests claim_generated_questions applies.
+              if (!qaResult?.blocked && verdict.agreed) delivered++;
             } else {
               insertFailures++;
               if (!insertError) insertError = rowError;
@@ -594,6 +676,7 @@ serve(async (req) => {
             verifications = [];
             flagChecks = [];
             subtopics = [];
+            delivered = 0;
             insertFailures = 0;
             insertError = null;
             controller.enqueue(frame({ __meta: { restart: true } }));
@@ -613,6 +696,10 @@ serve(async (req) => {
         const blocked = qaResults.filter((r) => r?.blocked).length;
         const disputed = verifications.filter((v) => !v.agreed).length;
 
+        // Hand back what the wave reserved and did not deliver, before the
+        // summary, so the allowance it reports is the settled one.
+        const released = await releaseReservation();
+
         log("wave_complete", {
           ms: Date.now() - startedAt,
           persisted: persistedIds.length,
@@ -629,6 +716,8 @@ serve(async (req) => {
           flagChecks: flagChecks.length,
           flagChecksCleared: flagChecks.filter((f) => f.confirmed).length,
           flagCheckErrors: flagChecks.filter((f) => f.error).length,
+          delivered,
+          allowanceReleased: released,
         });
 
         controller.enqueue(
@@ -658,6 +747,13 @@ serve(async (req) => {
                 systemName: SYSTEM_NAMES[system],
                 subtopics,
                 streamError,
+                // A free account's settled allowance for today; null for Pro.
+                allowance: reservation
+                  ? {
+                      limit: FREE_DAILY_QBANK_QUESTIONS,
+                      remaining: reservation.remainingAfter + released,
+                    }
+                  : null,
               },
               questionIds: persistedIds,
               qa: qaResults,
@@ -683,6 +779,7 @@ serve(async (req) => {
       ms: Date.now() - startedAt,
       message: err instanceof Error ? err.message : String(err),
     });
+    await releaseReservation().catch(() => 0);
     return json({ error: "Internal error" }, 500);
   }
 });

@@ -11,10 +11,14 @@ import {
   Compass,
   PenLine,
   PlayCircle,
+  Timer,
 } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import DashboardLayout from "@/components/dashboard/DashboardLayout";
 import AuthModal from "@/components/AuthModal";
+import GoProModal from "@/components/GoProModal";
+import { useUsageLimit, MAX_DAILY_QBANK_QUESTIONS } from "@/hooks/use-usage-limit";
+import { allowedSetSizes, examBlockFor } from "../../supabase/functions/_shared/qbank-allowance.ts";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -124,6 +128,15 @@ const QBank = () => {
   const [resumingId, setResumingId] = useState<string | null>(null);
   // Signing in happens here, so the topic a sheet handed over is still in the box afterwards.
   const [authOpen, setAuthOpen] = useState(false);
+  const [goProOpen, setGoProOpen] = useState(false);
+
+  // The free allowance: ten delivered questions a day (Pro: null, unlimited).
+  // The picker never offers a set the server would cut short.
+  const { qbankRemaining, isProUser, isLoading: usageLoading } = useUsageLimit();
+  const remaining = usageLoading ? null : qbankRemaining;
+  const sizes = allowedSetSizes(remaining, SET_SIZES);
+  const outOfQuestions = remaining === 0;
+  const examBlock = examBlockFor(remaining);
 
   // A sheet hands its topic over (and what the student marked on it), as the
   // Roadmap hands one to Sheets. The student still chooses the set and starts it.
@@ -133,6 +146,12 @@ const QBank = () => {
     return typeof handed === "string" ? handed.slice(0, 300) : "";
   });
   const [setSize, setSetSize] = useState(MIN_SET_SIZE);
+  // Keep the chosen size inside today's allowance as it changes — after a set,
+  // or once usage loads.
+  useEffect(() => {
+    if (sizes.length > 0 && !sizes.includes(setSize)) setSetSize(sizes[sizes.length - 1]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sizes.join(",")]);
   const [challenge, setChallenge] = useState<ChallengeLevel>("balanced");
   const [examMode, setExamMode] = useState<ExamMode>("step1");
   const [playMode, setPlayMode] = useState<PlayMode>("tutor");
@@ -201,7 +220,7 @@ const QBank = () => {
 
   const generate = useCallback(async () => {
     const trimmed = topic.trim();
-    if (!trimmed || isStarting) return;
+    if (!trimmed || isStarting || outOfQuestions) return;
     const rejection = validateTopic(trimmed);
     if (rejection) {
       setError(topicRejectionMessage(rejection));
@@ -227,7 +246,7 @@ const QBank = () => {
       });
       setIsStarting(false);
     }
-  }, [topic, setSize, challenge, examMode, playMode, isStarting, startGeneratedSession, navigate, toast, queryClient]);
+  }, [topic, setSize, challenge, examMode, playMode, isStarting, outOfQuestions, startGeneratedSession, navigate, toast, queryClient]);
 
 
   const routed = !!generation?.systemName;
@@ -346,7 +365,7 @@ const QBank = () => {
                     <button
                       type="button"
                       onClick={generate}
-                      disabled={isStarting || !topic.trim()}
+                      disabled={isStarting || !topic.trim() || outOfQuestions}
                       className="flex h-12 shrink-0 items-center justify-center gap-2 rounded-[14px] bg-[color:var(--color-foreground)] px-6 text-sm font-semibold text-[color:var(--color-background)] shadow-[0_16px_32px_rgba(15,23,42,0.12)] transition-all duration-200 hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:translate-y-0"
                     >
                       {isStarting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
@@ -354,6 +373,58 @@ const QBank = () => {
                     </button>
                   </div>
                 </div>
+
+                {/* Today's allowance — free accounts only. */}
+                {!isProUser && remaining !== null && (
+                  <p className="-mt-2 text-xs leading-relaxed text-muted-foreground">
+                    {outOfQuestions ? (
+                      <span className="font-medium text-warning">
+                        You've used today's {MAX_DAILY_QBANK_QUESTIONS} free questions · they reset at midnight UTC ·{" "}
+                      </span>
+                    ) : (
+                      <span>
+                        {remaining} of {MAX_DAILY_QBANK_QUESTIONS} free questions left today · retries of missed and
+                        marked questions are free ·{" "}
+                      </span>
+                    )}
+                    <button type="button" className="underline hover:text-foreground" onClick={() => setGoProOpen(true)}>
+                      Go Pro for unlimited
+                    </button>
+                  </p>
+                )}
+
+                {/* Exam block — one tap to the USMLE format (20 items, 30 min,
+                    since May 2026); a half block on the free plan. */}
+                {examBlock && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSetSize(examBlock.size);
+                      setPlayMode("timed");
+                    }}
+                    disabled={isStarting}
+                    aria-pressed={setSize === examBlock.size && playMode === "timed"}
+                    className={`flex w-full items-center gap-3 rounded-[14px] border px-4 py-3 text-left transition-colors disabled:opacity-50 ${
+                      setSize === examBlock.size && playMode === "timed"
+                        ? "border-primary bg-primary/5"
+                        : "border-border hover:border-primary"
+                    }`}
+                  >
+                    <Timer className="h-4 w-4 shrink-0 text-primary" aria-hidden />
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-sm font-semibold text-foreground">
+                        {remaining === null ? "Exam block" : "Half exam block"} · {examBlock.size} questions ·{" "}
+                        {Number.isInteger(examBlock.minutes) ? examBlock.minutes : examBlock.minutes.toFixed(1)} min
+                      </span>
+                      <span className="block text-xs text-muted-foreground">
+                        Timed, 90 seconds a question — the pace of a real USMLE block.
+                      </span>
+                    </span>
+                    {setSize === examBlock.size && playMode === "timed" && (
+                      <Check className="h-4 w-4 shrink-0 text-primary" aria-hidden />
+                    )}
+                  </button>
+                )}
 
                 {/* Options — always shown, so the student sees what the set will be. */}
                 <div className="border-t border-[color:var(--color-border)] pt-4">
@@ -414,14 +485,14 @@ const QBank = () => {
                       <div>
                         <p className={`${MONO_EYEBROW} text-muted-foreground mb-2`}>Questions</p>
                         <div className="flex flex-wrap gap-2">
-                          {SET_SIZES.map((size) => {
+                          {(sizes.length > 0 ? sizes : SET_SIZES).map((size) => {
                             const active = size === setSize;
                             return (
                               <button
                                 key={size}
                                 type="button"
                                 onClick={() => setSetSize(size)}
-                                disabled={isStarting}
+                                disabled={isStarting || outOfQuestions}
                                 aria-pressed={active}
                                 className={`${PILL_BASE} tabular-nums ${active ? PILL_ON : PILL_OFF}`}
                               >
@@ -587,6 +658,7 @@ const QBank = () => {
             </>
           )}
       </div>
+      <GoProModal open={goProOpen} onOpenChange={setGoProOpen} />
       <AuthModal
         open={authOpen}
         onOpenChange={setAuthOpen}

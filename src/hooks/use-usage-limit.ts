@@ -1,9 +1,15 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
+import {
+  FREE_DAILY_QBANK_QUESTIONS,
+  QBANK_USAGE_KIND,
+} from "../../supabase/functions/_shared/qbank-allowance.ts";
 
 export const MAX_DAILY_SHEETS = 5;
 export const MAX_DAILY_CARDS = 5;
+/** Delivered QBank questions per day for a free account; Pro is unlimited. */
+export const MAX_DAILY_QBANK_QUESTIONS = FREE_DAILY_QBANK_QUESTIONS;
 
 interface ProfileRow {
   is_pro: boolean;
@@ -63,6 +69,13 @@ export function useUsageLimit() {
   const cardsCount =
     usageQuery.data?.find((r) => r.kind === "cards")?.count ?? 0;
 
+  // Counted server-side by qbank-generate, which reserves a wave and hands back
+  // what it did not deliver — so this is delivered questions, as the cap is.
+  const qbankCount =
+    usageQuery.data?.find((r) => r.kind === QBANK_USAGE_KIND)?.count ?? 0;
+  /** Null for Pro: unlimited. */
+  const qbankRemaining = isProUser ? null : Math.max(0, MAX_DAILY_QBANK_QUESTIONS - qbankCount);
+
   const isSheetLimited = sheetCount >= MAX_DAILY_SHEETS && !isProUser;
   const isCardsLimited = cardsCount >= MAX_DAILY_CARDS && !isProUser;
 
@@ -78,6 +91,8 @@ export function useUsageLimit() {
     cardsCount,
     isSheetLimited,
     isCardsLimited,
+    qbankCount,
+    qbankRemaining,
     isProUser: !!isProUser,
     isLoading: profileQuery.isLoading || usageQuery.isLoading,
     refresh,

@@ -130,6 +130,12 @@ export interface GenerationOutcome {
   systemName: string | null;
   /** Set for "failed", and for "short" when a reason is known. */
   error: string | null;
+  /**
+   * The run stopped because a free account used its daily allowance. Not a
+   * failure to retry: "write the remaining" would only be refused again, so
+   * the player offers Pro instead.
+   */
+  capReached?: boolean;
 }
 
 export interface RunGenerationOptions {
@@ -185,6 +191,8 @@ interface WaveResult {
   fatal: string | null;
   /** The wave closed with a waveComplete frame — proof the server speaks this protocol. */
   completed: boolean;
+  /** Refused because the account's daily allowance is used up. Always fatal. */
+  capReached: boolean;
 }
 
 /** Shown when the server cannot write this set at all; the cause goes to the console. */
@@ -234,6 +242,7 @@ async function runWave(
     streamError: null,
     fatal: null,
     completed: false,
+    capReached: false,
   };
 
   // A stall watchdog layered over the caller's signal, so a hung upstream ends
@@ -273,6 +282,14 @@ async function runWave(
     if (!response.ok || !response.body) {
       const body = await response.json().catch(() => null);
       const message = body?.error ?? `Generation failed (${response.status})`;
+      // The free allowance is spent. A 429 is otherwise a rate limit worth
+      // retrying, so this is told apart by its code, not its status.
+      if (body?.code === "daily_cap") {
+        result.fatal = message;
+        result.capReached = true;
+        result.streamError = message;
+        return result;
+      }
       // 401, 400 and 422 will fail identically however many times they are
       // retried: an expired token, a malformed request or a topic the router
       // declined as not medical is not a transient condition.
@@ -517,6 +534,15 @@ export async function runQbankGeneration(
         lastError = err instanceof Error ? err.message : String(err);
       }
 
+      if (wave?.capReached) {
+        // A set the allowance cut short is short, not failed: what it already
+        // delivered is a playable set.
+        return {
+          status: delivered > 0 ? "short" : "failed",
+          delivered, heldBack, heldBackItems, target, waves, systemName,
+          error: wave.fatal, capReached: true,
+        };
+      }
       if (wave?.fatal) {
         return { status: "failed", delivered, heldBack, heldBackItems, target, waves, systemName, error: wave.fatal };
       }

@@ -109,6 +109,11 @@ export interface GenerationState {
   heldBackItems: HeldBackItem[];
   /** Set when the run failed outright, or ended short for a known reason. */
   error: string | null;
+  /**
+   * The run stopped on a free account's daily allowance. The player offers Pro
+   * rather than "write the remaining", which the server would only refuse.
+   */
+  capReached: boolean;
 }
 
 interface SessionSummary {
@@ -771,6 +776,7 @@ export const QBankProvider = ({ children }: { children: ReactNode }) => {
         heldBack: heldBackBase,
         heldBackItems: heldBackItemsBase,
         error: null,
+        capReached: false,
       });
 
       const run = runQbankGeneration({
@@ -844,6 +850,10 @@ export const QBankProvider = ({ children }: { children: ReactNode }) => {
           genRunningRef.current = false;
         }
 
+        // The server counted what this run delivered against the free
+        // allowance; the pages that show it re-read today's usage.
+        queryClient.invalidateQueries({ queryKey: ["usage"] });
+
         heldBackRef.current = heldBackBase + outcome.heldBack;
         heldBackItemsRef.current = [...heldBackItemsBase, ...outcome.heldBackItems];
         setGeneration((prev) =>
@@ -852,6 +862,7 @@ export const QBankProvider = ({ children }: { children: ReactNode }) => {
                 ...prev,
                 status: outcome.status,
                 error: outcome.error,
+                capReached: outcome.capReached ?? false,
                 heldBack: heldBackRef.current,
                 heldBackItems: heldBackItemsRef.current,
                 systemName: outcome.systemName ?? prev.systemName,
@@ -872,7 +883,7 @@ export const QBankProvider = ({ children }: { children: ReactNode }) => {
         return outcome;
       });
     },
-    [claimGenerated]
+    [claimGenerated, queryClient]
   );
 
   const startGeneratedSession = useCallback(
@@ -889,8 +900,10 @@ export const QBankProvider = ({ children }: { children: ReactNode }) => {
       heldBackItemsRef.current = [];
       setReviewIndex(null);
 
+      // Floored at one, not at the smallest picker size: a free account with
+      // three questions left today is offered a set of three.
       const setTarget = Math.min(
-        Math.max(MIN_SET_SIZE, Math.round(target) || MIN_SET_SIZE),
+        Math.max(1, Math.round(target) || MIN_SET_SIZE),
         MAX_SET_SIZE
       );
       const generationId = newGenerationId();

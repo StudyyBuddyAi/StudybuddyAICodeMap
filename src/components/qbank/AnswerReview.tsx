@@ -3,7 +3,6 @@ import { CheckCircle2, MinusCircle, XCircle } from "lucide-react";
 import { renderMarkdown } from "@/lib/render-markdown";
 import { choiceLabel as choice, formatClock } from "@/lib/qbank-answer";
 import { TIMED_SECONDS_PER_QUESTION, type OptionKey, type Question, type QuestionMedia } from "@/lib/qbank-types";
-import DifficultyPulse from "./DifficultyPulse";
 import { MediaBlock } from "./QuestionMedia";
 
 /**
@@ -36,7 +35,6 @@ const AnswerReview = forwardRef<
           <Icon aria-hidden />
           {title}
         </h2>
-        {q.difficulty && <DifficultyPulse difficulty={q.difficulty} />}
       </div>
 
       {result === "correct" ? (

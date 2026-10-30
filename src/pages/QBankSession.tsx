@@ -9,6 +9,7 @@ import BlockClock from "@/components/qbank/BlockClock";
 import BlockReviewDialog from "@/components/qbank/BlockReviewDialog";
 import { BottomBar, SaveExitButton, ToolsSheet, TopBar, type ExamTools } from "@/components/qbank/ExamBars";
 import FloatingCalculator from "@/components/qbank/FloatingCalculator";
+import GoProModal from "@/components/GoProModal";
 import HighlightableText from "@/components/qbank/HighlightableText";
 import { ItemRail, ItemSheet } from "@/components/qbank/ItemNavigator";
 import LabValuesSheet from "@/components/qbank/LabValuesSheet";
@@ -42,10 +43,12 @@ const GenerationNotice = ({
   generation,
   loaded,
   onResume,
+  onGoPro,
 }: {
   generation: GenerationState;
   loaded: number;
   onResume: () => void;
+  onGoPro: () => void;
 }) => {
   const running = generation.status === "running";
   const short = !running && loaded < generation.target;
@@ -77,7 +80,7 @@ const GenerationNotice = ({
               (generation.status === "aborted"
                 ? "Writing paused when the set was left."
                 : generation.heldBackItems.length > 0
-                ? "The questions written after these didn't pass our quality checks."
+                ? "The replacements for questions that failed our quality checks didn't arrive."
                 : "The question writer couldn't finish the rest just now.")}
           </>
         )}
@@ -92,12 +95,19 @@ const GenerationNotice = ({
           <ul style={{ margin: "6px 0 0", padding: 0, listStyle: "none" }}>
             {Object.entries(heldBackByReason).map(([reason, count]) => (
               <li key={reason}>
-                {count} rewritten: {ruleLabel(reason).toLowerCase()}
+                {count} replaced: {ruleLabel(reason).toLowerCase()}
               </li>
             ))}
           </ul>
         )}
-        {short && (
+        {/* A set the free allowance stopped is not one to retry: the server
+            would refuse the remaining questions until tomorrow. */}
+        {short && generation.capReached && (
+          <button type="button" onClick={onGoPro} className="qb-btn qb-btn--outline" style={{ marginTop: 8 }}>
+            Go Pro for unlimited questions
+          </button>
+        )}
+        {short && !generation.capReached && (
           <button type="button" onClick={onResume} className="qb-btn qb-btn--outline" style={{ marginTop: 8 }}>
             <RotateCcw aria-hidden /> Write the remaining {generation.target - loaded}
           </button>
@@ -189,6 +199,7 @@ const QBankSession = () => {
   const [loadAttempt, setLoadAttempt] = useState(0);
   const [retrying, setRetrying] = useState(false);
   const [viewer, setViewer] = useState<{ items: QuestionMedia[]; index: number }>({ items: [], index: 0 });
+  const [goProOpen, setGoProOpen] = useState(false);
   /** What the live region last said: the result of a submitted answer. */
   const [announcement, setAnnouncement] = useState("");
   const prefs = useQBankPrefs();
@@ -656,7 +667,12 @@ const QBankSession = () => {
         <main id="qb-main" ref={mainRef} className="qb-main" tabIndex={-1} aria-label="Question">
           <div className="qb-column">
             {session?.generation && generation && inSession && (
-              <GenerationNotice generation={generation} loaded={session.questions.length} onResume={resumeGeneration} />
+              <GenerationNotice
+                generation={generation}
+                loaded={session.questions.length}
+                onResume={resumeGeneration}
+                onGoPro={() => setGoProOpen(true)}
+              />
             )}
 
             <article key={isReviewing ? `review-${reviewIndex}` : `question-${q.id}`} className="question-enter">
@@ -857,6 +873,7 @@ const QBankSession = () => {
         readOnly={!inSession}
       />
       <FloatingCalculator open={calcOpen} onClose={() => setCalcOpen(false)} />
+      <GoProModal open={goProOpen} onOpenChange={setGoProOpen} />
       <ItemSheet
         cells={cells}
         onSelect={handleGo}
