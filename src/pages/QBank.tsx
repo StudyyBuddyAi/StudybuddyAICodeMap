@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import PageHeader from "@/components/layout/PageHeader";
 import { useLocation, useNavigate } from "react-router-dom";
 import {
@@ -13,15 +13,28 @@ import {
   PlayCircle,
   Timer,
   RotateCcw,
+  Shuffle,
+  CalendarDays,
+  SlidersHorizontal,
 } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import DashboardLayout from "@/components/dashboard/DashboardLayout";
 import AuthModal from "@/components/AuthModal";
 import GoProModal from "@/components/GoProModal";
+import TopicComposer from "@/components/qbank/TopicComposer";
+import SystemBrowser from "@/components/qbank/SystemBrowser";
+import SuggestionCards from "@/components/qbank/SuggestionCards";
 import { useUsageLimit, MAX_DAILY_QBANK_QUESTIONS } from "@/hooks/use-usage-limit";
 import { allowedSetSizes, examBlockFor } from "../../supabase/functions/_shared/qbank-allowance.ts";
 import { useQBankReviewQueue } from "@/hooks/use-qbank-review-queue";
+import { useQBankTarget } from "@/hooks/use-qbank-target";
+import { useCurriculumTopics } from "@/hooks/use-curriculum-topics";
+import { useLibraryTopics } from "@/hooks/use-library-topics";
 import { describeReviewQueue, pickReviewIds } from "@/lib/qbank-review-queue";
+import { buildSuggestions, type ExamTarget, type Suggestion } from "@/lib/qbank-suggestions";
+import { buildExamBlock } from "@/lib/qbank-exam-block";
+import { challengesFor, dailyChallenge } from "@/lib/qbank-challenges";
+import type { TopicOption } from "@/lib/topic-suggest";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -43,14 +56,12 @@ import {
   CHALLENGE_LABELS,
   CHALLENGE_BLURBS,
   EXAM_MODE_LABELS,
-  EXAM_MODE_BLURBS,
   PLAY_MODE_LABELS,
   PLAY_MODE_BLURBS,
   type ChallengeLevel,
   type ExamMode,
   type PlayMode,
 } from "@/lib/qbank-types";
-
 
 interface UnfinishedRow {
   id: string;
@@ -74,11 +85,18 @@ const SET_SIZES = Array.from(
   (_, i) => MIN_SET_SIZE + i * SET_SIZE_STEP
 );
 
+/** Topics the student can mix in one set (owner decision, 2026-10-30). */
+const MAX_TOPICS = 5;
+
 const CHALLENGE_ORDER: ChallengeLevel[] = ["foundations", "balanced", "challenge"];
 
-const EXAM_MODE_ORDER: ExamMode[] = ["step1", "step2ck", "mixed"];
-
 const PLAY_MODE_ORDER: PlayMode[] = ["tutor", "timed"];
+
+const TARGETS: { id: ExamTarget; label: string }[] = [
+  { id: "step1", label: "Step 1" },
+  { id: "step2ck", label: "Step 2 CK" },
+  { id: "mixed", label: "Both" },
+];
 
 /**
  * The pill classes shared by every option group in the generator card. A
@@ -94,14 +112,19 @@ const PILL_OFF = "bg-card border-border text-muted-foreground hover:border-prima
 type StepState = "pending" | "active" | "done";
 
 /**
+ * How a set splits across its topics: they take turns by question, so the
+ * first ones get the remainder. "4 · 3 · 3" for ten across three.
+ */
+const splitLabel = (size: number, topicCount: number): string =>
+  Array.from({ length: topicCount }, (_, i) => Math.max(0, Math.ceil((size - i) / topicCount))).join(" · ");
+
+/**
  * QBank.
  *
- * Every set is written on demand: a student names a topic and a size, and the
- * questions are generated for it against the same NBME item-writing rules the
- * prompt encodes. There is no pre-built pool to browse — the curated bank only
- * ever covered three systems, and its configurator (system, domain, count,
- * flagged-only) used to sit here in front of the generator. It is gone; the
- * `questions` table itself is untouched and still backs every generated row.
+ * Every set is written on demand. A student names one topic or mixes up to
+ * five, picks a ready-made set from "For you", or takes a quick start (an exam
+ * block weighted like the real exam, a daily five, a surprise) — see
+ * docs/qbank/topic-selection-ux.md for why the page is shaped this way.
  *
  * The generation does not run on this page. It runs in QBankProvider, which
  * wraps every /qbank route, so navigating to the session does not cancel it.
@@ -134,6 +157,10 @@ const QBank = () => {
   const [authOpen, setAuthOpen] = useState(false);
   const [goProOpen, setGoProOpen] = useState(false);
 
+  // The exam the student prepares for — a remembered page setting, not a pill
+  // on every set.
+  const [target, setTarget] = useQBankTarget();
+
   // The free allowance: ten delivered questions a day (Pro: null, unlimited).
   // The picker never offers a set the server would cut short.
   const { qbankRemaining, isProUser, isLoading: usageLoading } = useUsageLimit();
@@ -141,19 +168,40 @@ const QBank = () => {
   const sizes = allowedSetSizes(remaining, SET_SIZES);
   const outOfQuestions = remaining === 0;
   const examBlock = examBlockFor(remaining);
+  const fit = useCallback((size: number) => (remaining === null ? size : Math.min(size, remaining)), [remaining]);
 
   // Missed and marked questions that are due back. Re-sits are free.
   const { queue } = useQBankReviewQueue();
   const reviewIds = pickReviewIds(queue);
   const [startingReview, setStartingReview] = useState(false);
 
+  // What to suggest: the curriculum, the student's own topics, the catalogue.
+  const { curriculum, options: curriculumOptions } = useCurriculumTopics();
+  const { topics: libraryTopics } = useLibraryTopics();
+  const [seed, setSeed] = useState(0);
+  const suggestions = useMemo(
+    () => buildSuggestions({ topics: libraryTopics, target, curriculum, seed }),
+    [libraryTopics, target, curriculum, seed]
+  );
+  const composerOptions: TopicOption[] = useMemo(
+    () => [
+      ...libraryTopics.map((t) => ({ title: t.title, systemName: null, systemKey: null, source: "library" as const })),
+      ...curriculumOptions,
+    ],
+    [libraryTopics, curriculumOptions]
+  );
+
   // A sheet hands its topic over (and what the student marked on it), as the
   // Roadmap hands one to Sheets. The student still chooses the set and starts it.
   const location = useLocation();
-  const [topic, setTopic] = useState(() => {
+  const [topics, setTopics] = useState<string[]>(() => {
     const handed = (location.state as { topic?: unknown } | null)?.topic;
-    return typeof handed === "string" ? handed.slice(0, 300) : "";
+    return typeof handed === "string" && handed.trim() ? [handed.trim().slice(0, 300)] : [];
   });
+  const [draft, setDraft] = useState("");
+  const [browseOpen, setBrowseOpen] = useState(false);
+  const [showOptions, setShowOptions] = useState(false);
+
   const [setSize, setSetSize] = useState(MIN_SET_SIZE);
   // Keep the chosen size inside today's allowance as it changes — after a set,
   // or once usage loads.
@@ -162,9 +210,10 @@ const QBank = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sizes.join(",")]);
   const [challenge, setChallenge] = useState<ChallengeLevel>("balanced");
-  const [examMode, setExamMode] = useState<ExamMode>("step1");
   const [playMode, setPlayMode] = useState<PlayMode>("tutor");
   const [isStarting, setIsStarting] = useState(false);
+  const [startingId, setStartingId] = useState<string | null>(null);
+  const [startedSize, setStartedSize] = useState(MIN_SET_SIZE);
   const [error, setError] = useState<string | null>(null);
   const [elapsed, setElapsed] = useState(0);
 
@@ -227,36 +276,100 @@ const QBank = () => {
   // silently starting a second set on top of the first.
   const runInProgress = !!session && generation?.status === "running";
 
-  const generate = useCallback(async () => {
-    const trimmed = topic.trim();
-    if (!trimmed || isStarting || outOfQuestions) return;
-    const rejection = validateTopic(trimmed);
-    if (rejection) {
-      setError(topicRejectionMessage(rejection));
+  /**
+   * Every way into a set ends here: the composer, a card, a quick start. The
+   * size is held inside a free allowance; the exam is the page's target.
+   */
+  const launch = useCallback(
+    async (spec: {
+      topics: string[];
+      systems?: (string | null)[];
+      size: number;
+      level: ChallengeLevel;
+      mode?: PlayMode;
+      id?: string;
+    }) => {
+      if (isStarting || outOfQuestions || spec.topics.length === 0) return;
+      const size = fit(spec.size);
+      if (size <= 0) return;
+
+      setIsStarting(true);
+      setStartingId(spec.id ?? null);
+      setStartedSize(size);
+      setError(null);
+      try {
+        // Resolves the moment the first question exists and the session is
+        // live. The remaining waves keep running against the provider.
+        const id = await startGeneratedSession(
+          spec.topics.length === 1 ? spec.topics[0] : spec.topics,
+          size,
+          spec.level,
+          target as ExamMode,
+          spec.mode ?? playMode,
+          spec.systems ? { systems: spec.systems } : {}
+        );
+        queryClient.invalidateQueries({ queryKey: ["qbank-unfinished"] });
+        navigate(id ? `/qbank/session?session=${id}` : "/qbank/session");
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Generation failed";
+        setError(message);
+        toast({ title: "Could not generate questions", description: message, variant: "destructive" });
+        setIsStarting(false);
+        setStartingId(null);
+      }
+    },
+    [isStarting, outOfQuestions, fit, startGeneratedSession, target, playMode, queryClient, navigate, toast]
+  );
+
+  /** The composer's set: its chips plus anything typed and not yet added. */
+  const pendingTopics = useMemo(() => {
+    const typed = draft.trim();
+    if (!typed || topics.some((t) => t.toLowerCase() === typed.toLowerCase())) return topics;
+    return [...topics, typed].slice(0, MAX_TOPICS);
+  }, [topics, draft]);
+
+  const generate = useCallback(() => {
+    const typed = draft.trim();
+    if (typed) {
+      const rejection = validateTopic(typed);
+      if (rejection) {
+        setError(topicRejectionMessage(rejection));
+        return;
+      }
+    }
+    void launch({ topics: pendingTopics, size: setSize, level: challenge });
+  }, [draft, pendingTopics, setSize, challenge, launch]);
+
+  const startCard = (s: Suggestion) =>
+    void launch({ topics: s.topics, systems: s.systems, size: s.size, level: s.level, id: s.id });
+
+  /** An exam block: one topic per question across the systems, by exam weight. */
+  const startExamBlock = () => {
+    if (!examBlock) return;
+    const block = buildExamBlock({ target, size: examBlock.size, curriculum });
+    void launch({ topics: block.topics, systems: block.systems, size: examBlock.size, level: "balanced", mode: "timed", id: "exam-block" });
+  };
+
+  /** Five questions across what the student studied most recently; today's challenge for a new student. */
+  const startDaily = () => {
+    const recent = [...libraryTopics]
+      .filter((t) => t.sheets.length > 0 || !!t.deck || !!t.qbank)
+      .sort((a, b) => b.lastActivity - a.lastActivity)
+      .slice(0, MAX_TOPICS)
+      .map((t) => t.title);
+    if (recent.length > 0) {
+      void launch({ topics: recent, size: 5, level: "balanced", id: "daily-5" });
       return;
     }
+    const c = dailyChallenge(target);
+    void launch({ topics: c.topics.map((x) => x.title), systems: c.topics.map((x) => x.system), size: 5, level: c.level, id: "daily-5" });
+  };
 
-    setIsStarting(true);
-    setError(null);
-
-    try {
-      // Resolves the moment the first question exists and the session is live.
-      // The remaining waves keep running against the provider.
-      const id = await startGeneratedSession(trimmed, setSize, challenge, examMode, playMode);
-      queryClient.invalidateQueries({ queryKey: ["qbank-unfinished"] });
-      navigate(id ? `/qbank/session?session=${id}` : "/qbank/session");
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "Generation failed";
-      setError(message);
-      toast({
-        title: "Could not generate questions",
-        description: message,
-        variant: "destructive",
-      });
-      setIsStarting(false);
-    }
-  }, [topic, setSize, challenge, examMode, playMode, isStarting, outOfQuestions, startGeneratedSession, navigate, toast, queryClient]);
-
+  const startSurprise = () => {
+    const pool = challengesFor(target);
+    const c = pool[Math.floor(Math.random() * pool.length)];
+    void launch({ topics: c.topics.map((x) => x.title), systems: c.topics.map((x) => x.system), size: 5, level: c.level, id: "surprise" });
+  };
 
   const startReview = async () => {
     if (startingReview || reviewIds.length === 0) return;
@@ -275,7 +388,31 @@ const QBank = () => {
   };
 
   const routed = !!generation?.systemName;
-  const estimatedMinutes = Math.max(1, Math.round((setSize * 18) / 60));
+  const mixing = pendingTopics.length >= 2;
+  const quickBusy = isStarting || outOfQuestions;
+
+  const targetSwitch = !isAnonymous && user && (
+    <div className="flex flex-wrap items-center gap-2">
+      <span className="text-xs text-muted-foreground">Studying for</span>
+      <div role="radiogroup" aria-label="Studying for" className="inline-flex rounded-full border border-border p-0.5">
+        {TARGETS.map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            role="radio"
+            aria-checked={target === t.id}
+            onClick={() => setTarget(t.id)}
+            disabled={isStarting}
+            className={`h-7 rounded-full px-3 text-xs font-semibold transition-colors ${
+              target === t.id ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
 
   return (
     <DashboardLayout wide>
@@ -285,7 +422,8 @@ const QBank = () => {
           <PageHeader
             label="QBank"
             title="Practice questions"
-            description="USMLE-style questions on any topic. The first one is ready in seconds."
+            description="One topic, a mix of several, or a ready-made challenge. The first question is ready in seconds."
+            aside={targetSwitch || undefined}
           />
 
           {/* Sign In Card */}
@@ -397,49 +535,41 @@ const QBank = () => {
                 </div>
               )}
 
-              {/* Generator Card — the topic and the button that starts the set
-                  come first; every option sits open beneath them. */}
-              <div className="space-y-5 rounded-[26px] border border-[color:var(--color-border)] bg-[color:var(--color-card)] p-5 shadow-[0_18px_40px_rgba(15,23,42,0.04)]">
-                {/* Topic */}
+              {/* Composer — one topic, or several mixed; the set's shape folds
+                  into one line until the student wants to change it. */}
+              <div className="space-y-4 rounded-[26px] border border-[color:var(--color-border)] bg-[color:var(--color-card)] p-5 shadow-[0_18px_40px_rgba(15,23,42,0.04)]">
                 <div>
-                  <label htmlFor="qbank-topic" className={`${MONO_EYEBROW} text-muted-foreground mb-2 block`}>
-                    Topic
-                  </label>
-                  <div className="flex flex-col gap-2.5 sm:flex-row">
-                    <input
-                      id="qbank-topic"
-                      value={topic}
-                      onChange={(e) => {
-                        setTopic(e.target.value);
-                        if (error) setError(null);
-                      }}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") generate();
-                      }}
-                      disabled={isStarting}
-                      placeholder="aortic dissection, nephrotic syndrome, the brachial plexus…"
-                      className="h-12 flex-1 rounded-[14px] border px-3.5 text-sm outline-none transition-colors focus:border-[var(--color-accent)] disabled:opacity-60"
-                      style={{
-                        borderColor: "var(--color-border)",
-                        background: "var(--color-background)",
-                        color: "var(--color-foreground)",
-                      }}
-                    />
-                    <button
-                      type="button"
-                      onClick={generate}
-                      disabled={isStarting || !topic.trim() || outOfQuestions}
-                      className="flex h-12 shrink-0 items-center justify-center gap-2 rounded-[14px] bg-[color:var(--color-foreground)] px-6 text-sm font-semibold text-[color:var(--color-background)] shadow-[0_16px_32px_rgba(15,23,42,0.12)] transition-all duration-200 hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:translate-y-0"
-                    >
-                      {isStarting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
-                      {isStarting ? "Writing…" : `Generate ${setSize} questions`}
-                    </button>
-                  </div>
+                  <p className={`${MONO_EYEBROW} text-muted-foreground mb-2`}>What do you want to practise?</p>
+                  <TopicComposer
+                    topics={topics}
+                    onChange={(next) => {
+                      setTopics(next);
+                      if (error) setError(null);
+                    }}
+                    draft={draft}
+                    onDraftChange={(d) => {
+                      setDraft(d);
+                      if (error) setError(null);
+                    }}
+                    options={composerOptions}
+                    max={MAX_TOPICS}
+                    disabled={isStarting}
+                    onSubmit={generate}
+                    onBrowse={() => setBrowseOpen(true)}
+                  />
+                  {mixing && (
+                    <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
+                      <span className="font-medium text-foreground">
+                        Mixed: {setSize} questions across {pendingTopics.length} topics ({splitLabel(setSize, pendingTopics.length)})
+                      </span>{" "}
+                      — switching between topics is harder, and better for telling them apart.
+                    </p>
+                  )}
                 </div>
 
                 {/* Today's allowance — free accounts only. */}
                 {!isProUser && remaining !== null && (
-                  <p className="-mt-2 text-xs leading-relaxed text-muted-foreground">
+                  <p className="text-xs leading-relaxed text-muted-foreground">
                     {outOfQuestions ? (
                       <span className="font-medium text-warning">
                         You've used today's {MAX_DAILY_QBANK_QUESTIONS} free questions · they reset at midnight UTC ·{" "}
@@ -456,155 +586,113 @@ const QBank = () => {
                   </p>
                 )}
 
-                {/* Exam block — one tap to the USMLE format (20 items, 30 min,
-                    since May 2026); a half block on the free plan. */}
-                {examBlock && (
+                {/* The set in one line, and the button that starts it. */}
+                <div className="flex flex-col gap-3 border-t border-[color:var(--color-border)] pt-4 sm:flex-row sm:items-center">
+                  <div className="min-w-0 flex-1 text-sm text-foreground">
+                    <span className="font-medium tabular-nums">{setSize} questions</span>
+                    <span className="text-muted-foreground">
+                      {" "}· {PLAY_MODE_LABELS[playMode]} · {CHALLENGE_LABELS[challenge]} · {EXAM_MODE_LABELS[target as ExamMode]}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setShowOptions((o) => !o)}
+                      aria-expanded={showOptions}
+                      aria-controls="qbank-customize"
+                      className="ml-2 inline-flex items-center gap-1 text-xs font-medium text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+                    >
+                      <SlidersHorizontal className="h-3.5 w-3.5" /> {showOptions ? "Done" : "Change"}
+                    </button>
+                  </div>
                   <button
                     type="button"
-                    onClick={() => {
-                      setSetSize(examBlock.size);
-                      setPlayMode("timed");
-                    }}
-                    disabled={isStarting}
-                    aria-pressed={setSize === examBlock.size && playMode === "timed"}
-                    className={`flex w-full items-center gap-3 rounded-[14px] border px-4 py-3 text-left transition-colors disabled:opacity-50 ${
-                      setSize === examBlock.size && playMode === "timed"
-                        ? "border-primary bg-primary/5"
-                        : "border-border hover:border-primary"
-                    }`}
+                    onClick={generate}
+                    disabled={isStarting || pendingTopics.length === 0 || outOfQuestions}
+                    className="flex h-12 shrink-0 items-center justify-center gap-2 rounded-[14px] bg-[color:var(--color-foreground)] px-6 text-sm font-semibold text-[color:var(--color-background)] shadow-[0_16px_32px_rgba(15,23,42,0.12)] transition-all duration-200 hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:translate-y-0"
                   >
-                    <Timer className="h-4 w-4 shrink-0 text-primary" aria-hidden />
-                    <span className="min-w-0 flex-1">
-                      <span className="block text-sm font-semibold text-foreground">
-                        {remaining === null ? "Exam block" : "Half exam block"} · {examBlock.size} questions ·{" "}
-                        {Number.isInteger(examBlock.minutes) ? examBlock.minutes : examBlock.minutes.toFixed(1)} min
-                      </span>
-                      <span className="block text-xs text-muted-foreground">
-                        Timed, 90 seconds a question — the pace of a real USMLE block.
-                      </span>
-                    </span>
-                    {setSize === examBlock.size && playMode === "timed" && (
-                      <Check className="h-4 w-4 shrink-0 text-primary" aria-hidden />
-                    )}
+                    {isStarting && !startingId ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+                    {isStarting && !startingId ? "Writing…" : `Start ${setSize} questions`}
                   </button>
-                )}
-
-                {/* Options — always shown, so the student sees what the set will be. */}
-                <div className="border-t border-[color:var(--color-border)] pt-4">
-                  <p className={`${MONO_EYEBROW} text-foreground`}>Customize your set</p>
-                    <div id="qbank-customize" className="mt-4 grid gap-5 sm:grid-cols-2">
-                      {/* Mode — how the set is sat, not what it is written for. */}
-                      <div>
-                        <p className={`${MONO_EYEBROW} text-muted-foreground mb-2`}>Mode</p>
-                        <div className="flex flex-wrap gap-2">
-                          {PLAY_MODE_ORDER.map((m) => {
-                            const active = m === playMode;
-                            return (
-                              <button
-                                key={m}
-                                type="button"
-                                onClick={() => setPlayMode(m)}
-                                disabled={isStarting}
-                                aria-pressed={active}
-                                className={`${PILL_BASE} ${active ? PILL_ON : PILL_OFF}`}
-                              >
-                                {active && <Check className="w-4 h-4" />}
-                                {PLAY_MODE_LABELS[m]}
-                              </button>
-                            );
-                          })}
-                        </div>
-                        <p className="mt-2 text-[11px] text-muted-foreground">{PLAY_MODE_BLURBS[playMode]}</p>
-                      </div>
-
-                      {/* Exam mode — selects the system prompt and briefs the
-                          set is written against. */}
-                      <div>
-                        <p className={`${MONO_EYEBROW} text-muted-foreground mb-2`}>Exam Mode</p>
-                        <div className="flex flex-wrap gap-2">
-                          {EXAM_MODE_ORDER.map((mode) => {
-                            const active = mode === examMode;
-                            return (
-                              <button
-                                key={mode}
-                                type="button"
-                                onClick={() => setExamMode(mode)}
-                                disabled={isStarting}
-                                aria-pressed={active}
-                                className={`${PILL_BASE} ${active ? PILL_ON : PILL_OFF}`}
-                              >
-                                {active && <Check className="w-4 h-4" />}
-                                {EXAM_MODE_LABELS[mode]}
-                              </button>
-                            );
-                          })}
-                        </div>
-                        <p className="mt-2 text-[11px] text-muted-foreground">
-                          {EXAM_MODE_BLURBS[examMode]}
-                        </p>
-                      </div>
-
-                      {/* How many */}
-                      <div>
-                        <p className={`${MONO_EYEBROW} text-muted-foreground mb-2`}>Questions</p>
-                        <div className="flex flex-wrap gap-2">
-                          {(sizes.length > 0 ? sizes : SET_SIZES).map((size) => {
-                            const active = size === setSize;
-                            return (
-                              <button
-                                key={size}
-                                type="button"
-                                onClick={() => setSetSize(size)}
-                                disabled={isStarting || outOfQuestions}
-                                aria-pressed={active}
-                                className={`${PILL_BASE} tabular-nums ${active ? PILL_ON : PILL_OFF}`}
-                              >
-                                {active && <Check className="w-4 h-4" />}
-                                {size}
-                              </button>
-                            );
-                          })}
-                        </div>
-                        <p className="mt-2 text-[11px] text-muted-foreground">
-                          A question takes about twenty seconds to write, so a set of {setSize}{" "}
-                          finishes in roughly {estimatedMinutes} minute
-                          {estimatedMinutes === 1 ? "" : "s"} — but you will be answering it
-                          long before then.
-                        </p>
-                      </div>
-
-                      {/* Difficulty — a reasoning-order dial underneath, not a
-                          difficulty one. Reasoning order is what the batch plan
-                          actually controls; the model labels difficulty
-                          downstream of it, and the prompt names the band each
-                          level should land in. The wire parameter stays
-                          `challenge`. */}
-                      <div>
-                        <p className={`${MONO_EYEBROW} text-muted-foreground mb-2`}>Difficulty</p>
-                        <div className="flex flex-wrap gap-2">
-                          {CHALLENGE_ORDER.map((level) => {
-                            const active = level === challenge;
-                            return (
-                              <button
-                                key={level}
-                                type="button"
-                                onClick={() => setChallenge(level)}
-                                disabled={isStarting}
-                                aria-pressed={active}
-                                className={`${PILL_BASE} ${active ? PILL_ON : PILL_OFF}`}
-                              >
-                                {active && <Check className="w-4 h-4" />}
-                                {CHALLENGE_LABELS[level]}
-                              </button>
-                            );
-                          })}
-                        </div>
-                        <p className="mt-2 text-[11px] text-muted-foreground">
-                          {CHALLENGE_BLURBS[challenge]}
-                        </p>
-                      </div>
-                    </div>
                 </div>
+
+                {showOptions && (
+                  <div id="qbank-customize" className="grid gap-5 sm:grid-cols-3">
+                    {/* Mode — how the set is sat, not what it is written for. */}
+                    <div>
+                      <p className={`${MONO_EYEBROW} text-muted-foreground mb-2`}>Mode</p>
+                      <div className="flex flex-wrap gap-2">
+                        {PLAY_MODE_ORDER.map((m) => {
+                          const active = m === playMode;
+                          return (
+                            <button
+                              key={m}
+                              type="button"
+                              onClick={() => setPlayMode(m)}
+                              disabled={isStarting}
+                              aria-pressed={active}
+                              className={`${PILL_BASE} ${active ? PILL_ON : PILL_OFF}`}
+                            >
+                              {active && <Check className="w-4 h-4" />}
+                              {PLAY_MODE_LABELS[m]}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      <p className="mt-2 text-[11px] text-muted-foreground">{PLAY_MODE_BLURBS[playMode]}</p>
+                    </div>
+
+                    {/* How many */}
+                    <div>
+                      <p className={`${MONO_EYEBROW} text-muted-foreground mb-2`}>Questions</p>
+                      <div className="flex flex-wrap gap-2">
+                        {(sizes.length > 0 ? sizes : SET_SIZES).map((size) => {
+                          const active = size === setSize;
+                          return (
+                            <button
+                              key={size}
+                              type="button"
+                              onClick={() => setSetSize(size)}
+                              disabled={isStarting || outOfQuestions}
+                              aria-pressed={active}
+                              className={`${PILL_BASE} tabular-nums ${active ? PILL_ON : PILL_OFF}`}
+                            >
+                              {active && <Check className="w-4 h-4" />}
+                              {size}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      <p className="mt-2 text-[11px] text-muted-foreground">
+                        You start after the first one is written; the rest arrive while you answer.
+                      </p>
+                    </div>
+
+                    {/* Difficulty — a reasoning-order dial underneath, not a
+                        difficulty one. Reasoning order is what the batch plan
+                        actually controls; the wire parameter stays `challenge`. */}
+                    <div>
+                      <p className={`${MONO_EYEBROW} text-muted-foreground mb-2`}>Difficulty</p>
+                      <div className="flex flex-wrap gap-2">
+                        {CHALLENGE_ORDER.map((level) => {
+                          const active = level === challenge;
+                          return (
+                            <button
+                              key={level}
+                              type="button"
+                              onClick={() => setChallenge(level)}
+                              disabled={isStarting}
+                              aria-pressed={active}
+                              className={`${PILL_BASE} ${active ? PILL_ON : PILL_OFF}`}
+                            >
+                              {active && <Check className="w-4 h-4" />}
+                              {CHALLENGE_LABELS[level]}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      <p className="mt-2 text-[11px] text-muted-foreground">{CHALLENGE_BLURBS[challenge]}</p>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {error && (
@@ -630,8 +718,8 @@ const QBank = () => {
                     <Step
                       state={routed ? "done" : "active"}
                       icon={Compass}
-                      label="Topic routed"
-                      detail={generation?.systemName ?? "choosing a system"}
+                      label="Topics routed"
+                      detail={generation?.systemName ?? "choosing systems"}
                     />
                     <Step
                       state={routed ? "active" : "pending"}
@@ -643,10 +731,55 @@ const QBank = () => {
 
                   <p className="mt-4 text-[11px] text-muted-foreground">
                     The session opens as soon as the first question is ready. The other{" "}
-                    {setSize - 1} are written while you answer it, and appear as they land.
+                    {startedSize - 1} are written while you answer it, and appear as they land.
                   </p>
                 </div>
               )}
+
+              {/* For you — personal first, then challenges for this exam. */}
+              <SuggestionCards
+                suggestions={suggestions}
+                onStart={startCard}
+                onShuffle={() => setSeed((s) => s + 1)}
+                startingId={startingId}
+                disabled={quickBusy}
+                sizeFor={(s) => fit(s.size)}
+              />
+
+              {/* Quick starts — no topic needed. */}
+              <section aria-labelledby="qb-quick" className="space-y-2.5">
+                <h2 id="qb-quick" className={`${MONO_EYEBROW} text-muted-foreground`}>
+                  Quick start
+                </h2>
+                <div className="grid gap-2.5 sm:grid-cols-3">
+                  {examBlock && (
+                    <QuickStart
+                      icon={Timer}
+                      title={`${remaining === null ? "Exam block" : "Half exam block"} · ${examBlock.size} Q`}
+                      detail={`Timed, ${Number.isInteger(examBlock.minutes) ? examBlock.minutes : examBlock.minutes.toFixed(1)} min — mixed across systems like the real exam`}
+                      busy={startingId === "exam-block"}
+                      disabled={quickBusy || curriculum.length === 0}
+                      onClick={startExamBlock}
+                    />
+                  )}
+                  <QuickStart
+                    icon={CalendarDays}
+                    title={`Daily ${fit(5)}`}
+                    detail="A quick mix of what you studied most recently"
+                    busy={startingId === "daily-5"}
+                    disabled={quickBusy}
+                    onClick={startDaily}
+                  />
+                  <QuickStart
+                    icon={Shuffle}
+                    title="Surprise me"
+                    detail={`A random challenge for ${TARGETS.find((t) => t.id === target)?.label ?? "your exam"}`}
+                    busy={startingId === "surprise"}
+                    disabled={quickBusy}
+                    onClick={startSurprise}
+                  />
+                </div>
+              </section>
 
               {/* Unfinished sets — every set left open, on any device. One
                   compact row each: what it is, how far along, resume. */}
@@ -721,6 +854,20 @@ const QBank = () => {
             </>
           )}
       </div>
+      <SystemBrowser
+        open={browseOpen}
+        onOpenChange={setBrowseOpen}
+        curriculum={curriculum}
+        slots={Math.max(0, MAX_TOPICS - topics.length)}
+        onAdd={(added) => {
+          setTopics((prev) => {
+            const next = [...prev];
+            for (const a of added) if (!next.some((t) => t.toLowerCase() === a.toLowerCase())) next.push(a);
+            return next.slice(0, MAX_TOPICS);
+          });
+          if (error) setError(null);
+        }}
+      />
       <GoProModal open={goProOpen} onOpenChange={setGoProOpen} />
       <AuthModal
         open={authOpen}
@@ -730,6 +877,39 @@ const QBank = () => {
     </DashboardLayout>
   );
 };
+
+const QuickStart = ({
+  icon: Icon,
+  title,
+  detail,
+  busy,
+  disabled,
+  onClick,
+}: {
+  icon: typeof Timer;
+  title: string;
+  detail: string;
+  busy: boolean;
+  disabled: boolean;
+  onClick: () => void;
+}) => (
+  <button
+    type="button"
+    onClick={onClick}
+    disabled={disabled}
+    className="flex items-start gap-3 rounded-2xl border border-[color:var(--color-border)] bg-[color:var(--color-card)] p-4 text-left transition-all duration-200 hover:-translate-y-0.5 hover:border-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:translate-y-0"
+  >
+    {busy ? (
+      <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-primary" aria-hidden />
+    ) : (
+      <Icon className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden />
+    )}
+    <span className="min-w-0">
+      <span className="block text-sm font-semibold text-foreground">{title}</span>
+      <span className="block text-xs leading-relaxed text-muted-foreground">{detail}</span>
+    </span>
+  </button>
+);
 
 const Step = ({
   state,
