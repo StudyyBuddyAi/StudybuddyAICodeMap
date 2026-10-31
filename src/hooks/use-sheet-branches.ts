@@ -36,7 +36,7 @@ import {
   type LayerPill,
   type SheetLayer,
 } from "@/lib/sheet-layer";
-import { resolvePlan } from "@/lib/sheet-plan";
+import { planHints, resolvePlan } from "@/lib/sheet-plan";
 import { requestSignature, requestTopic } from "@/lib/sheet-signature";
 import type { GeneratedSheet, SectionBody } from "@/types/generated-sheet";
 
@@ -436,7 +436,8 @@ export function useSheetBranches(o: UseSheetBranchesOptions): BranchesStore {
   const requestSheet = useCallback((): BranchSheet | null => {
     const s = live.current.o.sheet;
     if (!s) return null;
-    const keys = resolvePlan(s).map((p) => p.key);
+    const plan = resolvePlan(s);
+    const keys = plan.map((p) => p.key);
     const sections: Record<string, SectionBody> = {};
     for (const k of keys) {
       const body = s.sections?.[k] ?? (s as unknown as Record<string, SectionBody | undefined>)[k];
@@ -450,6 +451,7 @@ export function useSheetBranches(o: UseSheetBranchesOptions): BranchesStore {
       topic: requestTopic(s, c.topic),
       sourceIds: c.sourceIds,
       signature: requestSignature(s, live.current.layer),
+      hints: planHints(plan),
       examMode: c.examMode,
       difficulty: c.difficulty,
     };

@@ -27,7 +27,8 @@
  *   Enhance — the clinical tie-in ran past its 50-word cap.
  */
 import { buildNotesPrompts, type NotesPromptInput } from "./medical-notes-prompts.ts";
-import { resolveSheetPlan, sectionQuota, type PlannedSection } from "./sheet-plan.ts";
+import { isShapedPlan, resolveSheetPlan, sectionQuota, type PlannedSection } from "./sheet-plan.ts";
+import { GROUP_HOME, flowBlock } from "./sheet-schema.ts";
 
 const CARDS_FORMAT_MARKER = "OUTPUT FORMAT — copy this structure exactly:";
 
@@ -77,7 +78,9 @@ FINAL CHECK — verify each point before you write the closing }:
 - Write for the audience and exam the request names. A retrieved passage from a pediatrics or adult textbook does not narrow the audience.
 - sourceCoverage must agree with itself: "full" means "uncovered" is empty; "none" lists every section; "partial" lists at least one section but not all of them.
 - referenceNote is a finished sentence — never the instruction text in angle brackets.
-- No fact appears in two sections, except a Memory Hook that encodes one of the two or three central facts.`;
+- No fact appears in two sections, except a Memory Hook that encodes one of the two or three central facts${
+    isShapedPlan(plan) ? ", and The Big Picture, which names what the blocks detail" : ""
+  }.`;
 }
 
 export function buildCortiNotesPrompts(input: NotesPromptInput): { systemPrompt: string; userContent: string } {
@@ -124,6 +127,11 @@ export function buildCortiNotesPrompts(input: NotesPromptInput): { systemPrompt:
           difficulty: input.difficulty,
         });
     systemPrompt += sheetChecklist(plan);
+    // Read last, where Corti's models attend: how the sheet reads, and for a
+    // group sheet where each fact lives. A group sheet opens on its map, so
+    // only a sheet without one gets the "In short:" opener.
+    const shaped = isShapedPlan(plan);
+    systemPrompt += flowBlock(input.difficulty, { opener: !shaped }) + (shaped ? GROUP_HOME : "");
   }
 
   return { systemPrompt, userContent: base.userContent };

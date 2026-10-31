@@ -30,8 +30,12 @@ export function schemaLine(section: PlannedSection, part: "core" | "more" = "cor
   if (section.kind === "list") {
     return `  "${key}": [\n    "<${brief} One item per element, no leading number.>",\n    "<...>"\n  ],`;
   }
-  return `  "${key}": "<${brief}${part === "core" ? LABELS_ON_OWN_LINES : MORE_LINES_APART}>",`;
+  // A section of paragraphs (a group sheet's map) has no labels to keep apart.
+  const unlabelled = part === "core" && section.coreLabels !== undefined && section.coreLabels.length === 0;
+  return `  "${key}": "<${brief}${unlabelled ? PARAGRAPHS_APART : part === "core" ? LABELS_ON_OWN_LINES : MORE_LINES_APART}>",`;
 }
+
+const PARAGRAPHS_APART = " Every paragraph starts on its own line, after a \\n.";
 
 /**
  * A prose depth adds lines under whichever labels need them, so it is not
@@ -106,6 +110,58 @@ export const ONE_HOME_PER_FACT = `ONE HOME PER FACT — the sheet must not repea
 - The one deliberate exception: a Memory Hook may encode one of the sheet's two or three most central facts, because the hook itself — the mnemonic, analogy or image — is the new thing. A hook that only restates a fact is not a hook.
 - Before writing each section, check what the sheet has already said, and spend that section's items on what is not yet on the page.`;
 
+
+/**
+ * How much connective tissue a sheet gets, by difficulty. Readers new to a
+ * topic understand more from text that states its links and defines its
+ * terms; readers who know it do as well with compact text (the cohesion and
+ * expertise-reversal findings). Either way the causal link stays explicit.
+ */
+const COHESION: Record<string, string> = {
+  Basic:
+    "Write for a reader meeting this for the first time: full sentences, every term defined the first time it appears, no unexplained abbreviations, and the reason each step follows from the last (because, so, which is why).",
+  Intermediate:
+    "Write in full, connected sentences: say why each step follows from the last (because, so, which is why). Standard terminology; expand an abbreviation the first time.",
+  Advanced:
+    "Write compactly, for a reader who knows the basics, but still in sentences that connect: the causal link between steps stays explicit even when the wording is terse.",
+};
+
+/**
+ * The sheet reads as one explanation, top to bottom.
+ *
+ * Every earlier rule took words away — counts, one home per fact, high-yield
+ * only — and each was right about padding, but nothing asked for the facts
+ * that stay to be connected, so a sheet read as labelled fragments. Students
+ * learn a topic from explanations that link cause to sign and revise from
+ * bullets; this asks for the first without giving up the density of the second.
+ *
+ * `opener` is for a sheet without a map: its first line says what the topic is
+ * and what ties it together.
+ */
+export function flowBlock(difficulty: string | undefined, opts: { opener: boolean }): string {
+  return `
+
+FLOW — the sheet must read as one coherent explanation, top to bottom, not a heap of facts:
+${
+  opts.opener
+    ? `- The first line of the first section is "In short:" followed by two sentences: what this topic is, and the one idea that ties it together. If the topic covers several conditions, name them there and the axis that organises them (timing, age, mechanism, site).\n`
+    : ""
+}- ${COHESION[difficulty ?? ""] ?? COHESION.Intermediate}
+- A labelled line is a short connected passage, not a string of buzzword → fragment pairs. Arrows may show a chain, but the sentence around them says what it means.
+- If the topic covers several conditions, never mix two of them in one sentence. Inside a line, take them one at a time, always in the same order, each starting on its own line as "Name — …".
+- Order the items of every list the way the sheet's content is ordered, and group items about the same condition together. If the topic covers several conditions, start each item with the condition it is about.
+- Every item stays specific and testable. Flow is added by connecting facts, never by padding or by restating one.`;
+}
+
+/**
+ * Where facts live on a group sheet. Added to ONE_HOME_PER_FACT rather than
+ * replacing it: the map may name what a block details, a block owns its
+ * member, and the table and traps are about the differences.
+ */
+export const GROUP_HOME = `
+- The Big Picture opens the sheet and may name a fact a block details; that is its job, not a repeat.
+- Each block holds everything about its own member. Write a fact in the block it belongs to; a shared fact goes in the first block it fits, and a later block may refer back to it in a few words ("as in RDS") instead of restating it.
+- The tell-apart table only contrasts the blocks; Exam Traps are confusions between them or within one.`;
 
 /**
  * The rules for the plan's table sections, or nothing when it has none — so a
