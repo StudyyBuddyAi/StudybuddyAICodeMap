@@ -13,6 +13,8 @@ export const PRIVACY_CONTACT_EMAIL = "[contact email]";
 export type PrivacyBlock = string | { list: string[] };
 
 export interface PrivacySection {
+  /** Anchor for a section linked from elsewhere (/privacy#id). */
+  id?: string;
   heading: string;
   body: PrivacyBlock[];
 }
@@ -89,15 +91,19 @@ export const PRIVACY_SECTIONS: PrivacySection[] = [
     heading: "How long we keep it",
     body: [
       "Your account and what you create are kept while your account exists, so you can come back to them. Guest work on a device stays until you delete it, clear the app's data or the browser's storage, or uninstall the app.",
-      "When an account is deleted, the account and the study data linked to it are deleted. Library query logs may be kept without any link to you.",
+      "When an account is deleted, the account and the study data linked to it are deleted at once. Library query logs are kept without any link to you (see Deleting your account and data).",
     ],
   },
   {
-    heading: "Deleting your data",
+    id: "delete-account",
+    heading: "Deleting your account and data",
     body: [
-      `To delete your account and its data, email ${PRIVACY_CONTACT_EMAIL} from the address on the account, with the subject "Delete my account". We confirm the request and complete it within 30 days. You can also delete individual sheets, decks and QBank sets in the app at any time.`,
-      "A guest's work is on the device: clear the app's data or uninstall it (apps), or clear the site's data in your browser (website).",
-      "You can also ask us for a copy of your data, or to correct it, at the same address.",
+      "In the app: open Settings, choose Delete account, and type DELETE to confirm. Your account and its data are deleted at once and you are signed out. This cannot be undone.",
+      "What is deleted: your account (email, username, sign-in), your profile and plan, your study sheets and everything added to them, your decks, cards and review history, your QBank sets, answers, flags, notes and the questions written for you, your usage counts and your AI memory.",
+      "What is kept, with no link to you: the text of library queries and which reference passages they used, kept to check the quality of answers; and a Pro access code you redeemed, which stays used. Neither can be traced back to you once the account is gone.",
+      `If you can't use the app (for example, you no longer have it installed), email ${PRIVACY_CONTACT_EMAIL} from the address on the account, with the subject "Delete my account". We confirm the request and delete the account within 30 days.`,
+      "You can also delete single sheets, decks and QBank sets in the app at any time. A guest's work is on the device: clear the app's data or uninstall it (apps), or clear the site's data in your browser (website).",
+      "To ask for a copy of your data, or to correct it, write to the same address.",
     ],
   },
   {
