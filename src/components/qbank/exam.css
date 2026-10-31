@@ -720,6 +720,89 @@
 
 .qb-domain { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 
+/* Full explanation (FullExplanation.tsx): the depth under the short one — a
+   bottom line, the concept, a comparison table, the algorithm as a figure,
+   every option and the facts to keep. Folds away once read. */
+.qb-full { display: grid; gap: 10px; padding-top: 4px; border-top: 1px solid var(--qb-line); }
+.qb-full-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 0 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+.qb-full-toggle h3 { margin: 0; }
+.qb-full-chevron { width: 16px; height: 16px; color: var(--fg-muted); transition: transform var(--dur-base) var(--ease-out); }
+.qb-full-chevron--open { transform: rotate(180deg); }
+.qb-full-body { display: grid; gap: 16px; }
+.qb-full-status { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 0; font-size: 0.92em; line-height: 1.6; color: var(--fg-muted); }
+.qb-full-status svg { width: 15px; height: 15px; flex-shrink: 0; }
+.qb-full-retry { display: inline-flex; align-items: center; gap: 4px; border: 0; background: none; color: var(--accent); font: inherit; cursor: pointer; }
+.qb-full-retry svg { width: 13px; height: 13px; }
+.qb-full-bottom { display: grid; gap: 4px; margin: 0; line-height: 1.6; color: var(--fg); font-weight: 500; }
+.qb-full-prose { display: grid; gap: 10px; }
+.qb-full-prose p { margin: 0; line-height: 1.75; color: var(--fg-muted); }
+.qb-full-prose strong,
+.qb-full-options strong,
+.qb-full-hy strong { color: var(--fg); font-weight: 650; }
+
+.qb-full-figure { display: grid; gap: 8px; margin: 0; }
+.qb-full-table-wrap { overflow-x: auto; border: 1px solid var(--qb-line-strong); border-radius: var(--radius-md); }
+.qb-full-table { width: 100%; border-collapse: collapse; font-size: 0.92em; line-height: 1.5; }
+.qb-full-table th,
+.qb-full-table td { padding: 8px 12px; text-align: left; vertical-align: top; border-bottom: 1px solid var(--qb-line); }
+.qb-full-table thead th { background: var(--qb-chrome); color: var(--fg); font-weight: 650; white-space: nowrap; }
+.qb-full-table tbody th { color: var(--fg); font-weight: 600; }
+.qb-full-table td { color: var(--fg-muted); }
+.qb-full-table tbody tr:last-child > * { border-bottom: 0; }
+
+/* The algorithm: boxes down a spine, a decision's branches beside its box. */
+.qb-flow { display: grid; gap: 0; margin: 0; padding: 0; list-style: none; }
+.qb-flow-step { position: relative; display: grid; gap: 6px; padding-bottom: 22px; }
+.qb-flow-step:last-child { padding-bottom: 0; }
+.qb-flow-step:not(:last-child)::after {
+  content: "";
+  position: absolute;
+  left: 20px;
+  bottom: 4px;
+  height: 14px;
+  border-left: 2px solid var(--qb-line-strong);
+}
+.qb-flow-step:not(:last-child)::before {
+  content: "";
+  position: absolute;
+  left: 16px;
+  bottom: 0;
+  border: 5px solid transparent;
+  border-top-color: var(--qb-line-strong);
+  border-bottom: 0;
+}
+.qb-flow-box {
+  justify-self: start;
+  max-width: 100%;
+  padding: 9px 14px;
+  border: 1px solid var(--qb-line-strong);
+  border-radius: var(--radius-md);
+  background: var(--qb-sheet);
+  color: var(--fg);
+  line-height: 1.5;
+}
+.qb-flow-step--decision .qb-flow-box { border-color: color-mix(in srgb, var(--accent) 45%, transparent); background: var(--accent-soft); font-weight: 550; }
+.qb-flow-branches { display: grid; gap: 2px; padding-left: 16px; font-size: 0.92em; line-height: 1.5; color: var(--fg-muted); }
+.qb-flow-branch b { color: var(--fg); font-weight: 650; }
+
+.qb-full-options { display: grid; gap: 8px; }
+.qb-full-options ul { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.qb-full-options li { display: grid; gap: 2px; padding-left: 12px; border-left: 2px solid var(--qb-line); line-height: 1.6; color: var(--fg-muted); }
+.qb-full-options li[data-key="correct"] { border-left-color: var(--qb-right); }
+.qb-full-hy { display: grid; gap: 4px; margin: 0; padding-left: 18px; line-height: 1.6; color: var(--fg); }
+
 /* Report a problem: a quiet link under the explanation, a small dialog. */
 .qb-report { padding-top: 4px; }
 .qb-report-link,
