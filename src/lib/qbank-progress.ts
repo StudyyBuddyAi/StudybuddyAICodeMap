@@ -182,10 +182,13 @@ export function buildQBankProgress(input: {
   };
 }
 
-/** Topics worth another set: enough answers to judge, weakest first. */
+/** Below this a topic is worth another set: the exam's 65–70% is where to be. */
+export const WEAK_TOPIC_BELOW = 0.7;
+
+/** Topics worth another set: enough answers to judge, under the bar, weakest first. */
 export function weakestTopics(progress: QBankProgress, limit = 5): TopicProgress[] {
   return progress.topics
-    .filter((t) => t.answered >= MIN_TOPIC_ANSWERS)
+    .filter((t) => t.answered >= MIN_TOPIC_ANSWERS && t.correct / t.answered < WEAK_TOPIC_BELOW)
     .sort((a, b) => a.correct / a.answered - b.correct / b.answered || b.answered - a.answered)
     .slice(0, limit);
 }

@@ -102,7 +102,7 @@ describe("buildQBankProgress", () => {
 });
 
 describe("weakestTopics", () => {
-  it("ranks topics with enough answers, weakest first", () => {
+  it("ranks topics with enough answers and a score under the bar, weakest first", () => {
     const attempts = [
       ...["a", "b", "c"].map((q, i) => attempt(q, i === 0, "s1", "Cardiovascular")),
       ...["d", "e", "f"].map((q) => attempt(q, true, "s2", "Respiratory")),
@@ -118,6 +118,7 @@ describe("weakestTopics", () => {
       curriculum,
       now: NOW,
     });
-    expect(weakestTopics(p).map((t) => t.title)).toEqual(["Heart Failure", "Asthma"]);
+    // Asthma at 100% needs no more work; AF has one answer, too few to judge.
+    expect(weakestTopics(p).map((t) => t.title)).toEqual(["Heart Failure"]);
   });
 });

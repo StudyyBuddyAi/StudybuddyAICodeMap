@@ -6,6 +6,7 @@ import { useQBankProgress } from "@/hooks/use-qbank-progress";
 import {
   accuracy,
   MIN_TOPIC_ANSWERS,
+  WEAK_TOPIC_BELOW,
   weakestTopics,
   type SystemProgress,
   type TopicProgress,
@@ -98,7 +99,8 @@ const QBankProgress = () => {
                   Work on next
                 </h2>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  Your lowest scores, among topics with at least {MIN_TOPIC_ANSWERS} questions.
+                  Topics under {Math.round(WEAK_TOPIC_BELOW * 100)}% with at least {MIN_TOPIC_ANSWERS} questions, lowest
+                  first.
                 </p>
                 <ul className="mt-3 divide-y divide-[color:var(--color-border)]">
                   {weakest.map((t) => (
@@ -178,7 +180,7 @@ const SystemRow = ({ system: s, onPractise }: { system: SystemProgress; onPracti
       <p className="truncate text-sm font-medium text-foreground">{s.name}</p>
       <p className="text-xs text-muted-foreground">
         {s.answered === 0 ? "Not started" : `${s.answered} question${s.answered === 1 ? "" : "s"}`}
-        {s.topicsTotal > 0 && ` · ${s.topicsPractised} of ${s.topicsTotal} topics`}
+        {s.topicsTotal > 0 && ` · ${s.topicsPractised} of ${s.topicsTotal} topic${s.topicsTotal === 1 ? "" : "s"}`}
       </p>
     </div>
     <Meter answered={s.answered} correct={s.correct} />
@@ -197,7 +199,8 @@ const TopicRow = ({
 }) => (
   <li className="flex flex-wrap items-center gap-x-4 gap-y-2 py-3">
     <div className="min-w-0 flex-1">
-      <p className="truncate text-sm font-medium text-foreground" dir="auto">
+      {/* A topic typed in Arabic reads right to left but lines up with the rest. */}
+      <p className="truncate text-left text-sm font-medium text-foreground" dir="auto">
         {t.title}
       </p>
       <p className="text-xs text-muted-foreground">

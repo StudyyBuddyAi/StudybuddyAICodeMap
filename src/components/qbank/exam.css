@@ -801,7 +801,8 @@
 .qb-full-options ul { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
 .qb-full-options li { display: grid; gap: 2px; padding-left: 12px; border-left: 2px solid var(--qb-line); line-height: 1.6; color: var(--fg-muted); }
 .qb-full-options li[data-key="correct"] { border-left-color: var(--qb-right); }
-.qb-full-hy { display: grid; gap: 4px; margin: 0; padding-left: 18px; line-height: 1.6; color: var(--fg); }
+.qb-full-hy { display: grid; gap: 4px; margin: 0; padding-left: 18px; list-style: disc; line-height: 1.6; color: var(--fg); }
+.qb-full-hy li::marker { color: var(--accent); }
 
 /* Report a problem: a quiet link under the explanation, a small dialog. */
 .qb-report { padding-top: 4px; }
