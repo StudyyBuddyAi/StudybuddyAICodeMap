@@ -40,10 +40,14 @@ import type { GeneratedQuestionDraft } from "./qbank-types";
 /** Questions per wave. Matches the ~90s request shape already proven in production. */
 export const WAVE_SIZE = 5;
 
-/** The set sizes a student can pick. */
-export const MIN_SET_SIZE = 5;
+/**
+ * The set sizes a student can pick: any number in this range. The ceiling is
+ * the USMLE block since May 2026 (qbank-allowance.ts EXAM_BLOCK_SIZE).
+ */
+export const MIN_SET_SIZE = 1;
 export const MAX_SET_SIZE = 20;
-export const SET_SIZE_STEP = 5;
+/** What the picker starts on. */
+export const DEFAULT_SET_SIZE = 5;
 
 /**
  * Extra waves allowed beyond the ideal count, to absorb shortfalls.

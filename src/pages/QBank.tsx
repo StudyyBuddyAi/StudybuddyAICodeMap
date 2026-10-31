@@ -27,7 +27,8 @@ import DifficultyScale from "@/components/qbank/DifficultyScale";
 import WritingOverlay from "@/components/qbank/WritingOverlay";
 import { EXAM_THEME } from "@/lib/qbank-exam-theme";
 import { useUsageLimit, MAX_DAILY_QBANK_QUESTIONS } from "@/hooks/use-usage-limit";
-import { allowedSetSizes, examBlockFor } from "../../supabase/functions/_shared/qbank-allowance.ts";
+import { examBlockFor, largestSetSize } from "../../supabase/functions/_shared/qbank-allowance.ts";
+import SetSizeStepper from "@/components/qbank/SetSizeStepper";
 import { useQBankReviewQueue } from "@/hooks/use-qbank-review-queue";
 import { useQBankTarget } from "@/hooks/use-qbank-target";
 import { useCurriculumTopics } from "@/hooks/use-curriculum-topics";
@@ -51,7 +52,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { useQBankContext } from "@/contexts/QBankContext";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
-import { MIN_SET_SIZE, MAX_SET_SIZE, SET_SIZE_STEP } from "@/lib/qbank-wave-runner";
+import { DEFAULT_SET_SIZE, MAX_SET_SIZE } from "@/lib/qbank-wave-runner";
 import { formatRelative } from "@/lib/qbank-format";
 import { topicRejectionMessage, validateTopic } from "@/lib/validate-topic";
 import {
@@ -80,11 +81,6 @@ interface UnfinishedRow {
 }
 
 const MONO_EYEBROW = "font-mono text-[11px] font-medium tracking-widest uppercase";
-
-const SET_SIZES = Array.from(
-  { length: Math.floor((MAX_SET_SIZE - MIN_SET_SIZE) / SET_SIZE_STEP) + 1 },
-  (_, i) => MIN_SET_SIZE + i * SET_SIZE_STEP
-);
 
 /** Topics the student can mix in one set (owner decision, 2026-10-30). */
 const MAX_TOPICS = 5;
@@ -159,7 +155,7 @@ const QBank = () => {
   // The picker never offers a set the server would cut short.
   const { qbankRemaining, isProUser, isLoading: usageLoading } = useUsageLimit();
   const remaining = usageLoading ? null : qbankRemaining;
-  const sizes = allowedSetSizes(remaining, SET_SIZES);
+  const maxSize = largestSetSize(remaining, MAX_SET_SIZE);
   const outOfQuestions = remaining === 0;
   const examBlock = examBlockFor(remaining);
   const fit = useCallback((size: number) => (remaining === null ? size : Math.min(size, remaining)), [remaining]);
@@ -196,18 +192,18 @@ const QBank = () => {
   const [browseOpen, setBrowseOpen] = useState(false);
   const [showOptions, setShowOptions] = useState(false);
 
-  const [setSize, setSetSize] = useState(MIN_SET_SIZE);
+  const [setSize, setSetSize] = useState(DEFAULT_SET_SIZE);
   // Keep the chosen size inside today's allowance as it changes — after a set,
   // or once usage loads.
   useEffect(() => {
-    if (sizes.length > 0 && !sizes.includes(setSize)) setSetSize(sizes[sizes.length - 1]);
+    if (maxSize > 0 && setSize > maxSize) setSetSize(maxSize);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sizes.join(",")]);
+  }, [maxSize]);
   const [challenge, setChallenge] = useState<ChallengeLevel>("balanced");
   const [playMode, setPlayMode] = useState<PlayMode>("tutor");
   const [isStarting, setIsStarting] = useState(false);
   const [startingId, setStartingId] = useState<string | null>(null);
-  const [startedSize, setStartedSize] = useState(MIN_SET_SIZE);
+  const [startedSize, setStartedSize] = useState(DEFAULT_SET_SIZE);
   const [startedTopics, setStartedTopics] = useState<string[]>([]);
   /** Set by Cancel, so the run's refusal is not reported as a failure. */
   const cancelledRef = useRef(false);
@@ -645,26 +641,16 @@ const QBank = () => {
                     {/* How many */}
                     <div>
                       <p className={`${MONO_EYEBROW} text-muted-foreground mb-2`}>Questions</p>
-                      <div className="flex flex-wrap gap-2">
-                        {(sizes.length > 0 ? sizes : SET_SIZES).map((size) => {
-                          const active = size === setSize;
-                          return (
-                            <button
-                              key={size}
-                              type="button"
-                              onClick={() => setSetSize(size)}
-                              disabled={isStarting || outOfQuestions}
-                              aria-pressed={active}
-                              className={`${PILL_BASE} tabular-nums ${active ? PILL_ON : PILL_OFF}`}
-                            >
-                              {active && <Check className="w-4 h-4" />}
-                              {size}
-                            </button>
-                          );
-                        })}
-                      </div>
+                      <SetSizeStepper
+                        value={setSize}
+                        max={Math.max(1, maxSize)}
+                        onChange={setSetSize}
+                        disabled={isStarting || outOfQuestions}
+                      />
                       <p className="mt-2 text-[11px] text-muted-foreground">
-                        You start after the first one is written; the rest arrive while you answer.
+                        Any number from 1 to {Math.max(1, maxSize)}
+                        {remaining === null ? " — 20 is a USMLE block" : " today"}. You start after the first one is
+                        written; the rest arrive while you answer.
                       </p>
                     </div>
 

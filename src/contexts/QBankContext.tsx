@@ -20,6 +20,7 @@ import type {
 import { NOTE_MAX_LENGTH } from "@/lib/qbank-types";
 import {
   runQbankGeneration,
+  DEFAULT_SET_SIZE,
   MIN_SET_SIZE,
   MAX_SET_SIZE,
   type BlueprintRow,
@@ -961,10 +962,10 @@ export const QBankProvider = ({ children }: { children: ReactNode }) => {
       heldBackItemsRef.current = [];
       setReviewIndex(null);
 
-      // Floored at one, not at the smallest picker size: a free account with
-      // three questions left today is offered a set of three.
+      // Floored at one: a free account with three questions left today is
+      // offered a set of three.
       const setTarget = Math.min(
-        Math.max(1, Math.round(target) || MIN_SET_SIZE),
+        Math.max(MIN_SET_SIZE, Math.round(target) || DEFAULT_SET_SIZE),
         MAX_SET_SIZE
       );
       const generationId = newGenerationId();
