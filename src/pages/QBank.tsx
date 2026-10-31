@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import PageHeader from "@/components/layout/PageHeader";
-import { useLocation, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
   LogIn,
   History,
@@ -14,6 +14,7 @@ import {
   Shuffle,
   CalendarDays,
   SlidersHorizontal,
+  BarChart3,
 } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import DashboardLayout from "@/components/dashboard/DashboardLayout";
@@ -408,6 +409,16 @@ const QBank = () => {
               </>
             }
             description="Built on NBME item-writing rules. Name a topic — or mix up to five — and a set is written for it; you start on the first question as soon as it is ready, and the rest is written while you work."
+            aside={
+              user && !isAnonymous ? (
+                <Link
+                  to="/qbank/progress"
+                  className="inline-flex items-center gap-1.5 text-sm font-medium text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+                >
+                  <BarChart3 className="h-4 w-4" /> Your progress by system and topic
+                </Link>
+              ) : undefined
+            }
           />
 
           {/* Sign In Card */}

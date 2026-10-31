@@ -639,6 +639,9 @@ const QBankSummary = () => {
                   : `Another ${againSize} on ${lastGeneration?.topics && lastGeneration.topics.length > 1 ? "these topics" : "this topic"}`}
               </button>
             )}
+            <button type="button" className="qb-btn qb-btn--lg" onClick={() => navigate("/qbank/progress")}>
+              Your progress
+            </button>
             <button type="button" className="qb-btn qb-btn--lg" onClick={() => navigate("/qbank")}>
               Back to QBank
             </button>
