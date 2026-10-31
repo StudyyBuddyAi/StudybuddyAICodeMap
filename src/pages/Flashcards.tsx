@@ -650,7 +650,7 @@ const Flashcards = () => {
                   </div>
                   {/* Back — answer */}
                   <div className="flip-face flip-face-back absolute inset-0 w-full">
-                    <CardFace card={current} text={current.answer} showCitation />
+                    <CardFace card={current} text={current.answer} />
                   </div>
                 </div>
               </div>

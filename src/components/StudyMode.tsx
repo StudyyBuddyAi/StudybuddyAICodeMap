@@ -10,8 +10,6 @@ import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useUsageLimit } from "@/hooks/use-usage-limit";
 import GoProModal from "@/components/GoProModal";
-import { getCitationsForTopic } from "@/lib/citation-store";
-import CitationBadgeList from "@/components/CitationBadgeList";
 import SheetSources from "@/components/SheetSources";
 import { startTopProgress, finishTopProgress } from "@/components/TopProgressBar";
 import { callMedicalNotes } from "@/lib/callMedicalNotes";
@@ -222,7 +220,7 @@ const StudyMode = ({ dueCards, liveCards, onReview, settings, onClose }: StudyMo
                   </div>
                   {/* Back */}
                   <div className="flip-face flip-face-back absolute inset-0 w-full">
-                    <CardFace card={current} text={current.answer} showCitation />
+                    <CardFace card={current} text={current.answer} />
                   </div>
                 </div>
               </div>
@@ -300,17 +298,13 @@ const StudyMode = ({ dueCards, liveCards, onReview, settings, onClose }: StudyMo
   );
 };
 
-export const CardFace = ({
-  card,
-  text,
-  showCitation = false,
-}: {
-  card: Card;
-  text: string;
-  showCitation?: boolean;
-}) => {
+/**
+ * One side of a card. It carries no citation: the deck's paper used to sit
+ * under every answer, which read as the source of that answer when it was
+ * only further reading on the topic (early-access feedback).
+ */
+export const CardFace = ({ card, text }: { card: Card; text: string }) => {
   const tagColors = getTagColors(card.tag);
-  const citations = showCitation ? getCitationsForTopic(card.topic) : [];
   function cardFontSize(text: string): string {
     if (text.length < 120) return "text-lg md:text-xl";
     if (text.length < 220) return "text-base md:text-lg";
@@ -355,11 +349,6 @@ export const CardFace = ({
           {text}
         </p>
       </div>
-      {showCitation && citations.length > 0 && (
-        <div className="shrink-0 mt-1">
-          <CitationBadgeList state="found" citations={citations} />
-        </div>
-      )}
     </div>
   );
 };

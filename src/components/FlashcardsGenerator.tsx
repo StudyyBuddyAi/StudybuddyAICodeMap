@@ -766,13 +766,18 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated, onTopicChange, w
         )}
       </div>
 
+      {/* A paper on the topic to read further — never the source of the
+          cards, so it is labelled as reading rather than as a reference. */}
       {citationState !== "idle" && citationState !== "hidden" && (
-        <CitationBadgeList
-          state={citationState}
-          citations={citations}
-          onLockedClick={() => (isLoggedIn ? setGoProOpen(true) : setAuthModalOpen(true))}
-          isLoggedIn={isLoggedIn}
-        />
+        <div className="flex flex-wrap items-center gap-2">
+          {citationState === "found" && <span className="text-xs text-muted-foreground">Further reading</span>}
+          <CitationBadgeList
+            state={citationState}
+            citations={citations}
+            onLockedClick={() => (isLoggedIn ? setGoProOpen(true) : setAuthModalOpen(true))}
+            isLoggedIn={isLoggedIn}
+          />
+        </div>
       )}
 
       {/* Grounding result for the deck that was just generated */}
