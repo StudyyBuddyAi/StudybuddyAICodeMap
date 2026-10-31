@@ -8,6 +8,8 @@ import {
   ShieldCheck,
   ImageOff,
   ListChecks,
+  Layers,
+  Loader2,
 } from "lucide-react";
 import DashboardLayout from "@/components/dashboard/DashboardLayout";
 import PageLoader from "@/components/PageLoader";
@@ -15,6 +17,9 @@ import { StatusIcon } from "@/components/qbank/ItemNavigator";
 import "@/components/qbank/exam.css";
 import { useQBankContext } from "@/contexts/QBankContext";
 import { useUsageLimit } from "@/hooks/use-usage-limit";
+import { useFlashcardDeck } from "@/hooks/use-flashcard-deck";
+import { useToast } from "@/hooks/use-toast";
+import { DeckQuotaError, MAX_CARDS_PER_REQUEST, requestDeck } from "@/lib/deck-request";
 import { REVIEW_SET_SYSTEM } from "@/lib/qbank-review-queue";
 import { supabase } from "@/integrations/supabase/client";
 import type { PlayMode, Question, QuestionMedia, SessionAnnotations, SessionAnswer } from "@/lib/qbank-types";
@@ -199,12 +204,20 @@ const ScoreBar = ({ correct, incorrect, omitted }: { correct: number; incorrect:
 
 type Filter = "all" | "incorrect" | "omitted" | "marked";
 
+/** The notes function's exam modes, from the set's (medical-notes-prompts.ts MODE RULES). */
+const NOTES_EXAM_MODE: Record<string, string> = { step1: "USMLE Step 1", step2ck: "USMLE Step 2" };
+
+/** The set's typed topic lives in its generation JSON, not a column. */
+const SESSION_COLUMNS: string = "annotations, system, topic:generation->>topic";
+
 const QBankSummary = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const sessionId = searchParams.get("session");
 
-  const { qbankRemaining } = useUsageLimit();
+  const { qbankRemaining, refresh: refreshUsage } = useUsageLimit();
+  const { saveCards } = useFlashcardDeck();
+  const { toast } = useToast();
   const {
     lastSummary,
     startGeneratedSession,
@@ -220,6 +233,10 @@ const QBankSummary = () => {
   const [filter, setFilter] = useState<Filter>("all");
   /** A re-sit from the review queue: it has no single topic to write more of. */
   const [isReviewSet, setIsReviewSet] = useState(false);
+  /** What the student asked the set for, read off the session after a reload. */
+  const [sessionTopic, setSessionTopic] = useState<string | null>(null);
+  /** Cards written from this set's explanations. */
+  const [cards, setCards] = useState<{ status: "idle" | "writing" | "done"; count: number }>({ status: "idle", count: 0 });
 
   const [summaryData, setSummaryData] = useState<SummaryData | null>(null);
   const [summaryFlaggedIds, setSummaryFlaggedIds] = useState<Set<string>>(new Set());
@@ -248,7 +265,7 @@ const QBankSummary = () => {
           // student's own marks are on the session row, which they can read.
           const [{ data, error }, marks] = await Promise.all([
             supabase.rpc("get_session_review", { p_session: sessionId }),
-            supabase.from("qbank_sessions").select("annotations, system").eq("id", sessionId).maybeSingle(),
+            supabase.from("qbank_sessions").select(SESSION_COLUMNS).eq("id", sessionId).maybeSingle(),
           ]);
           if (cancelled) return;
           if (error) {
@@ -324,11 +341,13 @@ const QBankSummary = () => {
               total: Math.max(review.session.total ?? 0, questions.length),
               flaggedIds: [...flagSet],
               omitted: omittedQuestions.length,
-              annotations: normalizeAnnotations(marks.data?.annotations),
+              annotations: normalizeAnnotations((marks.data as unknown as { annotations?: unknown } | null)?.annotations),
             };
             setSummaryData(loaded);
             setSummaryFlaggedIds(flagSet);
-            setIsReviewSet(marks.data?.system === REVIEW_SET_SYSTEM);
+            const session = marks.data as unknown as { annotations?: unknown; system?: string; topic?: string | null } | null;
+            setIsReviewSet(session?.system === REVIEW_SET_SYSTEM);
+            setSessionTopic(session?.topic ?? null);
             loadSummary(loaded);
             setLoading(false);
             return;
@@ -513,6 +532,50 @@ const QBankSummary = () => {
   };
 
   const missed = score.incorrect + score.omitted;
+
+  // Cards from the explanations of what the student got wrong — or, on a clean
+  // set, of everything they answered. Omitted questions have no answer, and
+  // the server writes only from answered ones.
+  const wrongIds = rows.filter((r) => r.status === "incorrect").map((r) => r.q.id);
+  const cardIds = (wrongIds.length ? wrongIds : rows.filter((r) => r.status === "correct").map((r) => r.q.id)).slice(
+    0,
+    MAX_CARDS_PER_REQUEST
+  );
+
+  /**
+   * A deck written from this set's explanations and key points (early-access
+   * feedback: flashcards are for remembering the QBank). Saved under the set's
+   * topic, so the Library keeps it with that topic's sheet and sets.
+   */
+  const makeCards = async () => {
+    if (cards.status === "writing" || !cardIds.length) return;
+    const deckTopic = (lastGeneration?.topic ?? sessionTopic ?? systemLabel).slice(0, 60);
+    setCards({ status: "writing", count: 0 });
+    try {
+      const result = await requestDeck({
+        notes: deckTopic,
+        examMode: NOTES_EXAM_MODE[lastGeneration?.examMode ?? ""] ?? "General",
+        difficulty: "Advanced",
+        // One or two cards a question.
+        cardCount: Math.min(MAX_CARDS_PER_REQUEST, cardIds.length * 2),
+        useGrounding: false,
+        useMemory: false,
+        deckSource: { kind: "qbank", questionIds: cardIds },
+      });
+      refreshUsage();
+      if (!result.cards.length) throw new Error("no cards");
+      await saveCards(result.cards.map((c) => ({ ...c, topic: deckTopic, origin: "qbank" as const })));
+      setCards({ status: "done", count: result.cards.length });
+      toast({ title: `${result.cards.length} cards added to your ${deckTopic} deck` });
+    } catch (e) {
+      setCards({ status: "idle", count: 0 });
+      toast(
+        e instanceof DeckQuotaError
+          ? { title: "Today's free decks are used up", description: e.message, variant: "destructive" }
+          : { title: "Couldn't write the cards", description: "Please try again.", variant: "destructive" }
+      );
+    }
+  };
   // The same size again, inside a free account's allowance for today.
   const wantedAgain = lastGeneration?.target ?? Math.max(summaryData?.total ?? 0, 5);
   const againSize = qbankRemaining === null ? wantedAgain : Math.min(wantedAgain, qbankRemaining);
@@ -639,6 +702,26 @@ const QBankSummary = () => {
                   : `Another ${againSize} on ${lastGeneration?.topics && lastGeneration.topics.length > 1 ? "these topics" : "this topic"}`}
               </button>
             )}
+            {cardIds.length > 0 &&
+              (cards.status === "done" ? (
+                <button type="button" className="qb-btn qb-btn--outline qb-btn--lg" onClick={() => navigate("/flashcards")}>
+                  <Layers /> {cards.count} cards added · Study them
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="qb-btn qb-btn--outline qb-btn--lg"
+                  onClick={() => void makeCards()}
+                  disabled={cards.status === "writing"}
+                >
+                  {cards.status === "writing" ? <Loader2 className="animate-spin" /> : <Layers />}
+                  {cards.status === "writing"
+                    ? "Writing cards…"
+                    : wrongIds.length
+                    ? `Make cards from the ${wrongIds.length} you missed`
+                    : "Make cards from this set"}
+                </button>
+              ))}
             <button type="button" className="qb-btn qb-btn--lg" onClick={() => navigate("/qbank/progress")}>
               Your progress
             </button>
