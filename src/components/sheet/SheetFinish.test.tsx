@@ -41,4 +41,33 @@ describe("SheetFinish", () => {
     screen.getByRole("button", { name: /New sheet/ }).click();
     expect(onNewSheet).toHaveBeenCalledOnce();
   });
+
+  it("writes a full deck from the sheet, then points at it", () => {
+    const onWrite = vi.fn();
+    const { rerender } = finish(null, { fullDeck: { status: "idle", count: 0, onWrite, onReview: vi.fn() } });
+    screen.getByRole("button", { name: "Write a full deck from this sheet" }).click();
+    expect(onWrite).toHaveBeenCalledOnce();
+
+    rerender(
+      <LazyMotion features={domAnimation}>
+        <SheetFinish
+          topic="Lithium"
+          deck={null}
+          fullDeck={{ status: "writing", count: 0, onWrite, onReview: vi.fn() }}
+          onPractice={vi.fn()}
+          onExport={vi.fn()}
+          onShare={vi.fn()}
+          onNewSheet={vi.fn()}
+        />
+      </LazyMotion>
+    );
+    expect(screen.getByRole("button", { name: /Writing cards from your sheet/ })).toBeDisabled();
+  });
+
+  it("says how many cards the full deck added", async () => {
+    const onReview = vi.fn();
+    finish(null, { fullDeck: { status: "done", count: 18, onWrite: vi.fn(), onReview } });
+    (await screen.findByRole("button", { name: "18 cards from your sheet · Review" })).click();
+    expect(onReview).toHaveBeenCalledOnce();
+  });
 });

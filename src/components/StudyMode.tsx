@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { X, BookOpen, Layers, ArrowLeft, RotateCcw, AlertTriangle, CheckCircle2, Clock } from "lucide-react";
+import { X, BookOpen, Layers, ArrowLeft, RotateCcw, AlertTriangle, CheckCircle2, Clock, FileText, ListChecks } from "lucide-react";
 import RatingButtons from "@/components/flashcards/RatingButtons";
 import { useRatingKeys, useStudySession } from "@/hooks/use-study-session";
 import { formatInterval, type ReviewOutcome, type ReviewRating, type SrsSettings } from "@/lib/spaced-repetition";
@@ -324,9 +324,22 @@ export const CardFace = ({ card, text }: { card: Card; text: string }) => {
         >
           {card.tag || "Card"}
         </span>
-        {/* Every card states its grounding status explicitly — same color
+        {/* Every card states where it came from: the student's own sheet or
+            QBank questions, else its grounding status — same color
             convention as DeckGroundingBadge in DeckList.tsx. */}
-        {card.grounded ? (
+        {card.origin ? (
+          <span
+            title={
+              card.origin === "sheet"
+                ? "Written from your own study sheet on this topic"
+                : "Written from the explanation of a QBank question you answered"
+            }
+            className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium uppercase tracking-wider border border-success/40 bg-success/10 text-success"
+          >
+            {card.origin === "sheet" ? <FileText className="w-2.5 h-2.5" /> : <ListChecks className="w-2.5 h-2.5" />}
+            {card.origin === "sheet" ? "From your sheet" : "From QBank"}
+          </span>
+        ) : card.grounded ? (
           <span
             title="Generated from and verified against a specific clinical guideline"
             className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium uppercase tracking-wider border border-success/40 bg-success/10 text-success"
