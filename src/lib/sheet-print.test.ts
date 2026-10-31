@@ -162,9 +162,15 @@ describe("buildReferences", () => {
 
 describe("export helpers", () => {
   it("makes a file name the Save dialog can use", () => {
-    expect(exportFileName('Heart: "failure" / HFrEF', new Date("2026-10-07T00:00:00Z"))).toBe(
-      "Heart failure HFrEF — StudyBuddy sheet 2026-10-07"
+    expect(exportFileName('Heart: "failure" / HFrEF', new Date(2026, 9, 7, 9, 5))).toBe(
+      "Heart failure HFrEF — StudyBuddy sheet 2026-10-07 09.05"
     );
+  });
+
+  it("names two exports in a row differently", () => {
+    const at = new Date(2026, 9, 7, 9, 5);
+    expect(exportFileName("Asthma", at)).not.toBe(exportFileName("COPD", at));
+    expect(exportFileName("Asthma", at)).not.toBe(exportFileName("Asthma", new Date(2026, 9, 7, 9, 6)));
   });
 
   it("escapes a title for a CSS content string", () => {

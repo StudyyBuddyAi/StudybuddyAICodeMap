@@ -38,6 +38,7 @@ import SheetWarmup from "@/components/sheet/SheetWarmup";
 import { parseOutline, parseWarmup, type SheetOutline, type WarmupQuestion } from "@/lib/sheet-outline";
 import SheetFinish, { type SheetDeck } from "@/components/sheet/SheetFinish";
 import { ExportPdfDialog } from "@/components/sheet/print/ExportPdfDialog";
+import { exportFileName, printNamed } from "@/lib/sheet-print";
 import { TrackedSectionRail, TrackedSectionsMenu } from "@/components/sheet/SheetSections";
 import { BranchesButton, BranchesMenuItem, PanelAwareLayout } from "@/components/sheet/branches/BranchesChrome";
 import {
@@ -915,7 +916,21 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
   // Export PDF: the composed export for a structured sheet; a legacy text
   // sheet, which has no structure to compose, still prints as it reads.
   const [exportOpen, setExportOpen] = useState(false);
-  const exportPdf = () => (sheet && !legacyOutput ? setExportOpen(true) : window.print());
+  const exportPdf = () =>
+    sheet && !legacyOutput ? setExportOpen(true) : printNamed(exportFileName(firstLine(activeSettings.notes) || "Study sheet"));
+
+  // The tab carries the topic while a sheet is open, so a Save as PDF the
+  // browser offers from it — Ctrl+P, a phone's share sheet — is named for the
+  // topic rather than for the app.
+  const pageTitle = sheet || legacyOutput ? sheet?.topic?.trim() || firstLine(activeSettings.notes) || null : null;
+  useEffect(() => {
+    if (!pageTitle) return;
+    const previous = document.title;
+    document.title = `${pageTitle} · StudyBuddy`;
+    return () => {
+      document.title = previous;
+    };
+  }, [pageTitle]);
   const exportContext = useMemo(
     () => ({
       topic: activeSettings.notes,
