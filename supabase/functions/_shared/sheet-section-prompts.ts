@@ -16,7 +16,7 @@
  * Kept free of Deno-only imports so the app's tests can check exactly what the
  * model is shown.
  */
-import { MAX_SECTIONS, asExamMode, resolvePlanFromKeys, sectionQuota, type PlannedSection } from "./sheet-plan.ts";
+import { MAX_SECTIONS, asExamMode, parsePlanHints, resolvePlanFromKeys, sectionQuota, type PlanHints, type PlannedSection } from "./sheet-plan.ts";
 import { ONE_HOME_PER_FACT, highYieldTest, schemaLine } from "./sheet-schema.ts";
 import { SECTIONS } from "./sheet-sections.ts";
 import { parseSignature, sentSections, type SheetSignature } from "./sheet-signature.ts";
@@ -79,6 +79,8 @@ export interface SectionRequest {
   signature: SheetSignature | null;
   /** The sections exactly as sent, for checking against the signatures. */
   sent: Record<string, SheetSectionBody>;
+  /** A group sheet's block titles and table headers, as the page shows them. */
+  hints: PlanHints;
 }
 
 /** Size limits: a sheet is a few kilobytes; these stop the endpoint carrying anything else. */
@@ -166,6 +168,7 @@ export function parseSectionRequest(raw: unknown): SectionRequest | null {
       : [],
     signature: parseSignature(r.signature),
     sent: sentSections(rawSections, plan),
+    hints: parsePlanHints(r.hints),
   };
   if (style === "custom") {
     const instruction = oneLine(r.instruction, SECTION_LIMITS.instruction);
@@ -229,6 +232,7 @@ function formatRule(section: PlannedSection): string {
   }
   if (section.kind === "list") return `- ${section.key}: one fact per item, no leading number.`;
   const labels = section.coreLabels ?? [];
+  if (!labels.length) return `- ${section.key}: short paragraphs separated by \\n inside the string. No labels, no lists.`;
   return `- ${section.key}: labelled lines separated by \\n inside the string. Every line starts with one of ${labels.map((l) => `"${l}:"`).join(", ")}.`;
 }
 
@@ -243,7 +247,7 @@ export interface SectionPromptInput {
 export function buildSectionPrompts(input: SectionPromptInput): { systemPrompt: string; userContent: string } {
   const { request: req, ragChunks } = input;
   const exam = asExamMode(input.examMode);
-  const plan = resolvePlanFromKeys(req.plan, exam);
+  const plan = resolvePlanFromKeys(req.plan, exam, req.hints, req.sections);
   const target = plan.find((s) => s.key === req.key)!;
 
   const task = `Rewrite the "${target.title}" section. ${

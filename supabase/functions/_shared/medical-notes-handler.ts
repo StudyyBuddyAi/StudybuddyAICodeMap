@@ -40,7 +40,8 @@ import {
 import { buildNotesPrompts, type NotesPromptInput } from "./medical-notes-prompts.ts";
 import { topicRejectionMessage, validateTopic } from "./validate-topic.ts";
 import { parseDecline } from "./topic-decline.ts";
-import { resolveSheetPlan, toWirePlan } from "./sheet-plan.ts";
+import { isShapedPlan, resolveShapedPlan, resolveSheetPlan, toWirePlan } from "./sheet-plan.ts";
+import { attachBlocks, outlineSheet, toWireOutline, warmupFor, type DraftQuestion, type OutlineResult } from "./sheet-outline.ts";
 import { classifyArchetype } from "./archetype.ts";
 import { DEFAULT_ARCHETYPE, asDepth, type Depth } from "./sheet-sections.ts";
 import { buildCortiNotesPrompts } from "./medical-notes-prompts-corti.ts";
@@ -472,6 +473,19 @@ export async function handleMedicalNotes(req: Request): Promise<Response> {
       ? classifyArchetype(notes)
       : Promise.resolve({ archetype: null, ms: 0, error: null });
 
+    // Outline: whether the topic is one thing or a group, and for a group its
+    // blocks (sheet-outline.ts). Beside the classifier and retrieval for the
+    // same reason, and failing open the same way: without it the sheet is
+    // planned from its archetype. The warm-up questions for the wait start at
+    // the same moment, so they reach the page before the sheet's first words.
+    const outlinePromise: Promise<OutlineResult> = isSheetMode
+      ? outlineSheet(notes, body.examMode, body.difficulty)
+      : Promise.resolve({ outline: null, ms: 0, error: null });
+    const warmupStartedAt = Date.now();
+    const warmupPromise: Promise<DraftQuestion[]> = isSheetMode
+      ? warmupFor(notes, body.examMode, body.difficulty)
+      : Promise.resolve([]);
+
     // Memory: the shared 10-turn window. enhance reads but never writes;
     // personalize, section and branch requests neither read nor write — they
     // are about a sheet already on the page, not a turn.
@@ -559,7 +573,7 @@ export async function handleMedicalNotes(req: Request): Promise<Response> {
     // are — a quota refusal, an early error. Marked handled here so a late
     // failure can't surface as an unhandled rejection after the response has
     // gone; awaiting the promise itself still sees the failure.
-    for (const p of [retrievalPromise, sectionChunksPromise, archetypePromise, memoryPromise, routingPromise]) {
+    for (const p of [retrievalPromise, sectionChunksPromise, archetypePromise, outlinePromise, warmupPromise, memoryPromise, routingPromise]) {
       p.catch(() => {});
     }
 
@@ -590,23 +604,45 @@ export async function handleMedicalNotes(req: Request): Promise<Response> {
      * pass a no-op and await it whole, exactly as before.
      */
     const prepare = async (emit: (meta: Record<string, unknown>) => void) => {
-      const planned = archetypePromise.then((archetype) => {
+      // What is coming goes to the page with the plan, and the warm-up once
+      // its questions can be matched to the blocks — never for a topic the
+      // classifier turns away. Nothing waits for the warm-up; if it lands
+      // after the sheet's first words, the page holds it for the end.
+      if (isSheetMode) {
+        Promise.all([archetypePromise, outlinePromise])
+          .then(([archetype, { outline }]) => {
+            if (!archetype.notMedical && outline) emit({ outline: toWireOutline(outline) });
+          })
+          .catch(() => {});
+        Promise.all([archetypePromise, outlinePromise, warmupPromise])
+          .then(([archetype, { outline }, drafts]) => {
+            log("warmup", { questions: drafts.length, ms: since(warmupStartedAt) });
+            if (archetype.notMedical || !drafts.length) return;
+            emit({ warmup: attachBlocks(drafts, outline?.blocks.map((b) => b.name) ?? []) });
+          })
+          .catch(() => {});
+      }
+      const planned = Promise.all([archetypePromise, outlinePromise]).then(([archetype, outlined]) => {
         // Not a medical topic: no plan, no writer — the stream says so instead.
         if (isSheetMode && archetype.notMedical) throw new NotMedicalTopicError();
-        // The sections this sheet gets: archetype chooses the spine, exam mode
-        // and difficulty add to it. Depth does not change them — it decides
-        // whether the page grows branches afterwards — so it travels beside the plan.
+        // The sections this sheet gets. A topic its outline reads as a group
+        // is taught block by block; anything else gets its archetype's
+        // sections, the spine plus what exam mode and difficulty add. Depth
+        // does not change them — it decides whether the page grows branches
+        // afterwards — so it travels beside the plan.
+        const planRequest = { archetype: archetype.archetype, examMode: body.examMode, difficulty: body.difficulty };
         const sheetPlan = isSheetMode
-          ? resolveSheetPlan({
-              archetype: archetype.archetype,
-              examMode: body.examMode,
-              difficulty: body.difficulty,
-            })
+          ? resolveShapedPlan(outlined.outline, planRequest) ?? resolveSheetPlan(planRequest)
           : [];
         if (isSheetMode) {
-          emit({ plan: toWirePlan(sheetPlan), depth, archetype: archetype.archetype ?? DEFAULT_ARCHETYPE });
+          emit({
+            plan: toWirePlan(sheetPlan),
+            depth,
+            archetype: archetype.archetype ?? DEFAULT_ARCHETYPE,
+            shape: outlined.outline?.shape ?? null,
+          });
         }
-        return { archetype, sheetPlan };
+        return { archetype, sheetPlan, outlined };
       });
       const retrieved = retrievalPromise.then((retrieval) => {
         // Emitted only when grounding was attempted, so a no-grounding sheet
@@ -616,7 +652,7 @@ export async function handleMedicalNotes(req: Request): Promise<Response> {
         }
         return retrieval;
       });
-      const [{ archetype, sheetPlan }, retrieval, memory, sectionChunks] = await Promise.all([
+      const [{ archetype, sheetPlan, outlined }, retrieval, memory, sectionChunks] = await Promise.all([
         planned,
         retrieved,
         memoryPromise,
@@ -828,6 +864,10 @@ export async function handleMedicalNotes(req: Request): Promise<Response> {
         archetypeFallback: isSheetMode && archetype.archetype === null,
         archetypeError: archetype.error,
         archetypeMs: archetype.ms,
+        shape: isSheetMode ? outlined?.outline?.shape ?? null : null,
+        shaped: isSheetMode ? isShapedPlan(sheetPlan) : null,
+        outlineMs: isSheetMode ? outlined?.ms ?? null : null,
+        outlineError: isSheetMode ? outlined?.error ?? null : null,
         sections: sheetPlan.map((s) => s.key),
         depth: isSheetMode ? depth : null,
         groundingAttempted,
@@ -956,7 +996,9 @@ export async function handleMedicalNotes(req: Request): Promise<Response> {
         try {
           const parsed = JSON.parse(sanitizeJsonOutput(assistantText));
           const topic = typeof parsed?.topic === "string" && parsed.topic.trim() ? parsed.topic : notes;
-          const overview = typeof parsed?.overview === "string" ? parsed.overview : "";
+          // A group sheet opens on its map rather than an overview.
+          const opening = parsed?.overview ?? parsed?.map;
+          const overview = typeof opening === "string" ? opening : "";
           return `${topic}: ${overview}`;
         } catch {
           return assistantText;

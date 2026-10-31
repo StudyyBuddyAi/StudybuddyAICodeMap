@@ -119,6 +119,8 @@ export interface SectionTemplate {
   scope?: string;
   /** What this section's `_more` adds, in its own terms. Defaults by kind. */
   more?: string;
+  /** `prose` only — the core's budget, for a section that isn't labelled lines. */
+  coreBudget?: string;
   /** `prose` only — the depth's line budget, when the default is too small for it. */
   moreBudget?: string;
   /** `list` and `table` — item (or row) ranges for the core and the depth. */
@@ -163,7 +165,7 @@ const MORE_DEFAULT: Record<SectionKind, string> = {
 export const listItems = (t: SectionTemplate): DepthRange => t.items ?? LIST_DEFAULT;
 
 export const proseBudget = (t: SectionTemplate, part: "core" | "more"): string =>
-  part === "core" ? PROSE_CORE_BUDGET : t.moreBudget ?? PROSE_MORE_BUDGET;
+  part === "core" ? t.coreBudget ?? PROSE_CORE_BUDGET : t.moreBudget ?? PROSE_MORE_BUDGET;
 
 /** Leaves out the parts of a brief the plan's other sections cover. */
 const withoutYielded = (t: SectionTemplate, planKeys: readonly string[], text: string): string =>
@@ -638,7 +640,48 @@ In practice: where this is used in a real clinical or research decision.
 Interpretation: how the value changes what you do.
 Caveat: **when it misleads**.`
   ),
+
+  // ── Group (a topic that is a family or a set of look-alikes) ──────────────
+  // No archetype lists these. A sheet whose outline (sheet-outline.ts) reads
+  // the topic as a group is planned from them by resolveShapedPlan, which
+  // gives each block its member's name and labels; the generic titles and
+  // briefs here are what a follow-up falls back to when the page sends none.
+  map: prose(
+    "map",
+    "The Big Picture",
+    "overview",
+    "How this group fits together, told as a lecturer would open it: 2 to 4 short paragraphs, each on its own line after a \\n, 100 to 180 words in all. No labels, no lists. Say what ties the blocks below together, why the idea that orders them is the way to hold them in your head, and the one clue that sets each apart. It names facts the blocks detail; it does not list them.",
+    {
+      scope: "how the group fits together — the idea that orders the blocks and the clue that sets each apart, with no detail",
+      coreBudget: "100 to 180 words",
+      evidenceBacked: false,
+    }
+  ),
+  ...Object.fromEntries(
+    [1, 2, 3, 4, 5].map((n) => [
+      `part${n}`,
+      prose(
+        `part${n}`,
+        `Block ${n}`,
+        "clinical",
+        "Everything the sheet says about the member of the group its heading names, as a connected story under its own labels, one or two connected sentences each. Only what passes the high-yield test.",
+        { scope: "everything about the one member of the group its heading names" }
+      ),
+    ])
+  ),
+  tellApart: table(
+    "tellApart",
+    "How to Tell Them Apart",
+    "compare",
+    ["Condition", "What points to it", "Confirm or first step"],
+    "One row per block above, in the same order (or per member inside a grouped block): the single clue that points to it, and what confirms it or what you do first. Only the discriminators — no new facts."
+  ),
 };
+
+/** The keys of a group sheet's blocks, in order. */
+export const PART_KEYS = [1, 2, 3, 4, 5].map((n) => `part${n}`);
+/** Sections that only a group sheet has. */
+export const GROUP_KEYS = ["map", ...PART_KEYS, "tellApart"];
 
 export type ArchetypeId =
   | "condition"

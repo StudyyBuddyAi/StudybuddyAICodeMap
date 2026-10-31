@@ -33,7 +33,7 @@
  * Kept free of Deno-only imports so the app's tests can check exactly what the
  * model is shown.
  */
-import { asExamMode, resolvePlanFromKeys, type PlannedSection } from "./sheet-plan.ts";
+import { MAX_SECTIONS, asExamMode, parsePlanHints, resolvePlanFromKeys, type PlanHints, type PlannedSection } from "./sheet-plan.ts";
 import { SECTIONS } from "./sheet-sections.ts";
 import { SECTION_LIMITS, asBody, groundingBlock, type Body, type Passage } from "./sheet-section-prompts.ts";
 import { parseSignature, sentSections, type SheetSignature } from "./sheet-signature.ts";
@@ -100,6 +100,8 @@ export interface BranchRequest {
   signature: SheetSignature | null;
   /** The sections exactly as sent, for checking against the signatures. */
   sent: Record<string, SheetSectionBody>;
+  /** A group sheet's block titles and table headers, as the page shows them. */
+  hints: PlanHints;
   /** suggest only — propose branches for these sections alone (a section just rewritten). */
   only?: string[];
   /** grow only — the line it grows from: `section:index`. */
@@ -192,7 +194,7 @@ export function parseBranchRequest(raw: unknown): BranchRequest | null {
   if (action !== "suggest" && action !== "grow") return null;
 
   if (!Array.isArray(r.plan)) return null;
-  const plan = [...new Set(r.plan.filter((k): k is string => typeof k === "string" && !!SECTIONS[k]))].slice(0, 7);
+  const plan = [...new Set(r.plan.filter((k): k is string => typeof k === "string" && !!SECTIONS[k]))].slice(0, MAX_SECTIONS);
   if (!plan.length) return null;
 
   const rawSections = r.sections;
@@ -218,8 +220,9 @@ export function parseBranchRequest(raw: unknown): BranchRequest | null {
       : [],
     signature: parseSignature(r.signature),
     sent: sentSections(rawSections, plan),
+    hints: parsePlanHints(r.hints),
   };
-  req.others = (Array.isArray(r.others) ? r.others : [])
+  req.others =(Array.isArray(r.others) ? r.others : [])
     .slice(0, BRANCH_LIMITS.others)
     .map((o) => {
       const x = (o ?? {}) as Record<string, unknown>;
@@ -381,7 +384,7 @@ export function buildSuggestPrompts(input: BranchPromptInput): { systemPrompt: s
   const { request: req } = input;
   const exam = asExamMode(input.examMode);
   const diff = input.difficulty || "Intermediate";
-  const plan = resolvePlanFromKeys(req.plan, exam);
+  const plan = resolvePlanFromKeys(req.plan, exam, req.hints, req.sections);
   const inScope = (key: string) => branchable(key) && (!req.only || req.only.includes(key));
   const content = plan.filter((s) => inScope(s.key) && !STUDY_AID_KEYS.includes(s.key));
   const aids = plan.filter((s) => inScope(s.key) && STUDY_AID_KEYS.includes(s.key));
@@ -580,7 +583,7 @@ export function buildGrowPrompts(input: BranchPromptInput): { systemPrompt: stri
   const { request: req, ragChunks } = input;
   const exam = asExamMode(input.examMode);
   const diff = input.difficulty || "Intermediate";
-  const plan = resolvePlanFromKeys(req.plan, exam);
+  const plan = resolvePlanFromKeys(req.plan, exam, req.hints, req.sections);
   const q = req.question!;
   const anchorKey = ANCHOR_RE.exec(req.anchor!)![1];
   const section = plan.find((s) => s.key === anchorKey);

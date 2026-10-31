@@ -58,6 +58,8 @@ export interface SectionRequestParams {
   grant?: string;
   /** The sheet's signatures, for the server to check the sheet is the one it wrote. */
   signature: SheetSignature | null;
+  /** Section titles and table headers as shown — a group sheet's blocks need them (planHints). */
+  hints?: { titles: Record<string, string>; columns: Record<string, string[]> };
   examMode?: string;
   difficulty?: string;
 }

@@ -34,6 +34,8 @@ import SheetComposer from "@/components/sheet/SheetComposer";
 import SheetSettings from "@/components/sheet/SheetSettings";
 import SheetTopicBar from "@/components/sheet/SheetTopicBar";
 import SheetPreparation from "@/components/sheet/SheetPreparation";
+import SheetWarmup from "@/components/sheet/SheetWarmup";
+import { parseOutline, parseWarmup, type SheetOutline, type WarmupQuestion } from "@/lib/sheet-outline";
 import SheetFinish, { type SheetDeck } from "@/components/sheet/SheetFinish";
 import { ExportPdfDialog } from "@/components/sheet/print/ExportPdfDialog";
 import { TrackedSectionRail, TrackedSectionsMenu } from "@/components/sheet/SheetSections";
@@ -66,7 +68,7 @@ import {
 } from "@/types/generated-sheet";
 import GroundingNotice from "@/components/GroundingNotice";
 import { reconcileGroundingLevel, resolveGroundingLevel } from "@/lib/grounding";
-import { parsePlan, renderOrder, resolvePlan, sectionBody, sectionHasBody } from "@/lib/sheet-plan";
+import { parsePlan, planHints, renderOrder, resolvePlan, sectionBody, sectionHasBody } from "@/lib/sheet-plan";
 import type { SheetSectionSpec } from "@/types/generated-sheet";
 import { applySourceLabels } from "@/lib/source-labels";
 import { fetchBestCitation, type CitationResult } from "@/lib/citation";
@@ -224,6 +226,17 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
   // The response was damaged and only part of it could be salvaged — the reader
   // is told rather than being handed a silently short sheet.
   const [sheetIncomplete, setSheetIncomplete] = useState(false);
+  // The topic's outline, from its own frame ahead of the plan: whether it is a
+  // group, its blocks, and the warm-up questions for the wait. Per sheet.
+  const [outline, setOutline] = useState<SheetOutline | null>(null);
+  const [warmup, setWarmup] = useState<WarmupQuestion[]>([]);
+  // The warm-up card: closed by the student, or touched (kept past the end of
+  // the stream, so an answer half-given isn't taken away).
+  const [warmupClosed, setWarmupClosed] = useState(false);
+  const [warmupTouched, setWarmupTouched] = useState(false);
+  // The warm-up arrived after the sheet's first words: shown under the sheet
+  // when it is finished rather than pushed in above the text being read.
+  const [warmupLate, setWarmupLate] = useState(false);
   // Identifies the sheet on screen, so the section navigator resets its active
   // item per sheet rather than when `topic` happens to arrive mid-stream.
   const [generationId, setGenerationId] = useState(0);
@@ -293,6 +306,9 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
   // when the frame never came (an edge function predating the plan), which
   // leaves the renderer on the legacy six sections.
   const planRef = useRef<SheetSectionSpec[] | null>(null);
+  // The outline's block names, read in the stream loop when the warm-up frame
+  // arrives after them.
+  const outlineBlocksRef = useRef<string[]>([]);
   // The deck, delivered in its own __meta frame at the end of the stream
   // because it is generated alongside the sheet rather than inside it.
   const flashcardsRef = useRef<Flashcard[] | null>(null);
@@ -384,6 +400,7 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
     setSavedSheetId(null);
     groundingResultRef.current = null;
     planRef.current = null;
+    outlineBlocksRef.current = [];
     flashcardsRef.current = null;
     premiumRef.current = { premium: false };
     signatureRef.current = null;
@@ -533,6 +550,18 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
               }
               if (typeof meta.premiumGrant === "string") {
                 premiumRef.current.grant = meta.premiumGrant;
+              }
+
+              if (meta.outline !== undefined) {
+                const parsedOutline = parseOutline(meta.outline);
+                outlineBlocksRef.current = parsedOutline?.blocks ?? [];
+                setOutline(parsedOutline);
+              }
+              // The warm-up is written after the outline and often lands
+              // mid-stream; its questions may name the outline's blocks.
+              if (meta.warmup !== undefined) {
+                setWarmup(parseWarmup(meta.warmup, outlineBlocksRef.current));
+                setWarmupLate(fullText.length > 0);
               }
 
               if (meta.plan !== undefined) {
@@ -974,6 +1003,13 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
     sectionAborts.current.clear();
     setSectionJobs({});
     setSectionDrafts({});
+    // The outline and its warm-up belong to the sheet being written; any
+    // other sheet that takes the page drops them.
+    setOutline(null);
+    setWarmup([]);
+    setWarmupClosed(false);
+    setWarmupTouched(false);
+    setWarmupLate(false);
   }
 
   /** The sheet as the student has it: their rewrites in place. */
@@ -992,6 +1028,7 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
     sourceIds: (sheet?.sources ?? []).map((s) => s.id),
     grant: sheet?.premiumGrant,
     signature: sheet ? requestSignature(sheet, layerState.layer) : null,
+    hints: sheet ? planHints(resolvePlan(sheet)) : undefined,
     examMode: activeSettings.examMode,
     difficulty: activeSettings.difficulty,
   });
@@ -1462,6 +1499,34 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
               section's own top margin, which stays put as the card folds —
               so the sections glide up with it instead of snapping at the end. */}
           <div>
+            {/* The topic's warm-up, in its own card above the preparation
+                card: that card folds away when the first words arrive, and
+                anything under it would jump while the student is answering.
+                Shown while the sheet is written, and after that only if the
+                student has started it. */}
+            <AnimatePresence initial={false}>
+              {warmup.length > 0 && !warmupLate && !warmupClosed && !legacyOutput && (loading || warmupTouched) && (
+                <m.div
+                  key={`warmup-${generationId}`}
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: "auto", transition: { ...FOLD, opacity: ENTER } }}
+                  exit={{ opacity: 0, height: 0, transition: FOLD }}
+                  style={{ overflow: "hidden" }}
+                >
+                  <div className="pb-3">
+                    <SheetWarmup
+                      questions={warmup}
+                      keyForBlock={(title) => resolvePlan(readingSheet).find((s) => s.title === title)?.key}
+                      sectionReady={(key) => streamedKeys.includes(key) || (!loading && sectionHasBody(readingSheet, key))}
+                      onJump={jumpToSection}
+                      onClose={() => setWarmupClosed(true)}
+                      onTouched={() => setWarmupTouched(true)}
+                    />
+                  </div>
+                </m.div>
+              )}
+            </AnimatePresence>
+
             {/* While the sheet is prepared, its first card says what is happening
                 and asks one question about the topic. It sits in the document's
                 flow, where the sections will be, and folds away — the sections
@@ -1480,6 +1545,8 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
                     status={generationStatus}
                     plan={planned ? resolvePlan(readingSheet) : null}
                     model={pro ? modelUsed : undefined}
+                    outline={outline}
+                    hasWarmup={warmup.length > 0}
                   />
                 </m.div>
               )}
@@ -1514,6 +1581,24 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
               </m.div>
             )}
           </div>
+
+          {/* A warm-up that arrived after the first words, asked once the
+              sheet is finished: a quick check under it, so nothing above the
+              text being read ever moved. */}
+          <AnimatePresence initial={false}>
+            {warmup.length > 0 && warmupLate && !warmupClosed && !loading && !!sheet && !legacyOutput && (
+              <m.div key={`check-${generationId}`} {...RISE}>
+                <SheetWarmup
+                  mode="check"
+                  questions={warmup}
+                  keyForBlock={(title) => resolvePlan(readingSheet).find((s) => s.title === title)?.key}
+                  sectionReady={(key) => sectionHasBody(readingSheet, key)}
+                  onJump={jumpToSection}
+                  onClose={() => setWarmupClosed(true)}
+                />
+              </m.div>
+            )}
+          </AnimatePresence>
 
           {/* Where the sheet ends: what to do with it now. Rises in when the
               stream finishes, below everything, so nothing already read moves. */}
