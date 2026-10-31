@@ -14,10 +14,19 @@
 import type { RagChunk } from "./rag.ts";
 import { MEMORY_FOLLOWUP_INSTRUCTION } from "./memory.ts";
 import { cardFocusLine } from "./card-focus.ts";
+import { cardSliceLine, studyMaterialBlock, type DeckSource } from "./deck-source.ts";
 import { CARDS_DECLINE_INSTRUCTION } from "./topic-decline.ts";
 import { asExamMode, resolveSheetPlan, sectionQuota, type PlannedSection } from "./sheet-plan.ts";
 import { HIGH_YIELD_ONLY, ONE_HOME_PER_FACT, highYieldTest, schemaLine, tableRulesBlock } from "./sheet-schema.ts";
 import { buildPersonalizePrompt, type PersonalizeRequest } from "./personalize.ts";
+
+/**
+ * How a card's answer is worded: as board review words it, so the card meets
+ * the student in the terms First Aid and the QBank's explanations use (early-
+ * access feedback: exam students revise from those, not from papers).
+ */
+export const BOARD_PHRASING =
+  "Word answers the way board review does: the standard high-yield term or buzzword — the classic finding, \"most common cause\", \"drug of choice\", the named sign — as First Aid and USMLE-style explanations put it.";
 
 export type PromptFamily = "haiku" | "gptOss";
 
@@ -39,6 +48,14 @@ export interface NotesPromptInput {
   focusCard?: unknown;
   /** Standalone deck only: which angle the cards lean towards (CARD_FOCUS). */
   cardFocus?: unknown;
+  /** One batch of a large deck: the kinds of card it keeps to (deck-source.ts CARD_SLICES). */
+  cardSlice?: unknown;
+  /**
+   * A deck written from the student's own material — a signed sheet, or the
+   * QBank questions they answered — in place of retrieval. Set by the handler
+   * from what it verified, never taken from the request body.
+   */
+  studyMaterial?: { kind: DeckSource["kind"]; text: string } | null;
   explainMode?: boolean;
   enhanceMode?: string;
   itemText?: string;
@@ -101,12 +118,16 @@ export function buildNotesPrompts(input: NotesPromptInput): { systemPrompt: stri
         ? input.plan
         : resolveSheetPlan({ archetype: "condition", examMode: mode, difficulty: diff });
 
-    const focusLine = cardFocusLine(input.cardFocus);
+    const focusLine = cardFocusLine(input.cardFocus) + cardSliceLine(input.cardSlice);
 
     const retrievedChunks = ragChunks.length;
     const grounded = retrievedChunks > 0;
 
-    const groundingContextBlock = !groundingAttempted
+    // A deck from the student's own material is written from that alone; no
+    // retrieval ran for it.
+    const groundingContextBlock = input.studyMaterial
+      ? studyMaterialBlock(input.studyMaterial.kind, input.studyMaterial.text)
+      : !groundingAttempted
       ? ""
       : grounded
       ? `Context from verified clinical guidelines (retrieved from our database):
@@ -205,6 +226,7 @@ HARD RULES:
 - Answers: 1-2 sentences only — never more.
 - No "Q:" or "A:" anywhere inside question or answer text.
 - No numbering. No headers between cards. No explanations.
+- ${BOARD_PHRASING}
 - Mix clinical vignettes and concept recall cards.`;
 
     // ── SHARED SHEET OUTPUT CONTRACT ───────────────────────────────────────
@@ -410,6 +432,7 @@ HARD RULES:
 - Answers: 1-2 sentences only — never more.
 - No "Q:" or "A:" anywhere inside question or answer text.
 - No numbering. No headers between cards. No explanations.
+- ${BOARD_PHRASING}
 - Mix clinical vignettes and concept recall cards.`;
 
     const haikuSheetPrompt = `${audienceBlock(mode, diff)}

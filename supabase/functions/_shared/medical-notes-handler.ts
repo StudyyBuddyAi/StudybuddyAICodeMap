@@ -64,12 +64,13 @@ import {
 } from "./sheet-branch-prompts.ts";
 import { signSections, verifySections } from "./sheet-signature.ts";
 import { finishedSheetSections } from "./sheet-text.ts";
+import { parseDeckSource, qbankMaterial, sheetMaterial, type AnsweredQuestion } from "./deck-source.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
     "authorization, x-client-info, apikey, content-type, x-simulate-corti-outage, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
-  "Access-Control-Expose-Headers": "x-model-used, x-model-fallback, x-is-premium, x-retrieved-chunks",
+  "Access-Control-Expose-Headers": "x-model-used, x-model-fallback, x-is-premium, x-retrieved-chunks, x-deck-source",
 };
 
 // Structured, machine-parseable logs (visible in Supabase edge-fn logs).
@@ -415,6 +416,39 @@ export async function handleMedicalNotes(req: Request): Promise<Response> {
       ? await verifySections(signingSecret(), followUpRequest.signature, followUpRequest.topic, followUpRequest.sent).catch(() => false)
       : false;
 
+    // A deck from the student's own material (deck-source.ts): a sheet the
+    // server signed, or QBank questions they have answered. Read and checked
+    // here, before anything is billed; the prompt gets only what passed.
+    const deckSource = cardsOnly && body.deckSource != null ? parseDeckSource(body.deckSource) : null;
+    if (cardsOnly && body.deckSource != null && !deckSource) {
+      return json({ error: "invalid_deck_source" }, 400);
+    }
+    let studyMaterial: { kind: "sheet" | "qbank"; text: string } | null = null;
+    if (deckSource?.kind === "sheet") {
+      const sheetSigned = await verifySections(signingSecret(), deckSource.signature, deckSource.topic, deckSource.sent).catch(() => false);
+      // Unsigned (saved before signing, or not this server's): an ordinary
+      // deck on its topic rather than one written from text it can't vouch for.
+      if (sheetSigned) studyMaterial = { kind: "sheet", text: sheetMaterial(deckSource, body.examMode) };
+    } else if (deckSource?.kind === "qbank") {
+      const { data: answered, error: answeredError } = await authClient
+        .from("user_attempts")
+        .select("question_id")
+        .eq("user_id", user.id)
+        .in("question_id", deckSource.questionIds);
+      if (answeredError) return json({ error: "deck_source_failed" }, 500);
+      const ids = [...new Set((answered ?? []).map((r: { question_id: string }) => r.question_id))];
+      if (!ids.length) return json({ error: "no_answered_questions" }, 400);
+      const { data: rows, error: rowsError } = await authClient
+        .from("questions")
+        .select("id, topic, question_text, option_a, option_b, option_c, option_d, option_e, correct_option, explanation, teaching_point, distractor_explanations")
+        .in("id", ids);
+      if (rowsError || !rows?.length) return json({ error: "deck_source_failed" }, 500);
+      // In the order the student asked for them.
+      const byId = new Map((rows as AnsweredQuestion[]).map((q) => [q.id, q]));
+      const ordered = deckSource.questionIds.map((id) => byId.get(id)).filter((q): q is AnsweredQuestion => !!q);
+      studyMaterial = { kind: "qbank", text: qbankMaterial(ordered) };
+    }
+
     const isAnonymous =
       user.is_anonymous === true || decodeJwtPayload(token).is_anonymous === true;
     const quotaEligible = !explainMode && !enhanceMode && !isPersonalize;
@@ -438,7 +472,8 @@ export async function handleMedicalNotes(req: Request): Promise<Response> {
     // ── Pre-model work, concurrently ────────────────────────────────────────
     // Grounding: sheet/cards only; explain/enhance/personalize are single-item
     // follow-ups, and a section request re-reads its sheet's own passages.
-    const groundingEligible = !enhanceMode && !explainMode && !isPersonalize && !isFollowUp;
+    // A deck from the student's own material is written from that alone.
+    const groundingEligible = !enhanceMode && !explainMode && !isPersonalize && !isFollowUp && !studyMaterial;
     const useGroundingFlag = typeof useGrounding === "boolean" ? useGrounding : true;
     const groundingAttempted = groundingEligible && useGroundingFlag;
     const groundingTopK = Math.min(Math.max(Math.round(typeof topK === "number" ? topK : 8), 1), 10);
@@ -489,7 +524,8 @@ export async function handleMedicalNotes(req: Request): Promise<Response> {
     // Memory: the shared 10-turn window. enhance reads but never writes;
     // personalize, section and branch requests neither read nor write — they
     // are about a sheet already on the page, not a turn.
-    const useMemoryFlag = !isPersonalize && !isFollowUp && (typeof useMemory === "boolean" ? useMemory : true);
+    const useMemoryFlag =
+      !isPersonalize && !isFollowUp && !deckSource && (typeof useMemory === "boolean" ? useMemory : true);
     const memoryWritable = useMemoryFlag && !enhanceMode;
     const memoryStartedAt = Date.now();
     const memoryPromise = (async () => {
@@ -706,6 +742,8 @@ export async function handleMedicalNotes(req: Request): Promise<Response> {
         plan: sheetPlan,
         // The validated request, never the raw body field.
         personalize,
+        // What was verified above, never the raw body field.
+        studyMaterial,
       };
       // A personalize reply is a line or a card, not a document; a rewrite is
       // one section; a branch, a few hundred words, or a sheet's pills.
@@ -1156,6 +1194,9 @@ export async function handleMedicalNotes(req: Request): Promise<Response> {
         "X-Retrieved-Chunks": String(ctx.retrievedChunks),
       };
       if (ctx.fallbackReason !== null) headers["X-Model-Fallback"] = "corti_unavailable";
+      // What a deck asked to be written from was written from: "none" when an
+      // unsigned sheet fell back to an ordinary deck on its topic.
+      if (deckSource) headers["X-Deck-Source"] = studyMaterial?.kind ?? "none";
       return new Response(
         ctx.response.body.pipeThrough(makeRelay(ctx, { leadingFrames: true, reportThinking: false })),
         { headers }

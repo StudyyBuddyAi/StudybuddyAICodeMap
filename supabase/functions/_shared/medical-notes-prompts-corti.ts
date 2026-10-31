@@ -26,7 +26,7 @@
  *
  *   Enhance — the clinical tie-in ran past its 50-word cap.
  */
-import { buildNotesPrompts, type NotesPromptInput } from "./medical-notes-prompts.ts";
+import { BOARD_PHRASING, buildNotesPrompts, type NotesPromptInput } from "./medical-notes-prompts.ts";
 import { isShapedPlan, resolveSheetPlan, sectionQuota, type PlannedSection } from "./sheet-plan.ts";
 import { GROUP_HOME, flowBlock } from "./sheet-schema.ts";
 
@@ -38,6 +38,7 @@ function cardsFormatBlock(count: number, topic: string): string {
 - Write exactly ${count} cards, every one about "${topic}". If a retrieved passage covers a different drug, disease or topic, do not write cards about it.
 - Every question line starts with "Q: " followed by exactly two tags: first ONE clinical tag chosen from [Diagnosis] [Mechanism] [Next Step] [Complication] [Association] — no other tag names are allowed — then ONE sourcing tag, [Grounded] if the card comes from the Context above or [General] if it does not. With no Context, every card is [General].
 - Every answer line starts with "A: " and is 1-2 sentences.
+- ${BOARD_PHRASING}
 - Questions end with "?". Mix clinical vignettes with concept recall.
 - Topic emoji, one of: 🫀 cardiac, 🩸 hematology, 🧠 neuro, 🫁 pulmonary, 🦴 ortho, 🩺 general, 💊 pharmacology, 🧬 genetics, 👁️ ophthalmology, 🤰 OB/GYN, 👶 pediatrics, 🧫 micro, ⚗️ biochem, 🩹 trauma, 🛡️ immunology
 
