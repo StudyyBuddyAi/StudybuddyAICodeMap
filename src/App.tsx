@@ -22,6 +22,7 @@ const Home = lazy(() => import("./pages/Home.tsx"));
 const Dashboard = lazy(() => import("./pages/Dashboard.tsx"));
 const Library = lazy(() => import("./pages/Library.tsx"));
 const Roadmap = lazy(() => import("./pages/Roadmap.tsx"));
+const Privacy = lazy(() => import("./pages/Privacy.tsx"));
 const Sheets = lazy(() => import("./pages/Sheets.tsx"));
 const Flashcards = lazy(() => import("./pages/Flashcards.tsx"));
 const QBank = lazy(() => import("./pages/QBank.tsx"));
@@ -66,6 +67,7 @@ const AppRoutes = () => {
           <Route path="/home" element={<Home />} />
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/roadmap" element={<Roadmap />} />
+          <Route path="/privacy" element={<Privacy />} />
           <Route path="/sheets" element={<Sheets />} />
           <Route path="/flashcards" element={<Flashcards />} />
           <Route element={<QBankProvider><Outlet /></QBankProvider>}>
