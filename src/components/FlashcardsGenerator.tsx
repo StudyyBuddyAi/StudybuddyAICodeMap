@@ -8,9 +8,9 @@ import { useUsageLimit, MAX_DAILY_CARDS } from "@/hooks/use-usage-limit";
 import { useCitationUsage } from "@/hooks/use-citation-usage";
 import { usePremiumHook } from "@/hooks/use-premium-hook";
 import { useAuth } from "@/hooks/use-auth";
-import { callMedicalNotes } from "@/lib/callMedicalNotes";
-import { parseDecline, topicRejectionMessage, validateTopic, TOPIC_MAX_LENGTH } from "@/lib/validate-topic";
-import { parseModelUsed, type ModelUsed } from "@/lib/model-used";
+import { DeckTopicError, deckBatches, mergeDecks, mergeGrounding, requestDeck } from "@/lib/deck-request";
+import { topicRejectionMessage, validateTopic, TOPIC_MAX_LENGTH } from "@/lib/validate-topic";
+import type { ModelUsed } from "@/lib/model-used";
 import { ModelCredit } from "@/components/PoweredByCorti";
 import { parseFlashcardsFromOutput } from "@/lib/parse-flashcards";
 import { fetchBestCitation, type CitationResult } from "@/lib/citation";
@@ -21,7 +21,6 @@ import AuthModal from "@/components/AuthModal";
 import { startTopProgress, finishTopProgress } from "@/components/TopProgressBar";
 import { useMemoryPreference } from "@/hooks/use-memory-preference";
 import { groundingLevelFromCards } from "@/lib/grounding";
-import { applySourceLabels } from "@/lib/source-labels";
 import GroundingNotice from "@/components/GroundingNotice";
 import SheetSources from "@/components/SheetSources";
 import type { SheetSource } from "@/types/generated-sheet";
@@ -48,13 +47,18 @@ const RECENT_FLASHCARD_TOPICS_KEY = "sb_recent_flashcard_topics_v1";
 // the Topics page (src/lib/popular-topics.ts).
 const POPULAR = POPULAR_TOPICS.filter((t) => t.short !== "HF");
 
-// The edge function clamps a deck to 3-20 cards (medical-notes-prompts.ts), so
-// the old 30-card option silently produced 20.
+// One request writes at most 20 cards (the edge function clamps it); 30 and 50
+// are Pro decks written as three batches (src/lib/deck-request.ts). Exam
+// students revise 100-200 cards a day, and 20 at a time was too few.
 const CARD_COUNTS = [
   { value: "8", label: "8" },
   { value: "12", label: "12" },
   { value: "20", label: "20" },
+  { value: "30", label: "30 ✦" },
+  { value: "50", label: "50 ✦" },
 ];
+/** Decks above this size are Pro. */
+const FREE_MAX_CARDS = 20;
 
 // Labels a student recognises, mapped onto the three levels the prompt's
 // "Difficulty:" line already understands.
@@ -220,7 +224,9 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated, onTopicChange, w
 
   const handleGenerate = async (overrideTopic?: string, overrideCardCount?: number) => {
     const activeTopic = overrideTopic ?? topic;
-    const activeCardCount = overrideCardCount ?? parseInt(cardCount, 10);
+    const requested = overrideCardCount ?? parseInt(cardCount, 10);
+    // A Pro deck picked before Pro ran out is written at the free size.
+    const activeCardCount = pro ? requested : Math.min(requested, FREE_MAX_CARDS);
     const rejection = validateTopic(activeTopic);
     if (rejection) {
       setTopicError(topicRejectionMessage(rejection));
@@ -240,104 +246,58 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated, onTopicChange, w
     setPendingGroundingRequested(useGrounding);
     groundingResultRef.current = null;
     try {
-      const response = await callMedicalNotes({
-        notes: activeTopic,
-        examMode: "General",
-        difficulty,
-        cardFocus,
-        focus: "Quick Revision",
-        length: "Concise",
-        cardsOnly: true,
-        cardCount: activeCardCount,
-        useGrounding,
-        topK: groundingTopK,
-        threshold: groundingThreshold,
-        useMemory,
-        userId: user?.id ?? null,
-        isAnonymous: isAnonymous ?? false,
-        isPro: pro,
-      });
-
-      if (!response.ok) {
-        const err = await response.json().catch(() => ({}));
-        if (response.status === 400 && err.code === "invalid_topic") {
-          setGenerating(false, "");
-          declineTopic(err.error || topicRejectionMessage("keyboard_mash"));
-          return;
-        }
-        if (response.status === 429) {
-          throw new Error("You've reached today's free limit. It resets at midnight UTC.");
-        }
-        throw new Error(err.error || `Error: ${response.status}`);
-      }
-
-      lastDeckModelRef.current = parseModelUsed(response.headers);
-      setLastDeckModel(lastDeckModelRef.current);
+      // Up to twenty cards in one request; a larger (Pro) deck in three
+      // batches side by side, each keeping to its own kinds of card, merged
+      // without repeats (src/lib/deck-request.ts).
+      const batches = deckBatches(activeCardCount);
+      const settled = await Promise.allSettled(
+        batches.map((b) =>
+          requestDeck({
+            notes: activeTopic,
+            examMode: "General",
+            difficulty,
+            cardFocus,
+            cardSlice: b.slice,
+            focus: "Quick Revision",
+            length: "Concise",
+            cardCount: b.count,
+            useGrounding,
+            topK: groundingTopK,
+            threshold: groundingThreshold,
+            // Each request is a turn in the shared memory window; batches
+            // would write the one deck into it three times.
+            useMemory: useMemory && batches.length === 1,
+            userId: user?.id ?? null,
+            isAnonymous: isAnonymous ?? false,
+            isPro: pro,
+          })
+        )
+      );
 
       // Usage was incremented server-side; refresh the displayed counts.
       refreshUsage();
       refetchPremium();
 
-      const reader = response.body?.getReader();
-      if (!reader) throw new Error("No response body");
-      const decoder = new TextDecoder();
-      let textBuffer = "";
-      let fullText = "";
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        textBuffer += decoder.decode(value, { stream: true });
-        let newlineIndex: number;
-        while ((newlineIndex = textBuffer.indexOf("\n")) !== -1) {
-          let line = textBuffer.slice(0, newlineIndex);
-          textBuffer = textBuffer.slice(newlineIndex + 1);
-          if (line.endsWith("\r")) line = line.slice(0, -1);
-          if (line.startsWith(":") || line.trim() === "") continue;
-          if (!line.startsWith("data: ")) continue;
-          const jsonStr = line.slice(6).trim();
-          if (jsonStr === "[DONE]") break;
-          try {
-            const parsed = JSON.parse(jsonStr);
-            // Grounding metadata arrives as one __meta event ahead of any model
-            // bytes. Intercept it before the delta read so it never lands in
-            // fullText and get parsed as a flashcard.
-            if (parsed.__meta) {
-              // The book/chapter labels arrive as a second __meta frame at the
-              // end of the stream and only refine the sources the first frame
-              // delivered, so merge rather than replace.
-              if (Array.isArray(parsed.__meta.sourceLabels)) {
-                const current = groundingResultRef.current;
-                if (current) {
-                  groundingResultRef.current = {
-                    ...current,
-                    sources: applySourceLabels(current.sources, parsed.__meta.sourceLabels),
-                  };
-                }
-              } else {
-                groundingResultRef.current = {
-                  retrievedChunks:
-                    typeof parsed.__meta.retrievedChunks === "number"
-                      ? parsed.__meta.retrievedChunks
-                      : 0,
-                  sources: Array.isArray(parsed.__meta.sources) ? parsed.__meta.sources : [],
-                };
-              }
-              continue;
-            }
-            const content = parsed.choices?.[0]?.delta?.content;
-            if (content) fullText += content;
-          } catch {
-            textBuffer = line + "\n" + textBuffer;
-            break;
-          }
+      // A batch that failed costs the deck its cards, not the deck: keep what
+      // the others wrote, and fail only when none did.
+      const decks = settled.flatMap((r) => (r.status === "fulfilled" ? [r.value] : []));
+      if (!decks.length) {
+        const reason = (settled.find((r) => r.status === "rejected") as PromiseRejectedResult).reason;
+        if (reason instanceof DeckTopicError) {
+          setGenerating(false, "");
+          declineTopic(reason.message || topicRejectionMessage("keyboard_mash"));
+          return;
         }
+        throw reason;
       }
+
+      lastDeckModelRef.current = decks[0].model;
+      setLastDeckModel(lastDeckModelRef.current);
 
       // Well-formed, but the writer judged it not a medical topic and wrote no
       // cards. The server has refunded the day's deck; show its reason rather
       // than a deck defining the gibberish, and never learn it as a recent.
-      const declined = parseDecline(fullText);
+      const declined = decks.find((d) => d.declined)?.declined;
       if (declined) {
         setGenerating(false, "");
         setLoadingMsg("");
@@ -346,7 +306,7 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated, onTopicChange, w
         return;
       }
 
-      const parsed = parseFlashcardsFromOutput(fullText, activeTopic);
+      const parsed = mergeDecks(decks.map((d) => d.cards));
       // Nothing usable came back: say so, and don't keep it as a recent topic.
       if (parsed.length === 0) {
         setGenerating(false, "");
@@ -359,6 +319,7 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated, onTopicChange, w
         return;
       }
       recordRecentTopic(activeTopic);
+      groundingResultRef.current = mergeGrounding(decks.map((d) => d.grounding));
 
       // Retrieval is the ceiling; the per-card [Grounded]/[General] tags decide
       // whether that ceiling was actually reached. No __meta at all means the
@@ -662,7 +623,12 @@ const FlashcardsGenerator = ({ onGeneratingChange, onGenerated, onTopicChange, w
         <h2 id="fc-shape-heading" className="font-display text-xl font-medium tracking-[-0.01em] text-foreground">
           Shape the deck
         </h2>
-        <Segmented label="Cards" options={CARD_COUNTS} value={cardCount} onChange={setCardCount} />
+        <Segmented
+          label="Cards"
+          options={CARD_COUNTS}
+          value={cardCount}
+          onChange={(v) => (!pro && Number(v) > FREE_MAX_CARDS ? setGoProOpen(true) : setCardCount(v))}
+        />
         <Segmented label="Difficulty" options={DIFFICULTIES} value={difficulty} onChange={setDifficulty} />
         <Segmented label="Focus" options={FOCUSES} value={cardFocus} onChange={setCardFocus} />
 
