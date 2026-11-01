@@ -132,6 +132,25 @@ export function resolvePlan(sheet: Pick<GeneratedSheet, "plan">): SheetSectionSp
   return sheet.plan?.length ? sheet.plan : [...LEGACY_PLAN];
 }
 
+/**
+ * The section titles and table headers as the page shows them, for a rewrite
+ * or a branch. A group sheet's block titles ("Neonatal Jaundice") and its
+ * table's headers were chosen for that sheet, so the server cannot rebuild
+ * them from keys; it reads only the ones it needs.
+ */
+export function planHints(plan: readonly SheetSectionSpec[]): {
+  titles: Record<string, string>;
+  columns: Record<string, string[]>;
+} {
+  const titles: Record<string, string> = {};
+  const columns: Record<string, string[]> = {};
+  for (const s of plan) {
+    titles[s.key] = s.title;
+    if (s.columns?.length) columns[s.key] = [...s.columns];
+  }
+  return { titles, columns };
+}
+
 /** Everything the renderer lays out, content sections first. */
 export function renderOrder(sheet: Pick<GeneratedSheet, "plan">): SheetSectionSpec[] {
   return [...resolvePlan(sheet), FLASHCARDS_SPEC, REFERENCE_NOTE_SPEC];

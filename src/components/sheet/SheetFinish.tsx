@@ -1,5 +1,5 @@
 import { AnimatePresence, m } from "motion/react";
-import { ArrowRight, Check, FileDown, Layers, Play, Plus, Share2 } from "lucide-react";
+import { ArrowRight, Check, FileDown, Layers, Loader2, Play, Plus, Share2, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { RISE, SWAP } from "@/lib/motion";
 
@@ -21,9 +21,23 @@ export interface SheetDeck {
   onReview: () => void;
 }
 
+/**
+ * A full deck written from the sheet itself — every section, up to twenty
+ * cards — beside the few the sheet came with (early-access feedback: cards
+ * should come from what the student studied).
+ */
+export interface SheetFullDeck {
+  status: "idle" | "writing" | "done";
+  /** Cards the last run added. */
+  count: number;
+  onWrite: () => void;
+  onReview: () => void;
+}
+
 interface SheetFinishProps {
   topic: string;
   deck: SheetDeck | null;
+  fullDeck?: SheetFullDeck | null;
   onPractice: () => void;
   onExport: () => void;
   onShare: () => void;
@@ -33,7 +47,7 @@ interface SheetFinishProps {
 const LINK_CLASS =
   "inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground transition-colors duration-150 hover:text-foreground";
 
-const SheetFinish = ({ topic, deck, onPractice, onExport, onShare, onNewSheet }: SheetFinishProps) => (
+const SheetFinish = ({ topic, deck, fullDeck, onPractice, onExport, onShare, onNewSheet }: SheetFinishProps) => (
   <m.section
     {...RISE}
     aria-label="Next steps"
@@ -66,6 +80,34 @@ const SheetFinish = ({ topic, deck, onPractice, onExport, onShare, onNewSheet }:
               <Button onClick={deck.onSave} className="h-10 gap-2 rounded-xl text-sm">
                 <Layers className="h-4 w-4" />
                 {deck.count ? `Add ${deck.count} cards to my deck` : "Add the cards to my deck"}
+              </Button>
+            </m.div>
+          )}
+        </AnimatePresence>
+      )}
+      {fullDeck && (
+        <AnimatePresence mode="wait" initial={false}>
+          {fullDeck.status === "done" ? (
+            <m.div key="full-done" {...SWAP}>
+              <Button variant="outline" onClick={fullDeck.onReview} className="h-10 gap-2 rounded-xl text-sm">
+                <Check className="h-4 w-4 text-primary" />
+                {fullDeck.count} cards from your sheet · Review
+              </Button>
+            </m.div>
+          ) : (
+            <m.div key="full-write" {...SWAP}>
+              <Button
+                variant="outline"
+                onClick={fullDeck.onWrite}
+                disabled={fullDeck.status === "writing"}
+                className="h-10 gap-2 rounded-xl text-sm"
+              >
+                {fullDeck.status === "writing" ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Sparkles className="h-4 w-4" />
+                )}
+                {fullDeck.status === "writing" ? "Writing cards from your sheet…" : "Write a full deck from this sheet"}
               </Button>
             </m.div>
           )}

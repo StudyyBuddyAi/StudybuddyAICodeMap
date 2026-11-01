@@ -37,7 +37,15 @@ export type Card = SrsFields & {
   grounded: boolean;
   /** Lapsed LEECH_THRESHOLD times: worth rewriting, explaining, or deleting. */
   isLeech: boolean;
+  /**
+   * Written from the student's own material — their sheet, or the QBank
+   * questions they answered — rather than on a topic. Shown on the card in
+   * place of the grounding badge.
+   */
+  origin?: CardOrigin | null;
 };
+
+export type CardOrigin = "sheet" | "qbank";
 
 /** A server card still carries its row id, which review_sessions references. */
 type ServerCard = Card & { rowId: string; needsMigration: boolean };
@@ -124,6 +132,7 @@ export function normalizeStoredCard(c: StoredCard): Card {
     // here so every consumer can read a boolean instead of guarding for it.
     grounded: c.grounded ?? false,
     isLeech: c.isLeech ?? false,
+    origin: c.origin ?? null,
   };
 }
 
@@ -147,10 +156,10 @@ function saveToStorage(cards: Card[]) {
   }
 }
 
-type NewCardInput = Pick<Card, "question" | "answer" | "tag" | "topic" | "topicEmoji" | "grounded">;
+type NewCardInput = Pick<Card, "question" | "answer" | "tag" | "topic" | "topicEmoji" | "grounded" | "origin">;
 
 const CARD_COLUMNS =
-  "id, client_id, question, answer, tag, topic, topic_emoji, interval_days, due_at, last_reviewed_at, review_count, created_at, grounded, srs_state, stability, difficulty, scheduled_days, learning_steps, lapses, is_leech";
+  "id, client_id, question, answer, tag, topic, topic_emoji, interval_days, due_at, last_reviewed_at, review_count, created_at, grounded, srs_state, stability, difficulty, scheduled_days, learning_steps, lapses, is_leech, origin";
 
 type CardRow = {
   id: string;
@@ -173,6 +182,7 @@ type CardRow = {
   learning_steps: number | null;
   lapses: number | null;
   is_leech: boolean | null;
+  origin: CardOrigin | null;
 };
 
 function rowToCard(row: CardRow): ServerCard {
@@ -207,6 +217,7 @@ function rowToCard(row: CardRow): ServerCard {
     createdAt: new Date(row.created_at).getTime(),
     grounded: row.grounded ?? false,
     isLeech: row.is_leech ?? false,
+    origin: row.origin ?? null,
   };
 }
 
@@ -434,6 +445,7 @@ export function useFlashcardDeck() {
               review_count: 0,
               srs_state: SrsState.New,
               grounded: c.grounded ?? false,
+              origin: c.origin ?? null,
             };
           })
           .filter((r): r is NonNullable<typeof r> => r !== null);
@@ -475,6 +487,7 @@ export function useFlashcardDeck() {
           createdAt: now,
           grounded: c.grounded ?? false,
           isLeech: false,
+          origin: c.origin ?? null,
         });
         added++;
       }

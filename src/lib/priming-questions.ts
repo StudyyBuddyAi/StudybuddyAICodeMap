@@ -76,6 +76,15 @@ const QUESTIONS: Record<string, (t: string) => string> = {
   definition: (t) => `How would you define ${t} in one sentence?`,
   formula: (t) => `Can you write out the formula for ${t}?`,
   application: (t) => `Where does ${t} change a real clinical decision?`,
+  // A group sheet (a family or a set of look-alikes). Its outline usually
+  // brings the topic's own warm-up, which replaces this question.
+  map: (t) => `How many members of ${t} can you name, and what one idea sets them apart?`,
+  part1: (t) => `Pick one member of ${t}: who gets it, and how does it show up?`,
+  part2: (t) => `Pick one member of ${t}: who gets it, and how does it show up?`,
+  part3: (t) => `Pick one member of ${t}: who gets it, and how does it show up?`,
+  part4: (t) => `Pick one member of ${t}: who gets it, and how does it show up?`,
+  part5: (t) => `Pick one member of ${t}: who gets it, and how does it show up?`,
+  tellApart: (t) => `Within ${t}, which two are most often confused, and what tells them apart?`,
 };
 
 export function primingQuestion(

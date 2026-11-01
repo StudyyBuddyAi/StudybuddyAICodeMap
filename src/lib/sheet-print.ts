@@ -328,10 +328,29 @@ export function buildReferences(sources: readonly SheetSource[], withExcerpts: b
   }));
 }
 
-/** A file name the browser offers in its Save dialog, from the print document's title. */
+/**
+ * A file name the browser offers in its Save dialog, from the print document's
+ * title. The topic leads, and the local date and minute follow it, so two
+ * exports in a row — two topics, or one topic twice — never offer the same
+ * name.
+ */
 export function exportFileName(title: string, date = new Date()): string {
   const safe = title.replace(/[\\/:*?"<>|]+/g, " ").replace(/\s+/g, " ").trim().slice(0, 80) || "Study sheet";
-  return `${safe} — StudyBuddy sheet ${date.toISOString().slice(0, 10)}`;
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const day = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+  return `${safe} — StudyBuddy sheet ${day} ${pad(date.getHours())}.${pad(date.getMinutes())}`;
+}
+
+/**
+ * Prints the page as it is, with the Save dialog offering `fileName` — the
+ * browser takes the PDF's name from the document title — and puts the title
+ * back afterwards. For a sheet with no structure to compose.
+ */
+export function printNamed(fileName: string): void {
+  const previous = document.title;
+  document.title = fileName;
+  window.addEventListener("afterprint", () => (document.title = previous), { once: true });
+  window.print();
 }
 
 /** A string safe inside a CSS `content: "…"` value, for the running header. */

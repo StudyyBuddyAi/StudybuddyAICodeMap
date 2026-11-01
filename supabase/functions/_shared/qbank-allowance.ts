@@ -25,21 +25,13 @@ export const EXAM_SECONDS_PER_QUESTION = 90;
 export const EXAM_BLOCK_SIZE = 20;
 
 /**
- * The set sizes a student can pick given what they have left today.
- *
- * `remaining` is null for an unlimited (Pro) account. Otherwise sizes above the
- * allowance are dropped, and the allowance itself is offered when it falls
- * between the fixed sizes — a student with seven left can sit seven, rather
- * than being offered only five.
+ * The largest set a student can pick given what they have left today: any
+ * number from one up to this. `remaining` is null for an unlimited (Pro)
+ * account, which gets the whole of `max`; zero means nothing is left.
  */
-export function allowedSetSizes(remaining: number | null, sizes: readonly number[]): number[] {
-  if (remaining === null) return [...sizes];
-  const left = Math.max(0, Math.floor(remaining));
-  if (left === 0) return [];
-  const fit = sizes.filter((s) => s <= left);
-  const max = Math.max(...sizes);
-  if (!fit.includes(left) && left < max) fit.push(left);
-  return fit.sort((a, b) => a - b);
+export function largestSetSize(remaining: number | null, max: number): number {
+  if (remaining === null) return max;
+  return Math.min(max, Math.max(0, Math.floor(remaining)));
 }
 
 /**

@@ -5,6 +5,7 @@ import type { GenerationStatus } from "@/components/SheetProgress";
 import { modelLabel, type ModelUsed } from "@/lib/model-used";
 import { ENTER, EXIT, SPRING_POP, SWAP } from "@/lib/motion";
 import { ARCHETYPE_PHRASES, primingQuestion, topicName } from "@/lib/priming-questions";
+import { isGroupShape, type SheetOutline } from "@/lib/sheet-outline";
 import type { SheetSectionSpec } from "@/types/generated-sheet";
 
 /**
@@ -109,21 +110,62 @@ interface SheetPreparationProps {
   /** The planned sections, once the plan has arrived. */
   plan: readonly SheetSectionSpec[] | null;
   model?: ModelUsed;
+  /** The topic's outline: whether it is a group, and its blocks. */
+  outline?: SheetOutline | null;
+  /** The topic's own warm-up has arrived (it shows in a card below this one). */
+  hasWarmup?: boolean;
 }
 
-function steps({ input, status, plan, model }: SheetPreparationProps): Step[] {
+/**
+ * A group sheet's blocks in teaching order, before any of them is written:
+ * an advance organiser — the student sees how the topic will be held
+ * together before the detail arrives.
+ */
+/** "Body system and presentation" → "body system and presentation", but "ABG pattern" stays. */
+const midSentence = (s: string) => (/^[A-Z]{2,}\b/.test(s) ? s : s.charAt(0).toLowerCase() + s.slice(1));
+
+const Blueprint = ({ outline }: { outline: SheetOutline }) => (
+  <span className="grid gap-1.5">
+    {outline.axis && <span>Taught one at a time, by {midSentence(outline.axis)}:</span>}
+    <ol className="m-0 flex list-none flex-wrap gap-1.5 p-0">
+      {outline.blocks.map((b, i) => (
+        <m.li
+          key={b}
+          initial={{ opacity: 0, scale: 0.9 }}
+          animate={{ opacity: 1, scale: 1, transition: { ...SPRING_POP, delay: i * 0.06 } }}
+          className="inline-flex max-w-full items-center gap-1.5 truncate rounded-full border border-border bg-card px-2.5 py-0.5 text-[11px] font-medium text-foreground"
+        >
+          <span className="font-mono text-muted-foreground">{i + 1}</span>
+          <span className="truncate">{b}</span>
+        </m.li>
+      ))}
+    </ol>
+  </span>
+);
+
+function steps({ input, status, plan, model, outline }: SheetPreparationProps): Step[] {
   const name = topicName(input, status.archetype);
   const phrase = status.archetype ? ARCHETYPE_PHRASES[status.archetype]?.a : undefined;
   // The planned sections by name: the sheet's contents, before it has any.
   const sectionTitles = (plan ?? []).map((s) => s.title);
+  const group = !!outline && isGroupShape(outline.shape) && outline.blocks.length >= 2;
 
   const topic: Step = status.planned
-    ? {
-        key: "topic",
-        status: "done",
-        label: phrase ? `Read ${name} as ${phrase}` : "Read the topic",
-        detail: sectionTitles.length ? `Sections: ${sectionTitles.join(" · ")}` : undefined,
-      }
+    ? group
+      ? {
+          key: "topic",
+          status: "done",
+          // Without the archetype: a long title falls back to "this topic",
+          // not "this condition", which a group of them isn't.
+          label: `Read ${topicName(input)} as a group of ${outline!.blocks.length}`,
+          detail: <Blueprint outline={outline!} />,
+        }
+      : {
+          key: "topic",
+          status: "done",
+          label: phrase ? `Read ${name} as ${phrase}` : "Read the topic",
+          detail: sectionTitles.length ? `Sections: ${sectionTitles.join(" · ")}` : undefined,
+        }
     : { key: "topic", status: "active", label: "Working out what kind of topic this is" };
 
   const books = status.books ?? [];
@@ -176,6 +218,9 @@ function steps({ input, status, plan, model }: SheetPreparationProps): Step[] {
 const SheetPreparation = (props: SheetPreparationProps) => {
   const list = steps(props);
   const question = primingQuestion(props.input, props.plan, props.status.archetype);
+  // The topic's own warm-up, when its outline brought one, takes over from
+  // the one generic question below; it sits in its own card under this one.
+  const hasWarmup = !!props.hasWarmup;
 
   return (
     <section aria-label="Preparing your sheet" style={CARD_STYLE}>
@@ -227,23 +272,25 @@ const SheetPreparation = (props: SheetPreparationProps) => {
           </ol>
 
           {/* One real question about this topic, while there is nothing yet to read. */}
-          <div className="mt-5 border-t border-dashed border-border pt-4">
-            <p
-              className="font-mono text-[11px] font-medium uppercase tracking-[0.08em]"
-              style={{ color: "var(--accent)" }}
-            >
-              Before you read
-            </p>
-            <AnimatePresence mode="wait" initial={false}>
-              <m.p key={question} {...SWAP} className="mt-1.5 text-[15px] leading-relaxed text-foreground">
-                {question}
-              </m.p>
-            </AnimatePresence>
-            <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
-              Answer it in your head first — a guess, even a wrong one, makes the answer stick when you
-              read it. <span className="whitespace-nowrap">(Pretesting effect · Richland, Kornell &amp; Kao, 2009)</span>
-            </p>
-          </div>
+          {!hasWarmup && (
+            <div className="mt-5 border-t border-dashed border-border pt-4">
+              <p
+                className="font-mono text-[11px] font-medium uppercase tracking-[0.08em]"
+                style={{ color: "var(--accent)" }}
+              >
+                Before you read
+              </p>
+              <AnimatePresence mode="wait" initial={false}>
+                <m.p key={question} {...SWAP} className="mt-1.5 text-[15px] leading-relaxed text-foreground">
+                  {question}
+                </m.p>
+              </AnimatePresence>
+              <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
+                Answer it in your head first — a guess, even a wrong one, makes the answer stick when you
+                read it. <span className="whitespace-nowrap">(Pretesting effect · Richland, Kornell &amp; Kao, 2009)</span>
+              </p>
+            </div>
+          )}
         </div>
       </AutoHeight>
     </section>

@@ -28,6 +28,7 @@ const Flashcards = lazy(() => import("./pages/Flashcards.tsx"));
 const QBank = lazy(() => import("./pages/QBank.tsx"));
 const QBankSession = lazy(() => import("./pages/QBankSession.tsx"));
 const QBankSummary = lazy(() => import("./pages/QBankSummary.tsx"));
+const QBankProgress = lazy(() => import("./pages/QBankProgress.tsx"));
 
 const queryClient = new QueryClient();
 
@@ -76,6 +77,7 @@ const AppRoutes = () => {
             <Route path="/qbank/generate" element={<Navigate to="/qbank" replace />} />
             <Route path="/qbank/session" element={<QBankSession />} />
             <Route path="/qbank/summary" element={<QBankSummary />} />
+            <Route path="/qbank/progress" element={<QBankProgress />} />
           </Route>
           <Route path="/library" element={<Library />} />
           <Route path="/reset-password" element={<ResetPassword />} />
