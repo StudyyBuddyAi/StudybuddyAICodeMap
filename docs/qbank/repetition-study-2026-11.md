@@ -230,3 +230,122 @@ node scripts/qbank-repetition/keyrepeat.cjs
 `out/` is git-ignored: the live pull contains students' generated items. After layer 1 or 2 is
 built, re-run the experiment with the real implementation as a new arm. It is the regression test.
 The whole study cost a few dollars of Corti credit.
+
+The shipped code is measured the same way by `gen-impl.mts` (arms E–H, §8.2), and the revisit
+wording by `revisit-ab.mts`. Both write beside the study arms, so `exp-groups.cjs`, the judge,
+`rate.mts` and `metrics.cjs` read them unchanged.
+
+## 8. What was built (2026-11-01, branch `qbank-repetition-study`)
+
+All three layers, built and tested locally. **Not deployed.** It needs one migration and a
+function deploy, plus the frontend for the student-facing parts (§8.4).
+
+### 8.1 The pieces
+
+| Layer | What | Where |
+|---|---|---|
+| 1 · ledger | Every wave reads the student's history on its topics (`qbank_topic_history`, service role only) and sends the writer a do-not-re-test list: one line per recently met item, `subtopic: teaching point`. That includes items from earlier waves of the same set, so it also replaces the label-only within-set guard. | `_shared/qbank-memory.ts`, `_shared/qbank-repetition.ts` `buildLedger`, `qbank-prompt.ts` `ledgerBlock` |
+| 1 · topic identity | The router also returns a canonical name ("DKA" → "Diabetic ketoacidosis"). Rows store `generation_meta.topicKey` and `canonicalTopic`, and history matches on either the canonical key or what was typed, so rows written before keys existed still count. Later waves are not routed, so they read the name wave one stored. Only trusted names (router, curriculum title, stored) are stored or used to build a shared blueprint. | `qbank-prompt.ts` `SYSTEM_ROUTER_PROMPT`, `qbank-generate/index.ts` |
+| 2 · blueprints | `qbank_topic_blueprints`: a topic's distinct concepts per exam track, shared by every student. Built in the background (`EdgeRuntime.waitUntil`) the first time a topic is seen. At most 2 builds per wave, one builder per topic (`claim_qbank_blueprint_build`), failure backoff 1h doubling to 7d. Build = an `s1-instant` draft at 0.5, then an `s1-instant` audit that may only name duplicate groups and unusable lines (it never rewrites and never judges the medicine), then validation (≥ 8 concepts). About 25–45 s. | `_shared/qbank-blueprint.ts`, migration `20261102000000` |
+| 2 · assignment | Each plan row is assigned a concept the student has not met: core before standard before extended, shuffled within a tier. The row records `generation_meta.concept`. | `qbank-repetition.ts` `assignRows` |
+| 3 · policy | Correct → not re-tested for 21 days. Given but unanswered → 7 days. Missed → cools 2 days, then at most one row in five revisits it as a **new item from a new direction**. A second miss restarts the clock, and a revisit that is answered closes the miss. A concept held back by the gate is retried once, then skipped. Once a topic is used up: re-test what is due, oldest first, never one from the same set or one still cooling. | `REPETITION_POLICY`, `buildThreads`, `assignRows` |
+| 3 · student-facing | The waiting screen says what history did ("Built from your history: 4 new concepts, a concept you missed before, asked a new way."). The summary says how far through the topic they are, and once it is used up offers **Move on to {broader}**, using the broader topic the blueprint names. | `src/lib/qbank-coverage.ts`, `WritingOverlay.tsx`, `QBankSummary.tsx` |
+
+Safety properties:
+- Every read fails open. An unreadable history (migration not applied, timeout) writes the
+  wave blind, exactly as before, and the rows record `repetition.memory = "unavailable"`.
+- With no history and no assignment, the user message is **byte-identical** to `main`
+  (checked across 2,160 plan configurations). System prompts are unchanged.
+- The stream's plan frame no longer carries each row's answer letter, and it never carries an
+  assigned concept. Both would give the answer away to anyone reading the network tab.
+
+### 8.2 Measured on the shipped code
+
+`scripts/qbank-repetition/gen-impl.mts` replays the study through the production
+`applyTopicMemory`, router, blueprint builder and prompt, with an in-memory database. Same
+topics, same seeded plans and the same blind judge as §3:
+
+| Arm | Repeats, sessions 2–4 | Unintended | On-topic, sessions 3–4 | Low-yield, sessions 3–4 |
+|---|---|---|---|---|
+| A · production today | 67% | 67% | 100% | 0% |
+| E · ledger only (topic has no blueprint yet) | 7% | 7% | 79% | 0% |
+| F · blueprint, before the ledger listed blueprint items | 14% | 14% | 100% | 0% |
+| **H · blueprint + full ledger (as shipped)** | **5%** | **5%** | **97%** | 3% (1 item) |
+| G · blueprint with answers (60% right, sessions 3 days apart) | 33% | 12% | 97% | 0% |
+
+G's 33% includes 9 repeats the policy asked for: revisits of missed concepts. G was run before
+the ledger change that H measures. The F → H change came from reading F's repeats. Handed a
+thin concept ("warfarin toxicity presents with bleeding"), the writer fell back to a famous fact
+the student had already met (factor VII falls first), and nothing told it that fact was taken.
+With the full ledger, warfarin went from 30% to 7%, and H had the best playable rate of any arm
+(97%). Every repeat left in H is a pair of blueprint concepts the writer followed faithfully
+but the strict judge counted as one ("CYP2C9 inhibitors potentiate warfarin" / "CYP2C9
+polymorphisms change dosing"). None is drift.
+
+Revisit wording, A/B on the 9 identical revisit prompts × 2 samples. Similarity is between the
+new item's lead-in and the earlier question's:
+
+| | identical lead-in | near-identical | mean similarity |
+|---|---|---|---|
+| "a new patient and a different question" | 4/18 | 8/18 | 0.56 |
+| shipped: "come at it from a different direction … if that asked for the treatment, ask what to monitor …" | 0/18 | 2/18 | 0.30 |
+
+The new-wording revisits still test the missed concept. An example: "most appropriate
+addition: spironolactone" came back as "why an MRA should not be started in this patient:
+hyperkalemia risk".
+
+Router: system unchanged for 25/26 test inputs. The exception is warfarin, cardiovascular →
+heme_onc, which the old prompt also returned in the study run. Canonical names are good:
+"DKA", "dka", "diabetic ketoacidosis" and "Diabetic Ketoacidosis high yield for step 1" all →
+"Diabetic ketoacidosis"; "nephrotic syndrom" → "Nephrotic syndrome"; Arabic "heart diseases" →
+"Heart disease". Junk is still declined.
+
+Blueprint builds measured: Heart failure (Step 2 CK) 40 concepts in 26 s, Diabetic ketoacidosis
+21 in 43 s, Warfarin 22 in 25 s.
+
+### 8.3 Tests
+
+- `src/lib/qbank-repetition.test.ts` — policy, ledger, assignment, blueprint parsing, prompt rendering.
+- `src/lib/qbank-coverage.test.ts`, `qbank-wave-runner.test.ts`, `WritingOverlay.test.tsx` and
+  `QBankSummary.test.tsx` — the client side.
+- `scripts/qbank-edge-test/edge-test.mjs` — the real handler against a fake database and Corti.
+  66 checks: canonical identity, ledger, revisits, assignment, background builds, later
+  waves, fail-open, curriculum mixes.
+- The migration was run in PGlite: history matching (legacy and canonical keys, whitespace and
+  case, mixed-set focus), latest attempt, lead-in, playable flag, claim backoff, and grants
+  (`authenticated` cannot call either function or read the table).
+
+### 8.4 Deploying
+
+1. `npx supabase db push`: migration `20261102000000_qbank_topic_memory.sql`, additive.
+2. `npx supabase functions deploy qbank-generate`. It fails open without step 1, so the order
+   is a preference, not a requirement. Optional env: `CORTI_BLUEPRINT_MODEL`
+   (default `corti-s1-instant`).
+3. Frontend: the waiting-screen line, the coverage note and **Move on**. Older frontends ignore
+   the new fields.
+
+Rollback: redeploy the previous `qbank-generate`. The migration can stay; nothing reads it then.
+
+After deploying, check:
+
+```sql
+-- Did waves read history?
+select generation_meta->'repetition'->>'memory' as memory, count(*)
+from questions where origin = 'generated' and created_at > now() - interval '1 day' group by 1;
+-- Blueprints building, built, failing
+select status, count(*), max(attempts) from qbank_topic_blueprints group by 1;
+```
+
+Then re-run §7's live measurement after a couple of weeks of use.
+
+### 8.5 Known limits
+
+- The writer still drifts off an assigned concept now and then. The full ledger contains the
+  damage, but a concept is recorded as assigned, not as actually tested.
+- Blueprint quality rests on `s1-instant` plus the audit. Near-duplicates can survive (warfarin
+  "teratogenic" vs "crosses the placenta").
+- Without a blueprint, the ledger alone drifts into adjacent material once the familiar facets
+  are used up (79% on-topic in sessions 3–4). It lasts one set, because the blueprint is built
+  in the background on the topic's first wave.
+- Spacing uses fixed intervals. FSRS at concept level (as the flashcards use) is the natural
+  next step, and `buildThreads` is where it would plug in.

@@ -69,7 +69,8 @@ if (mode === "live") {
 if (mode === "exp") {
   const jdir = process.argv[3];
   const pooled = !jdir.includes("arm");
-  const ARMS = ["A", "B1", "B2", "C", "D"];
+  // Study arms (gen.mts) and the shipped implementation (gen-impl.mts), whichever were run.
+  const ARMS = ["A", "B1", "B2", "C", "D", "E", "F", "G", "H"].filter((a) => fs.existsSync(path.join(OUT, a)));
   const topics = fs.readdirSync(path.join(OUT, "A"));
   const result = [];
   for (const topic of topics) {
@@ -89,6 +90,15 @@ if (mode === "exp") {
       const played = sessions.map((s) => s.filter((x) => x.playable));
       const all = sessions.flat();
       const s = repeatStats(played, conceptOf);
+      // Repeats the policy asked for — a revisit or a re-test row — are spacing, not
+      // repetition. Counted apart so arm G is judged on the ones nobody asked for.
+      const seenBefore = new Set();
+      let intended = 0;
+      for (const [k, items] of played.entries()) {
+        for (const it of items) if (k > 0 && seenBefore.has(conceptOf.get(it.uid)) && it.concept && it.concept.mode !== "new") intended++;
+        for (const it of items) seenBefore.add(conceptOf.get(it.uid));
+      }
+      s.intended = intended;
       result.push({ topic, arm, sessions: sessions.length, generated: all.length, playable: played.flat().length,
         blocked: all.filter((x) => x.blocked).length, disputed: all.filter((x) => !x.agreed).length, ...s });
     }
@@ -103,6 +113,7 @@ if (mode === "exp") {
     const rs = result.filter((r) => r.arm === arm);
     const sum = (k) => rs.reduce((a, r) => a + r[k], 0);
     console.log(arm.padEnd(3), `repeat ${sum("repeats")}/${sum("later")} = ${pct(sum("repeats") / sum("later"))}`,
+      `| unintended ${sum("repeats") - sum("intended")}/${sum("later")} = ${pct((sum("repeats") - sum("intended")) / sum("later"))}`,
       `| within-session dup ${sum("withinDup")}`, `| distinct ${sum("distinct")} of ${sum("playable")} playable`,
       `| playable ${sum("playable")}/${sum("generated")} = ${pct(sum("playable") / sum("generated"))} (blocked ${sum("blocked")}, disputed ${sum("disputed")})`);
   }

@@ -3,7 +3,8 @@
 const fs = require("fs");
 const path = require("path");
 const OUT = process.env.REPETITION_OUT ?? path.join(__dirname, "out");
-const ARMS = ["A", "B1", "B2", "C", "D"];
+// Study arms (gen.mts) and the shipped implementation (gen-impl.mts), whichever were run.
+const ARMS = ["A", "B1", "B2", "C", "D", "E", "F", "G", "H"].filter((a) => fs.existsSync(path.join(OUT, a)));
 const topics = fs.readdirSync(path.join(OUT, "A"));
 const pooled = [], perArm = [];
 for (const topic of topics) {
