@@ -34,12 +34,30 @@ export class DeckTopicError extends Error {}
 export class DeckQuotaError extends Error {}
 
 /**
+ * The cards finished so far in a deck still streaming. The last card is held
+ * back until something follows it: its answer may still be arriving.
+ */
+export function finishedCards(text: string, topic: string): ParsedCard[] {
+  const cards = parseFlashcardsFromOutput(text, topic);
+  return cards.slice(0, Math.max(0, cards.length - 1));
+}
+
+export interface DeckRequestOptions {
+  signal?: AbortSignal;
+  /** Each time another card is finished, every card finished so far. */
+  onCards?: (cards: ParsedCard[]) => void;
+}
+
+/**
  * One deck request, read to the end: the cards, the retrieval behind them and
  * the model that wrote them. Throws DeckTopicError / DeckQuotaError for the
  * refusals the page words itself, and a plain Error otherwise.
  */
-export async function requestDeck(params: MedicalNotesParams & { notes: string }): Promise<DeckResult> {
-  const response = await callMedicalNotes({ ...params, cardsOnly: true });
+export async function requestDeck(
+  params: MedicalNotesParams & { notes: string },
+  opts: DeckRequestOptions = {}
+): Promise<DeckResult> {
+  const response = await callMedicalNotes({ ...params, cardsOnly: true }, { signal: opts.signal });
   if (!response.ok) {
     const err = await response.json().catch(() => ({}));
     if (response.status === 400 && err.code === "invalid_topic") throw new DeckTopicError(err.error || "");
@@ -56,6 +74,15 @@ export async function requestDeck(params: MedicalNotesParams & { notes: string }
   let buffer = "";
   let text = "";
   let grounding: DeckGrounding | null = null;
+  let reported = 0;
+  const report = () => {
+    if (!opts.onCards) return;
+    const done = finishedCards(text, params.notes);
+    if (done.length > reported) {
+      reported = done.length;
+      opts.onCards(done);
+    }
+  };
 
   read: while (true) {
     const { done, value } = await reader.read();
@@ -85,7 +112,10 @@ export async function requestDeck(params: MedicalNotesParams & { notes: string }
           continue;
         }
         const content = parsed.choices?.[0]?.delta?.content;
-        if (content) text += content;
+        if (content) {
+          text += content;
+          if (content.includes("\n")) report();
+        }
       } catch {
         // A frame split across reads: wait for the rest of it.
         buffer = line + "\n" + buffer;
@@ -95,8 +125,10 @@ export async function requestDeck(params: MedicalNotesParams & { notes: string }
   }
 
   const declined = parseDecline(text);
+  const cards = declined ? [] : parseFlashcardsFromOutput(text, params.notes);
+  if (opts.onCards && cards.length > reported) opts.onCards(cards);
   return {
-    cards: declined ? [] : parseFlashcardsFromOutput(text, params.notes),
+    cards,
     declined,
     grounding,
     model,
@@ -121,6 +153,15 @@ export function deckBatches(count: number): DeckBatch[] {
   if (n <= MAX_CARDS_PER_REQUEST) return [{ count: n }];
   const slices = ["recognise", "explain", "manage"] as const;
   return slices.map((slice, i) => ({ slice, count: Math.min(MAX_CARDS_PER_REQUEST, Math.ceil((n - i) / slices.length)) }));
+}
+
+/**
+ * A deck mixed across topics: one deck per topic, sharing the cards, the first
+ * topics taking the remainder — 20 across three is 7 · 7 · 6.
+ */
+export function splitDeck(topics: readonly string[], size: number): { topic: string; count: number }[] {
+  const n = topics.length;
+  return topics.map((topic, i) => ({ topic, count: Math.ceil((Math.round(size) - i) / n) })).filter((p) => p.count > 0);
 }
 
 const words = (q: string) =>

@@ -3,7 +3,16 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const callMedicalNotes = vi.fn();
 vi.mock("@/lib/callMedicalNotes", () => ({ callMedicalNotes: (...a: unknown[]) => callMedicalNotes(...a) }));
 
-import { DeckQuotaError, DeckTopicError, deckBatches, mergeDecks, mergeGrounding, requestDeck } from "./deck-request";
+import {
+  DeckQuotaError,
+  DeckTopicError,
+  deckBatches,
+  finishedCards,
+  mergeDecks,
+  mergeGrounding,
+  requestDeck,
+  splitDeck,
+} from "./deck-request";
 import { CARD_SLICE_KEYS } from "../../supabase/functions/_shared/deck-source.ts";
 
 const card = (question: string, answer = "A.") => ({ question, answer, tag: "Mechanism", topic: "HF", grounded: false });
@@ -39,6 +48,24 @@ describe("deckBatches", () => {
     expect(deckBatches(30).map((b) => b.count)).toEqual([10, 10, 10]);
     // Every slice the client sends is one the server knows.
     for (const b of deckBatches(50)) expect(CARD_SLICE_KEYS).toContain(b.slice);
+  });
+});
+
+describe("splitDeck", () => {
+  it("shares a mixed deck's cards, the first topics taking the remainder", () => {
+    expect(splitDeck(["A", "B", "C"], 20)).toEqual([
+      { topic: "A", count: 7 },
+      { topic: "B", count: 7 },
+      { topic: "C", count: 6 },
+    ]);
+    expect(splitDeck(["A"], 12)).toEqual([{ topic: "A", count: 12 }]);
+  });
+});
+
+describe("finishedCards", () => {
+  it("holds back the last card while its answer may still be arriving", () => {
+    const text = "FLASHCARDS\n\nQ: [Mechanism][General] One?\nA: First.\n\nQ: [Diagnosis][General] Two?\nA: Sec";
+    expect(finishedCards(text, "T").map((c) => c.question)).toEqual(["One?"]);
   });
 });
 
@@ -81,7 +108,13 @@ describe("requestDeck", () => {
         { "x-deck-source": "qbank" }
       )
     );
-    const deck = await requestDeck({ notes: "Diuretics", deckSource: { kind: "qbank", questionIds: [] } });
+    const landed: number[] = [];
+    const deck = await requestDeck(
+      { notes: "Diuretics", deckSource: { kind: "qbank", questionIds: [] } },
+      { onCards: (cards) => landed.push(cards.length) }
+    );
+    // The one card is reported once the stream ends.
+    expect(landed).toEqual([1]);
     expect(callMedicalNotes.mock.calls[0][0]).toMatchObject({ cardsOnly: true, notes: "Diuretics" });
     expect(deck.cards).toHaveLength(1);
     expect(deck.cards[0]).toMatchObject({ question: "Why do thiazides lower urine calcium?", grounded: true });

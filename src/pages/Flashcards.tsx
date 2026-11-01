@@ -2,9 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import PageHeader from "@/components/layout/PageHeader";
 import { useBackdropScene } from "@/components/backdrop/backdrop-scene";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
-import { ArrowRight, BookOpen, Clock, PanelLeftClose, PanelLeftOpen, Play, Repeat, Settings2, Shuffle, SkipForward, X, Sparkles, Check, ChevronRight, RotateCcw, AlertTriangle, CheckCircle2, SlidersHorizontal } from "lucide-react";
+import { ArrowRight, BookOpen, Clock, PanelLeftClose, PanelLeftOpen, Play, Settings2, Shuffle, SkipForward, X, Sparkles, Check, RotateCcw, AlertTriangle, CheckCircle2, SlidersHorizontal } from "lucide-react";
 import DashboardLayout from "@/components/dashboard/DashboardLayout";
-import FlashcardsGenerator, { type GeneratedCard } from "@/components/FlashcardsGenerator";
+import DeckComposer, { type GeneratedCard } from "@/components/flashcards/DeckComposer";
 import DeckList from "@/components/DeckList";
 import { CardFace, ExplainPanel } from "@/components/StudyMode";
 import SheetSources from "@/components/SheetSources";
@@ -21,45 +21,71 @@ import { formatInterval, newSrsFields, type ReviewRating } from "@/lib/spaced-re
 
 const RECENT_DECK_LIMIT = 3;
 
-type RightPhase = "idle" | "generating" | "reviewing";
+type RightPhase = "idle" | "reviewing";
 
-const DueCardsReminderStrip = ({
+/**
+ * What is due today, where the QBank page puts its review queue: first, and
+ * only when there is something to do. The three counts are Anki's queues.
+ */
+const DueToday = ({
   dueCount,
   counts,
-  onStartReview,
+  onStart,
+  settingsLabel,
+  optimize,
+  onSettings,
 }: {
   dueCount: number;
   counts: { learning: number; review: number; new: number };
-  onStartReview: () => void;
+  onStart: () => void;
+  settingsLabel: string;
+  optimize: boolean;
+  onSettings: () => void;
 }) => (
-  <div className="flex items-center justify-between gap-2 rounded-xl border-l-4 border-l-primary border border-border bg-primary/5 p-3.5 animate-fade-in">
-    <div className="flex items-center gap-2 min-w-0">
-      <Repeat className="w-4 h-4 text-primary flex-shrink-0" />
-      <div className="min-w-0">
-        <span className="text-sm text-foreground">
-          <span key={dueCount} className="flip-number font-semibold text-primary">
-            {dueCount}
-          </span>{" "}
-          {dueCount === 1 ? "card" : "cards"} to study today
-        </span>
-        {/* Anki's three queue counts: new, learning, review. */}
-        <p className="text-[11px] text-muted-foreground tabular-nums">
-          <span className="text-info">{counts.new} new</span>
-          {" · "}
-          <span className="text-danger">{counts.learning} learning</span>
-          {" · "}
-          <span className="text-success">{counts.review} review</span>
-        </p>
-      </div>
+  <div className="flex flex-col gap-3 rounded-[26px] border border-[color:var(--color-border)] bg-[color:var(--color-card)] p-5 shadow-[0_18px_40px_rgba(15,23,42,0.04)] sm:flex-row sm:items-center">
+    <div className="min-w-0 flex-1">
+      {dueCount > 0 ? (
+        <>
+          <p className="text-base font-semibold text-foreground">
+            <span key={dueCount} className="flip-number tabular-nums">{dueCount}</span> {dueCount === 1 ? "card" : "cards"} due today
+          </p>
+          <p className="mt-0.5 text-xs tabular-nums text-muted-foreground">
+            <span className="text-info">{counts.new} new</span>
+            {" · "}
+            <span className="text-danger">{counts.learning} learning</span>
+            {" · "}
+            <span className="text-success">{counts.review} review</span>
+            {" · each comes back just before you would forget it"}
+          </p>
+        </>
+      ) : (
+        <p className="text-sm text-foreground">Nothing due — you're caught up. New cards and lapses come back on their own schedule.</p>
+      )}
+      <button
+        type="button"
+        onClick={onSettings}
+        className="mt-1.5 inline-flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
+      >
+        <SlidersHorizontal className="h-3.5 w-3.5" />
+        {settingsLabel}
+        {optimize && (
+          <span className="ml-1 inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary">
+            <Sparkles className="h-3 w-3" />
+            Ready to optimize
+          </span>
+        )}
+      </button>
     </div>
-    <button
-      type="button"
-      onClick={onStartReview}
-      className="h-7 px-3 rounded-lg bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 transition-colors flex items-center gap-1.5 flex-shrink-0"
-    >
-      <Play className="w-3 h-3" />
-      Review
-    </button>
+    {dueCount > 0 && (
+      <button
+        type="button"
+        onClick={onStart}
+        className="flex h-11 shrink-0 items-center justify-center gap-2 rounded-[14px] bg-primary px-5 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90"
+      >
+        <Play className="h-4 w-4" />
+        Study {dueCount}
+      </button>
+    )}
   </div>
 );
 
@@ -85,7 +111,8 @@ const Flashcards = () => {
   const [rightPhase, setRightPhase] = useState<RightPhase>("idle");
   // Reviewing cards is answering: the backdrop all but stops while it happens.
   useBackdropScene(rightPhase === "reviewing" ? { mode: "focus" } : null);
-  const [genTopic, setGenTopic] = useState("");
+  // The deck being dealt takes the page; the decks below wait until it lands.
+  const [dealingNow, setDealingNow] = useState(false);
   const [configDrawerOpen, setConfigDrawerOpen] = useState(false);
   // Desktop (lg+) left pane. Starts open; the reader collapses it once a deck
   // is on screen and the review pane takes the reclaimed width.
@@ -241,41 +268,31 @@ const Flashcards = () => {
   };
 
   // ── Generation → review hand-off ─────────────────────────────────────
-  const handleGeneratingChange = (generating: boolean, topic: string) => {
-    if (generating) {
-      setGenTopic(topic);
-      setRightPhase("generating");
-      setConfigDrawerOpen(false);
-    } else if (rightPhase === "generating") {
-      // Failed or empty generation falls back to idle; success transitions
-      // to reviewing via onGenerated just after.
-      setRightPhase("idle");
-    }
-  };
-
-  const handleGenerated = (cards: GeneratedCard[], topic: string, model: ModelUsed | null) => {
-    setGeneratedDeck(model ? { topic, model } : null);
-    const now = Date.now();
-    // Placeholders only: the session looks each card up in the saved deck first,
-    // so a regenerated card that already has a schedule keeps it.
-    const sessionCards: DeckCard[] = cards.map((c) => ({
-      ...newSrsFields(now),
-      id: makeCardId(c.question, c.answer),
-      question: c.question,
-      answer: c.answer,
-      tag: c.tag,
-      grounded: c.grounded,
-      topic: c.topic || topic,
-      topicEmoji: c.topicEmoji,
-      createdAt: now,
-      isLeech: false,
-    }));
-    if (!sessionCards.length) {
-      setRightPhase("idle");
-      return;
-    }
-    startSession(sessionCards, topic, `deck:${topic}`);
-  };
+  const handleGenerated = useCallback(
+    (cards: GeneratedCard[], label: string, model: ModelUsed | null, topics: string[]) => {
+      setGeneratedDeck(model ? { topic: label, model } : null);
+      const now = Date.now();
+      // Placeholders only: the session looks each card up in the saved deck
+      // first, so a regenerated card that already has a schedule keeps it.
+      const sessionCards: DeckCard[] = cards.map((c) => ({
+        ...newSrsFields(now),
+        id: makeCardId(c.question, c.answer),
+        question: c.question,
+        answer: c.answer,
+        tag: c.tag,
+        grounded: c.grounded,
+        topic: c.topic || label,
+        topicEmoji: c.topicEmoji,
+        createdAt: now,
+        isLeech: false,
+        origin: (c as GeneratedCard & { origin?: DeckCard["origin"] }).origin ?? null,
+      }));
+      if (!sessionCards.length) return;
+      // One topic reopens from the URL as its deck; a mix has no one deck to name.
+      startSession(sessionCards, label, topics.length === 1 ? `deck:${topics[0]}` : undefined);
+    },
+    [] // eslint-disable-line react-hooks/exhaustive-deps
+  );
 
   // ── Review interactions ──────────────────────────────────────────────
   const { total, reviewed, tally, flipped } = s;
@@ -316,7 +333,7 @@ const Flashcards = () => {
 
   /**
    * The "Generate flashcards" nudge on /sheets navigates here with a topic.
-   * FlashcardsGenerator already listens for `studybuddy:generate-flashcards`
+   * DeckComposer already listens for `studybuddy:generate-flashcards`
    * and is mounted on this page, so hand the topic straight to it. The history
    * entry is then cleared so a refresh doesn't regenerate.
    */
@@ -418,63 +435,11 @@ const Flashcards = () => {
         </div>
       </div>
     </div>
-  ) : (
-    <div key="config" className="pane-crossfade space-y-4">
-      {stats.due > 0 && totalDecks > 0 && (
-        <DueCardsReminderStrip dueCount={stats.due} counts={stats.counts} onStartReview={handleStartDue} />
-      )}
-      {totalDecks > 0 && (
-        <button
-          type="button"
-          onClick={() => setSettingsOpen(true)}
-          className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-primary transition-colors"
-        >
-          <SlidersHorizontal className="h-3.5 w-3.5" />
-          Study settings · {Math.round(settings.desiredRetention * 100)}% retention, {settings.newPerDay} new/day
-          {shouldSuggestOptimize(today.totalReviews, settings.weightsUpdatedAt, settings.weightsReviewCount) && (
-            <span className="ml-1 inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary">
-              <Sparkles className="h-3 w-3" />
-              Ready to optimize
-            </span>
-          )}
-        </button>
-      )}
-      <FlashcardsGenerator
-        onGeneratingChange={handleGeneratingChange}
-        onGenerated={handleGenerated}
-        wide={idle}
-      />
-    </div>
-  );
+  ) : null;
 
   // ── Right pane ────────────────────────────────────────────────────────
   const rightPaneContent =
-    rightPhase === "generating" ? (
-      // One slim panel under the button: what is being written, and that it is
-      // moving. No stack of placeholder cards pretending to be the deck.
-      <div
-        key="generating"
-        role="status"
-        aria-live="polite"
-        className="pane-crossfade flex items-center gap-4 rounded-2xl border border-border bg-card px-5 py-4 shadow-sm"
-      >
-        <span className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary/10">
-          <Sparkles className="h-5 w-5 text-primary" aria-hidden />
-          <span className="absolute inset-0 rounded-full border-2 border-transparent border-t-primary motion-safe:animate-spin" aria-hidden />
-        </span>
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-semibold text-foreground">
-            Writing your {genTopic || "new"} deck
-          </p>
-          <p className="text-xs text-muted-foreground">
-            Usually 20–40 seconds. Your review starts as soon as it's ready.
-          </p>
-          <div className="mt-2.5 h-1 overflow-hidden rounded-full bg-border" aria-hidden>
-            <div className="h-full w-1/3 rounded-full bg-primary motion-safe:animate-[fc-progress_1.4s_ease-in-out_infinite]" />
-          </div>
-        </div>
-      </div>
-    ) : rightPhase === "reviewing" && session ? (
+    rightPhase === "reviewing" && session ? (
       <div key="reviewing" className="pane-crossfade mx-auto w-full max-w-[560px] space-y-4">
         {/* Progress bar with card counter */}
         <div className="flex items-center justify-between gap-4">
@@ -699,44 +664,57 @@ const Flashcards = () => {
           </>
         ) : null}
       </div>
-    ) : (
-      <div key="idle" className="pane-crossfade space-y-6">
-        {totalDecks > 0 && (
-          <div className="space-y-4">
-            <DeckList
-              cards={recentDeckCards}
-              onStudyDeck={handleStudyDeck}
-              onDeleteDeck={handleDeleteDeck}
-              onReviewAll={handleReviewAny}
-            />
-            {totalDecks > RECENT_DECK_LIMIT && (
-              <div className="pl-1">
-                <Link
-                  to="/library"
-                  className="inline-flex items-center gap-1 text-sm font-medium text-primary underline-offset-4 hover:underline"
-                >
-                  See all {totalDecks} decks in your Library
-                  <ArrowRight className="h-3 w-3" />
-                </Link>
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-    );
+    ) : null;
 
   return (
     <DashboardLayout wide>
-      <div className="space-y-6">
-        <PageHeader label="Flashcards" title="New flashcard deck" aside={<FlashcardsIntro />} />
+      <div className={idle ? "mx-auto w-full max-w-5xl space-y-6 animate-fade-in" : "space-y-6"}>
+        <PageHeader
+          label="Flashcards · spaced repetition"
+          title={
+            <>
+              Cards that come back <em className="text-[color:var(--color-accent)]">just before you forget.</em>
+            </>
+          }
+          description="Name a topic — or mix up to five — and a deck is written for it, each card landing on the table as it is finished. Every card is then scheduled for the day you would start to forget it."
+          aside={<FlashcardsIntro />}
+        />
 
         {idle ? (
-          // Nothing under way: one column with the full width — the topic and
-          // its options first, then popular topics and your decks with room.
-          <div className="space-y-8">
-            {leftPaneContent}
-            {rightPaneContent}
-          </div>
+          // The QBank's page, for cards: what is due, the composer, decks made
+          // for you, quick starts, then the decks you already have.
+          <>
+            {totalDecks > 0 && !dealingNow && (
+              <DueToday
+                dueCount={stats.due}
+                counts={stats.counts}
+                onStart={handleStartDue}
+                onSettings={() => setSettingsOpen(true)}
+                settingsLabel={`Study settings · ${Math.round(settings.desiredRetention * 100)}% retention, ${settings.newPerDay} new a day`}
+                optimize={shouldSuggestOptimize(today.totalReviews, settings.weightsUpdatedAt, settings.weightsReviewCount)}
+              />
+            )}
+            <DeckComposer onGenerated={handleGenerated} onDealingChange={setDealingNow} />
+            {totalDecks > 0 && !dealingNow && (
+              <div className="space-y-3">
+                <DeckList
+                  cards={recentDeckCards}
+                  onStudyDeck={handleStudyDeck}
+                  onDeleteDeck={handleDeleteDeck}
+                  onReviewAll={handleReviewAny}
+                />
+                {totalDecks > RECENT_DECK_LIMIT && (
+                  <Link
+                    to="/library"
+                    className="inline-flex items-center gap-1 pl-1 text-sm font-medium text-primary underline-offset-4 hover:underline"
+                  >
+                    See all {totalDecks} decks in your Library
+                    <ArrowRight className="h-3 w-3" />
+                  </Link>
+                )}
+              </div>
+            )}
+          </>
         ) : (
         <div className="flex flex-col gap-6 lg:flex-row lg:gap-0 lg:items-start">
           {/* ── Left pane: configurator / session status (drawer on tablet).
