@@ -105,6 +105,14 @@
     --nav-h: 64px;
 }
 
+/* Below lg the app bar carries a second row — every page, one button each
+   (AppNav.tsx) — so whatever sticks under it moves down with it. */
+@media (max-width: 1023.98px) {
+    html:has([data-app-nav]) {
+        --nav-h: 115px;
+    }
+}
+
 /* The app toggles `.dark` on <html>; OpenMed's source already keys off both. */
 [data-theme="dark"],
 .dark {
