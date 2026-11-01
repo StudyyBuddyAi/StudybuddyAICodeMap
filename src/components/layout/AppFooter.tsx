@@ -21,6 +21,9 @@ const AppFooter = () => (
         <Link to="/library" className="hover:text-foreground">
           Library
         </Link>
+        <Link to="/privacy" className="hover:text-foreground">
+          Privacy
+        </Link>
         {SOCIALS.map((s) => (
           <a key={s.href} href={s.href} target="_blank" rel="noopener noreferrer" className="hover:text-foreground">
             {s.label}
