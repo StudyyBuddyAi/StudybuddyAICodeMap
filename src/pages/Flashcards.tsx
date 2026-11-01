@@ -167,16 +167,23 @@ const Flashcards = () => {
 
   // ── Session lifecycle ─────────────────────────────────────────────────
   // The open session is written into the URL (?review=due, ?review=all,
-  // ?deck=<topic>), so Back from another page — or a reload — returns to the
-  // cards rather than the empty generator, and the dashboard can link straight
-  // to today's review.
+  // ?deck=<topic>, ?mix=<topic>|<topic>), so Back from another page — or a
+  // reload — returns to the cards rather than the empty generator, and the
+  // dashboard can link straight to today's review.
   const [searchParams] = useSearchParams();
-  const sessionKey = searchParams.get("deck") ? `deck:${searchParams.get("deck")}` : searchParams.get("review") ? `review:${searchParams.get("review")}` : null;
+  const sessionKey = searchParams.get("deck")
+    ? `deck:${searchParams.get("deck")}`
+    : searchParams.get("mix")
+    ? `mix:${searchParams.get("mix")}`
+    : searchParams.get("review")
+    ? `review:${searchParams.get("review")}`
+    : null;
 
   const keyToSearch = (key: string) => {
     const [kind, ...rest] = key.split(":");
     const value = rest.join(":");
-    return kind === "deck" ? `?deck=${encodeURIComponent(value)}` : `?review=${encodeURIComponent(value)}`;
+    const param = kind === "deck" || kind === "mix" ? kind : "review";
+    return `?${param}=${encodeURIComponent(value)}`;
   };
 
   const pushedKeyRef = useRef<string | null>(null);
@@ -212,8 +219,8 @@ const Flashcards = () => {
   // A deck picks up where the student left it: the cards still due (or new)
   // come first, and only a deck with nothing due is studied in full, as an
   // early review. Reopening a half-done deck no longer starts it over.
-  const deckCards = (topic: string) => {
-    const deck = allCards.filter((c) => c.topic === topic);
+  const deckCards = (...topics: string[]) => {
+    const deck = allCards.filter((c) => topics.includes(c.topic));
     const now = Date.now();
     const due = deck.filter((c) => c.dueAt <= now);
     return due.length > 0 ? due : deck;
@@ -221,7 +228,9 @@ const Flashcards = () => {
   const handleStudyDeck = (topic: string) => startSession(deckCards(topic), topic, `deck:${topic}`);
 
   // Open the session the URL names, once the cards it needs have loaded; and
-  // close it when the URL loses it (Back out of a session).
+  // close it when the URL loses it (Back out of a session). Only a session the
+  // URL opened is closed that way: the effect also runs whenever the deck or
+  // today's due list is rebuilt, and must never take that for "Back".
   const openedKeyRef = useRef<string | null>(null);
   useEffect(() => {
     if (sessionKey && pushedKeyRef.current === sessionKey) {
@@ -230,7 +239,7 @@ const Flashcards = () => {
       return;
     }
     if (!sessionKey) {
-      if (pushedKeyRef.current) return;
+      if (pushedKeyRef.current || openedKeyRef.current === null) return;
       openedKeyRef.current = null;
       if (s.active) {
         s.end();
@@ -242,9 +251,12 @@ const Flashcards = () => {
     openedKeyRef.current = sessionKey;
     const [kind, ...rest] = sessionKey.split(":");
     const value = rest.join(":");
+    const mixed = value.split("|");
     const ok =
       kind === "deck"
         ? startSession(deckCards(value), value)
+        : kind === "mix"
+        ? startSession(deckCards(...mixed), mixed.join(" · "))
         : value === "all"
         ? startSession(allCards, "All cards")
         : startSession(dueCards, "Today's review");
@@ -268,6 +280,11 @@ const Flashcards = () => {
   };
 
   // ── Generation → review hand-off ─────────────────────────────────────
+  // The composer calls back when its deal ends, renders after it began, so
+  // the hand-off reads this render's startSession through a ref rather than
+  // the one the callback was created with.
+  const startSessionRef = useRef(startSession);
+  startSessionRef.current = startSession;
   const handleGenerated = useCallback(
     (cards: GeneratedCard[], label: string, model: ModelUsed | null, topics: string[]) => {
       setGeneratedDeck(model ? { topic: label, model } : null);
@@ -288,10 +305,12 @@ const Flashcards = () => {
         origin: (c as GeneratedCard & { origin?: DeckCard["origin"] }).origin ?? null,
       }));
       if (!sessionCards.length) return;
-      // One topic reopens from the URL as its deck; a mix has no one deck to name.
-      startSession(sessionCards, label, topics.length === 1 ? `deck:${topics[0]}` : undefined);
+      // Named in the URL either way — one topic as its deck, a mix as its
+      // topics — so Back and a reload come back to it, and the URL effect
+      // above never closes it as one the URL does not know.
+      startSessionRef.current(sessionCards, label, topics.length === 1 ? `deck:${topics[0]}` : `mix:${topics.join("|")}`);
     },
-    [] // eslint-disable-line react-hooks/exhaustive-deps
+    []
   );
 
   // ── Review interactions ──────────────────────────────────────────────
