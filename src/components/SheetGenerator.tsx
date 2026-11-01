@@ -36,8 +36,10 @@ import SheetTopicBar from "@/components/sheet/SheetTopicBar";
 import SheetPreparation from "@/components/sheet/SheetPreparation";
 import SheetWarmup from "@/components/sheet/SheetWarmup";
 import { parseOutline, parseWarmup, type SheetOutline, type WarmupQuestion } from "@/lib/sheet-outline";
-import SheetFinish, { type SheetDeck } from "@/components/sheet/SheetFinish";
+import SheetFinish, { type SheetDeck, type SheetFullDeck } from "@/components/sheet/SheetFinish";
+import { DeckQuotaError, MAX_CARDS_PER_REQUEST, requestDeck } from "@/lib/deck-request";
 import { ExportPdfDialog } from "@/components/sheet/print/ExportPdfDialog";
+import { exportFileName, printNamed } from "@/lib/sheet-print";
 import { TrackedSectionRail, TrackedSectionsMenu } from "@/components/sheet/SheetSections";
 import { BranchesButton, BranchesMenuItem, PanelAwareLayout } from "@/components/sheet/branches/BranchesChrome";
 import {
@@ -180,6 +182,8 @@ const settingsSummary = (s: SheetSettingsSnapshot) =>
 /** A title for a sheet whose topic hasn't arrived: the first line asked for. */
 const firstLine = (text: string) => text.trim().split("\n")[0].trim().slice(0, 80);
 
+const IDLE_FULL_DECK: Pick<SheetFullDeck, "status" | "count"> = { status: "idle", count: 0 };
+
 /**
  * A view swap starts at the top of the page. It mounts only after the outgoing
  * view has faded out (AnimatePresence "wait"), so the jump is never seen.
@@ -213,6 +217,8 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
   const [modelUsed, setModelUsed] = useState<ModelUsed | undefined>(undefined);
   const [loading, setLoading] = useState(false);
   const [deckSaved, setDeckSaved] = useState(false);
+  // The full deck written from this sheet (SheetFinish), separate from the few cards beside it.
+  const [fullDeck, setFullDeck] = useState<Pick<SheetFullDeck, "status" | "count">>(IDLE_FULL_DECK);
   // Sections whose JSON has fully arrived, so the renderer knows how much of a
   // still-streaming sheet is safe to show.
   const [streamedKeys, setStreamedKeys] = useState<string[]>([]);
@@ -393,6 +399,7 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
     setSheet(null);
     setLegacyOutput("");
     setDeckSaved(false);
+    setFullDeck(IDLE_FULL_DECK);
     setStreamedKeys([]);
     setLiveKey(undefined);
     setGenerationStatus({ planned: false, sources: useGrounding ? "pending" : "off" });
@@ -815,6 +822,7 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
     setNotes(item.input);
     setActiveSettings((prev) => ({ ...prev, ...loaded, notes: item.input }));
     setDeckSaved(false);
+    setFullDeck(IDLE_FULL_DECK);
     setSheetIncomplete(false);
     setSavedSheetId(item.id);
     setGenerationId((id) => id + 1);
@@ -906,6 +914,58 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
       }
     : null;
 
+  /**
+   * A full deck written from the sheet as the student has it — their rewrites
+   * in place — rather than on its topic. The server writes from it only when
+   * the sheet's signatures check; otherwise the deck is an ordinary one on the
+   * topic, saved without the "from your sheet" mark.
+   */
+  const writeFullDeck = async () => {
+    if (!sheet || legacyOutput || fullDeck.status === "writing") return;
+    const deckTopic = activeSettings.notes.trim().slice(0, 60);
+    const signedTopic = requestTopic(sheet, sheetTopic);
+    setFullDeck({ status: "writing", count: 0 });
+    try {
+      const result = await requestDeck({
+        notes: signedTopic,
+        examMode: activeSettings.examMode,
+        difficulty: activeSettings.difficulty,
+        cardCount: MAX_CARDS_PER_REQUEST,
+        useGrounding: false,
+        useMemory: false,
+        deckSource: {
+          kind: "sheet",
+          plan: sheetKeys,
+          sections: (studentSheet?.sections ?? {}) as Record<string, SectionBody>,
+          topic: signedTopic,
+          signature: requestSignature(sheet, layerState.layer),
+          hints: planHints(resolvePlan(sheet)),
+        },
+      });
+      refreshUsage();
+      if (!result.cards.length) throw new Error(result.declined ?? "No cards came back.");
+      const origin = result.source === "sheet" ? ("sheet" as const) : null;
+      await saveCards(
+        result.cards.map((c) => ({ ...c, topic: deckTopic, topicEmoji: sheet.topicEmoji, origin }))
+      );
+      setFullDeck({ status: "done", count: result.cards.length });
+      toast({
+        title: `${result.cards.length} cards ${origin ? "from your sheet" : `on ${deckTopic}`} added to your deck`,
+      });
+    } catch (e) {
+      setFullDeck({ status: "idle", count: 0 });
+      if (e instanceof DeckQuotaError) {
+        toast({ title: "Today's free decks are used up", description: e.message, variant: "destructive" });
+      } else {
+        toast({ title: "Couldn't write the deck", description: "Please try again.", variant: "destructive" });
+      }
+    }
+  };
+  const fullDeckAction: SheetFullDeck | null =
+    sheet && !legacyOutput && !loading && !!user && !isAnonymous
+      ? { ...fullDeck, onWrite: () => void writeFullDeck(), onReview: () => navigate("/library") }
+      : null;
+
   // ── The student's own layer ────────────────────────────────────────────
   // Pro, or a sheet the premium writer wrote: the free premium generation is
   // the Pro experience, whatever the student's plan.
@@ -915,7 +975,21 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
   // Export PDF: the composed export for a structured sheet; a legacy text
   // sheet, which has no structure to compose, still prints as it reads.
   const [exportOpen, setExportOpen] = useState(false);
-  const exportPdf = () => (sheet && !legacyOutput ? setExportOpen(true) : window.print());
+  const exportPdf = () =>
+    sheet && !legacyOutput ? setExportOpen(true) : printNamed(exportFileName(firstLine(activeSettings.notes) || "Study sheet"));
+
+  // The tab carries the topic while a sheet is open, so a Save as PDF the
+  // browser offers from it — Ctrl+P, a phone's share sheet — is named for the
+  // topic rather than for the app.
+  const pageTitle = sheet || legacyOutput ? sheet?.topic?.trim() || firstLine(activeSettings.notes) || null : null;
+  useEffect(() => {
+    if (!pageTitle) return;
+    const previous = document.title;
+    document.title = `${pageTitle} · StudyBuddy`;
+    return () => {
+      document.title = previous;
+    };
+  }, [pageTitle]);
   const exportContext = useMemo(
     () => ({
       topic: activeSettings.notes,
@@ -1172,6 +1246,7 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
     setLegacyOutput("");
     setNotes("");
     setDeckSaved(false);
+    setFullDeck(IDLE_FULL_DECK);
     setSheetIncomplete(false);
     setSavedSheetId(null);
     setGenerationId((id) => id + 1);
@@ -1608,6 +1683,7 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
                 key="finish"
                 topic={sheet?.topic?.trim() || firstLine(activeSettings.notes) || "this sheet"}
                 deck={deck}
+                fullDeck={fullDeckAction}
                 onPractice={() => practiceInQBank()}
                 onExport={exportPdf}
                 onShare={handleShare}

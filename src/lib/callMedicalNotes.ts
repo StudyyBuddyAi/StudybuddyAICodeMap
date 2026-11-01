@@ -43,7 +43,7 @@ export interface MedicalNotesParams {
   // Entitlement fields kept for backwards compatibility: the medical-notes
   // edge function now derives identity/entitlement from the verified JWT +
   // profiles and IGNORES these values. Keep the fields so existing callers
-  // (SheetGenerator, FlashcardsGenerator) still compile and send them harmlessly.
+  // (SheetGenerator, deck-request) still compile and send them harmlessly.
   userId?: string | null;
   isAnonymous?: boolean;
   isPro?: boolean;

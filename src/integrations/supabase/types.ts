@@ -50,6 +50,7 @@ export type Database = {
           interval_days: number
           is_leech: boolean
           lapses: number
+          origin: "sheet" | "qbank" | null
           last_reviewed_at: string | null
           learning_steps: number
           question: string
@@ -74,6 +75,7 @@ export type Database = {
           interval_days?: number
           is_leech?: boolean
           lapses?: number
+          origin?: "sheet" | "qbank" | null
           last_reviewed_at?: string | null
           learning_steps?: number
           question: string
@@ -98,6 +100,7 @@ export type Database = {
           interval_days?: number
           is_leech?: boolean
           lapses?: number
+          origin?: "sheet" | "qbank" | null
           last_reviewed_at?: string | null
           learning_steps?: number
           question?: string

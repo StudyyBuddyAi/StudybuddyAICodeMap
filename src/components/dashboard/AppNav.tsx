@@ -1,4 +1,3 @@
-import { useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import {
   LayoutDashboard,
@@ -9,16 +8,7 @@ import {
   FlaskConical,
   Settings,
   LogIn,
-  Menu,
-  X,
-  ChevronDown,
 } from "lucide-react";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
 import { displayName } from "@/lib/display-name";
@@ -37,43 +27,32 @@ interface AppNavProps {
   onOpenAccount: () => void;
 }
 
-const homeItem = { to: "/dashboard", label: "Home", icon: LayoutDashboard };
-const roadmapItem = { to: "/roadmap", label: "Roadmap", icon: MapIcon };
-const libraryItem = { to: "/library", label: "Library", icon: LibraryIcon };
+/**
+ * Every page, one button each, always in view. The study tools used to sit
+ * under a "Tools" menu and the whole bar folded into a hamburger on a phone,
+ * so reaching QBank from Flashcards took two taps and a guess; now it is one
+ * tap from anywhere, on any screen.
+ */
+export const NAV_ITEMS = [
+  { to: "/dashboard", label: "Home", icon: LayoutDashboard },
+  { to: "/roadmap", label: "Roadmap", icon: MapIcon },
+  { to: "/sheets", label: "Sheets", icon: FileText },
+  { to: "/flashcards", label: "Flashcards", icon: Layers },
+  { to: "/qbank", label: "QBank", icon: FlaskConical },
+  { to: "/library", label: "Library", icon: LibraryIcon },
+] as const;
 
-// The three study tools are on the dashboard already, so the bar groups them
-// under one "Tools" menu instead of spending three links on them.
-const toolItems = [
-  { to: "/sheets", label: "Sheets", icon: FileText, hint: "Structured study sheets" },
-  { to: "/flashcards", label: "Flashcards", icon: Layers, hint: "Spaced-repetition decks" },
-  { to: "/qbank", label: "QBank", icon: FlaskConical, hint: "USMLE-style questions" },
-];
-
-const NAV_LINK = "border-b px-3 pt-1.5 pb-[3px] text-sm font-medium transition-colors";
-
-const NavLinkItem = ({ to, label, active, onClick }: { to: string; label: string; active: boolean; onClick: () => void }) => (
-  <Link
-    to={to}
-    onClick={onClick}
-    aria-current={active ? "page" : undefined}
-    className={`${NAV_LINK} ${
-      active ? "border-[color:var(--accent)] text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"
-    }`}
-  >
-    {label}
-  </Link>
-);
+const FOCUS =
+  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[color:var(--bg)]";
+/** The page you are on is inked in; the rest stay quiet until hovered. */
+const ON = "bg-foreground text-background shadow-[0_1px_2px_rgba(15,23,42,0.18)]";
+const OFF = "text-muted-foreground hover:bg-secondary hover:text-foreground";
 
 const AppNav = ({ onNavigate, onOpenAuth, onOpenAccount }: AppNavProps) => {
   const { user, isAnonymous } = useAuth();
   const location = useLocation();
-  const [mobileOpen, setMobileOpen] = useState(false);
   const name = displayName(user);
   const signedIn = !!user && !isAnonymous;
-  // Signed in, the brand is the way home: it opens the dashboard, so a separate
-  // Home link is noise. Guests keep Home, and the brand returns them to the
-  // landing page.
-  const leadItems = signedIn ? [roadmapItem] : [homeItem, roadmapItem];
   const brandTo = signedIn ? "/dashboard" : "/";
 
   const userId = user?.id ?? null;
@@ -93,51 +72,41 @@ const AppNav = ({ onNavigate, onOpenAuth, onOpenAccount }: AppNavProps) => {
   const profile = profileQuery.data ?? null;
   const isPro =
     profile?.is_pro === true &&
-    (profile.pro_expires_at === null ||
-      new Date(profile.pro_expires_at) > new Date());
-
-  const handleNav = () => {
-    setMobileOpen(false);
-    if (onNavigate) onNavigate();
-  };
+    (profile.pro_expires_at === null || new Date(profile.pro_expires_at) > new Date());
 
   // A prefix only counts at a path-segment boundary, so /qbank/session keeps
-  // QBank lit but "/" doesn't match every route and light Home with it.
-  const isActive = (to: string) =>
-    location.pathname === to ||
-    (to !== "/" && location.pathname.startsWith(`${to}/`));
-  const toolsActive = toolItems.some((item) => isActive(item.to));
+  // QBank lit but "/" doesn't match every route.
+  const isActive = (to: string) => location.pathname === to || location.pathname.startsWith(`${to}/`);
 
   return (
-    <>
-      <header
-        className="sticky top-0 z-50 border-b"
-        style={{
-          background: "color-mix(in srgb, var(--bg) 82%, transparent)",
-          backdropFilter: "blur(14px)",
-          WebkitBackdropFilter: "blur(14px)",
-          borderColor: "var(--border)",
-          height: "var(--nav-h, 64px)",
-        }}
-      >
-        <div
-          className="flex items-center justify-between gap-3 h-full px-4 sm:gap-4 sm:px-6"
-          style={{ maxWidth: "var(--max-w, 1280px)", margin: "0 auto" }}
-        >
+    <header
+      data-app-nav
+      className="sticky top-0 z-50 border-b"
+      style={{
+        background: "color-mix(in srgb, var(--bg) 84%, transparent)",
+        backdropFilter: "blur(14px)",
+        WebkitBackdropFilter: "blur(14px)",
+        borderColor: "var(--border)",
+      }}
+    >
+      <div className="mx-auto px-4 sm:px-6" style={{ maxWidth: "var(--max-w, 1280px)" }}>
+        {/* 63px + the 1px border: the 64px --nav-h that sticky bars sit under.
+            Below lg the second row makes it taller (openmed-tokens.css). */}
+        <div className="flex h-14 items-center justify-between gap-3 lg:h-[63px] lg:gap-4">
           {/* Brand */}
           <Link
             to={brandTo}
-            onClick={handleNav}
+            onClick={onNavigate}
             aria-label={signedIn ? "StudyBuddy AI — go to dashboard" : "StudyBuddy AI — home"}
-            className="flex items-center gap-2.5 shrink-0 no-underline"
+            className={`flex shrink-0 items-center gap-2.5 rounded-lg no-underline ${FOCUS}`}
             style={{ color: "var(--fg)" }}
           >
-            <BrandMark size={34} />
+            <BrandMark size={32} />
             <span
               style={{
                 fontFamily: "var(--font-display)",
                 fontWeight: 500,
-                fontSize: 22,
+                fontSize: 21,
                 letterSpacing: "-0.02em",
                 lineHeight: 1,
                 color: "var(--fg)",
@@ -147,7 +116,7 @@ const AppNav = ({ onNavigate, onOpenAuth, onOpenAccount }: AppNavProps) => {
               <span style={{ fontStyle: "italic", color: "var(--accent)" }}> AI</span>
             </span>
             <span
-              className="hidden sm:inline"
+              className="hidden xl:inline"
               style={{
                 fontFamily: "var(--font-mono)",
                 fontSize: 10,
@@ -163,49 +132,35 @@ const AppNav = ({ onNavigate, onOpenAuth, onOpenAccount }: AppNavProps) => {
             </span>
           </Link>
 
-          {/* Desktop nav links */}
-          <nav className="hidden lg:flex items-center gap-1" aria-label="Main">
-            {leadItems.map((item) => (
-              <NavLinkItem key={item.to} to={item.to} label={item.label} active={isActive(item.to)} onClick={handleNav} />
-            ))}
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                className={`${NAV_LINK} inline-flex items-center gap-1 ${
-                  toolsActive ? "border-[color:var(--accent)] text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                Tools
-                <ChevronDown className="h-3.5 w-3.5" aria-hidden />
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="start" className="w-60">
-                {toolItems.map((item) => {
-                  const Icon = item.icon;
-                  return (
-                    <DropdownMenuItem key={item.to} asChild>
-                      <Link
-                        to={item.to}
-                        onClick={handleNav}
-                        aria-current={isActive(item.to) ? "page" : undefined}
-                        className="flex cursor-pointer items-start gap-3 py-2"
-                      >
-                        <Icon className="mt-0.5 h-4 w-4 text-primary" aria-hidden />
-                        <span>
-                          <span className="block text-sm font-medium text-foreground">{item.label}</span>
-                          <span className="block text-xs text-muted-foreground">{item.hint}</span>
-                        </span>
-                      </Link>
-                    </DropdownMenuItem>
-                  );
-                })}
-              </DropdownMenuContent>
-            </DropdownMenu>
-            <NavLinkItem to={libraryItem.to} label={libraryItem.label} active={isActive(libraryItem.to)} onClick={handleNav} />
+          {/* Pages — one row in the bar from lg up. */}
+          <nav aria-label="Main" className="hidden lg:block">
+            <ul className="flex items-center gap-0.5 rounded-full border border-border bg-[color:color-mix(in_srgb,var(--bg-elevated)_70%,transparent)] p-1">
+              {NAV_ITEMS.map(({ to, label, icon: Icon }) => {
+                const active = isActive(to);
+                return (
+                  <li key={to}>
+                    <Link
+                      to={to}
+                      onClick={onNavigate}
+                      aria-current={active ? "page" : undefined}
+                      className={`inline-flex h-8 items-center gap-1.5 rounded-full px-3 text-sm font-medium transition-colors duration-150 ${FOCUS} ${
+                        active ? ON : OFF
+                      }`}
+                    >
+                      <Icon className="h-4 w-4 shrink-0" aria-hidden />
+                      {label}
+                    </Link>
+                  </li>
+                );
+              })}
+            </ul>
           </nav>
 
-          {/* Desktop right actions */}
-          <div className="hidden lg:flex items-center gap-2 shrink-0">
+          {/* Account */}
+          <div className="flex shrink-0 items-center gap-2">
             {isPro && (
               <span
+                className="hidden sm:inline"
                 style={{
                   fontFamily: "var(--font-mono)",
                   fontSize: 10,
@@ -221,7 +176,22 @@ const AppNav = ({ onNavigate, onOpenAuth, onOpenAccount }: AppNavProps) => {
               </span>
             )}
 
-            {isAnonymous || !user ? (
+            {signedIn ? (
+              // One account button: Go Pro, theme and sign out live in Settings.
+              <button
+                type="button"
+                onClick={onOpenAccount}
+                title="Settings"
+                aria-label={`Settings · ${name}`}
+                className={`inline-flex h-9 items-center gap-2 rounded-full border border-border p-1 text-sm font-medium text-foreground transition-colors hover:bg-secondary xl:pe-3 ${FOCUS}`}
+              >
+                <span className="grid h-7 w-7 place-items-center rounded-full bg-primary text-xs font-semibold uppercase text-primary-foreground">
+                  {name.charAt(0)}
+                </span>
+                <span className="hidden max-w-[140px] truncate xl:inline">{name}</span>
+                <Settings className="hidden h-3.5 w-3.5 text-muted-foreground xl:block" aria-hidden />
+              </button>
+            ) : (
               <>
                 <ThemeToggle />
                 <button
@@ -229,158 +199,49 @@ const AppNav = ({ onNavigate, onOpenAuth, onOpenAccount }: AppNavProps) => {
                   onClick={onOpenAccount}
                   aria-label="Settings"
                   title="Settings"
-                  className="grid h-8 w-8 place-items-center rounded-md text-muted-foreground transition-colors hover:text-foreground"
+                  className={`hidden h-8 w-8 place-items-center rounded-md text-muted-foreground transition-colors hover:text-foreground sm:grid ${FOCUS}`}
                 >
                   <Settings className="h-4 w-4" />
                 </button>
                 <button
+                  type="button"
                   onClick={onOpenAuth}
-                  style={{
-                    fontFamily: "var(--font-sans)",
-                    fontSize: 14,
-                    fontWeight: 500,
-                    padding: "9px 14px",
-                    borderRadius: "var(--radius-md)",
-                    border: "1px solid transparent",
-                    background: "var(--fg)",
-                    color: "var(--bg)",
-                    cursor: "pointer",
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: 6,
-                  }}
+                  className={`inline-flex h-9 items-center gap-1.5 rounded-[var(--radius-md)] bg-foreground px-3.5 text-sm font-medium text-background transition-opacity hover:opacity-90 ${FOCUS}`}
                 >
-                  <LogIn style={{ width: 14, height: 14 }} />
+                  <LogIn className="h-3.5 w-3.5" aria-hidden />
                   Sign in
                 </button>
               </>
-            ) : (
-              // One account button: Go Pro, theme and sign out live in Settings.
-              <button
-                onClick={onOpenAccount}
-                title="Settings"
-                className="inline-flex h-9 items-center gap-2 rounded-full border border-border ps-1 pe-3 text-sm font-medium text-foreground transition-colors hover:bg-secondary"
-              >
-                <span className="grid h-7 w-7 place-items-center rounded-full bg-primary text-xs font-semibold uppercase text-primary-foreground">
-                  {name.charAt(0)}
-                </span>
-                <span className="max-w-[140px] truncate">{name}</span>
-                <Settings style={{ width: 14, height: 14 }} className="text-muted-foreground" />
-              </button>
             )}
-          </div>
-
-          {/* Mobile actions */}
-          <div className="flex lg:hidden items-center gap-2">
-            {(isAnonymous || !user) && <ThemeToggle />}
-            <button
-              onClick={() => setMobileOpen((v) => !v)}
-              aria-label={mobileOpen ? "Close menu" : "Open menu"}
-              aria-expanded={mobileOpen}
-              style={{
-                width: 36,
-                height: 36,
-                display: "inline-flex",
-                alignItems: "center",
-                justifyContent: "center",
-                background: "transparent",
-                border: "1px solid var(--border-strong)",
-                borderRadius: "var(--radius-pill)",
-                cursor: "pointer",
-                color: "var(--fg)",
-              }}
-            >
-              {mobileOpen ? (
-                <X style={{ width: 16, height: 16 }} />
-              ) : (
-                <Menu style={{ width: 16, height: 16 }} />
-              )}
-            </button>
           </div>
         </div>
 
-        {/* Mobile dropdown */}
-        {mobileOpen && (
-          <div
-            className="lg:hidden absolute left-0 right-0 top-full"
-            style={{
-              background: "var(--bg)",
-              borderBottom: "1px solid var(--border)",
-              boxShadow: "var(--shadow-2)",
-              zIndex: 49,
-            }}
-          >
-            <nav style={{ padding: "6px 16px 10px" }}>
-              {[...leadItems, ...toolItems.map((t) => ({ ...t, nested: true })), libraryItem].map((item, idx, all) => {
-                const active = isActive(item.to);
-                const Icon = item.icon;
-                const nested = "nested" in item;
-                const firstTool = nested && !("nested" in all[idx - 1]);
-                return (
-                  <div key={item.to}>
-                    {firstTool && (
-                      <p className="pt-3 pb-1 font-mono text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
-                        Tools
-                      </p>
-                    )}
-                    <Link
-                      to={item.to}
-                      onClick={handleNav}
-                      aria-current={active ? "page" : undefined}
-                      className={`flex items-center gap-2.5 border-b border-border py-3 text-[15px] font-medium ${
-                        nested ? "ps-3" : ""
-                      } ${active ? "text-[color:var(--accent)]" : "text-foreground"}`}
-                    >
-                      <Icon className="h-4 w-4" />
-                      {item.label}
-                    </Link>
-                  </div>
-                );
-              })}
-
-              <div style={{ display: "flex", gap: 8, padding: "12px 0 4px" }}>
-                {!isAnonymous && user ? (
-                  <button
-                    onClick={() => {
-                      onOpenAccount();
-                      setMobileOpen(false);
-                    }}
-                    className="flex h-11 flex-1 items-center justify-center gap-2 rounded-lg border border-border text-sm font-medium text-foreground"
+        {/* Pages below lg: a second row of the same buttons, all six in reach
+            at once — no menu to open. */}
+        <nav aria-label="Main" className="pb-2 lg:hidden">
+          <ul className="grid grid-cols-6 gap-0.5 rounded-2xl border border-border bg-[color:color-mix(in_srgb,var(--bg-elevated)_70%,transparent)] p-1">
+            {NAV_ITEMS.map(({ to, label, icon: Icon }) => {
+              const active = isActive(to);
+              return (
+                <li key={to} className="min-w-0">
+                  <Link
+                    to={to}
+                    onClick={onNavigate}
+                    aria-current={active ? "page" : undefined}
+                    className={`flex h-10 flex-col items-center justify-center gap-0.5 rounded-xl px-0.5 text-[10.5px] font-medium leading-none transition-colors duration-150 sm:flex-row sm:gap-1.5 sm:text-[13px] ${FOCUS} ${
+                      active ? ON : OFF
+                    }`}
                   >
-                    <Settings style={{ width: 14, height: 14 }} />
-                    Settings · {name}
-                  </button>
-                ) : (
-                  <>
-                    <button
-                      onClick={() => {
-                        onOpenAccount();
-                        setMobileOpen(false);
-                      }}
-                      className="flex h-11 items-center justify-center gap-2 rounded-lg border border-border px-4 text-sm font-medium text-foreground"
-                    >
-                      <Settings style={{ width: 14, height: 14 }} />
-                      Settings
-                    </button>
-                    <button
-                      onClick={() => {
-                        onOpenAuth();
-                        setMobileOpen(false);
-                      }}
-                      className="flex h-11 flex-1 items-center justify-center gap-2 rounded-lg bg-foreground text-sm font-medium text-background"
-                    >
-                      <LogIn style={{ width: 14, height: 14 }} />
-                      Sign in
-                    </button>
-                  </>
-                )}
-              </div>
-            </nav>
-          </div>
-        )}
-      </header>
-
-    </>
+                    <Icon className="h-4 w-4 shrink-0" aria-hidden />
+                    <span className="max-w-full truncate">{label}</span>
+                  </Link>
+                </li>
+              );
+            })}
+          </ul>
+        </nav>
+      </div>
+    </header>
   );
 };
 

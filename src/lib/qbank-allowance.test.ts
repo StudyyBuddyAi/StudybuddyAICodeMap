@@ -1,30 +1,29 @@
 import { describe, it, expect } from "vitest";
 import {
-  allowedSetSizes,
   examBlockFor,
   FREE_DAILY_QBANK_QUESTIONS,
+  largestSetSize,
 } from "../../supabase/functions/_shared/qbank-allowance.ts";
 
-const SIZES = [5, 10, 15, 20];
-
-describe("allowedSetSizes", () => {
-  it("offers every size to an unlimited account", () => {
-    expect(allowedSetSizes(null, SIZES)).toEqual(SIZES);
+describe("largestSetSize", () => {
+  it("gives an unlimited account the whole block", () => {
+    expect(largestSetSize(null, 20)).toBe(20);
   });
 
-  it("drops sizes the free allowance cannot cover", () => {
+  it("stops at what a free account has left", () => {
     expect(FREE_DAILY_QBANK_QUESTIONS).toBe(10);
-    expect(allowedSetSizes(10, SIZES)).toEqual([5, 10]);
+    expect(largestSetSize(10, 20)).toBe(10);
+    expect(largestSetSize(7, 20)).toBe(7);
+    expect(largestSetSize(3.6, 20)).toBe(3);
   });
 
-  it("offers what is left when it falls between the fixed sizes", () => {
-    expect(allowedSetSizes(7, SIZES)).toEqual([5, 7]);
-    expect(allowedSetSizes(3, SIZES)).toEqual([3]);
+  it("never goes past the block", () => {
+    expect(largestSetSize(25, 20)).toBe(20);
   });
 
-  it("offers nothing once the day is used up", () => {
-    expect(allowedSetSizes(0, SIZES)).toEqual([]);
-    expect(allowedSetSizes(-2, SIZES)).toEqual([]);
+  it("is zero once the day is used up", () => {
+    expect(largestSetSize(0, 20)).toBe(0);
+    expect(largestSetSize(-2, 20)).toBe(0);
   });
 });
 
