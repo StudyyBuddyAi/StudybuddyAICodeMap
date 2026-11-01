@@ -100,6 +100,14 @@ const DEFAULT_TENANT = "base";
 const DEFAULT_ROUTER_MODEL: CortiModel = "corti-s1-instant";
 const DEFAULT_VERIFIER_MODEL: CortiModel = "corti-s1-instant";
 
+/**
+ * Topic blueprints (qbank-blueprint.ts) get `corti-s1-instant` too, for the
+ * reason the writer does: `corti-s1` wrote the cleanest concept lists but took
+ * 110-183s and once reasoned through its whole budget and returned nothing, and
+ * a build runs in the background of a wave, inside the edge wall clock.
+ */
+const DEFAULT_BLUEPRINT_MODEL: CortiModel = "corti-s1-instant";
+
 export interface CortiConfig {
   clientId: string;
   clientSecret: string;
@@ -111,6 +119,8 @@ export interface CortiConfig {
   routerModel: CortiModel;
   /** The independent cold-answering probe. */
   verifierModel: CortiModel;
+  /** Topic blueprints: a topic's distinct concepts, built once and shared. */
+  blueprintModel: CortiModel;
 }
 
 /** Narrows an env value onto the model enum, or falls back. */
@@ -142,7 +152,7 @@ export function cortiConfigFromEnv(): CortiConfig {
   const region: CortiRegion = rawRegion === "us" ? "us" : DEFAULT_REGION;
 
   // Each model is an env override with its own default, so a model regression
-  // on any of the three is an env rollback rather than a redeploy.
+  // on any of the four is an env rollback rather than a redeploy.
   return {
     clientId,
     clientSecret,
@@ -151,6 +161,7 @@ export function cortiConfigFromEnv(): CortiConfig {
     model: asCortiModel(Deno.env.get("CORTI_MODEL"), DEFAULT_MODEL),
     routerModel: asCortiModel(Deno.env.get("CORTI_ROUTER_MODEL"), DEFAULT_ROUTER_MODEL),
     verifierModel: asCortiModel(Deno.env.get("CORTI_VERIFIER_MODEL"), DEFAULT_VERIFIER_MODEL),
+    blueprintModel: asCortiModel(Deno.env.get("CORTI_BLUEPRINT_MODEL"), DEFAULT_BLUEPRINT_MODEL),
   };
 }
 

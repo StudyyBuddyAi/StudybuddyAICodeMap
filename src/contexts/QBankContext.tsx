@@ -16,6 +16,7 @@ import type {
   PlayMode,
   HighlightRange,
   SessionAnnotations,
+  TopicCoverage,
 } from "@/lib/qbank-types";
 import { NOTE_MAX_LENGTH } from "@/lib/qbank-types";
 import {
@@ -763,6 +764,8 @@ export const QBankProvider = ({ children }: { children: ReactNode }) => {
       setTarget: number;
       startIndex: number;
       covered: string[];
+      /** Resuming: the blueprint coverage the earlier waves reported. */
+      coverage?: TopicCoverage[];
       system: string | null;
       systemName: string | null;
       challenge: ChallengeLevel;
@@ -791,6 +794,7 @@ export const QBankProvider = ({ children }: { children: ReactNode }) => {
         examMode: cfg.examMode,
         nextIndex: cfg.startIndex,
         covered: cfg.covered,
+        ...(cfg.coverage?.length ? { coverage: cfg.coverage } : {}),
       };
 
       setGeneration({
@@ -818,6 +822,7 @@ export const QBankProvider = ({ children }: { children: ReactNode }) => {
         signal: controller.signal,
         startIndex: cfg.startIndex,
         alreadyCovered: cfg.covered,
+        coverage: cfg.coverage,
         system: cfg.system,
         challenge: cfg.challenge,
         examMode: cfg.examMode,
@@ -865,6 +870,7 @@ export const QBankProvider = ({ children }: { children: ReactNode }) => {
           meta.systemName = progress.systemName ?? meta.systemName;
           meta.nextIndex = progress.nextIndex;
           meta.covered = progress.covered;
+          if (progress.coverage.length) meta.coverage = progress.coverage;
           if (progress.systems) meta.systems = progress.systems;
           setGeneration((prev) =>
             prev
@@ -1080,6 +1086,7 @@ export const QBankProvider = ({ children }: { children: ReactNode }) => {
         setTarget: meta.target,
         startIndex: meta.nextIndex,
         covered: meta.covered,
+        coverage: meta.coverage,
         system: meta.system,
         systemName: meta.systemName,
         // A set written before these fields existed resumes at the defaults,

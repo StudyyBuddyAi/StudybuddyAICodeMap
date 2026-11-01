@@ -14,6 +14,7 @@ import {
   type SystemKey,
 } from "./qbank-prompt.ts";
 import { checkBatch, type QaResult } from "./qbank-qa.ts";
+import { topicKey } from "./qbank-repetition.ts";
 import type { FlagCheckResult, VerificationResult } from "./qbank-verify.ts";
 
 /**
@@ -295,6 +296,20 @@ export interface PersistInput {
    * finds its way into the session. Minted by the client, never by the model.
    */
   generationId: string;
+  /**
+   * How this wave drew on the student's history (qbank-memory.ts), stored per
+   * row so the repetition policy can be measured later. Absent from callers
+   * that predate it, the eval scripts among them.
+   */
+  repetition?: {
+    version: string;
+    /** "unavailable" when history could not be read and the wave was written blind. */
+    memory: "ok" | "unavailable";
+    /** Do-not-re-test lines sent to the writer. */
+    ledger: number;
+    /** Ready blueprints the wave assigned from. */
+    blueprints: number;
+  };
 }
 
 export interface PreparedBatch {
@@ -359,6 +374,7 @@ function buildRow(
   verification: VerificationResult[],
   flagCheck: FlagCheckResult | null = null
 ) {
+  const row = input.plan.questions.find((p) => p.index === question.index);
   return {
     // The item's own system on a mixed set, so a cross-system set files each
     // question where it belongs.
@@ -398,9 +414,8 @@ function buildRow(
       examTrack: question.examTrack,
       examTrackReported: question.examTrackReported,
       index: question.index,
-      plannedAnswer: input.plan.questions.find((p) => p.index === question.index)?.answerLetter ?? null,
-      plannedReasoningOrder:
-        input.plan.questions.find((p) => p.index === question.index)?.reasoningOrder ?? null,
+      plannedAnswer: row?.answerLetter ?? null,
+      plannedReasoningOrder: row?.reasoningOrder ?? null,
       reasoningChain: question.reasoningChain,
       selfCheck: question.selfCheck,
       reviewerFlag: question.reviewerFlag,
@@ -414,6 +429,21 @@ function buildRow(
       // The fact check on a writer flag, when the item carried one and was
       // still in play. Null otherwise — not "passed": nothing was checked.
       flagCheck,
+      // What the next set on this topic reads back (qbank_topic_history): the
+      // key the item is matched under, and what it was assigned to turn on.
+      // The key falls back to what was typed for a caller that set none.
+      topicKey: row?.topicKey ?? topicKey(question.focus ?? input.topic),
+      canonicalTopic: row?.canonical ?? null,
+      concept: row?.assignment
+        ? {
+            mode: row.assignment.mode,
+            id: row.assignment.conceptId,
+            blueprint: row.assignment.blueprintId,
+            revisitOf: row.assignment.revisitOf,
+            text: row.assignment.text,
+          }
+        : null,
+      repetition: input.repetition ?? null,
       generatedAt: new Date().toISOString(),
     },
   };

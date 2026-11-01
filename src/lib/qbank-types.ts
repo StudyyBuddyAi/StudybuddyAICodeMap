@@ -96,6 +96,31 @@ export interface SessionGeneration {
   examMode: ExamMode;
   nextIndex: number;
   covered: string[];
+  /**
+   * How much of each topic's concept blueprint the student has met, as of the
+   * set's latest wave — what tells the summary page a topic is used up and
+   * which broader topic to offer. Absent until a topic has a blueprint, and on
+   * every set saved before blueprints existed.
+   */
+  coverage?: TopicCoverage[];
+}
+
+/**
+ * One topic's standing against its blueprint, as qbank-generate reports it in
+ * waveComplete (supabase/functions/_shared/qbank-repetition.ts Coverage).
+ */
+export interface TopicCoverage {
+  /** The topic's canonical name. */
+  topic: string;
+  examTrack: ExamMode;
+  /** Concepts in the topic's blueprint. */
+  total: number;
+  /** Concepts the student has been asked, counting this set. */
+  covered: number;
+  /** Nothing in the blueprint left that the student has not met. */
+  exhausted: boolean;
+  /** A topic that contains this one, to move on to. */
+  broader: string | null;
 }
 
 /**

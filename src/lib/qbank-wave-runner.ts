@@ -2,7 +2,8 @@ import { callQbankGenerate } from "./callQbankGenerate";
 import { parsePartialQuestions } from "./parse-partial-questions";
 import { DISPUTED_REASON } from "./qbank-rule-labels";
 import { firstItemStage, type WritingStage } from "./qbank-writing-stage";
-import type { GeneratedQuestionDraft } from "./qbank-types";
+import type { GeneratedQuestionDraft, TopicCoverage } from "./qbank-types";
+import { mergeCoverage, parseCoverage } from "./qbank-coverage";
 
 /**
  * Turns a target number of questions into a sequence of generation waves.
@@ -113,6 +114,12 @@ export interface BlueprintRow {
   index: number;
   reasoningOrder: string;
   focus: string | null;
+  /**
+   * What the student's history made of the row: a concept they have not met,
+   * a revisit of one they missed, or a re-test of one met long ago. Null when
+   * the writer chose freely. Never the concept itself, which the server keeps.
+   */
+  mode: "new" | "revisit" | "retest" | null;
 }
 
 /** Where the writer is with the wave's first question. Never derived from content. */
@@ -142,6 +149,8 @@ export interface GenerationProgress {
   covered: string[];
   /** A mixed set: each topic's system, once routed, for the waves after. */
   systems: (string | null)[] | null;
+  /** Each topic's blueprint coverage as of the latest wave that reported it. */
+  coverage: TopicCoverage[];
 }
 
 export interface GenerationOutcome {
@@ -200,6 +209,8 @@ export interface RunGenerationOptions {
   alreadyCovered?: string[];
   /** Resuming: the system the set was routed to, so the brief does not change. */
   system?: string | null;
+  /** Resuming: coverage the earlier waves reported, so a topic they reported is not forgotten. */
+  coverage?: TopicCoverage[];
   /** The reasoning-order mix the student asked for. Echoed on every wave. */
   challenge?: string;
   /** The exam the set is for. Echoed on every wave, like `challenge`. */
@@ -234,7 +245,12 @@ interface WaveResult {
   completed: boolean;
   /** Refused because the account's daily allowance is used up. Always fatal. */
   capReached: boolean;
+  /** Blueprint coverage the wave reported; empty for a topic without a blueprint. */
+  coverage: TopicCoverage[];
 }
+
+const PLAN_MODES = new Set(["new", "revisit", "retest"]);
+
 
 /** Shown when the server cannot write this set at all; the cause goes to the console. */
 const GENERATOR_UNAVAILABLE =
@@ -287,6 +303,7 @@ async function runWave(
     fatal: null,
     completed: false,
     capReached: false,
+    coverage: [],
   };
 
   // A stall watchdog layered over the caller's signal, so a hung upstream ends
@@ -398,6 +415,7 @@ async function runWave(
                   index: Number(row.index) || 0,
                   reasoningOrder: typeof row.reasoningOrder === "string" ? row.reasoningOrder : "",
                   focus: typeof row.focus === "string" ? row.focus : null,
+                  mode: PLAN_MODES.has(row.mode as string) ? (row.mode as BlueprintRow["mode"]) : null,
                 }))
               : undefined;
             const focuses = Array.isArray(meta.focuses)
@@ -459,6 +477,7 @@ async function runWave(
               result.systems = summary.systems.map((x) => (typeof x === "string" ? x : null));
             }
             if (typeof summary.streamError === "string") result.streamError = summary.streamError;
+            result.coverage = parseCoverage(summary.coverage);
 
             /**
              * A wave that wrote questions and could not commit a single one.
@@ -579,6 +598,7 @@ export async function runQbankGeneration(
   let systemName: string | null = null;
   let lastError: string | null = null;
   const covered = new Set<string>(opts.alreadyCovered ?? []);
+  let coverage: TopicCoverage[] = opts.coverage ?? [];
   // A resumed set was routed by a server that already spoke this protocol.
   let serverProven = opts.system != null;
 
@@ -657,6 +677,7 @@ export async function runQbankGeneration(
     systemName = wave.systemName ?? systemName;
     if (wave.streamError) lastError = wave.streamError;
     wave.subtopics.forEach((s) => covered.add(s));
+    coverage = mergeCoverage(coverage, wave.coverage);
 
     delivered += wave.playable;
     heldBack += wave.heldBack;
@@ -678,6 +699,7 @@ export async function runQbankGeneration(
       nextIndex,
       covered: [...covered],
       systems,
+      coverage,
     });
   }
 

@@ -92,6 +92,7 @@ import {
 } from "./qbank-systems.ts";
 export { SYSTEM_NAMES, SYSTEM_KEYS, FAMILY_KEYS, isFamily };
 export type { SystemKey, FamilyKey };
+import type { LedgerSection, RowAssignment } from "./qbank-repetition.ts";
 
 export type OptionLetter = "a" | "b" | "c" | "d" | "e";
 export type ReasoningOrder = "1st" | "2nd" | "3rd";
@@ -1124,6 +1125,20 @@ export interface PlannedQuestion {
    */
   focus?: string;
   system?: SystemKey;
+  /**
+   * The row's topic under its canonical name, and that name's key — what the
+   * row is stored and later matched under, so "DKA" today and "diabetic
+   * ketoacidosis" next week are one topic. Set by the handler after the plan
+   * is built; buildBatchPlan never sets them.
+   */
+  topicKey?: string;
+  canonical?: string;
+  /**
+   * What this row's item must turn on, when the student's history or the
+   * topic's blueprint decided it (qbank-repetition.ts). Absent leaves the
+   * choice to the writer, as every row was before.
+   */
+  assignment?: RowAssignment;
 }
 
 /** One topic of a mixed set and the system it routed to. */
@@ -1391,6 +1406,94 @@ export interface UserMessageInput {
   plan: BatchPlan;
   /** Subtopics already generated in this session — v13's duplication guard. */
   avoidSubtopics?: string[];
+  /**
+   * What the student has already been given on the wave's topics, in earlier
+   * sets or earlier in this one, as buildLedger lays it out. The writer must
+   * not test any listed fact again.
+   */
+  ledger?: LedgerSection[];
+}
+
+const clipText = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1).trimEnd()}…` : s);
+
+/** What an assigned row's item turns on, appended to its plan row. Empty for an unassigned row. */
+function assignmentSuffix(q: PlannedQuestion): string {
+  const a = q.assignment;
+  if (!a) return "";
+  const earlier = a.earlierLeadIn
+    ? ` (earlier question: "${clipText(a.earlierLeadIn.replace(/\s+/g, " ").trim(), 200)}")`
+    : "";
+  if (a.mode === "revisit") return ` — revisit: ${a.text}${earlier}`;
+  if (a.mode === "retest") return ` — re-test: ${a.text}${earlier}`;
+  return ` — concept: ${a.text}`;
+}
+
+/**
+ * The instruction for assigned rows, said once, after the plan. Empty when no
+ * row is assigned, so an unassigned request renders byte for byte as it always
+ * has. The first paragraph is the wording the blueprint arm of the repetition
+ * study was measured with (8% repeats, every item on-topic).
+ */
+function assignmentNote(plan: BatchPlan): string {
+  const modes = new Set(plan.questions.map((q) => q.assignment?.mode).filter(Boolean));
+  if (modes.size === 0) return "";
+  const every = plan.questions.every((q) => q.assignment);
+  const parts = [
+    `${every ? "Each plan row names the concept its item must turn on." : "Where a plan row names a concept, that is what its item must turn on."} Write the item so its correct answer depends on that concept and not on any other row's; choose the patient, the lead-in direction and the distractors yourself. The concept is what the item tests, not the wording of its key: the options stay short, parallel and of equal length as the rules require.`,
+  ];
+  if (modes.has("revisit") || modes.has("retest")) {
+    const why = [
+      modes.has("revisit") && "A revisit row is a concept this student answered wrongly in an earlier session.",
+      modes.has("retest") && "A re-test row is a concept this student met some time ago.",
+    ]
+      .filter(Boolean)
+      .join(" ");
+    parts.push(
+      `${why} Test the same concept again, but come at it from a different direction than the question quoted on its row, the way the exam would: if that asked for the treatment, ask what to monitor once it is started or which patient it would be wrong for; if it asked for the diagnosis, ask for the finding or the test that settles it; if it asked for a mechanism, ask for the finding or the consequence the mechanism explains. Use a new patient and never reuse the quoted lead-in, so the item is answered from understanding rather than from memory of the earlier one.`
+    );
+  }
+  return `\n\n${parts.join("\n\n")}`;
+}
+
+/**
+ * The do-not-re-test list. Empty without history, so a first set renders as
+ * it always has.
+ *
+ * The opening and the "still a repeat" rule are the fact-ledger arm of the
+ * repetition study, which cut repeats from 67% to 12%. That arm also drifted
+ * once the familiar facets were used up — into the general physiology under a
+ * topic, or a neighbouring disease — so "squarely within the topic" is now
+ * spelled out.
+ *
+ * Beside assigned rows the list can name a row's own concept, when an earlier
+ * item drifted onto it. The row wins: the student met it by accident, and the
+ * row is what was decided.
+ */
+function ledgerBlock(ledger: LedgerSection[], mixed: boolean, assigned: boolean): string {
+  const sections = ledger.filter((s) => s.entries.length > 0);
+  if (sections.length === 0) return "";
+  const lines = (s: LedgerSection) => s.entries.map((e) => `- ${e.subtopic}: ${e.fact}`).join("\n");
+  const grouped = mixed || sections.length > 1;
+  const body = grouped ? sections.map((s) => `### ${s.topic}\n${lines(s)}`).join("\n\n") : lines(sections[0]);
+  return `
+## Already asked of this student — do not re-test
+
+This student has already been given these items on ${grouped ? "these topics" : "this topic"}, in earlier sessions or earlier in this set. Each line is the fact the item turned on.
+${body}
+
+Every item in this batch must turn on a fact, mechanism or decision that is NOT on this list. The same fact in a new patient, a new vignette or a reversed lead-in is still a repeat. When the topic's most familiar facets are used up, go to other high-yield facets that are still squarely within the topic — its own mechanism, presentation, diagnosis, complications and treatment, not the general physiology beneath it, a neighbouring disease, or obscure detail just to be new.${
+    assigned
+      ? " The one exception is a concept a plan row names: write it as the row asks, from a direction the listed item did not take — and never let a row's item slide onto a different fact from this list."
+      : ""
+  }
+`;
+}
+
+/** The v13 avoid list, minus subtopics the ledger already names. */
+function avoidList(avoidSubtopics: string[], ledger: LedgerSection[]): string {
+  const named = new Set(ledger.flatMap((s) => s.entries.map((e) => e.subtopic.toLowerCase())));
+  const rest = avoidSubtopics.filter((s) => !named.has(s.toLowerCase()));
+  return rest.length ? `\n## Already covered — do not duplicate\n${rest.map((s) => `- ${s}`).join("\n")}\n` : "";
 }
 
 /**
@@ -1428,7 +1531,7 @@ ${brief}`;
  * every topic listed. A wave of five holds at most five systems, so at most
  * five briefs — the same order of size as mixed mode's two.
  */
-function buildMixedTopicMessage(plan: BatchPlan, avoidSubtopics: string[]): string {
+function buildMixedTopicMessage(plan: BatchPlan, avoidSubtopics: string[], ledger: LedgerSection[]): string {
   const examMixed = plan.examMode === "mixed";
   const systems = [...new Set(plan.questions.map((q) => q.system ?? plan.system))];
   const tracks: ExamTrack[] = examMixed ? ["step1", "step2ck"] : [plan.examMode === "step2ck" ? "step2ck" : "step1"];
@@ -1445,8 +1548,8 @@ function buildMixedTopicMessage(plan: BatchPlan, avoidSubtopics: string[]): stri
     .map((q) => {
       const where = `focus: ${q.focus ?? "any of the topics"} (${SYSTEM_NAMES[q.system ?? plan.system]})`;
       return examMixed
-        ? `- Question ${q.index}: ${EXAM_TRACK_NAMES[q.examTrack]} item, reasoning order ${q.reasoningOrder} — ${where}`
-        : `- Question ${q.index}: reasoning order ${q.reasoningOrder} — ${where}`;
+        ? `- Question ${q.index}: ${EXAM_TRACK_NAMES[q.examTrack]} item, reasoning order ${q.reasoningOrder} — ${where}${assignmentSuffix(q)}`
+        : `- Question ${q.index}: reasoning order ${q.reasoningOrder} — ${where}${assignmentSuffix(q)}`;
     })
     .join("\n");
 
@@ -1454,9 +1557,7 @@ function buildMixedTopicMessage(plan: BatchPlan, avoidSubtopics: string[]): stri
     ? "\nEach plan row names its track. Write a Step 1 item to the Step 1 brief and a Step 2 CK item to the Step 2 CK brief, and set examTrack to the track the row assigned.\n"
     : "";
 
-  const avoidBlock = avoidSubtopics.length
-    ? `\n## Already covered — do not duplicate\n${avoidSubtopics.map((s) => `- ${s}`).join("\n")}\n`
-    : "";
+  const avoidBlock = avoidList(avoidSubtopics, ledger);
 
   const topics = (plan.focuses ?? []).map((f, i) => `${i + 1}. ${f.topic} (${SYSTEM_NAMES[f.system]})`).join("\n");
 
@@ -1466,10 +1567,10 @@ function buildMixedTopicMessage(plan: BatchPlan, avoidSubtopics: string[]): stri
 
 ${planRows}
 
-Write each item at the reasoning order assigned to it, on the topic its row names, within that topic's system and brief, and put its correct answer on whichever option is correct.
+Write each item at the reasoning order assigned to it, on the topic its row names, within that topic's system and brief, and put its correct answer on whichever option is correct.${assignmentNote(plan)}
 ${trackNote}
 ${CHALLENGE_BRIEFS[plan.challenge]}
-${avoidBlock}
+${avoidBlock}${ledgerBlock(ledger, true, plan.questions.some((q) => q.assignment))}
 ## Requested topics — a mixed set
 
 ${topics}
@@ -1484,8 +1585,8 @@ This set mixes these topics on purpose, so the student has to switch between the
  * A step1 request produces exactly the message it did before modes existed.
  * Mixed injects both briefs and labels each plan row with its track.
  */
-export function buildUserMessage({ topic, plan, avoidSubtopics = [] }: UserMessageInput): string {
-  if (plan.focuses && plan.focuses.length >= 2) return buildMixedTopicMessage(plan, avoidSubtopics);
+export function buildUserMessage({ topic, plan, avoidSubtopics = [], ledger = [] }: UserMessageInput): string {
+  if (plan.focuses && plan.focuses.length >= 2) return buildMixedTopicMessage(plan, avoidSubtopics, ledger);
   const mixed = plan.examMode === "mixed";
 
   // Answer letters are deliberately NOT sent. They are applied after the fact
@@ -1499,8 +1600,8 @@ export function buildUserMessage({ topic, plan, avoidSubtopics = [] }: UserMessa
   const planRows = plan.questions
     .map((q) =>
       mixed
-        ? `- Question ${q.index}: ${EXAM_TRACK_NAMES[q.examTrack]} item, reasoning order ${q.reasoningOrder}`
-        : `- Question ${q.index}: reasoning order ${q.reasoningOrder}`
+        ? `- Question ${q.index}: ${EXAM_TRACK_NAMES[q.examTrack]} item, reasoning order ${q.reasoningOrder}${assignmentSuffix(q)}`
+        : `- Question ${q.index}: reasoning order ${q.reasoningOrder}${assignmentSuffix(q)}`
     )
     .join("\n");
 
@@ -1514,9 +1615,7 @@ ${systemBrief(plan, "step2ck", " (Step 2 CK track)")}`
     ? "\nEach plan row names its track. Write a Step 1 item to the Step 1 brief and a Step 2 CK item to the Step 2 CK brief, and set examTrack to the track the row assigned.\n"
     : "";
 
-  const avoidBlock = avoidSubtopics.length
-    ? `\n## Already covered — do not duplicate\n${avoidSubtopics.map((s) => `- ${s}`).join("\n")}\n`
-    : "";
+  const avoidBlock = avoidList(avoidSubtopics, ledger);
 
   return `${briefs}
 
@@ -1524,10 +1623,10 @@ ${systemBrief(plan, "step2ck", " (Step 2 CK track)")}`
 
 ${planRows}
 
-Write each item at the reasoning order assigned to it, and put its correct answer on whichever option is correct.
+Write each item at the reasoning order assigned to it, and put its correct answer on whichever option is correct.${assignmentNote(plan)}
 ${trackNote}
 ${CHALLENGE_BRIEFS[plan.challenge]}
-${avoidBlock}
+${avoidBlock}${ledgerBlock(ledger, false, plan.questions.some((q) => q.assignment))}
 ## Requested topic
 
 ${topic}
@@ -1543,13 +1642,20 @@ Generate ${plan.questions.length} questions on this topic, within the ${plan.sys
  * prompt is assembled, and a wrong system means the wrong drift traps and the
  * wrong overlap rules for the whole batch. The thirteen systems serve both
  * exams, so the router is mode-blind.
+ *
+ * It also names the topic canonically, since it is already reading it: what a
+ * student typed is how they phrased it today, and "DKA" this week and
+ * "diabetic ketoacidosis" next week have to meet as one topic for their
+ * history and their blueprint to follow them (qbank-repetition.ts).
  */
 export const SYSTEM_ROUTER_PROMPT = `You classify a medical study topic into exactly one USMLE organ system.
 
 Systems, by key:
 ${SYSTEM_KEYS.map((k) => `- ${k}: ${SYSTEM_NAMES[k]}`).join("\n")}
 
-Return ONE JSON object: {"system": "<key>", "confidence": <0-1>}
+Return ONE JSON object: {"system": "<key>", "confidence": <0-1>, "canonical": "<topic name>"}
+
+"canonical" is the topic's standard name in English, as a textbook would title it: expand abbreviations, correct the spelling, and drop words about studying ("high-yield", "for Step 1", "questions on"). Keep the student's scope — name the same topic, never a broader or a narrower one: "DKA" is "Diabetic ketoacidosis", "warfarin" is "Warfarin", "HFpEF" is "Heart failure with preserved ejection fraction", "why do I keep mixing up the demyelinating diseases" is "Demyelinating diseases".
 
 Use the key exactly as written above. Communication, ethics, consent, capacity, confidentiality, breaking bad news, professionalism and patient safety belong to social_sciences; statistics, test characteristics, study design, bias and epidemiology belong to biostats_epi — even when the example in the topic is a disease. Otherwise pick the system whose content outline the topic primarily belongs to, not one it merely touches — a topic about anaemia of chronic kidney disease is heme_onc if it is about the anaemia and renal if it is about the kidney. If the topic is too vague to place, return the closest system with a low confidence rather than refusing.
 
