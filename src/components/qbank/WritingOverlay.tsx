@@ -5,6 +5,7 @@ import type { ExamTarget } from "@/lib/qbank-suggestions";
 import { EXAM_THEME, tipsFor } from "@/lib/qbank-exam-theme";
 import { WRITING_STAGES, stageIndex, type WritingStage } from "@/lib/qbank-writing-stage";
 import LabLightning from "./LabLightning";
+import { memoryNote } from "@/lib/qbank-coverage";
 
 /** A first question runs to roughly this many characters of JSON. */
 const TYPICAL_ITEM_CHARS = 4500;
@@ -66,6 +67,7 @@ const WritingOverlay = ({
 
   const blueprint = generation?.blueprint ?? [];
   const focuses = generation?.focuses ?? (topics.length === 1 ? [{ topic: topics[0], systemName: generation?.systemName ?? "" }] : []);
+  const fromHistory = memoryNote(blueprint);
 
   return (
     <div
@@ -146,6 +148,7 @@ const WritingOverlay = ({
                   .join(" · ")}
               </p>
             )}
+            {fromHistory && <p className="mt-1.5 text-xs text-muted-foreground">{fromHistory}</p>}
           </div>
         )}
 

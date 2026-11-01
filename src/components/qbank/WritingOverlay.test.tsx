@@ -14,8 +14,8 @@ const gen = (over: Partial<GenerationState> = {}): GenerationState => ({
   error: null,
   capReached: false,
   blueprint: [
-    { index: 1, reasoningOrder: "2nd", focus: "Heart failure" },
-    { index: 2, reasoningOrder: "3rd", focus: "SPIKES" },
+    { index: 1, reasoningOrder: "2nd", focus: "Heart failure", mode: null },
+    { index: 2, reasoningOrder: "3rd", focus: "SPIKES", mode: null },
   ],
   focuses: [
     { topic: "Heart failure", systemName: "Cardiovascular" },
@@ -40,6 +40,20 @@ describe("WritingOverlay", () => {
     expect(dialog).toHaveTextContent("Communication & Ethics");
     expect(dialog).toHaveTextContent(/Step 2 CK tip/);
     expect(dialog).toHaveTextContent(/high, low or normal/i);
+    // A set the writer planned freely says nothing about history.
+    expect(dialog).not.toHaveTextContent(/Built from your history/);
+  });
+
+  it("says what the student's history made of the first wave", () => {
+    const blueprint = [
+      { index: 1, reasoningOrder: "2nd", focus: null, mode: "new" as const },
+      { index: 2, reasoningOrder: "1st", focus: null, mode: "revisit" as const },
+      { index: 3, reasoningOrder: "3rd", focus: null, mode: "new" as const },
+    ];
+    render(<WritingOverlay open target="step1" generation={gen({ blueprint, focuses: null })} elapsed={3} size={5} topics={["warfarin"]} onCancel={vi.fn()} />);
+    expect(screen.getByRole("dialog")).toHaveTextContent(
+      "Built from your history: 2 new concepts, a concept you missed before, asked a new way."
+    );
   });
 
   it("renders nothing when closed, and cancels on request", () => {

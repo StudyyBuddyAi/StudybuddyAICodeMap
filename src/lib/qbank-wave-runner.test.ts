@@ -87,6 +87,8 @@ interface WaveSpec {
   insertError?: string;
   /** A mixed set's per-topic systems, as the server routed them. */
   systems?: string[];
+  /** Blueprint coverage, as the summary frame carries it. */
+  coverage?: unknown;
 }
 
 function waveFrames(spec: WaveSpec, startIndex: number): unknown[] {
@@ -156,6 +158,7 @@ function waveFrames(spec: WaveSpec, startIndex: number): unknown[] {
           system: spec.system ?? "renal",
           systemName: spec.systemName ?? "Renal",
           subtopics: spec.subtopics ?? [],
+          ...(spec.coverage !== undefined ? { coverage: spec.coverage } : {}),
           streamError: null,
         },
       },
@@ -266,9 +269,69 @@ describe("runQbankGeneration — the waiting screen's signals", () => {
       onWriting: (w) => stages.push(w.stage),
     });
 
-    expect(metas[0]).toEqual({ systemName: "Renal & Urinary", model: "m", blueprint: [{ index: 1, reasoningOrder: "2nd", focus: null }] });
+    expect(metas[0]).toEqual({ systemName: "Renal & Urinary", model: "m", blueprint: [{ index: 1, reasoningOrder: "2nd", focus: null, mode: null }] });
     expect(JSON.stringify(metas)).not.toContain("answerLetter");
     expect([...new Set(stages)]).toEqual(["planning", "reasoning", "case", "question", "explanation", "checking"]);
+  });
+});
+
+describe("runQbankGeneration — topic memory", () => {
+  it("passes on what history made of each row, and never more", async () => {
+    const metas: { blueprint?: unknown }[] = [];
+    await runQbankGeneration({
+      ...baseOpts(),
+      target: 1,
+      call: async () =>
+        sseResponse([
+          {
+            __meta: {
+              system: "renal", systemName: "Renal & Urinary", model: "m", startIndex: 1,
+              plan: [
+                { index: 1, reasoningOrder: "2nd", mode: "revisit" },
+                { index: 2, reasoningOrder: "1st", mode: "concept text that must not travel" },
+              ],
+            },
+          },
+          { __meta: { questionReady: { id: "q1", index: 1, blocked: false, difficulty: "Medium", reasoningOrder: "2nd", agreed: true } } },
+          { __meta: { waveComplete: { requested: 1, persisted: 1, insertFailures: 0, system: "renal", systemName: "Renal & Urinary", subtopics: [] } } },
+        ]),
+      onMeta: (m) => metas.push(m),
+    });
+    expect(metas[0].blueprint).toEqual([
+      { index: 1, reasoningOrder: "2nd", focus: null, mode: "revisit" },
+      { index: 2, reasoningOrder: "1st", focus: null, mode: null },
+    ]);
+  });
+
+  it("keeps each topic's latest coverage across waves, starting from a resumed set's", async () => {
+    const dka = (covered: number) => ({ topic: "Diabetic ketoacidosis", examTrack: "step1", total: 20, covered, exhausted: false, broader: "Diabetes mellitus" });
+    const { call } = fakeCall([
+      { delivers: 5, coverage: [dka(5), { topic: "broken" }, "nonsense"] },
+      { delivers: 5, coverage: [dka(10)] },
+    ]);
+    const progress: unknown[] = [];
+    await runQbankGeneration({
+      ...baseOpts(),
+      target: 10,
+      call,
+      coverage: [{ topic: "Warfarin", examTrack: "step1", total: 18, covered: 18, exhausted: true, broader: "Anticoagulants" }],
+      onProgress: (p) => progress.push(p.coverage),
+    });
+    expect(progress[0]).toEqual([
+      { topic: "Warfarin", examTrack: "step1", total: 18, covered: 18, exhausted: true, broader: "Anticoagulants" },
+      dka(5),
+    ]);
+    expect(progress[1]).toEqual([
+      { topic: "Warfarin", examTrack: "step1", total: 18, covered: 18, exhausted: true, broader: "Anticoagulants" },
+      dka(10),
+    ]);
+  });
+
+  it("reports no coverage when the server sends none", async () => {
+    const { call } = fakeCall([{ delivers: 5 }]);
+    let last: unknown = null;
+    await runQbankGeneration({ ...baseOpts(), target: 5, call, onProgress: (p) => (last = p.coverage) });
+    expect(last).toEqual([]);
   });
 });
 

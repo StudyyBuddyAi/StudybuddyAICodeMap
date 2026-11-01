@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
+  ArrowRight,
   RotateCcw,
   ChevronRight,
   Flag,
@@ -22,7 +23,8 @@ import { useToast } from "@/hooks/use-toast";
 import { DeckQuotaError, MAX_CARDS_PER_REQUEST, requestDeck } from "@/lib/deck-request";
 import { REVIEW_SET_SYSTEM } from "@/lib/qbank-review-queue";
 import { supabase } from "@/integrations/supabase/client";
-import type { PlayMode, Question, QuestionMedia, SessionAnnotations, SessionAnswer } from "@/lib/qbank-types";
+import type { PlayMode, Question, QuestionMedia, SessionAnnotations, SessionAnswer, TopicCoverage } from "@/lib/qbank-types";
+import { parseCoverage, topicStandings } from "@/lib/qbank-coverage";
 import { CHALLENGE_LABELS, EXAM_MODE_LABELS, TIMED_SECONDS_PER_QUESTION } from "@/lib/qbank-types";
 import { formatClock } from "@/lib/qbank-answer";
 import { ITEM_STATUS_LABEL, type ItemStatus } from "@/lib/qbank-item-status";
@@ -208,7 +210,7 @@ type Filter = "all" | "incorrect" | "omitted" | "marked";
 const NOTES_EXAM_MODE: Record<string, string> = { step1: "USMLE Step 1", step2ck: "USMLE Step 2" };
 
 /** The set's typed topic lives in its generation JSON, not a column. */
-const SESSION_COLUMNS: string = "annotations, system, topic:generation->>topic";
+const SESSION_COLUMNS: string = "annotations, system, topic:generation->>topic, coverage:generation->coverage";
 
 const QBankSummary = () => {
   const navigate = useNavigate();
@@ -235,6 +237,8 @@ const QBankSummary = () => {
   const [isReviewSet, setIsReviewSet] = useState(false);
   /** What the student asked the set for, read off the session after a reload. */
   const [sessionTopic, setSessionTopic] = useState<string | null>(null);
+  /** How much of each topic's concept list the student has now met, read off the session. */
+  const [sessionCoverage, setSessionCoverage] = useState<TopicCoverage[] | null>(null);
   /** Cards written from this set's explanations. */
   const [cards, setCards] = useState<{ status: "idle" | "writing" | "done"; count: number }>({ status: "idle", count: 0 });
 
@@ -345,9 +349,10 @@ const QBankSummary = () => {
             };
             setSummaryData(loaded);
             setSummaryFlaggedIds(flagSet);
-            const session = marks.data as unknown as { annotations?: unknown; system?: string; topic?: string | null } | null;
+            const session = marks.data as unknown as { annotations?: unknown; system?: string; topic?: string | null; coverage?: unknown } | null;
             setIsReviewSet(session?.system === REVIEW_SET_SYSTEM);
             setSessionTopic(session?.topic ?? null);
+            setSessionCoverage(parseCoverage(session?.coverage));
             loadSummary(loaded);
             setLoading(false);
             return;
@@ -493,8 +498,11 @@ const QBankSummary = () => {
    * same size. An old session opened by id has no generation behind it to
    * repeat, so that case goes back to the generator rather than starting
    * something the student did not ask for.
+   *
+   * `moveOnTo` writes the set on another topic instead: the broader topic the
+   * summary offers once this one is used up.
    */
-  const handleTryAgain = async () => {
+  const handleTryAgain = async (moveOnTo?: string) => {
     if (retrying) return;
     setRetrying(true);
     try {
@@ -503,6 +511,7 @@ const QBankSummary = () => {
       // same size, rather than dropping the student at an empty generator.
       // A mixed set repeats as the same mix, not as its "A · B" label.
       const retryTopic: string | string[] | null =
+        moveOnTo ??
         lastGeneration?.topics ?? lastGeneration?.topic ?? summaryData?.questions.find((q) => q.topic)?.topic ?? null;
       if (!retryTopic) {
         navigate("/qbank");
@@ -579,6 +588,10 @@ const QBankSummary = () => {
   // The same size again, inside a free account's allowance for today.
   const wantedAgain = lastGeneration?.target ?? Math.max(summaryData?.total ?? 0, 5);
   const againSize = qbankRemaining === null ? wantedAgain : Math.min(wantedAgain, qbankRemaining);
+  // This set's own row first: it is this set's by construction, where the
+  // in-memory generation is only the latest one this tab ran.
+  const standings = isReviewSet ? [] : topicStandings(sessionCoverage ?? lastGeneration?.coverage);
+  const moveOn = standings.find((s) => s.exhausted && s.broader)?.broader ?? null;
   const filters: { id: Filter; label: string }[] = [
     { id: "all", label: "All" },
     { id: "incorrect", label: "Incorrect" },
@@ -695,11 +708,16 @@ const QBankSummary = () => {
               </button>
             )}
             {againSize > 0 && !isReviewSet && (
-              <button type="button" className="qb-btn qb-btn--outline qb-btn--lg" onClick={handleTryAgain} disabled={retrying}>
+              <button type="button" className="qb-btn qb-btn--outline qb-btn--lg" onClick={() => void handleTryAgain()} disabled={retrying}>
                 <RotateCcw />
                 {retrying
                   ? "Writing…"
                   : `Another ${againSize} on ${lastGeneration?.topics && lastGeneration.topics.length > 1 ? "these topics" : "this topic"}`}
+              </button>
+            )}
+            {againSize > 0 && moveOn && (
+              <button type="button" className="qb-btn qb-btn--outline qb-btn--lg" onClick={() => void handleTryAgain(moveOn)} disabled={retrying}>
+                <ArrowRight /> Move on to {moveOn}
               </button>
             )}
             {cardIds.length > 0 &&
@@ -729,6 +747,14 @@ const QBankSummary = () => {
               Back to QBank
             </button>
           </div>
+
+          {standings.slice(0, 3).map((s) => (
+            <p key={s.topic} style={{ fontSize: 14, lineHeight: 1.6, color: "var(--fg-muted)", marginTop: 12 }}>
+              {s.exhausted
+                ? `You've now been asked every concept we track in ${s.topic} (${s.total}). Another set on it re-tests the ones you met longest ago, from new angles.`
+                : `You've now been asked ${s.covered} of the ${s.total} concepts we track in ${s.topic}; the next set on it goes to ones you haven't met.`}
+            </p>
+          ))}
 
           {(score.incorrect > 0 || counts.marked > 0) && (
             <p style={{ fontSize: 14, lineHeight: 1.6, color: "var(--fg-muted)", marginTop: 12 }}>
