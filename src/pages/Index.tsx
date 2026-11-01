@@ -460,7 +460,7 @@ function App() {
           <div className="footer-grid">
             <div className="footer-brand"><a href="#home" className="brand" data-testid="link-footer-home"><BrandMark size={34} className="brand-mark" /><span className="brand-name">StudyBuddy <b>AI</b></span></a><p>Study sheets, flashcards, and a USMLE-style QBank for medical students.</p></div>
             <div><h4>Product</h4><a href="#tools" data-testid="link-footer-tools">Tools</a><a href="#film" data-testid="link-footer-demo">Demo</a><a href="#pricing" data-testid="link-footer-pricing">Pricing</a></div>
-            <div><h4>Resources</h4><a href="#faq" data-testid="link-footer-faq">FAQ</a></div>
+            <div><h4>Resources</h4><a href="#faq" data-testid="link-footer-faq">FAQ</a><a href="/privacy" data-testid="link-footer-privacy">Privacy Policy</a></div>
             <div><h4>Connect</h4><a href={SOCIALS.instagram} target="_blank" rel="noopener noreferrer" data-testid="link-footer-instagram"><Instagram size={14} /> Instagram</a><a href={SOCIALS.linkedin} target="_blank" rel="noopener noreferrer" data-testid="link-footer-linkedin"><Linkedin size={14} /> LinkedIn</a><a href={SOCIALS.telegram} target="_blank" rel="noopener noreferrer" data-testid="link-footer-telegram"><Send size={14} /> Telegram</a></div>
           </div>
           <div className="footer-bottom"><span>© {new Date().getFullYear()} StudyBuddy AI</span><span>Built in Gaza, for medical students across MENA</span></div>
