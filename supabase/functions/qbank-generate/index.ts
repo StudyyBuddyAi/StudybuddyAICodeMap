@@ -28,6 +28,8 @@ import {
 } from "../_shared/qbank-verify.ts";
 import { hasWriterFlag, type QaResult } from "../_shared/qbank-qa.ts";
 import { FREE_DAILY_QBANK_QUESTIONS, QBANK_USAGE_KIND } from "../_shared/qbank-allowance.ts";
+import { applyTopicMemory, loadSetCanonicals, type WaveTopic } from "../_shared/qbank-memory.ts";
+import { topicKey } from "../_shared/qbank-repetition.ts";
 
 /**
  * On-demand QBank generation — one wave of a set.
@@ -124,6 +126,23 @@ const json = (body: unknown, status: number) =>
   });
 
 /**
+ * Keeps the isolate alive for work that outlives the response — a topic's
+ * blueprint build. Supabase's runtime provides EdgeRuntime.waitUntil; anywhere
+ * else (the Node dev server, the offline test) the promise simply runs on.
+ */
+const keepAlive = (task: Promise<unknown>) => {
+  const runtime = (globalThis as { EdgeRuntime?: { waitUntil?: (p: Promise<unknown>) => void } }).EdgeRuntime;
+  runtime?.waitUntil?.(task);
+};
+
+/** The router's name for a topic, when it gave a usable one. */
+function asCanonical(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const clean = value.replace(/\s+/g, " ").trim();
+  return clean && clean.length <= 120 ? clean : null;
+}
+
+/**
  * Resolves a free-text topic onto one system.
  *
  * A separate cheap call rather than a field the writer chooses, because the
@@ -141,7 +160,7 @@ const json = (body: unknown, status: number) =>
 async function resolveSystem(
   config: ReturnType<typeof cortiConfigFromEnv>,
   topic: string
-): Promise<{ system: SystemKey; confidence: number | null; notMedical?: boolean }> {
+): Promise<{ system: SystemKey; confidence: number | null; canonical?: string | null; notMedical?: boolean }> {
   try {
     const raw = await cortiComplete(config, {
       model: config.routerModel,
@@ -162,7 +181,7 @@ async function resolveSystem(
     }
     if (SYSTEM_KEYS.includes(parsed?.system)) {
       const confidence = typeof parsed.confidence === "number" ? parsed.confidence : null;
-      return { system: parsed.system as SystemKey, confidence };
+      return { system: parsed.system as SystemKey, confidence, canonical: asCanonical(parsed.canonical) };
     }
   } catch (err) {
     log("router_failed", { message: err instanceof Error ? err.message : String(err) });
@@ -284,7 +303,11 @@ serve(async (req) => {
     const routedList = await Promise.all(
       topics.map((t, i) =>
         givenSystems[i]
-          ? Promise.resolve({ system: givenSystems[i] as SystemKey, confidence: null as number | null })
+          ? Promise.resolve({
+              system: givenSystems[i] as SystemKey,
+              confidence: null as number | null,
+              canonical: null as string | null,
+            })
           : resolveSystem(config, t)
       )
     );
@@ -390,6 +413,44 @@ serve(async (req) => {
       examMode,
       focuses.length > 1 ? focuses : []
     );
+
+    // ── Topic memory ─────────────────────────────────────────────────────────
+    // What this student has already been asked on these topics, applied to the
+    // plan: rows assigned to concepts they have not met (or to a revisit of
+    // one they missed), and a do-not-re-test list for the writer. See
+    // _shared/qbank-repetition.ts. After the allowance, so a refused request
+    // costs no reads; fails open, so an unreadable history costs nothing but
+    // the history.
+    //
+    // Each topic's identity: the router's canonical name on a first wave, a
+    // curriculum title as given, and on a later wave — which is not routed —
+    // the name the set's earlier rows stored.
+    const setCanonicals =
+      waveStart > 1 && routedList.some((r) => !r.canonical)
+        ? await loadSetCanonicals(authClient, user.id, generationId)
+        : new Map<string, string>();
+    const waveTopics: WaveTopic[] = topics.map((t, i) => {
+      const routedName = routedList[i].canonical ?? null;
+      const storedName = setCanonicals.get(topicKey(t)) ?? null;
+      const curated = waveStart === 1 && !!givenSystems[i];
+      return {
+        topic: t,
+        system: focuses[i].system,
+        canonical: routedName ?? storedName ?? t,
+        buildable: !!routedName || !!storedName || curated,
+      };
+    });
+    const memory = await applyTopicMemory({
+      client: authClient,
+      config,
+      userId: user.id,
+      generationId,
+      plan,
+      topics: waveTopics,
+      log,
+    });
+    for (const build of memory.builds) keepAlive(build);
+
     log("generating", {
       system,
       topicCount: topics.length,
@@ -400,6 +461,13 @@ serve(async (req) => {
       challenge,
       examMode,
       avoidCount: avoid.length,
+      // Counts only — never a topic or a fact.
+      memory: memory.repetition.memory,
+      ledgerLines: memory.repetition.ledger,
+      assigned: plan.questions.filter((q) => q.assignment).length,
+      revisits: plan.questions.filter((q) => q.assignment?.mode === "revisit").length,
+      blueprints: memory.repetition.blueprints,
+      blueprintBuilds: memory.builds.length,
       model: config.model,
       topicLength: cleanTopic.length,
     });
@@ -417,7 +485,7 @@ serve(async (req) => {
           { role: "system", content: systemPromptFor(plan) },
           {
             role: "user",
-            content: buildUserMessage({ topic: cleanTopic, plan, avoidSubtopics: avoid }),
+            content: buildUserMessage({ topic: cleanTopic, plan, avoidSubtopics: avoid, ledger: memory.ledger }),
           },
         ],
       });
@@ -488,6 +556,7 @@ serve(async (req) => {
       ...(topics.length > 1 ? { topics } : {}),
       model: config.model,
       generationId,
+      repetition: memory.repetition,
     });
 
     /**
@@ -684,7 +753,18 @@ serve(async (req) => {
               focuses: focuses.map((x) => ({ topic: x.topic, system: x.system, systemName: SYSTEM_NAMES[x.system] })),
               model: config.model,
               examMode,
-              plan: plan.questions,
+              // The plan as the client may see it: positions, reasoning
+              // orders, topics and tracks. Not the letter each key will be
+              // moved to, and not the concept a row was assigned, both of
+              // which give an answer away to anyone reading the stream.
+              plan: plan.questions.map((q) => ({
+                index: q.index,
+                reasoningOrder: q.reasoningOrder,
+                examTrack: q.examTrack,
+                ...(q.focus ? { focus: q.focus, system: q.system } : {}),
+                ...(q.assignment ? { mode: q.assignment.mode } : {}),
+              })),
+              coverage: memory.coverage,
               startIndex: waveStart,
             },
           })
@@ -815,6 +895,10 @@ serve(async (req) => {
                 systemName: setSystemName,
                 systems: focuses.map((x) => x.system),
                 subtopics,
+                // How much of each blueprint the student has now met, and
+                // whether the topic is used up — the cue to suggest the
+                // broader topic it names.
+                coverage: memory.coverage,
                 streamError,
                 // A free account's settled allowance for today; null for Pro.
                 allowance: reservation

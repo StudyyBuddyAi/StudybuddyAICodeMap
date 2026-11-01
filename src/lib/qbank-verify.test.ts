@@ -20,6 +20,7 @@ const config: CortiConfig = {
   model: "corti-s1-instant",
   routerModel: "corti-s1-instant",
   verifierModel: "corti-s1-instant",
+  blueprintModel: "corti-s1-instant",
 };
 
 const item: FlagCheckableQuestion = {

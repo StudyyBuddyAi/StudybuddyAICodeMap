@@ -62,9 +62,14 @@ const BATCH = {
 };
 
 // ── Fake Corti ───────────────────────────────────────────────────────────────
-const calls = { stream: 0, verify: 0, flagCheck: 0, router: [] };
+const calls = { stream: 0, verify: 0, flagCheck: 0, router: [], blueprint: 0, audit: 0 };
 let lastStreamBody = null;
-const ROUTES = { "heart failure": "cardiovascular", "nephrotic syndrome": "renal", "spikes protocol": "social_sciences", "banana bread": "not_medical" };
+const ROUTES = { "heart failure": "cardiovascular", "nephrotic syndrome": "renal", "spikes protocol": "social_sciences", "banana bread": "not_medical", dka: "endocrine" };
+const CANONICAL = { dka: "Diabetic ketoacidosis", "heart failure": "Heart failure" };
+const DRAFT = {
+  broader: "Diabetes mellitus",
+  concepts: Array.from({ length: 12 }, (_, i) => ({ concept: `Testable point number ${i + 1} about ketoacidosis`, tier: i < 4 ? "core" : "standard" })),
+};
 let streamStatus = 200;
 const realFetch = globalThis.fetch;
 globalThis.fetch = async (url, init = {}) => {
@@ -96,7 +101,14 @@ globalThis.fetch = async (url, init = {}) => {
     let content;
     if (system.startsWith("You classify a medical study topic")) {
       calls.router.push(user);
-      content = JSON.stringify({ system: ROUTES[user.toLowerCase()] ?? "cardiovascular", confidence: 0.9 });
+      const canonical = CANONICAL[user.toLowerCase()];
+      content = JSON.stringify({ system: ROUTES[user.toLowerCase()] ?? "cardiovascular", confidence: 0.9, ...(canonical ? { canonical } : {}) });
+    } else if (system.startsWith("You map a medical study topic")) {
+      calls.blueprint++;
+      content = JSON.stringify(DRAFT);
+    } else if (system.includes("auditing a concept list")) {
+      calls.audit++;
+      content = JSON.stringify({ duplicates: [[2, 5]], unusable: [12] });
     } else if (system.includes("board-certified physician")) {
       calls.flagCheck++;
       content = JSON.stringify({ verdict: n === 5 ? "outdated" : "confirmed", note: "test" });
@@ -114,9 +126,39 @@ globalThis.fetch = async (url, init = {}) => {
 };
 
 // ── Fake Supabase ────────────────────────────────────────────────────────────
-function fakeClient({ isPro = false, granted = 5, remaining = 5 } = {}) {
-  const log = { rpc: [], inserts: [] };
+/**
+ * A fake Supabase client. Queries chain and resolve like the real builder, and
+ * are answered from `memory`: the student's history, the ready blueprints, an
+ * earlier wave's stored names, and whether a blueprint build is claimed.
+ */
+function fakeClient({ isPro = false, granted = 5, remaining = 5, memory = {} } = {}) {
+  const log = { rpc: [], inserts: [], queries: [], updates: [] };
   let nextId = 1;
+  const answer = (q) => {
+    if (q.op === "update") return { data: null, error: null };
+    if (q.table === "profiles") return { data: { is_pro: isPro, pro_expires_at: null }, error: null };
+    if (q.table === "qbank_topic_blueprints") return { data: memory.blueprints ?? [], error: null };
+    if (q.table === "questions") return { data: memory.setRows ?? [], error: null };
+    return { data: null, error: null };
+  };
+  const from = (table) => {
+    const q = { table, op: "select", filters: [], cols: null, payload: null };
+    log.queries.push(q);
+    const b = {
+      select: (cols) => ((q.cols = cols), b),
+      eq: (c, v) => (q.filters.push(["eq", c, v]), b),
+      in: (c, v) => (q.filters.push(["in", c, v]), b),
+      limit: () => b,
+      update: (payload) => ((q.op = "update"), (q.payload = payload), log.updates.push(q), b),
+      maybeSingle: async () => answer(q),
+      then: (resolve, reject) => Promise.resolve(answer(q)).then(resolve, reject),
+      insert: (row) => {
+        log.inserts.push(row);
+        return { select: () => ({ single: async () => ({ data: { id: `q-${nextId++}` }, error: null }) }) };
+      },
+    };
+    return b;
+  };
   const client = {
     log,
     auth: { getUser: async () => ({ data: { user: { id: "user-1", is_anonymous: false } }, error: null }) },
@@ -125,20 +167,38 @@ function fakeClient({ isPro = false, granted = 5, remaining = 5 } = {}) {
       if (name === "reserve_usage") {
         return { data: { granted, count: 10 - remaining, remaining, date: "2026-10-30" }, error: null };
       }
+      if (name === "qbank_topic_history") {
+        return memory.historyError
+          ? { data: null, error: { message: memory.historyError } }
+          : { data: memory.history ?? [], error: null };
+      }
+      if (name === "claim_qbank_blueprint_build") return { data: memory.claimId ?? null, error: null };
       return { data: null, error: null };
     },
-    from: (table) => ({
-      select: () => ({
-        eq: () => ({ maybeSingle: async () => ({ data: table === "profiles" ? { is_pro: isPro, pro_expires_at: null } : null, error: null }) }),
-      }),
-      insert: (row) => {
-        log.inserts.push(row);
-        return { select: () => ({ single: async () => ({ data: { id: `q-${nextId++}` }, error: null }) }) };
-      },
-    }),
+    from,
   };
   return client;
 }
+
+const daysAgo = (d) => new Date(Date.now() - d * 86_400_000).toISOString();
+/** One history row, as qbank_topic_history returns it. */
+const past = (over = {}) => ({
+  id: "h-1",
+  createdAt: daysAgo(10),
+  generationId: "g-old",
+  storedKey: "diabetic ketoacidosis",
+  rawKey: "dka",
+  examTrack: "step1",
+  concept: null,
+  revisitOf: null,
+  subtopic: "Potassium shift",
+  teachingPoint: "**Insulin** drives potassium into cells.",
+  leadIn: "Which mechanism explains the fall in potassium?",
+  playable: true,
+  lastAttemptAt: daysAgo(9),
+  lastCorrect: true,
+  ...over,
+});
 
 async function run(body) {
   const req = new Request("http://edge.test/qbank-generate", {
@@ -288,6 +348,186 @@ const check = (name, fn) => {
   globalThis.__fakeClient = fakeClient({ isPro: true });
   const { status } = await run({ topic: undefined, system: undefined, topics: ["a1 heart", "b2 kidney", "c3 lung", "d4 liver", "e5 brain", "f6 skin"] });
   check("more than five topics to route → 400", () => assert.equal(status, 400));
+}
+
+// ── Topic memory ─────────────────────────────────────────────────────────────
+const settle = async (done, ms = 3000) => {
+  const t0 = Date.now();
+  while (!done() && Date.now() - t0 < ms) await new Promise((r) => setTimeout(r, 20));
+};
+const userMessage = () => lastStreamBody.messages[1].content;
+const metaOf = (inserts) => inserts.map((r) => r.generation_meta);
+
+// 10. History, no blueprint: the canonical name joins "DKA" to its history, a
+//     recent fact goes on the do-not-re-test list, a due miss is revisited.
+{
+  calls.router = [];
+  globalThis.__fakeClient = fakeClient({
+    isPro: true,
+    memory: {
+      history: [
+        past(),
+        past({ id: "h-2", subtopic: "Cerebral edema", teachingPoint: "Rapid osmolar correction swells the brain.", leadIn: "What caused the headache?", lastAttemptAt: daysAgo(5), lastCorrect: false }),
+      ],
+    },
+  });
+  const { status, metas } = await run({ topic: "DKA", system: undefined });
+  const log = globalThis.__fakeClient.log;
+  const history = log.rpc.find((c) => c.name === "qbank_topic_history");
+  const rows = metaOf(log.inserts);
+  const open = metas.find((m) => m.plan);
+  check("memory wave streams", () => assert.equal(status, 200));
+  check("history read under the canonical key and the typed one", () =>
+    assert.deepEqual([...history.args.p_keys].sort(), ["diabetic ketoacidosis", "dka"]));
+  check("recent fact on the do-not-re-test list", () =>
+    assert.ok(userMessage().includes("- Potassium shift: Insulin drives potassium into cells.")));
+  check("due miss is revisited, not listed", () => {
+    assert.ok(userMessage().includes('— revisit: Rapid osmolar correction swells the brain. (earlier question: "What caused the headache?")'));
+    assert.ok(!userMessage().includes("- Cerebral edema:"));
+  });
+  check("rows stored under the canonical topic", () =>
+    assert.ok(rows.every((m) => m.topicKey === "diabetic ketoacidosis" && m.canonicalTopic === "Diabetic ketoacidosis")));
+  check("exactly one row records the revisit", () => {
+    const tagged = rows.filter((m) => m.concept);
+    assert.equal(tagged.length, 1);
+    assert.deepEqual({ mode: tagged[0].concept.mode, revisitOf: tagged[0].concept.revisitOf }, { mode: "revisit", revisitOf: "h-2" });
+  });
+  check("rows record how the wave used history", () =>
+    assert.deepEqual(rows[0].repetition, { version: "r1", memory: "ok", ledger: 1, blueprints: 0 }));
+  check("stream shows a row's mode, never its concept or answer letter", () => {
+    assert.equal(open.plan.filter((r) => r.mode === "revisit").length, 1);
+    const frame = JSON.stringify(open.plan);
+    assert.ok(!frame.includes("answerLetter") && !frame.includes("osmolar"));
+  });
+  check("a missing blueprint is claimed for the routed name", () => {
+    const claim = log.rpc.find((c) => c.name === "claim_qbank_blueprint_build");
+    assert.deepEqual(claim?.args, { p_topic_key: "diabetic ketoacidosis", p_exam_track: "step1", p_canonical: "Diabetic ketoacidosis", p_system: "endocrine", p_version: "b1" });
+  });
+}
+
+// 11. A ready blueprint: every row assigned a concept the student has not met.
+{
+  const concepts = Array.from({ length: 12 }, (_, i) => ({ id: `c${i + 1}`, text: `Ketoacidosis concept ${i + 1}`, tier: "core" }));
+  globalThis.__fakeClient = fakeClient({
+    isPro: true,
+    memory: {
+      history: [past({ concept: { blueprint: "bp-1", id: "c1" } })],
+      blueprints: [{ id: "bp-1", topic_key: "diabetic ketoacidosis", exam_track: "step1", concepts, broader: "Diabetes mellitus" }],
+    },
+  });
+  const { metas } = await run({ topic: "DKA", system: undefined });
+  const log = globalThis.__fakeClient.log;
+  const rows = metaOf(log.inserts);
+  const done = metas.find((m) => m.waveComplete)?.waveComplete;
+  const ids = rows.map((m) => m.concept?.id);
+  check("every row assigned a distinct blueprint concept", () => {
+    assert.ok(rows.every((m) => m.concept?.blueprint === "bp-1" && m.concept.mode === "new"));
+    assert.equal(new Set(ids).size, 5);
+  });
+  check("the met concept is not assigned again", () => assert.ok(!ids.includes("c1")));
+  check("the writer is told each row's concept", () => {
+    assert.ok(userMessage().includes("Each plan row names the concept its item must turn on."));
+    assert.equal((userMessage().match(/ — concept: Ketoacidosis concept/g) ?? []).length, 5);
+  });
+  check("a met blueprint concept is listed by what its item taught, and rows override the list", () => {
+    assert.ok(userMessage().includes("- Potassium shift: Insulin drives potassium into cells."));
+    assert.ok(userMessage().includes("The one exception is a concept a plan row names"));
+  });
+  check("summary reports coverage", () =>
+    assert.deepEqual(done?.coverage, [{ topic: "Diabetic ketoacidosis", examTrack: "step1", total: 12, covered: 6, exhausted: false, broader: "Diabetes mellitus" }]));
+  check("no build when the blueprint is ready", () => assert.ok(!log.rpc.some((c) => c.name === "claim_qbank_blueprint_build")));
+}
+
+// 12. A claimed build runs in the background and stores the audited list.
+{
+  const before = { blueprint: calls.blueprint, audit: calls.audit };
+  globalThis.__fakeClient = fakeClient({ isPro: true, memory: { history: [], claimId: "bp-new" } });
+  await run({ topic: "DKA", system: undefined });
+  const log = globalThis.__fakeClient.log;
+  await settle(() => log.updates.some((u) => u.table === "qbank_topic_blueprints"));
+  const stored = log.updates.find((u) => u.table === "qbank_topic_blueprints");
+  check("draft and audit each called once", () =>
+    assert.deepEqual({ b: calls.blueprint - before.blueprint, a: calls.audit - before.audit }, { b: 1, a: 1 }));
+  check("audited blueprint stored ready on the claimed row", () => {
+    assert.equal(stored?.payload.status, "ready");
+    assert.deepEqual(stored?.filters, [["eq", "id", "bp-new"]]);
+    // Twelve drafted; line 5 duplicates line 2 and line 12 is unusable.
+    assert.equal(stored?.payload.concepts.length, 10);
+    assert.deepEqual(stored?.payload.concepts.map((c) => c.id), ["c1", "c2", "c3", "c4", "c5", "c6", "c7", "c8", "c9", "c10"]);
+    assert.ok(!stored?.payload.concepts.some((c) => c.text.endsWith("number 5 about ketoacidosis")));
+    assert.equal(stored?.payload.broader, "Diabetes mellitus");
+  });
+}
+
+// 13. A later wave is not routed: it reads the set's stored name back.
+{
+  calls.router = [];
+  globalThis.__fakeClient = fakeClient({
+    isPro: true,
+    memory: { history: [], setRows: [{ focus: null, requested: "DKA", canonical: "Diabetic ketoacidosis" }] },
+  });
+  await run({ topic: "DKA", system: "endocrine", startIndex: 6 });
+  const log = globalThis.__fakeClient.log;
+  const setQuery = log.queries.find((q) => q.table === "questions" && q.op === "select");
+  check("later wave not routed", () => assert.equal(calls.router.length, 0));
+  check("later wave looks its set up by generation id", () =>
+    assert.ok(setQuery?.filters.some(([op, col, v]) => op === "eq" && col === "generation_meta->>generationId" && v === "gen-1")));
+  check("later wave keeps the canonical name", () =>
+    assert.ok(metaOf(log.inserts).every((m) => m.canonicalTopic === "Diabetic ketoacidosis" && m.topicKey === "diabetic ketoacidosis")));
+}
+
+// 14. A later wave with nothing stored falls back to what was typed — and
+//     never builds a shared blueprint under it.
+{
+  globalThis.__fakeClient = fakeClient({ isPro: true, memory: { history: [], setRows: [] } });
+  await run({ topic: "DKA", system: "endocrine", startIndex: 6 });
+  const log = globalThis.__fakeClient.log;
+  check("fallback name keyed but not stored as canonical", () =>
+    assert.ok(metaOf(log.inserts).every((m) => m.topicKey === "dka" && m.canonicalTopic === null)));
+  check("no blueprint claimed for a fallback name", () => assert.ok(!log.rpc.some((c) => c.name === "claim_qbank_blueprint_build")));
+}
+
+// 15. History unreadable: the wave is written blind, and says so.
+{
+  const streamsBefore = calls.stream;
+  globalThis.__fakeClient = fakeClient({ isPro: true, memory: { historyError: "function qbank_topic_history does not exist" } });
+  const { status, metas } = await run({ topic: "DKA", system: undefined });
+  const rows = metaOf(globalThis.__fakeClient.log.inserts);
+  check("unreadable history still generates", () => {
+    assert.equal(status, 200);
+    assert.equal(calls.stream, streamsBefore + 1);
+    assert.equal(metas.filter((m) => m.questionReady).length, 5);
+  });
+  check("blind wave recorded on its rows", () => assert.equal(rows[0].repetition.memory, "unavailable"));
+  check("blind wave assigns nothing and lists nothing", () => {
+    assert.ok(rows.every((m) => m.concept === null));
+    assert.ok(!userMessage().includes("do not re-test"));
+  });
+}
+
+// 16. A curriculum mix on its first wave: titles are canonical as given, and
+//     at most two builds start.
+{
+  calls.router = [];
+  globalThis.__fakeClient = fakeClient({ isPro: true, memory: { history: [] } });
+  await run({
+    topic: undefined,
+    system: undefined,
+    topics: ["Heart failure", "Nephrotic syndrome", "SPIKES protocol"],
+    systems: ["cardiovascular", "renal", "social_sciences"],
+  });
+  const log = globalThis.__fakeClient.log;
+  const claims = log.rpc.filter((c) => c.name === "claim_qbank_blueprint_build");
+  check("curriculum titles used as given, unrouted", () => {
+    assert.equal(calls.router.length, 0);
+    assert.deepEqual(
+      [...new Set(metaOf(log.inserts).map((m) => m.canonicalTopic))].sort(),
+      ["Heart failure", "Nephrotic syndrome", "SPIKES protocol"]
+    );
+  });
+  check("history read only for the wave's own topics", () =>
+    assert.deepEqual([...log.rpc.find((c) => c.name === "qbank_topic_history").args.p_keys].sort(), ["heart failure", "nephrotic syndrome", "spikes protocol"]));
+  check("at most two builds per wave", () => assert.equal(claims.length, 2));
 }
 
 console.log(results.join("\n"));
