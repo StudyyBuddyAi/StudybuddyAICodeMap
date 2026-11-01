@@ -10,7 +10,7 @@ import {
   type HistoryItem,
   type TopicMemory,
 } from "../../supabase/functions/_shared/qbank-repetition.ts";
-import { applyAudit, finalise, parseDraft } from "../../supabase/functions/_shared/qbank-blueprint.ts";
+import { applyAudit, finalise, isTransient, parseDraft } from "../../supabase/functions/_shared/qbank-blueprint.ts";
 import {
   SYSTEM_ROUTER_PROMPT,
   buildBatchPlan,
@@ -386,6 +386,16 @@ describe("blueprint parsing", () => {
   it("refuses an audit that would empty most of the list", () => {
     const concepts = ["a", "b", "c", "d"].map((t) => ({ text: t, tier: "core" as const }));
     expect(() => applyAudit(concepts, JSON.stringify({ duplicates: [[1, 2, 3, 4]], unusable: [] }))).toThrow();
+  });
+
+  it("tells a busy gateway from a build that came out wrong", () => {
+    expect(isTransient(new Error('corti_429: {"error":{"message":"The engine is currently busy"}}'))).toBe(true);
+    expect(isTransient(new Error("corti_503: (empty body)"))).toBe(true);
+    expect(isTransient(new TypeError("fetch failed"))).toBe(true);
+    expect(isTransient(new DOMException("The operation timed out.", "TimeoutError"))).toBe(true);
+    expect(isTransient(new Error("corti_400: bad request"))).toBe(false);
+    expect(isTransient(new Error("only 5 concepts"))).toBe(false);
+    expect(isTransient(new Error("audit dropped 9 of 12"))).toBe(false);
   });
 
   it("numbers the concepts and refuses a thin list", () => {

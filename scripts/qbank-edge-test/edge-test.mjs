@@ -66,6 +66,8 @@ const calls = { stream: 0, verify: 0, flagCheck: 0, router: [], blueprint: 0, au
 let lastStreamBody = null;
 const ROUTES = { "heart failure": "cardiovascular", "nephrotic syndrome": "renal", "spikes protocol": "social_sciences", "banana bread": "not_medical", dka: "endocrine" };
 const CANONICAL = { dka: "Diabetic ketoacidosis", "heart failure": "Heart failure" };
+/** Draft calls the fake gateway refuses as busy before it answers. */
+const busy = { draft: 0 };
 const DRAFT = {
   broader: "Diabetes mellitus",
   concepts: Array.from({ length: 12 }, (_, i) => ({ concept: `Testable point number ${i + 1} about ketoacidosis`, tier: i < 4 ? "core" : "standard" })),
@@ -105,6 +107,11 @@ globalThis.fetch = async (url, init = {}) => {
       content = JSON.stringify({ system: ROUTES[user.toLowerCase()] ?? "cardiovascular", confidence: 0.9, ...(canonical ? { canonical } : {}) });
     } else if (system.startsWith("You map a medical study topic")) {
       calls.blueprint++;
+      // What the first live build met: the gateway refusing while the wave ran.
+      if (busy.draft > 0) {
+        busy.draft--;
+        return new Response(JSON.stringify({ error: { message: "The engine is currently busy", code: 503 } }), { status: 429 });
+      }
       content = JSON.stringify(DRAFT);
     } else if (system.includes("auditing a concept list")) {
       calls.audit++;
@@ -221,6 +228,9 @@ async function run(body) {
 }
 
 await import(pathToFileURL(path.join(ROOT, "supabase/functions/qbank-generate/index.ts")).href);
+// The same module instance the handler imported: no real seconds spent waiting out a busy gateway.
+const { BLUEPRINT_RETRY } = await import(pathToFileURL(path.join(ROOT, "supabase/functions/_shared/qbank-blueprint.ts")).href);
+BLUEPRINT_RETRY.delaysMs = [0, 0, 0];
 assert.equal(typeof globalThis.__handler, "function", "serve() captured the handler");
 
 const results = [];
@@ -456,6 +466,35 @@ const metaOf = (inserts) => inserts.map((r) => r.generation_meta);
     assert.deepEqual(stored?.payload.concepts.map((c) => c.id), ["c1", "c2", "c3", "c4", "c5", "c6", "c7", "c8", "c9", "c10"]);
     assert.ok(!stored?.payload.concepts.some((c) => c.text.endsWith("number 5 about ketoacidosis")));
     assert.equal(stored?.payload.broader, "Diabetes mellitus");
+  });
+}
+
+// 12b. A busy gateway is retried inside the build, not parked for an hour.
+{
+  const before = calls.blueprint;
+  busy.draft = 2;
+  globalThis.__fakeClient = fakeClient({ isPro: true, memory: { history: [], claimId: "bp-busy" } });
+  await run({ topic: "DKA", system: undefined });
+  const log = globalThis.__fakeClient.log;
+  await settle(() => log.updates.some((u) => u.table === "qbank_topic_blueprints"));
+  const stored = log.updates.find((u) => u.table === "qbank_topic_blueprints");
+  check("busy gateway retried until it answers", () => assert.equal(calls.blueprint - before, 3));
+  check("retried build stored ready", () => assert.equal(stored?.payload.status, "ready"));
+}
+
+// 12c. Busy throughout: stored as a transient failure, which the claim
+//      function retries in minutes rather than hours.
+{
+  busy.draft = 99;
+  globalThis.__fakeClient = fakeClient({ isPro: true, memory: { history: [], claimId: "bp-busy-2" } });
+  await run({ topic: "DKA", system: undefined });
+  const log = globalThis.__fakeClient.log;
+  await settle(() => log.updates.some((u) => u.table === "qbank_topic_blueprints"));
+  const stored = log.updates.find((u) => u.table === "qbank_topic_blueprints");
+  busy.draft = 0;
+  check("exhausted retries stored as a transient failure", () => {
+    assert.equal(stored?.payload.status, "failed");
+    assert.match(stored?.payload.last_error ?? "", /^transient: corti_429/);
   });
 }
 

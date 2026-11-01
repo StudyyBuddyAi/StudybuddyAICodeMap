@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.39.8";
 import type { CortiConfig } from "./corti.ts";
-import { BLUEPRINT_VERSION, buildBlueprint } from "./qbank-blueprint.ts";
+import { BLUEPRINT_VERSION, buildBlueprint, isTransient } from "./qbank-blueprint.ts";
 import type { PersistInput } from "./qbank-persist.ts";
 import type { BatchPlan, ExamTrack, SystemKey } from "./qbank-prompt.ts";
 import {
@@ -205,11 +205,18 @@ async function buildAndStore(
       log("blueprint_built", { track: target.track, concepts: built.concepts.length, ms: Date.now() - startedAt });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
+      // "transient:" is read by claim_qbank_blueprint_build: a gateway that was
+      // busy is tried again in minutes, a build that came out wrong in hours.
+      const transient = isTransient(err);
       await client
         .from("qbank_topic_blueprints")
-        .update({ status: "failed", last_error: message.slice(0, 300), updated_at: new Date().toISOString() })
+        .update({
+          status: "failed",
+          last_error: `${transient ? "transient: " : ""}${message}`.slice(0, 300),
+          updated_at: new Date().toISOString(),
+        })
         .eq("id", id);
-      log("blueprint_failed", { track: target.track, message: message.slice(0, 200), ms: Date.now() - startedAt });
+      log("blueprint_failed", { track: target.track, transient, message: message.slice(0, 200), ms: Date.now() - startedAt });
     }
   } catch (err) {
     log("blueprint_claim_failed", { message: err instanceof Error ? err.message : String(err) });

@@ -196,28 +196,61 @@ export interface BuiltBlueprint {
   model: string;
 }
 
+/**
+ * Whether a failure is the gateway being momentarily unable rather than the
+ * build being wrong: a 429 or 5xx from Corti, a dropped connection, a timeout.
+ *
+ * Measured on the first live deploy: a build started beside its wave's own
+ * stream and probes was refused at once with "The engine is currently busy"
+ * (429/503). Treated as a real failure it was parked for an hour, and a topic's
+ * every set went without a blueprint for that long.
+ */
+export function isTransient(err: unknown): boolean {
+  const message = err instanceof Error ? `${err.name} ${err.message}` : String(err);
+  return /corti_(429|5\d\d)\b|fetch failed|ECONNRESET|socket hang up|TimeoutError|timed out|AbortError/i.test(message);
+}
+
+/** Delays between attempts at one Corti call. Mutable so the offline test can zero them. */
+export const BLUEPRINT_RETRY = { delaysMs: [3_000, 10_000, 25_000] };
+
+async function withRetry<T>(call: () => Promise<T>): Promise<T> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await call();
+    } catch (err) {
+      const wait = BLUEPRINT_RETRY.delaysMs[attempt];
+      if (wait === undefined || !isTransient(err)) throw err;
+      await new Promise((resolve) => setTimeout(resolve, wait));
+    }
+  }
+}
+
 /** Draft, audit, validate. Throws on any failure: a failed build is retried later, never stored half-made. */
 export async function buildBlueprint(
   config: CortiConfig,
   input: { topic: string; system: SystemKey; track: ExamTrack }
 ): Promise<BuiltBlueprint> {
   const model = config.blueprintModel;
-  const draftRaw = await cortiComplete(config, {
-    model,
-    temperature: 0.5,
-    maxTokens: 4000,
-    messages: draftMessages(input.topic, input.system, input.track),
-    signal: AbortSignal.timeout(DRAFT_TIMEOUT_MS),
-  });
+  const draftRaw = await withRetry(() =>
+    cortiComplete(config, {
+      model,
+      temperature: 0.5,
+      maxTokens: 4000,
+      messages: draftMessages(input.topic, input.system, input.track),
+      signal: AbortSignal.timeout(DRAFT_TIMEOUT_MS),
+    })
+  );
   const draft = parseDraft(draftRaw);
   if (draft.concepts.length < MIN_CONCEPTS) throw new Error(`draft held ${draft.concepts.length} concepts`);
 
-  const auditRaw = await cortiComplete(config, {
-    model,
-    temperature: 0,
-    maxTokens: 1500,
-    messages: auditMessages(input.topic, input.track, draft.concepts.map((c) => c.text)),
-    signal: AbortSignal.timeout(AUDIT_TIMEOUT_MS),
-  });
+  const auditRaw = await withRetry(() =>
+    cortiComplete(config, {
+      model,
+      temperature: 0,
+      maxTokens: 1500,
+      messages: auditMessages(input.topic, input.track, draft.concepts.map((c) => c.text)),
+      signal: AbortSignal.timeout(AUDIT_TIMEOUT_MS),
+    })
+  );
   return { concepts: finalise(applyAudit(draft.concepts, auditRaw)), broader: draft.broader, model };
 }
