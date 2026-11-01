@@ -237,8 +237,9 @@ wording by `revisit-ab.mts`. Both write beside the study arms, so `exp-groups.cj
 
 ## 8. What was built (2026-11-01, branch `qbank-repetition-study`)
 
-All three layers, built and tested locally. **Not deployed.** It needs one migration and a
-function deploy, plus the frontend for the student-facing parts (§8.4).
+All three layers. **Backend deployed 2026-11-01**: migrations `20261102000000` and
+`20261102000100` are applied and `qbank-generate` v11 is live, checked end to end (§8.6). The
+student-facing parts ship with the frontend when this branch merges.
 
 ### 8.1 The pieces
 
@@ -317,7 +318,8 @@ Blueprint builds measured: Heart failure (Step 2 CK) 40 concepts in 26 s, Diabet
 
 ### 8.4 Deploying
 
-1. `npx supabase db push`: migration `20261102000000_qbank_topic_memory.sql`, additive.
+1. `npx supabase db push`: migrations `20261102000000_qbank_topic_memory.sql` and
+   `20261102000100_qbank_blueprint_transient_retry.sql`, both additive.
 2. `npx supabase functions deploy qbank-generate`. It fails open without step 1, so the order
    is a preference, not a requirement. Optional env: `CORTI_BLUEPRINT_MODEL`
    (default `corti-s1-instant`).
@@ -349,3 +351,28 @@ Then re-run §7's live measurement after a couple of weeks of use.
   in the background on the topic's first wave.
 - Spacing uses fixed intervals. FSRS at concept level (as the flashcards use) is the natural
   next step, and `buildThreads` is where it would plug in.
+
+### 8.6 Live check (2026-11-01)
+
+The check runs against the deployed function with a throwaway Pro account, deleted afterwards
+along with every row it wrote (`auth.users` cascades to `questions`).
+
+- **v10 found a real problem.** The background blueprint build was refused at once by Corti, 429
+  "The engine is currently busy", because it starts beside its wave's own stream and probes. The
+  claim function treated that as a real failure and parked the topic for an hour. **v11** retries
+  a busy gateway inside the build (3 s, 10 s, 25 s). It stores a failure that is still busy as
+  `transient:`, which migration `20261102000100` lets the next wave reclaim after five minutes.
+  The live row from the v10 run was relabelled transient for the re-check.
+- **On v11, everything held:**
+  - Set 1, typed "DKA": routed to endocrine; rows stored as "Diabetic ketoacidosis"; history read
+    (empty), not failed open; blueprint built in the background (21 concepts, broader "Diabetes
+    complications") before the set finished.
+  - Set 2, typed "Diabetic Ketoacidosis": found set 1 under the canonical name (ledger = set 1's
+    5 playable items) and was assigned 5 distinct blueprint concepts. Its coverage was reported.
+  - Wave 2 of set 2: not routed; kept the canonical name; 3 further distinct concepts; ledger
+    grew to 10; coverage grew.
+  - The plan frame carried each row's mode only: no answer letters, no concepts.
+- Grants on live: `anon` and `authenticated` cannot call either function or read
+  `qbank_topic_blueprints`; `service_role` can.
+
+Rollback: redeploy `qbank-generate` from `main`. Both migrations can stay.
