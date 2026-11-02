@@ -354,11 +354,16 @@ function checkMetaLanguage(q: CheckableQuestion, findings: QaFinding[]): void {
 }
 
 function checkDistractorCoverage(q: CheckableQuestion, findings: QaFinding[]): void {
+  // A block since 2026-11-02. The player shows each distractor's explanation
+  // under the option a student picked, so a missing one means a student who
+  // chose it is told they were wrong and never why. Measured on the live table:
+  // about 1.5% of v14 items, so holding them back costs little, and 40 served
+  // items had reached students with a gap.
   for (const letter of distractorKeys(q.correctOption)) {
     if (!q.distractorExplanations[letter]?.trim()) {
       findings.push({
         rule: "missing-distractor-explanation",
-        severity: "warn",
+        severity: "block",
         detail: `No explanation for distractor ${letter}.`,
       });
     }
@@ -449,6 +454,148 @@ function checkLeadIn(q: CheckableQuestion, findings: QaFinding[]): void {
 }
 
 /**
+ * Lab values a student has to read as data.
+ *
+ * A vignette's numbers are the evidence the item asks a student to reason
+ * from, so a wrong unit or an impossible value is a factual error in the stem
+ * itself — and one no other check reads. Measured on the live table
+ * (2026-11-02): seven served items gave serum ammonia in μmol/dL, a hundredfold
+ * error the writer repeated every time it wrote the analyte.
+ *
+ * Two findings, both blocks:
+ *  - `lab-unit` — a molar or equivalent concentration per decilitre, which no
+ *    laboratory reports, or a common analyte in a unit it is never given in
+ *    (sodium in mg/dL, creatinine in mmol/L).
+ *  - `lab-implausible` — a common analyte outside any value a living patient
+ *    presents with. The bounds are survivable extremes, not reference ranges:
+ *    a potassium of 8.9 or a glucose of 1,400 is a vignette; a potassium of 42
+ *    is a typo.
+ *
+ * Deliberately narrow, because a false positive costs a student a question.
+ * Only a value written straight after its analyte is read ("sodium is 128
+ * mEq/L"), never one across a comma, a bracket or another analyte's name, so a
+ * list like "sodium 138, potassium 4.0 mEq/L" cannot hand sodium potassium's
+ * value. Body fluids other than blood (urine sodium, pleural glucose) and drug
+ * forms (potassium chloride, calcium gluconate) are skipped: their ranges are
+ * different and a dose is not a level.
+ */
+type LabRange = readonly [min: number, max: number];
+
+interface LabAnalyte {
+  name: string;
+  pattern: RegExp;
+  /** Accepted units, lowercased with micro written as μ, and their survivable range. */
+  units: Record<string, LabRange>;
+}
+
+/** A drug or a property named after the analyte, not a level of it. */
+const NOT_A_LEVEL =
+  "(?!\\s*(?:chloride|citrate|phosphate|bicarbonate|gluconate|carbonate|acetate|iodide|hydroxide|polystyrene|nitroprusside|valproate|thiosulfate|sulfate|channel|sparing|binder|supplement|replacement|repletion|restriction|intake|load|deficit|wasting|excretion|clearance|tolerance))";
+
+const LAB_ANALYTES: LabAnalyte[] = [
+  { name: "sodium", pattern: new RegExp(`\\bsodium\\b${NOT_A_LEVEL}`, "gi"), units: { "meq/l": [95, 200], "mmol/l": [95, 200] } },
+  { name: "potassium", pattern: new RegExp(`\\bpotassium\\b${NOT_A_LEVEL}`, "gi"), units: { "meq/l": [1, 12], "mmol/l": [1, 12] } },
+  { name: "chloride", pattern: new RegExp(`\\bchloride\\b${NOT_A_LEVEL}`, "gi"), units: { "meq/l": [50, 150], "mmol/l": [50, 150] } },
+  { name: "bicarbonate", pattern: new RegExp(`\\b(?:bicarbonate|hco3-?)(?![a-z])${NOT_A_LEVEL}`, "gi"), units: { "meq/l": [1, 60], "mmol/l": [1, 60] } },
+  { name: "glucose", pattern: new RegExp(`\\bglucose\\b${NOT_A_LEVEL}`, "gi"), units: { "mg/dl": [5, 3000], "mmol/l": [0.3, 170] } },
+  { name: "creatinine", pattern: new RegExp(`\\bcreatinine\\b${NOT_A_LEVEL}`, "gi"), units: { "mg/dl": [0.1, 30], "μmol/l": [8, 2700] } },
+  { name: "BUN", pattern: /\b(?:bun|blood urea nitrogen|urea nitrogen)\b/gi, units: { "mg/dl": [1, 300] } },
+  {
+    name: "hemoglobin",
+    pattern: /\bha?emoglobin\b(?!\s*(?:a1c|a2|a\b|f\b|s\b|c\b|h\b|electrophoresis|variant|-oxygen))/gi,
+    units: { "g/dl": [1.5, 26], "g/l": [15, 260] },
+  },
+  { name: "albumin", pattern: new RegExp(`\\balbumin\\b${NOT_A_LEVEL}`, "gi"), units: { "g/dl": [0.5, 7], "g/l": [5, 70] } },
+  { name: "calcium", pattern: new RegExp(`\\bcalcium\\b${NOT_A_LEVEL}`, "gi"), units: { "mg/dl": [3, 20], "mmol/l": [0.5, 5], "meq/l": [1, 10] } },
+  { name: "ammonia", pattern: /\bammonia\b/gi, units: { "μmol/l": [5, 3000], "μg/dl": [5, 5000] } },
+  { name: "lactate", pattern: /\blact(?:ate|ic acid)\b/gi, units: { "mmol/l": [0.1, 35], "meq/l": [0.1, 35], "mg/dl": [1, 320] } },
+  { name: "magnesium", pattern: new RegExp(`\\bmagnesium\\b${NOT_A_LEVEL}`, "gi"), units: { "mg/dl": [0.3, 12], "meq/l": [0.3, 10], "mmol/l": [0.15, 5] } },
+];
+
+/** Every analyte's name at once, to stop a value being read across another's. */
+const ANY_ANALYTE = new RegExp(LAB_ANALYTES.map((a) => a.pattern.source).join("|"), "i");
+
+/** A cation named just before an anion analyte makes a salt: potassium chloride, sodium bicarbonate. */
+const SALT_BEFORE = /\b(?:sodium|potassium|calcium|magnesium|ammonium|lithium|zinc|ferrous|ferric|aluminum|aluminium|hydrogen)\s+$/i;
+
+/** A fluid that is not blood: its analytes have their own, different ranges. */
+const OTHER_FLUID =
+  /\b(?:urine|urinary|stool|fecal|faecal|csf|cerebrospinal|pleural|peritoneal|ascitic|synovial|fluid|sweat|dialysate|amniotic|vitreous|aspirate|gastric|drain)\b/i;
+
+/**
+ * Number then concentration unit, straight after an analyte. The gap may hold
+ * words and comparison signs ("is", "of", "below", ">") but no digit, comma,
+ * full stop, semicolon or bracket, which is what keeps it inside one value.
+ */
+const VALUE_AFTER =
+  /^([^\d,.;()[\]]{0,30}?)(\d{1,3}(?:,\d{3})+|\d+(?:\.\d+)?)\s*((?:[µμu]|mc|m|n|p)?(?:mol|eq|g)\s*\/\s*(?:dl|l|ml))\b/i;
+
+/**
+ * A change in a value rather than the value — "glucose rises by 3 mg/dL",
+ * "a fall of 10 mEq/L per day". Its unit is still checked; its size is not.
+ */
+const A_CHANGE = /\b(?:by|per|every)\b|\b(?:rise|rises|rose|fall|falls|fell|increase[sd]?|decrease[sd]?|drop(?:s|ped)?|change[sd]?|reduction|correction)\s+(?:of\s+)?(?:about\s+|roughly\s+|at least\s+)?$/i;
+
+/** Molar or equivalent per decilitre: never a real laboratory unit. */
+const NONSTANDARD_UNIT = /(\d+(?:\.\d+)?)\s*((?:[µμu]|mc|m|n|p)?(?:mol|eq)\s*\/\s*dl)\b/gi;
+
+/** Lowercase, no spaces, every spelling of micro as μ. */
+function normalizeUnit(unit: string): string {
+  return unit.toLowerCase().replace(/\s+/g, "").replace(/^(?:µ|u|mc)/, "μ");
+}
+
+function checkLabValues(q: CheckableQuestion, findings: QaFinding[]): void {
+  const texts = [
+    q.vignette,
+    q.leadIn,
+    ...OPTION_KEYS.map((k) => q.options[k]),
+    q.explanation,
+    ...Object.values(q.distractorExplanations).filter((t): t is string => !!t),
+  ];
+  const seen = new Set<string>();
+  const report = (rule: "lab-unit" | "lab-implausible", detail: string) => {
+    if (seen.has(detail)) return;
+    seen.add(detail);
+    findings.push({ rule, severity: "block", detail });
+  };
+
+  for (const text of texts) {
+    for (const m of text.matchAll(NONSTANDARD_UNIT)) {
+      report("lab-unit", `"${m[0].trim()}" is in ${m[2]}, a unit no laboratory reports.`);
+    }
+
+    for (const analyte of LAB_ANALYTES) {
+      for (const hit of text.matchAll(analyte.pattern)) {
+        const at = hit.index ?? 0;
+        // This sentence only: "…maroon stool. Hemoglobin is 6.1 g/dL" is blood.
+        const before = text.slice(Math.max(0, at - 40), at).split(/[.;]\s|\n/).pop() ?? "";
+        if (SALT_BEFORE.test(before)) continue;
+        // Another fluid keeps the unit check (pleural glucose is still mg/dL)
+        // and drops the range, which is the blood's.
+        const blood = !OTHER_FLUID.test(before) || /\b(?:serum|plasma|blood)\s+$/i.test(before);
+        const value = VALUE_AFTER.exec(text.slice(at + hit[0].length, at + hit[0].length + 60));
+        if (!value) continue;
+        if (ANY_ANALYTE.test(value[1])) continue;
+
+        const amount = Number(value[2].replace(/,/g, ""));
+        const unit = normalizeUnit(value[3]);
+        const quoted = `${hit[0]}${value[0]}`.replace(/\s+/g, " ").trim();
+        if (/(?:mol|eq)\/dl$/.test(unit)) continue; // reported above
+        const range = analyte.units[unit];
+        if (!range) {
+          report("lab-unit", `"${quoted}" gives ${analyte.name} in ${value[3]}, a unit it is not reported in.`);
+        } else if (blood && (amount < range[0] || amount > range[1]) && !A_CHANGE.test(value[1])) {
+          report(
+            "lab-implausible",
+            `"${quoted}" is outside any value a patient presents with (${range[0]}–${range[1]} ${value[3]}).`
+          );
+        }
+      }
+    }
+  }
+}
+
+/**
  * The writer's own uncertainty, surfaced.
  *
  * This replaces a check on the `selfCheck` booleans, which measured as pure
@@ -530,6 +677,7 @@ export function checkQuestion(question: CheckableQuestion): QaResult {
   checkBolding(question, findings);
   checkVignetteQuestion(question, findings);
   checkLeadIn(question, findings);
+  checkLabValues(question, findings);
   checkReviewerFlag(question, findings);
 
   return {

@@ -174,9 +174,73 @@ describe("checkQuestion", () => {
     expect(rules(d)).not.toContain("stem-key-cueing");
   });
 
-  it("warns on a missing distractor explanation", () => {
+  it("blocks a missing distractor explanation", () => {
     const d = draft({ distractorExplanations: { a: "No.", c: "No.", d: "No." } });
     expect(rules(d)).toContain("missing-distractor-explanation");
+    expect(checkQuestion(d).blocked).toBe(true);
+  });
+
+  describe("lab values", () => {
+    const withStem = (vignette: string) => draft({ vignette });
+    const labRules = (vignette: string) => rules(withStem(vignette)).filter((r) => r.startsWith("lab-"));
+
+    it("blocks a molar unit per decilitre, which no laboratory reports", () => {
+      // The live table's repeated error: ammonia a hundredfold off.
+      const d = withStem("A 4-day-old boy is lethargic. Serum ammonia is 480 μmol/dL. Urinary orotic acid is high.");
+      expect(rules(d)).toContain("lab-unit");
+      expect(checkQuestion(d).blocked).toBe(true);
+      expect(labRules("Bicarbonate is 3 mEq/dL.")).toEqual(["lab-unit"]);
+    });
+
+    it("blocks an analyte in a unit it is never reported in", () => {
+      expect(labRules("Serum creatinine is 1.4 mmol/L.")).toEqual(["lab-unit"]);
+      expect(labRules("Sodium is 138 mg/dL.")).toEqual(["lab-unit"]);
+      // A pleural value keeps its unit check, though not the blood's range.
+      expect(labRules("Pleural fluid glucose is 38 mEq/L.")).toEqual(["lab-unit"]);
+    });
+
+    it("blocks a value no living patient presents with", () => {
+      expect(labRules("Potassium is 42 mEq/L.")).toEqual(["lab-implausible"]);
+      expect(labRules("Hemoglobin is 98 g/dL.")).toEqual(["lab-implausible"]);
+      expect(labRules("Serum sodium is 13.8 mEq/L.")).toEqual(["lab-implausible"]);
+    });
+
+    it("passes real vignettes, in US and SI units, at their extremes", () => {
+      expect(
+        labRules(
+          "Sodium is 118 mEq/L, potassium 6.9 mEq/L, chloride 88 mEq/L and bicarbonate 9 mEq/L. Glucose is 1,240 mg/dL. Creatinine is 2.8 mg/dL and BUN 64 mg/dL."
+        )
+      ).toEqual([]);
+      expect(labRules("Haemoglobin is 68 g/L and creatinine 310 μmol/L; glucose 22.4 mmol/L.")).toEqual([]);
+      expect(labRules("Plasma ammonia is 610 μmol/L. Lactate is 7.8 mmol/L. Ammonia was 95 mcg/dL.")).toEqual([]);
+    });
+
+    it("does not read one analyte's value across a list, a comma or another analyte", () => {
+      expect(labRules("Serum sodium, potassium and chloride are 128, 3.1 and 90 mEq/L.")).toEqual([]);
+      expect(labRules("Sodium 138, potassium 4.0 mEq/L.")).toEqual([]);
+      expect(labRules("The sodium and potassium are 4.0 mEq/L apart.")).toEqual([]);
+    });
+
+    it("skips other fluids' ranges, salts, doses and changes", () => {
+      expect(labRules("Urine sodium is 12 mEq/L and urine potassium is 80 mEq/L.")).toEqual([]);
+      expect(labRules("Potassium chloride 40 mEq/L is added to the fluids.")).toEqual([]);
+      expect(labRules("Sodium bicarbonate 150 mEq/L is infused.")).toEqual([]);
+      expect(labRules("Each unit raises hemoglobin by 1 g/dL.")).toEqual([]);
+      expect(labRules("Correct sodium by no more than 8 mEq/L per day.")).toEqual([]);
+      expect(labRules("Hemoglobin A1c is 9.1%. Glucose-6-phosphate dehydrogenase is low.")).toEqual([]);
+    });
+
+    it("reads blood in the sentence after a stool or fluid finding", () => {
+      expect(labRules("He passes maroon stool. Hemoglobin is 61 g/dL.")).toEqual(["lab-implausible"]);
+    });
+
+    it("checks the options and the explanation, not only the stem", () => {
+      const d = draft({
+        options: { ...draft().options, a: "Serum potassium of 55 mEq/L" },
+        explanation: "**Thiazides** act on the **NCC**. Expect ammonia near 300 μmol/dL.",
+      });
+      expect(rules(d).filter((r) => r.startsWith("lab-")).sort()).toEqual(["lab-implausible", "lab-unit"]);
+    });
   });
 
   it("blocks an item that argues against its own key", () => {
