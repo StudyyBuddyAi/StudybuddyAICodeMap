@@ -1,5 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import {
+  ambiguityFinding,
+  checkAmbiguity,
   checkWriterFlag,
   combineReads,
   parseFlagCheck,
@@ -101,6 +103,32 @@ describe("combineReads", () => {
     expect(combineReads(first, read({ answer: null, error: "429" }))).toBe(first);
     // A second read standing in brings no objection of its own.
     expect(combineReads(read({ answer: null, error: "x" }), read({ issue: "Hmm.", solvable: false }))).toMatchObject({ issue: "", solvable: true });
+  });
+});
+
+describe("checkAmbiguity", () => {
+  const reply = (content: string) => vi.fn(async () => content);
+
+  it("reports a second answer or missing data, and holds the item back", async () => {
+    const r = await checkAmbiguity(config, item, {}, reply('{"defect":"second_answer","option":"c","note":"Ivabradine also fits."}'));
+    expect(r).toMatchObject({ defect: "second_answer", option: "c", error: null });
+    expect(ambiguityFinding(r)).toMatchObject({ rule: "reviewer-ambiguity", severity: "block" });
+    const m = await checkAmbiguity(config, item, {}, reply('```json\n{"defect":"missing_data","option":null,"note":"No EF given."}\n```'));
+    expect(ambiguityFinding(m)?.detail).toContain("missing the finding");
+  });
+
+  it("is shown the key, and passes a clean item", async () => {
+    const complete = reply('{"defect":"none","option":null,"note":""}');
+    const r = await checkAmbiguity(config, item, {}, complete);
+    expect(ambiguityFinding(r)).toBeNull();
+    expect(JSON.stringify((complete.mock.calls[0] as unknown[])[1])).toContain("Keyed answer: A");
+  });
+
+  it("fails open on an error or a reply it cannot read", async () => {
+    const broken = await checkAmbiguity(config, item, {}, vi.fn(async () => { throw new Error("429"); }));
+    expect(ambiguityFinding(broken)).toBeNull();
+    expect(broken.error).toBe("429");
+    expect(ambiguityFinding(await checkAmbiguity(config, item, {}, reply('{"defect":"maybe"}')))).toBeNull();
   });
 });
 

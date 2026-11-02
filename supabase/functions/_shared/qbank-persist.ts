@@ -15,7 +15,13 @@ import {
 } from "./qbank-prompt.ts";
 import { checkBatch, type QaResult } from "./qbank-qa.ts";
 import { topicKey } from "./qbank-repetition.ts";
-import type { FlagCheckResult, TwoReads, VerificationResult } from "./qbank-verify.ts";
+import type { AmbiguityResult, FlagCheckResult, TwoReads, VerificationResult } from "./qbank-verify.ts";
+
+/** The checks beyond the gate and the combined verdict, stored for measurement. */
+export interface StoredChecks {
+  reads?: TwoReads | null;
+  ambiguity?: AmbiguityResult | null;
+}
 
 /**
  * Parsing and persisting a generated batch, server-side.
@@ -373,7 +379,7 @@ function buildRow(
   qaResult: QaResult | undefined,
   verification: VerificationResult[],
   flagCheck: FlagCheckResult | null = null,
-  reads: TwoReads | null = null
+  checks: StoredChecks = {}
 ) {
   const row = input.plan.questions.find((p) => p.index === question.index);
   return {
@@ -430,7 +436,10 @@ function buildRow(
       // Each blind read as it answered, beside the combined verdict above that
       // the claim filters on — so each model's share of the holds can be
       // measured. Null from callers that read once.
-      reads: reads ? { primary: reads.primary, second: reads.second } : null,
+      reads: checks.reads ? { primary: checks.reads.primary, second: checks.reads.second } : null,
+      // The ambiguity review (qbank-verify checkAmbiguity); null when it was
+      // skipped for an item the gate had already blocked.
+      ambiguity: checks.ambiguity ?? null,
       // The fact check on a writer flag, when the item carried one and was
       // still in play. Null otherwise — not "passed": nothing was checked.
       flagCheck,
@@ -539,11 +548,11 @@ export async function persistOne(
   qaResult: QaResult | undefined,
   verification: VerificationResult[] = [],
   flagCheck: FlagCheckResult | null = null,
-  reads: TwoReads | null = null
+  checks: StoredChecks = {}
 ): Promise<PersistOneResult> {
   const { data, error } = await client
     .from("questions")
-    .insert(buildRow(question, userId, input, qaResult, verification, flagCheck, reads))
+    .insert(buildRow(question, userId, input, qaResult, verification, flagCheck, checks))
     .select("id")
     .single();
 

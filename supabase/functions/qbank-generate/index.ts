@@ -22,6 +22,8 @@ import {
 import { prepareBatch, persistOne, type PersistInput } from "../_shared/qbank-persist.ts";
 import {
   verifyTwice,
+  checkAmbiguity,
+  ambiguityFinding,
   checkWriterFlag,
   probeConcern,
   type FlagCheckResult,
@@ -543,6 +545,8 @@ serve(async (req) => {
     /** Items only the second blind read held back, and second reads that failed. */
     let secondReadHolds = 0;
     let secondReadErrors = 0;
+    let ambiguityHolds = 0;
+    let ambiguityErrors = 0;
     let subtopics: string[] = [];
     let insertFailures = 0;
     /**
@@ -606,8 +610,15 @@ serve(async (req) => {
             // verdict it was written with rather than one bolted on later.
             // Fails open — see qbank-verify. The track is per question: a
             // mixed wave carries both exams.
-            const reads = await verifyTwice(config, question, question.examTrack);
+            // Both blind reads and the ambiguity review, side by side: three
+            // calls, one item's wait. The review is skipped for an item the
+            // gate already blocked — it would be paying to confirm a no.
+            const [reads, ambiguity] = await Promise.all([
+              verifyTwice(config, question, question.examTrack),
+              qaResult?.blocked ? Promise.resolve(null) : checkAmbiguity(config, question),
+            ]);
             const verdict = reads.verdict;
+            if (ambiguity?.error) ambiguityErrors++;
             verifications.push(verdict);
             if (reads.second?.error) secondReadErrors++;
             if (reads.primary.agreed && reads.second && !reads.second.error && !reads.second.agreed) secondReadHolds++;
@@ -621,6 +632,15 @@ serve(async (req) => {
               qaResult.findings.push(concern);
               qaResult.blocked = true;
               probeConcerns++;
+            }
+
+            // A reviewer who knew the key found a second defensible answer, or
+            // a stem missing the finding that decides it. See checkAmbiguity.
+            const unclear = ambiguity ? ambiguityFinding(ambiguity) : null;
+            if (unclear && qaResult && !qaResult.blocked && verdict.agreed) {
+              qaResult.findings.push(unclear);
+              qaResult.blocked = true;
+              ambiguityHolds++;
             }
 
             // An item its writer was unsure of is admitted only if a fact
@@ -653,7 +673,7 @@ serve(async (req) => {
               qaResult,
               [verdict],
               flagCheck,
-              reads
+              { reads, ambiguity }
             );
 
             if (id) {
@@ -846,6 +866,8 @@ serve(async (req) => {
             probeConcerns = 0;
             secondReadHolds = 0;
             secondReadErrors = 0;
+            ambiguityHolds = 0;
+            ambiguityErrors = 0;
             subtopics = [];
             delivered = 0;
             insertFailures = 0;
@@ -887,6 +909,8 @@ serve(async (req) => {
           probeConcerns,
           secondReadHolds,
           secondReadErrors,
+          ambiguityHolds,
+          ambiguityErrors,
           flagChecks: flagChecks.length,
           flagChecksCleared: flagChecks.filter((f) => f.confirmed).length,
           flagCheckErrors: flagChecks.filter((f) => f.error).length,

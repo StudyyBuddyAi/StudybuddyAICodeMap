@@ -38,6 +38,7 @@ export const RULE_LABELS: Record<string, string> = {
   "lab-implausible": "A lab value was not physiologically possible",
   "explanation-self-correction": "The explanation corrected its own answer",
   "explanation-letter-reference": "The explanation pointed at an option by letter",
+  "reviewer-ambiguity": "A reviewer found a second defensible answer or missing data",
 };
 
 /**

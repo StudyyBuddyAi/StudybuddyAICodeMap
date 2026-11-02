@@ -62,7 +62,7 @@ const BATCH = {
 };
 
 // ── Fake Corti ───────────────────────────────────────────────────────────────
-const calls = { stream: 0, verify: 0, flagCheck: 0, router: [], blueprint: 0, audit: 0 };
+const calls = { stream: 0, verify: 0, flagCheck: 0, ambiguity: 0, router: [], blueprint: 0, audit: 0 };
 let lastStreamBody = null;
 const ROUTES = { "heart failure": "cardiovascular", "nephrotic syndrome": "renal", "spikes protocol": "social_sciences", "banana bread": "not_medical", dka: "endocrine" };
 const CANONICAL = { dka: "Diabetic ketoacidosis", "heart failure": "Heart failure" };
@@ -78,6 +78,8 @@ let probeObjections = {};
 /** Items the second blind read (corti-s1-mini-instant) answers off the key; and that read failing outright. */
 let secondReadWrong = new Set();
 let secondReadDown = false;
+/** Per item: what the ambiguity reviewer reports ("second_answer" | "missing_data"). */
+let ambiguityDefects = {};
 const realFetch = globalThis.fetch;
 globalThis.fetch = async (url, init = {}) => {
   const u = String(url);
@@ -121,6 +123,9 @@ globalThis.fetch = async (url, init = {}) => {
     } else if (system.includes("auditing a concept list")) {
       calls.audit++;
       content = JSON.stringify({ duplicates: [[2, 5]], unusable: [12] });
+    } else if (system.includes("senior USMLE item reviewer")) {
+      calls.ambiguity++;
+      content = JSON.stringify({ defect: ambiguityDefects[n] ?? "none", option: null, note: ambiguityDefects[n] ? "test" : "" });
     } else if (system.includes("board-certified physician")) {
       calls.flagCheck++;
       content = JSON.stringify({ verdict: n === 5 ? "outdated" : "confirmed", note: "test" });
@@ -640,6 +645,32 @@ const metaOf = (inserts) => inserts.map((r) => r.generation_meta);
   secondReadDown = false;
   const ready = Object.fromEntries(down.metas.filter((m) => m.questionReady).map((m) => [m.questionReady.index, m.questionReady]));
   check("a failed second read changes nothing", () => assert.ok(ready[1].agreed && ready[2].agreed && ready[4].agreed === false));
+}
+
+// 19. The ambiguity review: a second defensible answer holds an item both
+// blind reads passed; an item the gate already blocked is never reviewed.
+{
+  ambiguityDefects = { 1: "second_answer" };
+  const before = calls.ambiguity;
+  globalThis.__fakeClient = fakeClient({ granted: 5, remaining: 5 });
+  const { metas } = await run({});
+  ambiguityDefects = {};
+  const log = globalThis.__fakeClient.log;
+  const byIndex = Object.fromEntries(metas.filter((m) => m.questionReady).map((m) => [m.questionReady.index, m.questionReady]));
+  const row = (n) => log.inserts.find((r) => r.generation_meta.index === n)?.generation_meta;
+  check("reviewer's second answer holds item 1", () => {
+    assert.equal(byIndex[1].blocked, true);
+    assert.equal(byIndex[1].blockRule, "reviewer-ambiguity");
+  });
+  check("the review is stored on every reviewed row", () => {
+    assert.equal(row(1).ambiguity.defect, "second_answer");
+    assert.equal(row(2).ambiguity.defect, "none");
+  });
+  check("a gate-blocked item is not reviewed", () => {
+    assert.equal(row(3).ambiguity, null);
+    assert.equal(calls.ambiguity - before, 4);
+  });
+  check("item 2 still delivered", () => assert.ok(!byIndex[2].blocked && byIndex[2].agreed));
 }
 
 console.log(results.join("\n"));

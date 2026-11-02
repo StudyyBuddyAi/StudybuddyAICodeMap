@@ -252,6 +252,91 @@ export function probeConcern(verdict: VerificationResult): QaFinding | null {
   };
 }
 
+// ── Ambiguity review ────────────────────────────────────────────────────────
+
+/**
+ * The defects a blind read misses most: a second option as defensible as the
+ * key, and a stem that lacks the finding needed to prefer the key. A blind
+ * reader picks one answer and moves on; only a reviewer who knows the key can
+ * ask whether anything else is as good. So this one is not blind.
+ *
+ * Measured on the accuracy suite (docs/qbank/accuracy-2026-11.md §6) before it
+ * was wired in: on its own it held back 20 of 25 faulty gold items and none of
+ * 55 sound ones; on top of the gate and both blind reads it caught a further
+ * five planted faults — duplicated meaning, second answers, missing and
+ * flipped findings — for no extra sound item held. The same prompt on
+ * `-mini-instant` held five sound items, so it runs on the verifier model.
+ * Fails open, like the probe.
+ */
+export type AmbiguityDefect = "none" | "second_answer" | "missing_data";
+
+export interface AmbiguityResult {
+  index: number;
+  defect: AmbiguityDefect;
+  /** The other defensible option, when the reviewer named one. */
+  option: OptionLetter | null;
+  note: string;
+  error: string | null;
+}
+
+const AMBIGUITY_PROMPT = `You are a senior USMLE item reviewer deciding whether a single-best-answer item can be released. You are shown the item and its keyed answer. Judge only two defects:
+
+1. second_answer: another option is as correct or as defensible as the key for the question exactly as asked — an expert would accept it. An option that is partly true, true in a different patient, or a worse choice is NOT this defect.
+2. missing_data: the stem lacks a finding a well-prepared student needs to prefer the key over another option.
+
+Most items have neither. Report a defect only if you would reject the item for it.
+
+Return ONE JSON object and nothing else:
+{"defect":"none"|"second_answer"|"missing_data","option":"a"|"b"|"c"|"d"|"e"|null,"note":string}
+
+note: under 20 words; "" when defect is none.`;
+
+export async function checkAmbiguity(
+  config: CortiConfig,
+  question: VerifiableQuestion,
+  probe: ProbeOptions = {},
+  complete: typeof cortiComplete = cortiComplete
+): Promise<AmbiguityResult> {
+  const base = { index: question.index, defect: "none" as const, option: null, note: "" };
+  try {
+    const raw = await complete(config, {
+      model: probe.model ?? config.verifierModel,
+      temperature: probe.temperature ?? 0,
+      maxTokens: 400,
+      json: true,
+      messages: [
+        { role: "system", content: AMBIGUITY_PROMPT },
+        { role: "user", content: `${renderItem(question)}\n\nKeyed answer: ${question.correctOption.toUpperCase()}` },
+      ],
+      signal: AbortSignal.timeout(VERIFIER_TIMEOUT_MS),
+    });
+    const text = raw.replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, "");
+    const parsed = JSON.parse(text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1));
+    const defect: AmbiguityDefect = parsed?.defect === "second_answer" || parsed?.defect === "missing_data" ? parsed.defect : "none";
+    const option = String(parsed?.option ?? "").trim().toLowerCase();
+    return {
+      index: question.index,
+      defect,
+      option: LETTERS.includes(option as OptionLetter) ? (option as OptionLetter) : null,
+      note: typeof parsed?.note === "string" ? parsed.note.trim().slice(0, 300) : "",
+      error: null,
+    };
+  } catch (err) {
+    return { ...base, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/** The review's finding for the gate, or null when it found nothing (or failed). */
+export function ambiguityFinding(result: AmbiguityResult): QaFinding | null {
+  if (result.error || result.defect === "none") return null;
+  const what = result.defect === "second_answer" ? "a second defensible answer" : "a stem missing the finding that decides it";
+  return {
+    rule: "reviewer-ambiguity",
+    severity: "block",
+    detail: `A reviewer who knew the key found ${what}${result.note ? `: ${result.note}` : "."}`,
+  };
+}
+
 // ── Writer-flag fact check ──────────────────────────────────────────────────
 
 /**
