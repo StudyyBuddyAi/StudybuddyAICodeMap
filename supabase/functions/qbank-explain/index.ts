@@ -73,26 +73,30 @@ serve(async (req) => {
     ]);
     if (!attempts?.length && !sessions?.length) return json({ error: "not_graded" }, 403);
 
-    const cached = await admin
-      .from("question_explanations")
-      .select("status, content")
-      .eq("question_id", questionId)
-      .maybeSingle();
+    const [cached, { data: question, error: questionError }] = await Promise.all([
+      admin.from("question_explanations").select("status, content").eq("question_id", questionId).maybeSingle(),
+      admin
+        .from("questions")
+        .select(
+          "question_text, option_a, option_b, option_c, option_d, option_e, correct_option, explanation, teaching_point, distractor_explanations, subject, topic, held:generation_meta->held"
+        )
+        .eq("id", questionId)
+        .maybeSingle(),
+    ]);
+    if (questionError || !question) return json({ error: "question_not_found" }, 404);
+
+    // Withdrawn after it was served (20261103000000_qbank_held_questions.sql):
+    // no deeper teaching of a key that is in doubt, even one already written.
+    if (question.held) {
+      log("held", { elapsedMs: Date.now() - startedAt });
+      return json({ status: "held" });
+    }
     if (cached.data) {
       log("cache_hit", { elapsedMs: Date.now() - startedAt });
       return cached.data.status === "explained"
         ? json({ status: "explained", explanation: cached.data.content })
         : json({ status: "held" });
     }
-
-    const { data: question, error: questionError } = await admin
-      .from("questions")
-      .select(
-        "question_text, option_a, option_b, option_c, option_d, option_e, correct_option, explanation, teaching_point, distractor_explanations, subject, topic"
-      )
-      .eq("id", questionId)
-      .maybeSingle();
-    if (questionError || !question) return json({ error: "question_not_found" }, 404);
 
     const model = asCortiModel(Deno.env.get("CORTI_EXPLAIN_MODEL"), DEFAULT_MODEL);
     const upstream = await cortiChatCompletion(cortiConfigFromEnv(), {
@@ -131,6 +135,18 @@ serve(async (req) => {
       { onConflict: "question_id", ignoreDuplicates: true }
     );
     if (stored.error) log("cache_write_failed", { error: stored.error.message });
+
+    // A writer that doubts the key withholds more than its explanation: the
+    // question leaves the review queue and the decks built from answered sets.
+    // Best effort; the explanation is held either way.
+    if (result.kind === "disputed") {
+      const held = await admin.rpc("hold_generated_question", {
+        p_question: questionId,
+        p_reason: result.reason,
+        p_source: "explain-dispute",
+      });
+      if (held.error) log("hold_failed", { error: held.error.message });
+    }
 
     log(result.kind, { model, elapsedMs: Date.now() - startedAt });
     return result.kind === "explained"
