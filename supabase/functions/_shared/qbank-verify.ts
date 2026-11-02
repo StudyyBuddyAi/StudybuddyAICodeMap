@@ -1,4 +1,4 @@
-import { cortiComplete, type CortiConfig } from "./corti.ts";
+import { cortiComplete, type CortiConfig, type CortiModel } from "./corti.ts";
 import { EXAM_TRACK_NAMES, type ExamTrack, type OptionLetter } from "./qbank-prompt.ts";
 import type { QaFinding } from "./qbank-qa.ts";
 
@@ -124,20 +124,31 @@ function renderItem(question: VerifiableQuestion): string {
 }
 
 /**
+ * A probe read other than the production one: another model, or a sampled
+ * read for a self-consistency vote. Only the accuracy harness
+ * (scripts/qbank-accuracy) passes these; production reads at the defaults.
+ */
+export interface ProbeOptions {
+  model?: CortiModel;
+  temperature?: number;
+}
+
+/**
  * Answers one item blind. `track` is per question rather than per batch
  * because a mixed set carries both exams in one wave.
  */
 export async function verifyOne(
   config: CortiConfig,
   question: VerifiableQuestion,
-  track: ExamTrack = question.examTrack ?? "step1"
+  track: ExamTrack = question.examTrack ?? "step1",
+  probe: ProbeOptions = {}
 ): Promise<VerificationResult> {
   const base = { index: question.index, answer: null, solvable: true, issue: "" };
 
   try {
     const raw = await cortiComplete(config, {
-      model: config.verifierModel,
-      temperature: 0,
+      model: probe.model ?? config.verifierModel,
+      temperature: probe.temperature ?? 0,
       maxTokens: VERIFIER_MAX_TOKENS,
       json: true,
       messages: [
@@ -168,6 +179,48 @@ export async function verifyOne(
     // Fail open: an unreachable verifier is not the student's problem.
     return { ...base, agreed: true, error: err instanceof Error ? err.message : String(err) };
   }
+}
+
+/**
+ * The two blind reads as one verdict.
+ *
+ * The second read runs on another model (config.secondVerifierModel) because
+ * the first is the writer's own model, and a model tends to ratify its own
+ * output. Either read landing off the key holds the item back. The first
+ * read's judgement — solvable, issue — stays the one probeConcern reads: the
+ * second read's objections added nothing on the accuracy suite.
+ *
+ * Each read fails open on its own, so an item now ships unverified only when
+ * both fail. When only the first fails, the second stands in for it: on the
+ * live table a served item whose explanation argued a different option from
+ * its key had a first read that failed open and nothing else to stop it.
+ */
+export function combineReads(primary: VerificationResult, second: VerificationResult | null): VerificationResult {
+  if (!second || second.error || !second.answer) return primary;
+  if (primary.error || !primary.answer) return { ...second, solvable: true, issue: "" };
+  if (primary.agreed && !second.agreed) return { ...primary, agreed: false, answer: second.answer };
+  return primary;
+}
+
+export interface TwoReads {
+  /** What gates the item: see combineReads. */
+  verdict: VerificationResult;
+  primary: VerificationResult;
+  /** Null when the second read is switched off. */
+  second: VerificationResult | null;
+}
+
+/** Both blind reads, in parallel, so the second costs no wall clock. */
+export async function verifyTwice(
+  config: CortiConfig,
+  question: VerifiableQuestion,
+  track: ExamTrack = question.examTrack ?? "step1"
+): Promise<TwoReads> {
+  const [primary, second] = await Promise.all([
+    verifyOne(config, question, track),
+    config.secondVerifierModel ? verifyOne(config, question, track, { model: config.secondVerifierModel }) : Promise.resolve(null),
+  ]);
+  return { verdict: combineReads(primary, second), primary, second };
 }
 
 /**
@@ -344,11 +397,12 @@ export async function checkWriterFlag(
  *
  * Parallel because the batch is small and the calls are independent, so the
  * whole pass costs about one item's latency. Each item is judged on its own
- * track, so a mixed batch needs no special handling here.
+ * track, so a mixed batch needs no special handling here. Both reads, as the
+ * edge function runs them; the combined verdict per item.
  */
 export function verifyBatch(
   config: CortiConfig,
   questions: VerifiableQuestion[]
 ): Promise<VerificationResult[]> {
-  return Promise.all(questions.map((q) => verifyOne(config, q)));
+  return Promise.all(questions.map(async (q) => (await verifyTwice(config, q)).verdict));
 }

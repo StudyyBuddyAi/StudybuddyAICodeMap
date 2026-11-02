@@ -108,6 +108,16 @@ const DEFAULT_VERIFIER_MODEL: CortiModel = "corti-s1-instant";
  */
 const DEFAULT_BLUEPRINT_MODEL: CortiModel = "corti-s1-instant";
 
+/**
+ * A second blind read, on a different model, beside the verifier: the
+ * independence the note above gave up, bought back. Measured on the accuracy
+ * suite (docs/qbank/accuracy-2026-11.md §6), `-mini-instant` disagreeing with
+ * the key caught faults the first read passed and held back none of 55 sound
+ * items; asking `-instant` three times instead held more sound items and caught
+ * fewer faults. CORTI_SECOND_VERIFIER_MODEL=none turns it off.
+ */
+const DEFAULT_SECOND_VERIFIER_MODEL: CortiModel = "corti-s1-mini-instant";
+
 export interface CortiConfig {
   clientId: string;
   clientSecret: string;
@@ -121,6 +131,8 @@ export interface CortiConfig {
   verifierModel: CortiModel;
   /** Topic blueprints: a topic's distinct concepts, built once and shared. */
   blueprintModel: CortiModel;
+  /** The second blind read; null when switched off. Absent reads as off. */
+  secondVerifierModel?: CortiModel | null;
 }
 
 /** Narrows an env value onto the model enum, or falls back. */
@@ -152,7 +164,8 @@ export function cortiConfigFromEnv(): CortiConfig {
   const region: CortiRegion = rawRegion === "us" ? "us" : DEFAULT_REGION;
 
   // Each model is an env override with its own default, so a model regression
-  // on any of the four is an env rollback rather than a redeploy.
+  // on any of them is an env rollback rather than a redeploy.
+  const second = Deno.env.get("CORTI_SECOND_VERIFIER_MODEL");
   return {
     clientId,
     clientSecret,
@@ -162,6 +175,7 @@ export function cortiConfigFromEnv(): CortiConfig {
     routerModel: asCortiModel(Deno.env.get("CORTI_ROUTER_MODEL"), DEFAULT_ROUTER_MODEL),
     verifierModel: asCortiModel(Deno.env.get("CORTI_VERIFIER_MODEL"), DEFAULT_VERIFIER_MODEL),
     blueprintModel: asCortiModel(Deno.env.get("CORTI_BLUEPRINT_MODEL"), DEFAULT_BLUEPRINT_MODEL),
+    secondVerifierModel: second === "none" ? null : asCortiModel(second, DEFAULT_SECOND_VERIFIER_MODEL),
   };
 }
 

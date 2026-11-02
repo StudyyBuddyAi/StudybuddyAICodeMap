@@ -75,6 +75,9 @@ const DRAFT = {
 let streamStatus = 200;
 /** Per item: the probe answers with the key but objects to the item. */
 let probeObjections = {};
+/** Items the second blind read (corti-s1-mini-instant) answers off the key; and that read failing outright. */
+let secondReadWrong = new Set();
+let secondReadDown = false;
 const realFetch = globalThis.fetch;
 globalThis.fetch = async (url, init = {}) => {
   const u = String(url);
@@ -128,8 +131,12 @@ globalThis.fetch = async (url, init = {}) => {
         .find(([, , text]) => text === KEY_TEXT(n))?.[1]?.toLowerCase();
       const wrong = ["a", "b", "c", "d", "e"].find((l) => l !== letter);
       const objection = probeObjections[n];
+      const second = body.model === "corti-s1-mini-instant";
+      if (second && secondReadDown) {
+        return new Response(JSON.stringify({ error: { message: "busy" } }), { status: 503 });
+      }
       content = JSON.stringify({
-        answer: n === 4 ? wrong : letter,
+        answer: n === 4 || (second && secondReadWrong.has(n)) ? wrong : letter,
         solvable: objection?.solvable ?? true,
         issue: objection?.issue ?? "None.",
       });
@@ -607,6 +614,32 @@ const metaOf = (inserts) => inserts.map((r) => r.generation_meta);
     assert.equal(log.rpc.find((c) => c.name === "release_usage")?.args.p_n, 4);
   });
   check("an objected item is not fact-checked as well", () => assert.equal(calls.flagCheck - flagChecksBefore, 0));
+}
+
+// 18. The second blind read, on another model: its disagreement holds an item
+// the first read passed; when it fails, it changes nothing.
+{
+  secondReadWrong = new Set([2]);
+  globalThis.__fakeClient = fakeClient({ granted: 5, remaining: 5 });
+  const { metas } = await run({});
+  secondReadWrong = new Set();
+  const log = globalThis.__fakeClient.log;
+  const byIndex = Object.fromEntries(metas.filter((m) => m.questionReady).map((m) => [m.questionReady.index, m.questionReady]));
+  const row = (n) => log.inserts.find((r) => r.generation_meta.index === n)?.generation_meta;
+  check("second read's disagreement holds item 2", () => assert.equal(byIndex[2].agreed, false));
+  check("both reads stored, the combined verdict gating", () => {
+    assert.equal(row(2).reads.primary.agreed, true);
+    assert.equal(row(2).reads.second.agreed, false);
+    assert.equal(row(2).verification.agreed, false);
+  });
+  check("item 1 still delivered", () => assert.ok(!byIndex[1].blocked && byIndex[1].agreed));
+
+  secondReadDown = true;
+  globalThis.__fakeClient = fakeClient({ granted: 5, remaining: 5 });
+  const down = await run({});
+  secondReadDown = false;
+  const ready = Object.fromEntries(down.metas.filter((m) => m.questionReady).map((m) => [m.questionReady.index, m.questionReady]));
+  check("a failed second read changes nothing", () => assert.ok(ready[1].agreed && ready[2].agreed && ready[4].agreed === false));
 }
 
 console.log(results.join("\n"));

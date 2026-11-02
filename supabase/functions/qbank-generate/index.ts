@@ -21,7 +21,7 @@ import {
 } from "../_shared/qbank-prompt.ts";
 import { prepareBatch, persistOne, type PersistInput } from "../_shared/qbank-persist.ts";
 import {
-  verifyOne,
+  verifyTwice,
   checkWriterFlag,
   probeConcern,
   type FlagCheckResult,
@@ -540,6 +540,9 @@ serve(async (req) => {
     let verifications: VerificationResult[] = [];
     let flagChecks: FlagCheckResult[] = [];
     let probeConcerns = 0;
+    /** Items only the second blind read held back, and second reads that failed. */
+    let secondReadHolds = 0;
+    let secondReadErrors = 0;
     let subtopics: string[] = [];
     let insertFailures = 0;
     /**
@@ -603,8 +606,11 @@ serve(async (req) => {
             // verdict it was written with rather than one bolted on later.
             // Fails open — see qbank-verify. The track is per question: a
             // mixed wave carries both exams.
-            const verdict = await verifyOne(config, question, question.examTrack);
+            const reads = await verifyTwice(config, question, question.examTrack);
+            const verdict = reads.verdict;
             verifications.push(verdict);
+            if (reads.second?.error) secondReadErrors++;
+            if (reads.primary.agreed && reads.second && !reads.second.error && !reads.second.agreed) secondReadHolds++;
 
             // The probe answered with the key but objected to the item — two
             // defensible answers, duplicate options, missing data. Held back
@@ -646,7 +652,8 @@ serve(async (req) => {
               question,
               qaResult,
               [verdict],
-              flagCheck
+              flagCheck,
+              reads
             );
 
             if (id) {
@@ -837,6 +844,8 @@ serve(async (req) => {
             verifications = [];
             flagChecks = [];
             probeConcerns = 0;
+            secondReadHolds = 0;
+            secondReadErrors = 0;
             subtopics = [];
             delivered = 0;
             insertFailures = 0;
@@ -876,6 +885,8 @@ serve(async (req) => {
           insertError,
           verifierErrors: verifications.filter((v) => v.error).length,
           probeConcerns,
+          secondReadHolds,
+          secondReadErrors,
           flagChecks: flagChecks.length,
           flagChecksCleared: flagChecks.filter((f) => f.confirmed).length,
           flagCheckErrors: flagChecks.filter((f) => f.error).length,

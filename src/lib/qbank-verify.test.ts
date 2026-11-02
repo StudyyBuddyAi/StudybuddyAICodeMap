@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import {
   checkWriterFlag,
+  combineReads,
   parseFlagCheck,
   probeConcern,
   probeIssue,
@@ -74,6 +75,32 @@ describe("probeConcern", () => {
     expect(probeIssue(undefined)).toBe("");
     expect(probeIssue("Two defensible answers: B and D.")).toBe("Two defensible answers: B and D.");
     expect(probeIssue("No option matches the CURB-65 criteria.")).toBe("No option matches the CURB-65 criteria.");
+  });
+});
+
+describe("combineReads", () => {
+  const read = (over: Partial<VerificationResult> = {}): VerificationResult => ({
+    index: 1, agreed: true, answer: "c", solvable: true, issue: "", error: null, ...over,
+  });
+
+  it("holds the item back when either read lands off the key", () => {
+    expect(combineReads(read(), read({ agreed: false, answer: "a" }))).toMatchObject({ agreed: false, answer: "a" });
+    expect(combineReads(read({ agreed: false, answer: "b" }), read())).toMatchObject({ agreed: false, answer: "b" });
+    expect(combineReads(read(), read()).agreed).toBe(true);
+  });
+
+  it("lets the second read stand in when the first failed open", () => {
+    const failed = read({ answer: null, error: "timeout" });
+    expect(combineReads(failed, read({ agreed: false, answer: "a" }))).toMatchObject({ agreed: false, error: null });
+    expect(combineReads(failed, null)).toBe(failed);
+  });
+
+  it("keeps the first read's judgement for probeConcern, and ignores a failed second read", () => {
+    const first = read({ issue: "Two defensible answers." });
+    expect(combineReads(first, read({ issue: "" })).issue).toBe("Two defensible answers.");
+    expect(combineReads(first, read({ answer: null, error: "429" }))).toBe(first);
+    // A second read standing in brings no objection of its own.
+    expect(combineReads(read({ answer: null, error: "x" }), read({ issue: "Hmm.", solvable: false }))).toMatchObject({ issue: "", solvable: true });
   });
 });
 
