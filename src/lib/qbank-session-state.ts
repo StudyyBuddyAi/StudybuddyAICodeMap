@@ -231,7 +231,7 @@ export const resumeStartIndex = (nextIndex: number, generationMaxIndex: number |
     ? Math.max(nextIndex, generationMaxIndex + 1)
     : nextIndex;
 
-const KEY_FIELDS = ["correct_option", "explanation", "teaching_point", "distractor_explanations"] as const;
+const KEY_FIELDS = ["correct_option", "explanation", "teaching_point", "distractor_explanations", "withdrawn"] as const;
 
 const withoutKey = (q: Question): Question => {
   const copy = { ...q };

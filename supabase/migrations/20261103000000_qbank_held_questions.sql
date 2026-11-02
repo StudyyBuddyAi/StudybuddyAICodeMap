@@ -13,6 +13,7 @@
 --   - qbank-explain answers "held" for it, and holds the question itself when
 --     its writer disputes the key.
 --   - a deck built from answered questions leaves it out (medical-notes).
+--   - a reviewed set marks it "withdrawn" beside its key (qbank_question_payload).
 -- The student's past sessions still show it as it was answered; withdrawing it
 -- does not rewrite their history.
 --
@@ -312,3 +313,57 @@ REVOKE ALL ON FUNCTION public.start_qbank_session(
 GRANT EXECUTE ON FUNCTION public.start_qbank_session(
   text[], int, text, uuid[], text
 ) TO authenticated;
+
+-- The graded question payload (get_session_review, resume_qbank_session)
+-- carries "withdrawn", so a student reviewing an old set is told which answer
+-- not to rely on. Only with the key: before grading it would hint at the item.
+create or replace function public.qbank_question_payload(p_id uuid, p_with_key boolean)
+returns jsonb
+language sql
+stable
+set search_path = public
+as $$
+  select jsonb_build_object(
+      'id', q.id,
+      'subject', q.subject,
+      'domain', q.domain,
+      'topic', q.topic,
+      'difficulty', q.difficulty,
+      'competency', q.competency,
+      'question_text', q.question_text,
+      'option_a', q.option_a,
+      'option_b', q.option_b,
+      'option_c', q.option_c,
+      'option_d', q.option_d,
+      'option_e', q.option_e,
+      'media', coalesce((
+        select jsonb_agg(
+          jsonb_build_object(
+            'file_url', md.file_url,
+            'media_type', md.media_type,
+            'caption', qm.caption,
+            'attribution', md.attribution,
+            'license', md.license,
+            'display_context', qm.display_context,
+            'display_order', qm.display_order
+          ) order by qm.display_order
+        )
+        from question_media qm
+        join media md on md.id = qm.media_id
+        where qm.question_id = q.id
+      ), '[]'::jsonb)
+    )
+    || case when p_with_key then jsonb_build_object(
+      'correct_option', q.correct_option,
+      'explanation', q.explanation,
+      'teaching_point', q.teaching_point,
+      'distractor_explanations', q.distractor_explanations,
+      -- Withdrawn after it was served: the review says so beside the key.
+      'withdrawn', coalesce(q.generation_meta, '{}'::jsonb) ? 'held'
+    ) else '{}'::jsonb end
+  from questions q
+  where q.id = p_id;
+$$;
+
+revoke all on function public.qbank_question_payload(uuid, boolean) from public;
+revoke all on function public.qbank_question_payload(uuid, boolean) from anon, authenticated;

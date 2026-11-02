@@ -78,6 +78,7 @@ interface ReviewQuestion {
   explanation: string;
   teaching_point: string;
   distractor_explanations: Partial<Record<string, string>> | null;
+  withdrawn?: boolean;
   media: ReviewMedia[] | null;
 }
 

@@ -42,6 +42,11 @@ export interface Question {
    * optional rather than assume every answered question has it.
    */
   distractor_explanations?: Partial<Record<OptionKey, string>>;
+  /**
+   * Withdrawn after it was served — its key is in doubt
+   * (20261103000000_qbank_held_questions.sql). Arrives with the grade.
+   */
+  withdrawn?: boolean;
   media?: QuestionMedia[];
 }
 

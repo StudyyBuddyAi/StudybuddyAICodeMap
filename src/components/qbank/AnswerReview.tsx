@@ -1,5 +1,5 @@
 import { forwardRef } from "react";
-import { CheckCircle2, MinusCircle, XCircle } from "lucide-react";
+import { AlertTriangle, CheckCircle2, MinusCircle, XCircle } from "lucide-react";
 import { renderMarkdown } from "@/lib/render-markdown";
 import { choiceLabel as choice, formatClock } from "@/lib/qbank-answer";
 import { TIMED_SECONDS_PER_QUESTION, type OptionKey, type Question, type QuestionMedia } from "@/lib/qbank-types";
@@ -66,6 +66,16 @@ const AnswerReview = forwardRef<
       )}
 
       <hr className="qb-rule" />
+
+      {q.withdrawn && (
+        <div className="qb-notice" data-tone="warn" role="note">
+          <AlertTriangle aria-hidden />
+          <span>
+            <strong>Withdrawn after review.</strong> We found a problem with this question, so don't rely on its answer. It
+            won't come back in your review sets or flashcards.
+          </span>
+        </div>
+      )}
 
       <MediaBlock media={q.media} context="explanation" onOpen={onOpenMedia} />
 
