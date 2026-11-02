@@ -33,6 +33,12 @@ export const RULE_LABELS: Record<string, string> = {
   "writer-flagged": "The writer raised a concern",
   "writer-critical": "The writer reported a fault in its own question",
   "flag-unconfirmed": "A fact check could not clear the writer's doubt",
+  "probe-concern": "A second read found a problem with the question",
+  "lab-unit": "A lab value was given in the wrong unit",
+  "lab-implausible": "A lab value was not physiologically possible",
+  "explanation-self-correction": "The explanation corrected its own answer",
+  "explanation-letter-reference": "The explanation pointed at an option by letter",
+  "reviewer-ambiguity": "A reviewer found a second defensible answer or missing data",
 };
 
 /**

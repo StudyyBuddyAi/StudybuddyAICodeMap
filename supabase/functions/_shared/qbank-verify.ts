@@ -1,5 +1,6 @@
-import { cortiComplete, type CortiConfig } from "./corti.ts";
+import { cortiComplete, type CortiConfig, type CortiModel } from "./corti.ts";
 import { EXAM_TRACK_NAMES, type ExamTrack, type OptionLetter } from "./qbank-prompt.ts";
+import type { QaFinding } from "./qbank-qa.ts";
 
 /**
  * Independent cold-answering pass.
@@ -105,9 +106,31 @@ export interface VerificationResult {
 
 const LETTERS: OptionLetter[] = ["a", "b", "c", "d", "e"];
 
+/**
+ * The probe saying it has nothing to report. Since its issue now holds an
+ * item back (probeConcern), "No issues." must read as clean, not as a concern.
+ */
+const NO_ISSUE = /^(?:none|n\/a|no(?:\s+(?:significant|major|obvious|clear))?\s+(?:issues?|problems?|concerns?)(?:\s+(?:found|identified|noted))?)\.?$/i;
+
+/** The probe's issue field as a concern, or "" when it reported none. */
+export function probeIssue(value: unknown): string {
+  const issue = typeof value === "string" ? value.trim() : "";
+  return NO_ISSUE.test(issue) ? "" : issue;
+}
+
 function renderItem(question: VerifiableQuestion): string {
   const options = LETTERS.map((k) => `${k.toUpperCase()}. ${question.options[k]}`).join("\n");
   return `${question.vignette}\n\n${question.leadIn}\n\n${options}`;
+}
+
+/**
+ * A probe read other than the production one: another model, or a sampled
+ * read for a self-consistency vote. Only the accuracy harness
+ * (scripts/qbank-accuracy) passes these; production reads at the defaults.
+ */
+export interface ProbeOptions {
+  model?: CortiModel;
+  temperature?: number;
 }
 
 /**
@@ -117,14 +140,15 @@ function renderItem(question: VerifiableQuestion): string {
 export async function verifyOne(
   config: CortiConfig,
   question: VerifiableQuestion,
-  track: ExamTrack = question.examTrack ?? "step1"
+  track: ExamTrack = question.examTrack ?? "step1",
+  probe: ProbeOptions = {}
 ): Promise<VerificationResult> {
   const base = { index: question.index, answer: null, solvable: true, issue: "" };
 
   try {
     const raw = await cortiComplete(config, {
-      model: config.verifierModel,
-      temperature: 0,
+      model: probe.model ?? config.verifierModel,
+      temperature: probe.temperature ?? 0,
       maxTokens: VERIFIER_MAX_TOKENS,
       json: true,
       messages: [
@@ -148,15 +172,169 @@ export async function verifyOne(
       agreed: answer === question.correctOption,
       answer: answer as OptionLetter,
       solvable: parsed?.solvable !== false,
-      issue: typeof parsed?.issue === "string" && !/^none\.?$/i.test(parsed.issue.trim())
-        ? parsed.issue.trim()
-        : "",
+      issue: probeIssue(parsed?.issue),
       error: null,
     };
   } catch (err) {
     // Fail open: an unreachable verifier is not the student's problem.
     return { ...base, agreed: true, error: err instanceof Error ? err.message : String(err) };
   }
+}
+
+/**
+ * The two blind reads as one verdict.
+ *
+ * The second read runs on another model (config.secondVerifierModel) because
+ * the first is the writer's own model, and a model tends to ratify its own
+ * output. Either read landing off the key holds the item back. The first
+ * read's judgement — solvable, issue — stays the one probeConcern reads: the
+ * second read's objections added nothing on the accuracy suite.
+ *
+ * Each read fails open on its own, so an item now ships unverified only when
+ * both fail. When only the first fails, the second stands in for it: on the
+ * live table a served item whose explanation argued a different option from
+ * its key had a first read that failed open and nothing else to stop it.
+ */
+export function combineReads(primary: VerificationResult, second: VerificationResult | null): VerificationResult {
+  if (!second || second.error || !second.answer) return primary;
+  if (primary.error || !primary.answer) return { ...second, solvable: true, issue: "" };
+  if (primary.agreed && !second.agreed) return { ...primary, agreed: false, answer: second.answer };
+  return primary;
+}
+
+export interface TwoReads {
+  /** What gates the item: see combineReads. */
+  verdict: VerificationResult;
+  primary: VerificationResult;
+  /** Null when the second read is switched off. */
+  second: VerificationResult | null;
+}
+
+/** Both blind reads, in parallel, so the second costs no wall clock. */
+export async function verifyTwice(
+  config: CortiConfig,
+  question: VerifiableQuestion,
+  track: ExamTrack = question.examTrack ?? "step1"
+): Promise<TwoReads> {
+  const [primary, second] = await Promise.all([
+    verifyOne(config, question, track),
+    config.secondVerifierModel ? verifyOne(config, question, track, { model: config.secondVerifierModel }) : Promise.resolve(null),
+  ]);
+  return { verdict: combineReads(primary, second), primary, second };
+}
+
+/**
+ * The probe's own objection to an item it answered with the key.
+ *
+ * Agreement used to be the probe's only vote. It also judges the item — is it
+ * solvable, what is its biggest problem — and that judgement was stored and
+ * never read, so an item the probe answered correctly while saying "options A
+ * and C are essentially identical" went to the student. Measured on the live
+ * table (2026-11-02): five served items carried such an objection, and read by
+ * hand four of them were faulty — duplicate options, two defensible answers, a
+ * key worded as the wrong cause, a scoring rule the stem did not satisfy. The
+ * fifth was a false alarm on a sound post-MI item, which is the cost: an
+ * objection holds an item back and the wave writes another, at roughly one
+ * item in a hundred.
+ *
+ * A disagreement is already held back on its own, and a probe that errored
+ * fails open as before, so this reads only agreed, answered verdicts. Returns
+ * the gate finding to record, or null.
+ */
+export function probeConcern(verdict: VerificationResult): QaFinding | null {
+  if (verdict.error || !verdict.agreed || !verdict.answer) return null;
+  if (verdict.solvable && !verdict.issue) return null;
+  const what = verdict.issue || "it could not reach one defensible answer";
+  return {
+    rule: "probe-concern",
+    severity: "block",
+    detail: `A blind second read chose the key but objected to the item${verdict.solvable ? "" : " as unsolvable"}: ${what}`,
+  };
+}
+
+// ── Ambiguity review ────────────────────────────────────────────────────────
+
+/**
+ * The defects a blind read misses most: a second option as defensible as the
+ * key, and a stem that lacks the finding needed to prefer the key. A blind
+ * reader picks one answer and moves on; only a reviewer who knows the key can
+ * ask whether anything else is as good. So this one is not blind.
+ *
+ * Measured on the accuracy suite (docs/qbank/accuracy-2026-11.md §6) before it
+ * was wired in: on its own it held back 20 of 25 faulty gold items and none of
+ * 55 sound ones; on top of the gate and both blind reads it caught a further
+ * five planted faults — duplicated meaning, second answers, missing and
+ * flipped findings — for no extra sound item held. The same prompt on
+ * `-mini-instant` held five sound items, so it runs on the verifier model.
+ * Fails open, like the probe.
+ */
+export type AmbiguityDefect = "none" | "second_answer" | "missing_data";
+
+export interface AmbiguityResult {
+  index: number;
+  defect: AmbiguityDefect;
+  /** The other defensible option, when the reviewer named one. */
+  option: OptionLetter | null;
+  note: string;
+  error: string | null;
+}
+
+const AMBIGUITY_PROMPT = `You are a senior USMLE item reviewer deciding whether a single-best-answer item can be released. You are shown the item and its keyed answer. Judge only two defects:
+
+1. second_answer: another option is as correct or as defensible as the key for the question exactly as asked — an expert would accept it. An option that is partly true, true in a different patient, or a worse choice is NOT this defect.
+2. missing_data: the stem lacks a finding a well-prepared student needs to prefer the key over another option.
+
+Most items have neither. Report a defect only if you would reject the item for it.
+
+Return ONE JSON object and nothing else:
+{"defect":"none"|"second_answer"|"missing_data","option":"a"|"b"|"c"|"d"|"e"|null,"note":string}
+
+note: under 20 words; "" when defect is none.`;
+
+export async function checkAmbiguity(
+  config: CortiConfig,
+  question: VerifiableQuestion,
+  probe: ProbeOptions = {},
+  complete: typeof cortiComplete = cortiComplete
+): Promise<AmbiguityResult> {
+  const base = { index: question.index, defect: "none" as const, option: null, note: "" };
+  try {
+    const raw = await complete(config, {
+      model: probe.model ?? config.verifierModel,
+      temperature: probe.temperature ?? 0,
+      maxTokens: 400,
+      json: true,
+      messages: [
+        { role: "system", content: AMBIGUITY_PROMPT },
+        { role: "user", content: `${renderItem(question)}\n\nKeyed answer: ${question.correctOption.toUpperCase()}` },
+      ],
+      signal: AbortSignal.timeout(VERIFIER_TIMEOUT_MS),
+    });
+    const text = raw.replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, "");
+    const parsed = JSON.parse(text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1));
+    const defect: AmbiguityDefect = parsed?.defect === "second_answer" || parsed?.defect === "missing_data" ? parsed.defect : "none";
+    const option = String(parsed?.option ?? "").trim().toLowerCase();
+    return {
+      index: question.index,
+      defect,
+      option: LETTERS.includes(option as OptionLetter) ? (option as OptionLetter) : null,
+      note: typeof parsed?.note === "string" ? parsed.note.trim().slice(0, 300) : "",
+      error: null,
+    };
+  } catch (err) {
+    return { ...base, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/** The review's finding for the gate, or null when it found nothing (or failed). */
+export function ambiguityFinding(result: AmbiguityResult): QaFinding | null {
+  if (result.error || result.defect === "none") return null;
+  const what = result.defect === "second_answer" ? "a second defensible answer" : "a stem missing the finding that decides it";
+  return {
+    rule: "reviewer-ambiguity",
+    severity: "block",
+    detail: `A reviewer who knew the key found ${what}${result.note ? `: ${result.note}` : "."}`,
+  };
 }
 
 // ── Writer-flag fact check ──────────────────────────────────────────────────
@@ -304,11 +482,12 @@ export async function checkWriterFlag(
  *
  * Parallel because the batch is small and the calls are independent, so the
  * whole pass costs about one item's latency. Each item is judged on its own
- * track, so a mixed batch needs no special handling here.
+ * track, so a mixed batch needs no special handling here. Both reads, as the
+ * edge function runs them; the combined verdict per item.
  */
 export function verifyBatch(
   config: CortiConfig,
   questions: VerifiableQuestion[]
 ): Promise<VerificationResult[]> {
-  return Promise.all(questions.map((q) => verifyOne(config, q)));
+  return Promise.all(questions.map(async (q) => (await verifyTwice(config, q)).verdict));
 }

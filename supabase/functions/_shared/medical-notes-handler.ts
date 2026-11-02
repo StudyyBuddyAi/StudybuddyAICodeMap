@@ -440,11 +440,15 @@ export async function handleMedicalNotes(req: Request): Promise<Response> {
       if (!ids.length) return json({ error: "no_answered_questions" }, 400);
       const { data: rows, error: rowsError } = await authClient
         .from("questions")
-        .select("id, topic, question_text, option_a, option_b, option_c, option_d, option_e, correct_option, explanation, teaching_point, distractor_explanations")
+        .select("id, topic, question_text, option_a, option_b, option_c, option_d, option_e, correct_option, explanation, teaching_point, distractor_explanations, held:generation_meta->held")
         .in("id", ids);
       if (rowsError || !rows?.length) return json({ error: "deck_source_failed" }, 500);
+      // A question withdrawn after it was served is not made into cards: its
+      // key is in doubt (20261103000000_qbank_held_questions.sql).
+      const usable = (rows as (AnsweredQuestion & { held?: unknown })[]).filter((q) => !q.held);
+      if (!usable.length) return json({ error: "no_answered_questions" }, 400);
       // In the order the student asked for them.
-      const byId = new Map((rows as AnsweredQuestion[]).map((q) => [q.id, q]));
+      const byId = new Map(usable.map((q) => [q.id, q]));
       const ordered = deckSource.questionIds.map((id) => byId.get(id)).filter((q): q is AnsweredQuestion => !!q);
       studyMaterial = { kind: "qbank", text: qbankMaterial(ordered) };
     }

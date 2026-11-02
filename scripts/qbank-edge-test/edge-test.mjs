@@ -62,7 +62,7 @@ const BATCH = {
 };
 
 // ── Fake Corti ───────────────────────────────────────────────────────────────
-const calls = { stream: 0, verify: 0, flagCheck: 0, router: [], blueprint: 0, audit: 0 };
+const calls = { stream: 0, verify: 0, flagCheck: 0, ambiguity: 0, router: [], blueprint: 0, audit: 0 };
 let lastStreamBody = null;
 const ROUTES = { "heart failure": "cardiovascular", "nephrotic syndrome": "renal", "spikes protocol": "social_sciences", "banana bread": "not_medical", dka: "endocrine" };
 const CANONICAL = { dka: "Diabetic ketoacidosis", "heart failure": "Heart failure" };
@@ -73,6 +73,13 @@ const DRAFT = {
   concepts: Array.from({ length: 12 }, (_, i) => ({ concept: `Testable point number ${i + 1} about ketoacidosis`, tier: i < 4 ? "core" : "standard" })),
 };
 let streamStatus = 200;
+/** Per item: the probe answers with the key but objects to the item. */
+let probeObjections = {};
+/** Items the second blind read (corti-s1-mini-instant) answers off the key; and that read failing outright. */
+let secondReadWrong = new Set();
+let secondReadDown = false;
+/** Per item: what the ambiguity reviewer reports ("second_answer" | "missing_data"). */
+let ambiguityDefects = {};
 const realFetch = globalThis.fetch;
 globalThis.fetch = async (url, init = {}) => {
   const u = String(url);
@@ -116,6 +123,9 @@ globalThis.fetch = async (url, init = {}) => {
     } else if (system.includes("auditing a concept list")) {
       calls.audit++;
       content = JSON.stringify({ duplicates: [[2, 5]], unusable: [12] });
+    } else if (system.includes("senior USMLE item reviewer")) {
+      calls.ambiguity++;
+      content = JSON.stringify({ defect: ambiguityDefects[n] ?? "none", option: null, note: ambiguityDefects[n] ? "test" : "" });
     } else if (system.includes("board-certified physician")) {
       calls.flagCheck++;
       content = JSON.stringify({ verdict: n === 5 ? "outdated" : "confirmed", note: "test" });
@@ -125,7 +135,16 @@ globalThis.fetch = async (url, init = {}) => {
       const letter = (/^([A-E])\. (.*)$/gm.exec ? [...user.matchAll(/^([A-E])\. (.*)$/gm)] : [])
         .find(([, , text]) => text === KEY_TEXT(n))?.[1]?.toLowerCase();
       const wrong = ["a", "b", "c", "d", "e"].find((l) => l !== letter);
-      content = JSON.stringify({ answer: n === 4 ? wrong : letter, solvable: true, issue: "None." });
+      const objection = probeObjections[n];
+      const second = body.model === "corti-s1-mini-instant";
+      if (second && secondReadDown) {
+        return new Response(JSON.stringify({ error: { message: "busy" } }), { status: 503 });
+      }
+      content = JSON.stringify({
+        answer: n === 4 || (second && secondReadWrong.has(n)) ? wrong : letter,
+        solvable: objection?.solvable ?? true,
+        issue: objection?.issue ?? "None.",
+      });
     }
     return new Response(JSON.stringify({ choices: [{ message: { content } }] }), { status: 200 });
   }
@@ -567,6 +586,91 @@ const metaOf = (inserts) => inserts.map((r) => r.generation_meta);
   check("history read only for the wave's own topics", () =>
     assert.deepEqual([...log.rpc.find((c) => c.name === "qbank_topic_history").args.p_keys].sort(), ["heart failure", "nephrotic syndrome", "spikes protocol"]));
   check("at most two builds per wave", () => assert.equal(claims.length, 2));
+}
+
+// 17. The probe chose the key but objected to the item: held back like a gate
+// block, stored as such, and not charged to a free account.
+{
+  // Item 1 is otherwise clean; item 5 carries a writer flag, so without the
+  // objection it would go on to the fact check.
+  probeObjections = {
+    1: { solvable: false, issue: "Options A and C are essentially identical." },
+    5: { solvable: true, issue: "No option names the actual cause." },
+  };
+  const flagChecksBefore = calls.flagCheck;
+  globalThis.__fakeClient = fakeClient({ granted: 5, remaining: 5 });
+  const { metas } = await run({});
+  probeObjections = {};
+  const log = globalThis.__fakeClient.log;
+  const byIndex = Object.fromEntries(metas.filter((m) => m.questionReady).map((m) => [m.questionReady.index, m.questionReady]));
+  const done = metas.find((m) => m.waveComplete)?.waveComplete;
+  const row = (n) => log.inserts.find((r) => r.generation_meta.index === n)?.generation_meta;
+  check("probe objection blocks an agreed item", () =>
+    assert.ok(byIndex[1].agreed && byIndex[1].blocked && byIndex[5].agreed && byIndex[5].blocked));
+  check("probe objection named as the block rule", () =>
+    assert.deepEqual([byIndex[1].blockRule, byIndex[5].blockRule], ["probe-concern", "probe-concern"]));
+  check("probe objection stored on the row as qaBlocked", () => {
+    assert.equal(row(1).qaBlocked, true);
+    assert.ok(row(1).qa.some((f) => f.rule === "probe-concern" && f.detail.includes("essentially identical")));
+  });
+  check("only item 2 delivered, the other four not charged", () => {
+    assert.ok(!byIndex[2].blocked && byIndex[2].agreed);
+    assert.equal(done.blocked, 3);
+    assert.equal(log.rpc.find((c) => c.name === "release_usage")?.args.p_n, 4);
+  });
+  check("an objected item is not fact-checked as well", () => assert.equal(calls.flagCheck - flagChecksBefore, 0));
+}
+
+// 18. The second blind read, on another model: its disagreement holds an item
+// the first read passed; when it fails, it changes nothing.
+{
+  secondReadWrong = new Set([2]);
+  globalThis.__fakeClient = fakeClient({ granted: 5, remaining: 5 });
+  const { metas } = await run({});
+  secondReadWrong = new Set();
+  const log = globalThis.__fakeClient.log;
+  const byIndex = Object.fromEntries(metas.filter((m) => m.questionReady).map((m) => [m.questionReady.index, m.questionReady]));
+  const row = (n) => log.inserts.find((r) => r.generation_meta.index === n)?.generation_meta;
+  check("second read's disagreement holds item 2", () => assert.equal(byIndex[2].agreed, false));
+  check("both reads stored, the combined verdict gating", () => {
+    assert.equal(row(2).reads.primary.agreed, true);
+    assert.equal(row(2).reads.second.agreed, false);
+    assert.equal(row(2).verification.agreed, false);
+  });
+  check("item 1 still delivered", () => assert.ok(!byIndex[1].blocked && byIndex[1].agreed));
+
+  secondReadDown = true;
+  globalThis.__fakeClient = fakeClient({ granted: 5, remaining: 5 });
+  const down = await run({});
+  secondReadDown = false;
+  const ready = Object.fromEntries(down.metas.filter((m) => m.questionReady).map((m) => [m.questionReady.index, m.questionReady]));
+  check("a failed second read changes nothing", () => assert.ok(ready[1].agreed && ready[2].agreed && ready[4].agreed === false));
+}
+
+// 19. The ambiguity review: a second defensible answer holds an item both
+// blind reads passed; an item the gate already blocked is never reviewed.
+{
+  ambiguityDefects = { 1: "second_answer" };
+  const before = calls.ambiguity;
+  globalThis.__fakeClient = fakeClient({ granted: 5, remaining: 5 });
+  const { metas } = await run({});
+  ambiguityDefects = {};
+  const log = globalThis.__fakeClient.log;
+  const byIndex = Object.fromEntries(metas.filter((m) => m.questionReady).map((m) => [m.questionReady.index, m.questionReady]));
+  const row = (n) => log.inserts.find((r) => r.generation_meta.index === n)?.generation_meta;
+  check("reviewer's second answer holds item 1", () => {
+    assert.equal(byIndex[1].blocked, true);
+    assert.equal(byIndex[1].blockRule, "reviewer-ambiguity");
+  });
+  check("the review is stored on every reviewed row", () => {
+    assert.equal(row(1).ambiguity.defect, "second_answer");
+    assert.equal(row(2).ambiguity.defect, "none");
+  });
+  check("a gate-blocked item is not reviewed", () => {
+    assert.equal(row(3).ambiguity, null);
+    assert.equal(calls.ambiguity - before, 4);
+  });
+  check("item 2 still delivered", () => assert.ok(!byIndex[2].blocked && byIndex[2].agreed));
 }
 
 console.log(results.join("\n"));

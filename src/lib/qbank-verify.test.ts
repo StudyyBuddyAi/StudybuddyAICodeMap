@@ -1,8 +1,14 @@
 import { describe, it, expect, vi } from "vitest";
 import {
+  ambiguityFinding,
+  checkAmbiguity,
   checkWriterFlag,
+  combineReads,
   parseFlagCheck,
+  probeConcern,
+  probeIssue,
   type FlagCheckableQuestion,
+  type VerificationResult,
 } from "../../supabase/functions/_shared/qbank-verify.ts";
 import type { CortiConfig } from "../../supabase/functions/_shared/corti.ts";
 
@@ -33,6 +39,98 @@ const item: FlagCheckableQuestion = {
   explanation: "**SGLT2 inhibitors** reduce HF hospitalisation in HFpEF.",
   reviewerFlag: "Trial names EMPEROR-Preserved and DELIVER cited from memory, unconfirmed.",
 };
+
+describe("probeConcern", () => {
+  const verdict = (over: Partial<VerificationResult> = {}): VerificationResult => ({
+    index: 1,
+    agreed: true,
+    answer: "c",
+    solvable: true,
+    issue: "",
+    error: null,
+    ...over,
+  });
+
+  it("holds back an item the probe answered correctly but objected to", () => {
+    // Live, 2026-11-02: served with the key agreed and this issue on record.
+    const finding = probeConcern(
+      verdict({ solvable: false, issue: "Options A and C are essentially identical (Charcot-Bouchard microaneurysms)." })
+    );
+    expect(finding).toMatchObject({ rule: "probe-concern", severity: "block" });
+    expect(finding?.detail).toContain("unsolvable");
+    expect(probeConcern(verdict({ issue: "No option names chronic blood loss." }))?.severity).toBe("block");
+    expect(probeConcern(verdict({ solvable: false }))?.detail).toContain("one defensible answer");
+  });
+
+  it("leaves a clean agreement, a disagreement and a failed probe alone", () => {
+    expect(probeConcern(verdict())).toBeNull();
+    // A disagreement is already held back as disputed.
+    expect(probeConcern(verdict({ agreed: false, answer: "a", issue: "Two defensible answers." }))).toBeNull();
+    // The probe still fails open: an error is not a concern.
+    expect(probeConcern(verdict({ answer: null, error: "timeout", solvable: true }))).toBeNull();
+  });
+
+  it("reads every way of saying there is no issue as clean", () => {
+    for (const none of ["None.", "none", "No issues.", "No significant issues identified", "N/A", "  No concerns noted. "]) {
+      expect(probeIssue(none)).toBe("");
+    }
+    expect(probeIssue(undefined)).toBe("");
+    expect(probeIssue("Two defensible answers: B and D.")).toBe("Two defensible answers: B and D.");
+    expect(probeIssue("No option matches the CURB-65 criteria.")).toBe("No option matches the CURB-65 criteria.");
+  });
+});
+
+describe("combineReads", () => {
+  const read = (over: Partial<VerificationResult> = {}): VerificationResult => ({
+    index: 1, agreed: true, answer: "c", solvable: true, issue: "", error: null, ...over,
+  });
+
+  it("holds the item back when either read lands off the key", () => {
+    expect(combineReads(read(), read({ agreed: false, answer: "a" }))).toMatchObject({ agreed: false, answer: "a" });
+    expect(combineReads(read({ agreed: false, answer: "b" }), read())).toMatchObject({ agreed: false, answer: "b" });
+    expect(combineReads(read(), read()).agreed).toBe(true);
+  });
+
+  it("lets the second read stand in when the first failed open", () => {
+    const failed = read({ answer: null, error: "timeout" });
+    expect(combineReads(failed, read({ agreed: false, answer: "a" }))).toMatchObject({ agreed: false, error: null });
+    expect(combineReads(failed, null)).toBe(failed);
+  });
+
+  it("keeps the first read's judgement for probeConcern, and ignores a failed second read", () => {
+    const first = read({ issue: "Two defensible answers." });
+    expect(combineReads(first, read({ issue: "" })).issue).toBe("Two defensible answers.");
+    expect(combineReads(first, read({ answer: null, error: "429" }))).toBe(first);
+    // A second read standing in brings no objection of its own.
+    expect(combineReads(read({ answer: null, error: "x" }), read({ issue: "Hmm.", solvable: false }))).toMatchObject({ issue: "", solvable: true });
+  });
+});
+
+describe("checkAmbiguity", () => {
+  const reply = (content: string) => vi.fn(async () => content);
+
+  it("reports a second answer or missing data, and holds the item back", async () => {
+    const r = await checkAmbiguity(config, item, {}, reply('{"defect":"second_answer","option":"c","note":"Ivabradine also fits."}'));
+    expect(r).toMatchObject({ defect: "second_answer", option: "c", error: null });
+    expect(ambiguityFinding(r)).toMatchObject({ rule: "reviewer-ambiguity", severity: "block" });
+    const m = await checkAmbiguity(config, item, {}, reply('```json\n{"defect":"missing_data","option":null,"note":"No EF given."}\n```'));
+    expect(ambiguityFinding(m)?.detail).toContain("missing the finding");
+  });
+
+  it("is shown the key, and passes a clean item", async () => {
+    const complete = reply('{"defect":"none","option":null,"note":""}');
+    const r = await checkAmbiguity(config, item, {}, complete);
+    expect(ambiguityFinding(r)).toBeNull();
+    expect(JSON.stringify((complete.mock.calls[0] as unknown[])[1])).toContain("Keyed answer: A");
+  });
+
+  it("fails open on an error or a reply it cannot read", async () => {
+    const broken = await checkAmbiguity(config, item, {}, vi.fn(async () => { throw new Error("429"); }));
+    expect(ambiguityFinding(broken)).toBeNull();
+    expect(broken.error).toBe("429");
+    expect(ambiguityFinding(await checkAmbiguity(config, item, {}, reply('{"defect":"maybe"}')))).toBeNull();
+  });
+});
 
 describe("parseFlagCheck", () => {
   it("reads each verdict, tolerating fences and spelling", () => {
