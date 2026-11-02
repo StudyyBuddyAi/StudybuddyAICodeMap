@@ -208,3 +208,38 @@ The last two are the open gap, and they are also where the planted faults are le
 - **After a week:**
   - Run `review-queue.mts` and judge the spot checks.
   - Re-run the audit queries: the served rows with a probe issue, a lab finding or a key-naming writer flag should all be 0.
+
+## 8. Deployed 2026-11-02
+
+The branch was rebased onto main `b92ca26` (#32 squash-merged, plus #30) before deploying, so what is live is what the PR holds.
+
+| Piece | Before | Now |
+|---|---|---|
+| Migration | — | `20261103000000_qbank_held_questions.sql` applied |
+| Clean-up | — | `accuracy-cleanup-2026-11-02.sql` run: 6 items withdrawn, 7 ammonia units fixed |
+| `qbank-generate` | v11 | v12 |
+| `qbank-explain` | v1 | v2 |
+| `medical-notes` | v35 | v36 |
+| `medical-notes-next` | v16 | v17 |
+
+Function deploys used `--use-api`, since there is no Docker on this machine. No new environment variables; the second read is on by default.
+
+**Checked on live after the migration:**
+- `hold_generated_question` is executable by the service role only.
+- Students can still start sessions and read their queue, but cannot call `qbank_question_payload`.
+- All three filters are present.
+
+**Live end-to-end check** (throwaway Pro account, deleted afterwards with nothing left behind): 24/24.
+- A real Step 2 CK wave of 5 on "heart failure", in 57 s.
+- Both blind reads stored on every row (the mini read answered every item), the ambiguity review stored, and the combined verdict consistent with the reads.
+- The session admitted only the playable id; claim added the rest.
+- qbank-explain v2 explained a question; after `hold_generated_question` it answered `held`.
+- The review queue dropped the item, a re-sit by id was refused, and the reviewed set showed `withdrawn: true` on that item only.
+- A student's call to the hold function got 403.
+- This wave held nothing back, so the refusal of blocked and disputed items at session start was proven in the rolled-back rehearsal, not live.
+
+**Not exercised live:** the held-question filter in the medical-notes deck source. The deck path's card writer may reach OpenRouter, which is off limits for testing. It is covered by typecheck and code review only.
+
+**Rollback:** redeploy the four functions from `b92ca26`. The migration and the clean-up can stay. `CORTI_SECOND_VERIFIER_MODEL=none` drops the second read.
+
+The frontend (labels, withdrawn notice) ships when the PR merges. The live payload's extra `withdrawn` field is ignored by the current frontend.
