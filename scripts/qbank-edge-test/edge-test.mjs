@@ -73,6 +73,8 @@ const DRAFT = {
   concepts: Array.from({ length: 12 }, (_, i) => ({ concept: `Testable point number ${i + 1} about ketoacidosis`, tier: i < 4 ? "core" : "standard" })),
 };
 let streamStatus = 200;
+/** Per item: the probe answers with the key but objects to the item. */
+let probeObjections = {};
 const realFetch = globalThis.fetch;
 globalThis.fetch = async (url, init = {}) => {
   const u = String(url);
@@ -125,7 +127,12 @@ globalThis.fetch = async (url, init = {}) => {
       const letter = (/^([A-E])\. (.*)$/gm.exec ? [...user.matchAll(/^([A-E])\. (.*)$/gm)] : [])
         .find(([, , text]) => text === KEY_TEXT(n))?.[1]?.toLowerCase();
       const wrong = ["a", "b", "c", "d", "e"].find((l) => l !== letter);
-      content = JSON.stringify({ answer: n === 4 ? wrong : letter, solvable: true, issue: "None." });
+      const objection = probeObjections[n];
+      content = JSON.stringify({
+        answer: n === 4 ? wrong : letter,
+        solvable: objection?.solvable ?? true,
+        issue: objection?.issue ?? "None.",
+      });
     }
     return new Response(JSON.stringify({ choices: [{ message: { content } }] }), { status: 200 });
   }
@@ -567,6 +574,39 @@ const metaOf = (inserts) => inserts.map((r) => r.generation_meta);
   check("history read only for the wave's own topics", () =>
     assert.deepEqual([...log.rpc.find((c) => c.name === "qbank_topic_history").args.p_keys].sort(), ["heart failure", "nephrotic syndrome", "spikes protocol"]));
   check("at most two builds per wave", () => assert.equal(claims.length, 2));
+}
+
+// 17. The probe chose the key but objected to the item: held back like a gate
+// block, stored as such, and not charged to a free account.
+{
+  // Item 1 is otherwise clean; item 5 carries a writer flag, so without the
+  // objection it would go on to the fact check.
+  probeObjections = {
+    1: { solvable: false, issue: "Options A and C are essentially identical." },
+    5: { solvable: true, issue: "No option names the actual cause." },
+  };
+  const flagChecksBefore = calls.flagCheck;
+  globalThis.__fakeClient = fakeClient({ granted: 5, remaining: 5 });
+  const { metas } = await run({});
+  probeObjections = {};
+  const log = globalThis.__fakeClient.log;
+  const byIndex = Object.fromEntries(metas.filter((m) => m.questionReady).map((m) => [m.questionReady.index, m.questionReady]));
+  const done = metas.find((m) => m.waveComplete)?.waveComplete;
+  const row = (n) => log.inserts.find((r) => r.generation_meta.index === n)?.generation_meta;
+  check("probe objection blocks an agreed item", () =>
+    assert.ok(byIndex[1].agreed && byIndex[1].blocked && byIndex[5].agreed && byIndex[5].blocked));
+  check("probe objection named as the block rule", () =>
+    assert.deepEqual([byIndex[1].blockRule, byIndex[5].blockRule], ["probe-concern", "probe-concern"]));
+  check("probe objection stored on the row as qaBlocked", () => {
+    assert.equal(row(1).qaBlocked, true);
+    assert.ok(row(1).qa.some((f) => f.rule === "probe-concern" && f.detail.includes("essentially identical")));
+  });
+  check("only item 2 delivered, the other four not charged", () => {
+    assert.ok(!byIndex[2].blocked && byIndex[2].agreed);
+    assert.equal(done.blocked, 3);
+    assert.equal(log.rpc.find((c) => c.name === "release_usage")?.args.p_n, 4);
+  });
+  check("an objected item is not fact-checked as well", () => assert.equal(calls.flagCheck - flagChecksBefore, 0));
 }
 
 console.log(results.join("\n"));

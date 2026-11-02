@@ -37,7 +37,7 @@ const {
 } = await import(path.join(ROOT, "supabase/functions/_shared/qbank-prompt.ts"));
 const { parseBatchContent, prepareBatch } =
   await import(path.join(ROOT, "supabase/functions/_shared/qbank-persist.ts"));
-const { verifyBatch, checkWriterFlag } = await import(path.join(ROOT, "supabase/functions/_shared/qbank-verify.ts"));
+const { verifyBatch, checkWriterFlag, probeConcern } = await import(path.join(ROOT, "supabase/functions/_shared/qbank-verify.ts"));
 const { hasWriterFlag } = await import(path.join(ROOT, "supabase/functions/_shared/qbank-qa.ts"));
 const { cortiConfigFromEnv, cortiChatCompletion, cortiComplete } =
   await import(path.join(ROOT, "supabase/functions/_shared/corti.ts"));
@@ -247,6 +247,17 @@ for (const [i, spec] of SELECTED.entries()) {
       error: v.error,
       ms: verifyMs,
     }));
+
+    // The probe's objection to an item it answered with the key, held back as
+    // the edge function holds it, before the flag check reads `blocked`.
+    drafts.forEach((d, n: number) => {
+      const verdict = verification.find((v) => v.index === d.index);
+      const concern = verdict ? probeConcern(verdict) : null;
+      if (concern && qa[n] && !qa[n].blocked) {
+        qa[n].findings.push(concern);
+        qa[n].blocked = true;
+      }
+    });
 
     // The writer-flag fact check, exactly as the edge function runs it: only
     // on flagged items the gate and the probe both admitted, and a check that

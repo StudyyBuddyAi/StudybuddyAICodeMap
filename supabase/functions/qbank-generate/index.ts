@@ -23,6 +23,7 @@ import { prepareBatch, persistOne, type PersistInput } from "../_shared/qbank-pe
 import {
   verifyOne,
   checkWriterFlag,
+  probeConcern,
   type FlagCheckResult,
   type VerificationResult,
 } from "../_shared/qbank-verify.ts";
@@ -538,6 +539,7 @@ serve(async (req) => {
     let qaResults: QaResult[] = [];
     let verifications: VerificationResult[] = [];
     let flagChecks: FlagCheckResult[] = [];
+    let probeConcerns = 0;
     let subtopics: string[] = [];
     let insertFailures = 0;
     /**
@@ -603,6 +605,17 @@ serve(async (req) => {
             // mixed wave carries both exams.
             const verdict = await verifyOne(config, question, question.examTrack);
             verifications.push(verdict);
+
+            // The probe answered with the key but objected to the item — two
+            // defensible answers, duplicate options, missing data. Held back
+            // like a gate block, so the row's qaBlocked says so and the wave
+            // writes a replacement. See probeConcern.
+            const concern = probeConcern(verdict);
+            if (concern && qaResult && !qaResult.blocked) {
+              qaResult.findings.push(concern);
+              qaResult.blocked = true;
+              probeConcerns++;
+            }
 
             // An item its writer was unsure of is admitted only if a fact
             // check clears the doubt. Run last, and only on items still in
@@ -823,6 +836,7 @@ serve(async (req) => {
             qaResults = [];
             verifications = [];
             flagChecks = [];
+            probeConcerns = 0;
             subtopics = [];
             delivered = 0;
             insertFailures = 0;
@@ -861,6 +875,7 @@ serve(async (req) => {
           insertFailures,
           insertError,
           verifierErrors: verifications.filter((v) => v.error).length,
+          probeConcerns,
           flagChecks: flagChecks.length,
           flagChecksCleared: flagChecks.filter((f) => f.confirmed).length,
           flagCheckErrors: flagChecks.filter((f) => f.error).length,

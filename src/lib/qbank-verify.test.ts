@@ -2,7 +2,10 @@ import { describe, it, expect, vi } from "vitest";
 import {
   checkWriterFlag,
   parseFlagCheck,
+  probeConcern,
+  probeIssue,
   type FlagCheckableQuestion,
+  type VerificationResult,
 } from "../../supabase/functions/_shared/qbank-verify.ts";
 import type { CortiConfig } from "../../supabase/functions/_shared/corti.ts";
 
@@ -33,6 +36,46 @@ const item: FlagCheckableQuestion = {
   explanation: "**SGLT2 inhibitors** reduce HF hospitalisation in HFpEF.",
   reviewerFlag: "Trial names EMPEROR-Preserved and DELIVER cited from memory, unconfirmed.",
 };
+
+describe("probeConcern", () => {
+  const verdict = (over: Partial<VerificationResult> = {}): VerificationResult => ({
+    index: 1,
+    agreed: true,
+    answer: "c",
+    solvable: true,
+    issue: "",
+    error: null,
+    ...over,
+  });
+
+  it("holds back an item the probe answered correctly but objected to", () => {
+    // Live, 2026-11-02: served with the key agreed and this issue on record.
+    const finding = probeConcern(
+      verdict({ solvable: false, issue: "Options A and C are essentially identical (Charcot-Bouchard microaneurysms)." })
+    );
+    expect(finding).toMatchObject({ rule: "probe-concern", severity: "block" });
+    expect(finding?.detail).toContain("unsolvable");
+    expect(probeConcern(verdict({ issue: "No option names chronic blood loss." }))?.severity).toBe("block");
+    expect(probeConcern(verdict({ solvable: false }))?.detail).toContain("one defensible answer");
+  });
+
+  it("leaves a clean agreement, a disagreement and a failed probe alone", () => {
+    expect(probeConcern(verdict())).toBeNull();
+    // A disagreement is already held back as disputed.
+    expect(probeConcern(verdict({ agreed: false, answer: "a", issue: "Two defensible answers." }))).toBeNull();
+    // The probe still fails open: an error is not a concern.
+    expect(probeConcern(verdict({ answer: null, error: "timeout", solvable: true }))).toBeNull();
+  });
+
+  it("reads every way of saying there is no issue as clean", () => {
+    for (const none of ["None.", "none", "No issues.", "No significant issues identified", "N/A", "  No concerns noted. "]) {
+      expect(probeIssue(none)).toBe("");
+    }
+    expect(probeIssue(undefined)).toBe("");
+    expect(probeIssue("Two defensible answers: B and D.")).toBe("Two defensible answers: B and D.");
+    expect(probeIssue("No option matches the CURB-65 criteria.")).toBe("No option matches the CURB-65 criteria.");
+  });
+});
 
 describe("parseFlagCheck", () => {
   it("reads each verdict, tolerating fences and spelling", () => {

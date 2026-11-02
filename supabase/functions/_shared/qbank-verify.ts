@@ -1,5 +1,6 @@
 import { cortiComplete, type CortiConfig } from "./corti.ts";
 import { EXAM_TRACK_NAMES, type ExamTrack, type OptionLetter } from "./qbank-prompt.ts";
+import type { QaFinding } from "./qbank-qa.ts";
 
 /**
  * Independent cold-answering pass.
@@ -105,6 +106,18 @@ export interface VerificationResult {
 
 const LETTERS: OptionLetter[] = ["a", "b", "c", "d", "e"];
 
+/**
+ * The probe saying it has nothing to report. Since its issue now holds an
+ * item back (probeConcern), "No issues." must read as clean, not as a concern.
+ */
+const NO_ISSUE = /^(?:none|n\/a|no(?:\s+(?:significant|major|obvious|clear))?\s+(?:issues?|problems?|concerns?)(?:\s+(?:found|identified|noted))?)\.?$/i;
+
+/** The probe's issue field as a concern, or "" when it reported none. */
+export function probeIssue(value: unknown): string {
+  const issue = typeof value === "string" ? value.trim() : "";
+  return NO_ISSUE.test(issue) ? "" : issue;
+}
+
 function renderItem(question: VerifiableQuestion): string {
   const options = LETTERS.map((k) => `${k.toUpperCase()}. ${question.options[k]}`).join("\n");
   return `${question.vignette}\n\n${question.leadIn}\n\n${options}`;
@@ -148,15 +161,42 @@ export async function verifyOne(
       agreed: answer === question.correctOption,
       answer: answer as OptionLetter,
       solvable: parsed?.solvable !== false,
-      issue: typeof parsed?.issue === "string" && !/^none\.?$/i.test(parsed.issue.trim())
-        ? parsed.issue.trim()
-        : "",
+      issue: probeIssue(parsed?.issue),
       error: null,
     };
   } catch (err) {
     // Fail open: an unreachable verifier is not the student's problem.
     return { ...base, agreed: true, error: err instanceof Error ? err.message : String(err) };
   }
+}
+
+/**
+ * The probe's own objection to an item it answered with the key.
+ *
+ * Agreement used to be the probe's only vote. It also judges the item — is it
+ * solvable, what is its biggest problem — and that judgement was stored and
+ * never read, so an item the probe answered correctly while saying "options A
+ * and C are essentially identical" went to the student. Measured on the live
+ * table (2026-11-02): five served items carried such an objection, and read by
+ * hand four of them were faulty — duplicate options, two defensible answers, a
+ * key worded as the wrong cause, a scoring rule the stem did not satisfy. The
+ * fifth was a false alarm on a sound post-MI item, which is the cost: an
+ * objection holds an item back and the wave writes another, at roughly one
+ * item in a hundred.
+ *
+ * A disagreement is already held back on its own, and a probe that errored
+ * fails open as before, so this reads only agreed, answered verdicts. Returns
+ * the gate finding to record, or null.
+ */
+export function probeConcern(verdict: VerificationResult): QaFinding | null {
+  if (verdict.error || !verdict.agreed || !verdict.answer) return null;
+  if (verdict.solvable && !verdict.issue) return null;
+  const what = verdict.issue || "it could not reach one defensible answer";
+  return {
+    rule: "probe-concern",
+    severity: "block",
+    detail: `A blind second read chose the key but objected to the item${verdict.solvable ? "" : " as unsolvable"}: ${what}`,
+  };
 }
 
 // ── Writer-flag fact check ──────────────────────────────────────────────────
