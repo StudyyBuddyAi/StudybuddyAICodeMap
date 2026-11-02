@@ -6,9 +6,10 @@
 --
 -- Idempotent: a second run holds nothing new and edits nothing.
 
--- 1. Withdraw the four served items read by hand as faulty. Each passed the
---    blind probe on its key, and each carried a probe objection that nothing
---    acted on at the time (now the `probe-concern` block).
+-- 1. Withdraw the six served items read by hand as faulty. The first four
+--    passed the blind probe on its key and carried a probe objection that
+--    nothing acted on at the time (now the `probe-concern` block); the last
+--    two were found by the accuracy suite (docs/qbank/accuracy-2026-11.md §6.2).
 select id, hold_generated_question(id, reason, 'audit-2026-11-02') as held_now
 from (values
   ('0b653d2f-9ea3-45f0-8563-68ba4c7f42a6'::uuid,
@@ -18,7 +19,11 @@ from (values
   ('0b0ab96b-9649-4492-b8ff-e62d8ad49308'::uuid,
    'Keyed answer names inadequate dietary iron; the stem''s cause is chronic menstrual blood loss.'),
   ('57d851d9-2b98-4378-8ba1-1c9bff446000'::uuid,
-   'Options A and C both describe Charcot-Bouchard microaneurysms of the lenticulostriate perforators.')
+   'Options A and C both describe Charcot-Bouchard microaneurysms of the lenticulostriate perforators.'),
+  ('23bfc058-8fce-4198-b212-f28f3d6c8e5c'::uuid,
+   'Keyed autoregulation while the explanation argues CSF displacement into the spinal canal; the writer flag says the key was switched.'),
+  ('d460612a-edfa-4fdf-b0b0-c770a32e436a'::uuid,
+   'Copper IUD: copper-ion toxicity (keyed) and the sterile spermicidal inflammatory reaction are both defensible.')
 ) as t(id, reason);
 
 -- 2. Correct a hundredfold unit error: serum ammonia written in μmol/dL in

@@ -55,21 +55,19 @@ Treat the verdicts as provisional until a clinician confirms them.
 
 ## 4. Plan
 
-1. **Gate fixes (built, §5).**
-2. **Accuracy test suite.**
-   - A gold set of about 150 items with reviewer verdicts, starting from the 37 above.
+1. **Gate fixes.** Built (§5).
+2. **Accuracy test suite.** Built (§6.1).
+   - A gold set of items with reviewer verdicts: 86 so far, aiming for about 150, starting from the 37 above.
    - A fault-injection set: a moved key, a near-duplicate option, a wrong unit, a removed deciding finding.
    - Both report each check's catch rate and false-hold rate, and run on every prompt or gate change plus a weekly live sample.
-   - Builds on `regate.ts`.
-3. **Independence.**
-   - Probe self-consistency: 3 samples, with the key winning at least 2.
-   - A second Corti model.
-   - A blind-first flag check.
-   - Measured with step 2 before shipping.
-4. **Human loop.**
+3. **Independence.** Measured, and the winners built (§6.2).
+   - Probe self-consistency (3 samples, the key winning at least 2): measured, rejected.
+   - A second Corti model: built.
+   - A blind-first flag check: replaced by an ambiguity review that knows the key, which measured better.
+4. **Human loop.** Built (§6.3), except item statistics.
    - A review queue for every item with a red signal.
    - Verdicts feed the gold set.
-   - Once the shared pool exists, item statistics (p-value, discrimination) and vetted-first serving.
+   - Item statistics (p-value, discrimination) and vetted-first serving wait on the shared pool; items are answered about once each today.
 
 ## 5. Step 1 — built on `qbank-accuracy-gate`
 
@@ -101,21 +99,112 @@ Treat the verdicts as provisional until a clinician confirms them.
   - Full suite: 1,001 tests.
   - Typecheck and lint are clean.
 
-### Deploy order (needs the owner's go-ahead)
+## 6. Steps 2–4 — built on `qbank-accuracy-gate`
 
-1. `npx supabase db push --linked`. The dry run shows exactly `20261103000000_qbank_held_questions.sql`.
-2. `npx supabase db query --linked -f docs/qbank/accuracy-cleanup-2026-11-02.sql`. It holds the 4 faulty items and fixes the 7 ammonia units.
-3. `npx supabase functions deploy qbank-generate`, then `qbank-explain`, then `medical-notes` and `medical-notes-next` (both import `medical-notes-handler`).
-   - qbank-generate has no dependency on step 1.
-   - qbank-explain calls the new RPC, so it goes after step 1.
-   - The medical-notes handler has not changed since #31 apart from this filter. The only other shared change is an additive field in `corti.ts`.
-4. Frontend: only the labels. It ships with the branch's merge and is harmless before or after the functions.
+### 6.1 The accuracy suite (`scripts/qbank-accuracy`)
+
+| File | What it is |
+|---|---|
+| `labels.json` | Reviewer verdicts by question id: `ok`, `minor` (servable, small flaw) or `fatal` (must not be served), with a fault tag and a note. 86 so far (25 fatal, 55 ok, 6 minor), all by Claude on 2026-11-02, `clinicianConfirmed: false`. |
+| `gold.json` | The judged items as they were judged. `snapshot.mts` fetches new labels from live and keeps existing snapshots, so a later live edit never changes what a verdict was about. |
+| `mutants.json` | 226 faults planted in the 55 sound items. Six are text edits: mislabelled key, lab unit, lab value, exact duplicate option, self-correcting explanation, missing explanation. Four are written by Corti: paraphrased key, second correct option, removed deciding finding, flipped finding. Made by `mutate.mts`, kept so reruns replay the same set. |
+| `run.mts` | Runs every check and pipeline over both sets. Corti calls are cached in `out/cache`, so a rerun after a rule change costs nothing and an interrupted run resumes. Writes `out/report.md`. |
+| `candidates.mts` | Checks measured but not wired in (key consistency). |
+| `review-queue.mts`, `apply-verdicts.mts` | The human loop (§6.3). |
+
+```
+node scripts/qbank-accuracy/snapshot.mts     # after adding labels
+node scripts/qbank-accuracy/mutate.mts       # only to rebuild the planted set (Corti)
+node scripts/qbank-accuracy/run.mts          # the measurement; ~2,500 Corti calls cold, free warm
+```
+
+**When to run it:** on every change to the writer prompt, the gate or a check, and on each batch of new labels.
+
+**Caveats:**
+- The gold fatal items lean towards what the checks already caught: 20 of the 25 were picked because a check had fired.
+- Some Corti-written planted faults are not real. One "second correct option" was "efferent arteriole via norepinephrine". So the catch rates for second-correct and remove-finding are lower bounds; the six text-edit types are exact.
+
+### 6.2 What it measured, and what was built
+
+| Pipeline | Faulty gold held | Planted faults held | Sound gold held |
+|---|---|---|---|
+| Live until step 1 | 20/25 (80%) | 99/226 (44%) | 2/55 (4%) |
+| Step 1 (gate, probe concern, text rules below) | 23/25 (92%) | 188/226 (83%) | 3/55 (5%) |
+| + second blind read (`-mini-instant`) | 24/25 (96%) | 190/226 (84%) | 3/55 (5%) |
+| **+ ambiguity review (`-instant`) — this branch** | **24/25 (96%)** | **195/226 (86%)** | **3/55 (5%)** |
+| Probe as 3-read majority instead (rejected) | 21/25 (84%) | 189/226 (84%) | 4/55 (7%) |
+| Ambiguity review on `-mini-instant` (rejected) | 24/25 (96%) | 193/226 (85%) | 8/55 (15%) |
+| Key-consistency check added (not wired in) | 24/25 (96%) | 190/226 (84%) | 3–4/55 |
+
+Of the 3 sound items held, one is missing three distractor explanations, a real defect for a student. The true waste is about 2 in 55.
+
+**By planted fault, this branch:**
+- Caught every time: mislabelled key, lab unit, lab value, duplicate option, self-correcting explanation, missing explanation.
+- Paraphrased key: 23/25.
+- Flipped finding: 22/25.
+- Second correct option: 14/25.
+- Removed finding: 10/25.
+
+The last two are the open gap, and they are also where the planted faults are least reliable.
+
+**Built from the measurements:**
+
+| Item | What changed | Files |
+|---|---|---|
+| Second blind read | `corti-s1-mini-instant` answers blind beside the first read, in parallel. Either read off the key holds the item. A read that fails open is covered by the other. On its own it held 0/55 sound items. `CORTI_SECOND_VERIFIER_MODEL=none` turns it off. Both reads are stored in `generation_meta.reads`. | `_shared/corti.ts`, `_shared/qbank-verify.ts` (`verifyTwice`, `combineReads`), `qbank-generate/index.ts`, `_shared/qbank-persist.ts` |
+| Ambiguity review | A reviewer shown the key, asked only about a second defensible answer or missing deciding data. It blocks as `reviewer-ambiguity`, runs beside both reads, is skipped for gate-blocked items, and fails open. Stored in `generation_meta.ambiguity`. | `_shared/qbank-verify.ts` (`checkAmbiguity`), same files |
+| Explanation text rules | `explanation-self-correction` ("Wait, correct answer is a. Let me fix."). `explanation-letter-reference` (letters move in the shuffle). A writer flag naming the "real" key letter is now `writer-critical`: all 4 such flags on the live table were on faulty items, one of them served. | `_shared/qbank-qa.ts` |
+| Withdrawn notice | A reviewed set says "Withdrawn after review" on a held question. The graded payload carries `withdrawn`, never before grading. | migration (`qbank_question_payload`), `AnswerReview.tsx` |
+
+**Found on the way:** two more faulty served items.
+- `23bfc058`: the explanation argues a different option from its key, and its first blind read failed open.
+- `d460612a`: copper IUD, with two defensible answers.
+
+**Cost and load:**
+- Each item now makes three short calls, all running together: two blind reads and the review. Before, it made one, plus the occasional flag check.
+- That is roughly a 10–15% increase in a wave's Corti spend, with no added wait.
+- Corti answered 429 at around 9 parallel calls in earlier work. Items close about 17 s apart, so a wave stays well under that.
+- Watch `secondReadErrors` and `ambiguityErrors` in `wave_complete`.
+
+**The flag check now adds nothing measurable.** Without it the scores are identical. It is kept because it is the only check aimed at outdated guidelines, and the gold set has no outdated items to measure it on. That is a gap for the next round of labels.
+
+### 6.3 The human loop
+
+- `review-queue.mts` (read-only) writes `out/review-<date>.md` to read and `out/review-<date>.json` to fill in. It covers:
+  - open student reports
+  - questions withdrawn automatically and not yet reviewed
+  - served questions carrying a signal the gate now holds
+  - a random spot check (`SAMPLE=10`)
+
+  Anything already in `labels.json` is skipped.
+- `apply-verdicts.mts <file>` always adds the verdicts to `labels.json`, so the gold set grows. With `--apply` it also writes to live:
+  - withdraws each `fatal` item through `hold_generated_question`
+  - stamps every judged item `generation_meta.review`, so the queue does not offer it again
+  - closes its open reports: `accepted` when fatal, `rejected` when ok, untouched when minor
+
+  `REVIEWER=` names the reviewer and `CLINICIAN=1` marks the verdicts as clinician-confirmed.
+- **Suggested rhythm:** weekly, then `snapshot.mts` and `run.mts`.
+- The gold set needs a clinician's pass before its numbers are quoted outside the team.
+
+## 7. Deploy order (needs the owner's go-ahead)
+
+1. `npx supabase db push --linked`. The dry run showed exactly `20261103000000_qbank_held_questions.sql`, which includes the `withdrawn` payload.
+2. `npx supabase db query --linked -f docs/qbank/accuracy-cleanup-2026-11-02.sql`. It holds the 6 faulty served items (the 4 from §2 and the 2 from §6.2) and fixes the 7 ammonia units. Rehearsed on live with rollback: 6 held, 7 fixed, a second run a no-op.
+3. Deploy the functions:
+   - `npx supabase functions deploy qbank-generate`. It has no dependency on step 1. It needs no new environment variables; the second read is on by default.
+   - `qbank-explain`, which calls the new RPC, so after step 1.
+   - `medical-notes` and `medical-notes-next`, both of which import `medical-notes-handler`. The handler has not changed since #31 apart from the held filter; `corti.ts` gained two additive fields.
+4. Frontend: the labels and the withdrawn notice. Ships with the branch's merge. Before step 1 the notice never shows, because nothing sets `withdrawn`.
 
 **Rollback:**
 - Redeploy the functions from `d09d1c4`.
 - The migration can stay. Without the edge changes nothing sets `held`, and its filters only remove items.
+- `CORTI_SECOND_VERIFIER_MODEL=none` drops the second read without a redeploy.
 
 ### After deploying
 
-- Watch `wave_complete.probeConcerns` and `blocked` in the qbank-generate logs.
-- After a week, re-run the audit queries: the served rows with a probe issue should be 0, and so should the served rows with a lab finding.
+- Watch these in `wave_complete` in the qbank-generate logs: `probeConcerns`, `secondReadHolds`, `ambiguityHolds`, the matching `*Errors`, and `blocked`.
+- **The delivered share will fall** by a few percent. Each hold is replaced by a later wave and is never charged to a free account.
+- **After a week:**
+  - Run `review-queue.mts` and judge the spot checks.
+  - Re-run the audit queries: the served rows with a probe issue, a lab finding or a key-naming writer flag should all be 0.
