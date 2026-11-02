@@ -36,6 +36,8 @@ export const RULE_LABELS: Record<string, string> = {
   "probe-concern": "A second read found a problem with the question",
   "lab-unit": "A lab value was given in the wrong unit",
   "lab-implausible": "A lab value was not physiologically possible",
+  "explanation-self-correction": "The explanation corrected its own answer",
+  "explanation-letter-reference": "The explanation pointed at an option by letter",
 };
 
 /**

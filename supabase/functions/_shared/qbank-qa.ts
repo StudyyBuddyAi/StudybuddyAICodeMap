@@ -353,6 +353,53 @@ function checkMetaLanguage(q: CheckableQuestion, findings: QaFinding[]): void {
   }
 }
 
+/**
+ * The writer changing its mind in the text the student reads, and letters
+ * that no longer point where the writer meant.
+ *
+ *  - `explanation-self-correction`: "Wait, correct answer is a. Let me fix."
+ *    reached the live table (2026-11-02) on an item keyed to a different
+ *    letter than its explanation argued. A correction written into the
+ *    explanation means the key and the prose were settled separately, so
+ *    neither can be trusted.
+ *  - `explanation-letter-reference`: the options are shuffled after the
+ *    writer finishes (permuteToPlannedLetter), so "option a is the older
+ *    framing" written before the shuffle can name a different option after
+ *    it. Rare (two items in 1,302), so it is held back rather than repaired.
+ */
+/**
+ * "Correct answer is b", "corrected answer to c (duplex)" — a letter named as
+ * the key. The letter must stand alone, so "the correct answer is a beta
+ * blocker" is prose, not a letter.
+ */
+const NAMES_KEY_LETTER =
+  /\bcorrect(?:ed)?\s+(?:answer|key|option|choice)\s+(?:is|to|should be|was)\s+(?:actually\s+)?(?:option\s+|choice\s+)?\(?[a-e]\)?(?=[.,;:!?)]|\s*\(|\s*$|\s+(?:option|rather|not|instead)\b)/i;
+
+const SELF_CORRECTION: RegExp[] = [
+  /(?:^|[.!?]\s+)wait\b[,.!:—–-]/i,
+  /\blet me (?:fix|correct|re-?check|reconsider|redo|revise|re-?evaluate)\b/i,
+  NAMES_KEY_LETTER,
+];
+const LETTER_REFERENCE = /\b(?:option|choice)\s+\(?[a-e]\)?(?=[\s.,:;)]|$)/i;
+
+function checkExplanationText(q: CheckableQuestion, findings: QaFinding[]): void {
+  const texts = [q.explanation, ...Object.values(q.distractorExplanations).filter((t): t is string => !!t)];
+  if (texts.some((t) => SELF_CORRECTION.some((p) => p.test(t)))) {
+    findings.push({
+      rule: "explanation-self-correction",
+      severity: "block",
+      detail: "The explanation corrects its own answer — the key and the explanation were settled separately.",
+    });
+  }
+  if (texts.some((t) => LETTER_REFERENCE.test(t))) {
+    findings.push({
+      rule: "explanation-letter-reference",
+      severity: "block",
+      detail: "An explanation names an option by letter; the options are shuffled after writing, so the letter may point at a different option.",
+    });
+  }
+}
+
 function checkDistractorCoverage(q: CheckableQuestion, findings: QaFinding[]): void {
   // A block since 2026-11-02. The player shows each distractor's explanation
   // under the option a student picked, so a missing one means a student who
@@ -646,6 +693,10 @@ function checkReviewerFlag(q: CheckableQuestion, findings: QaFinding[]): void {
  */
 const CRITICAL_FLAG_PATTERNS: RegExp[] = [
   /^\W*critical\b\s*[:\-–—]/i,
+  // The writer naming which letter is "really" correct: on the live table
+  // (2026-11-02) all four such flags sat on faulty items, one of them served
+  // with its explanation arguing a different option from its key.
+  NAMES_KEY_LETTER,
   /\bcorrect\s*option\s+is\s+(?:wrong|incorrect|inconsistent|mis-?keyed)\b/i,
   /\b(?:answer\s+)?key\s+is\s+(?:wrong|incorrect)\b/i,
   /\boptions?\s+[a-e]\s+and\s+[a-e]\s+are\s+(?:identical|duplicates?|the same)\b/i,
@@ -673,6 +724,7 @@ export function checkQuestion(question: CheckableQuestion): QaResult {
   checkOptionHomogeneity(question, findings);
   checkCueing(question, findings);
   checkMetaLanguage(question, findings);
+  checkExplanationText(question, findings);
   checkDistractorCoverage(question, findings);
   checkBolding(question, findings);
   checkVignetteQuestion(question, findings);

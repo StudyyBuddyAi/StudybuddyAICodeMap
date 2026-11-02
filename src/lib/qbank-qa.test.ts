@@ -180,6 +180,40 @@ describe("checkQuestion", () => {
     expect(checkQuestion(d).blocked).toBe(true);
   });
 
+  describe("the writer changing its mind", () => {
+    it("blocks an explanation that corrects its own answer", () => {
+      // Live, 2026-11-02, on an item keyed to a different letter.
+      const d = draft({ explanation: "Wait, correct answer is a. Let me fix. **Dilated cardiomyopathy** shows thin walls." });
+      expect(rules(d)).toContain("explanation-self-correction");
+      expect(checkQuestion(d).blocked).toBe(true);
+    });
+
+    it("reads ordinary prose as prose", () => {
+      for (const explanation of [
+        "The correct answer is a **thiazide**, which acts on the NCC.",
+        "Watchful waiting is wrong here; the **NCC** is blocked.",
+        "Clinicians wait, observe, and then act on the **NCC** finding.",
+      ]) {
+        expect(rules(draft({ explanation }))).not.toContain("explanation-self-correction");
+      }
+    });
+
+    it("blocks a letter named in an explanation, which the shuffle may have moved", () => {
+      const d = draft({
+        distractorExplanations: { ...draft().distractorExplanations, a: "Option a is the older framing of the same idea." },
+      });
+      expect(rules(d)).toContain("explanation-letter-reference");
+      expect(rules(draft({ explanation: "The drug of choice for **NCC** blockade." }))).not.toContain("explanation-letter-reference");
+    });
+
+    it("treats a writer naming the 'real' key letter as a fault in its own item", () => {
+      expect(isCriticalFlag("Correct answer is option c (autoregulation) rather than option b.")).toBe(true);
+      expect(isCriticalFlag("Corrected answer to c (duplex ultrasonography).")).toBe(true);
+      expect(isCriticalFlag("Correct answer is b (frequency).")).toBe(true);
+      expect(isCriticalFlag("The correct answer is a beta blocker, from memory, unconfirmed.")).toBe(false);
+    });
+  });
+
   describe("lab values", () => {
     const withStem = (vignette: string) => draft({ vignette });
     const labRules = (vignette: string) => rules(withStem(vignette)).filter((r) => r.startsWith("lab-"));
