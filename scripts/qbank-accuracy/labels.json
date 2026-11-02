@@ -1,0 +1,635 @@
+[
+ {
+  "id": "0b653d2f-9ea3-45f0-8563-68ba4c7f42a6",
+  "verdict": "fatal",
+  "fault": "two-defensible",
+  "note": "qSOFA needs two criteria; the keyed finding gives one, so the stem does not meet the rule its explanation teaches.",
+  "reviewer": "claude-2026-11-02",
+  "clinicianConfirmed": false
+ },
+ {
+  "id": "880eea08-8077-482d-a42c-ce129a20f217",
+  "verdict": "ok",
+  "note": "ACE inhibitor post-MI with EF 34%; spironolactone needs HF symptoms or diabetes. Probe objection was a false alarm.",
+  "reviewer": "claude-2026-11-02",
+  "clinicianConfirmed": false
+ },
+ {
+  "id": "ff70e057-95ea-400a-93eb-ba3a28b8d0fa",
+  "verdict": "fatal",
+  "fault": "two-defensible",
+  "note": "Regimen holds an anthracycline and trastuzumab; either explains the cardiomyopathy.",
+  "reviewer": "claude-2026-11-02",
+  "clinicianConfirmed": false
+ },
+ {
+  "id": "0b0ab96b-9649-4492-b8ff-e62d8ad49308",
+  "verdict": "fatal",
+  "fault": "wrong-key",
+  "note": "Keyed \"inadequate dietary iron\" for menorrhagia; the cause is chronic blood loss.",
+  "reviewer": "claude-2026-11-02",
+  "clinicianConfirmed": false
+ },
+ {
+  "id": "57d851d9-2b98-4378-8ba1-1c9bff446000",
+  "verdict": "fatal",
+  "fault": "duplicate-options",
+  "note": "A and C both describe Charcot-Bouchard microaneurysms of lenticulostriate perforators.",
+  "reviewer": "claude-2026-11-02",
+  "clinicianConfirmed": false
+ },
+ {
+  "id": "5daf946c-ec62-4416-be63-9ae588b634a6",
+  "verdict": "ok",
+  "note": "PYP scintigraphy after AL excluded.",
+  "reviewer": "claude-2026-11-02",
+  "clinicianConfirmed": false
+ },
+ {
+  "id": "d966158c-c8a7-43db-bdb5-49ee1a875599",
+  "verdict": "ok",
+  "note": "Intermediate-risk chest pain after negative hs-troponins: ischemia testing. Disposition wording varies by institution.",
+  "reviewer": "claude-2026-11-02",
+  "clinicianConfirmed": false
+ },
+ {
+  "id": "f5606873-0982-4f6b-8931-4892469775e1",
+  "verdict": "ok",
+  "note": "Adult discrete coarctation: stent angioplasty.",
+  "reviewer": "claude-2026-11-02",
+  "clinicianConfirmed": false
+ },
+ {
+  "id": "4c1ad696-e759-4b92-a7e0-6deea2e9e8e0",
+  "verdict": "ok",
+  "note": "Pneumococcal plus annual influenza vaccination in nephrotic syndrome.",
+  "reviewer": "claude-2026-11-02",
+  "clinicianConfirmed": false
+ },
+ {
+  "id": "ac174ba5-b688-43be-ad4e-383f233206c6",
+  "verdict": "ok",
+  "note": "Healthy 26-year-old: hepatitis A vaccine alone as PEP (ACIP).",
+  "reviewer": "claude-2026-11-02",
+  "clinicianConfirmed": false
+ },
+ {
+  "id": "49dd97aa-fd7b-4ba3-b30d-acce227e602a",
+  "verdict": "ok",
+  "note": "VT within 48 h of MI: reassess EF at 40 days before ICD.",
+  "reviewer": "claude-2026-11-02",
+  "clinicianConfirmed": false
+ },
+ {
+  "id": "0bf3e0ee-574b-439b-86e2-bbb08c3d0808",
+  "verdict": "ok",
+  "note": "HCM with exertional syncope and family SCD: ICD.",
+  "reviewer": "claude-2026-11-02",
+  "clinicianConfirmed": false
+ },
+ {
+  "id": "9d33f666-138d-4c99-b630-cfdce0565924",
+  "verdict": "ok",
+  "note": "HCM high SCD risk: S-ICD reasonable.",
+  "reviewer": "claude-2026-11-02",
+  "clinicianConfirmed": false
+ },
+ {
+  "id": "857f12fd-1e17-4849-b72c-1195906f2753",
+  "verdict": "ok",
+  "note": "Complicated parapneumonic effusion: chest tube plus antibiotics.",
+  "reviewer": "claude-2026-11-02",
+  "clinicianConfirmed": false
+ },
+ {
+  "id": "566c4687-474b-47b3-8cba-873057182e34",
+  "verdict": "ok",
+  "note": "Insulinoma confirmed: localize with CT/MRI plus EUS.",
+  "reviewer": "claude-2026-11-02",
+  "clinicianConfirmed": false
+ },
+ {
+  "id": "46e176ab-d0ad-4170-ad5d-1e32239cd6bc",
+  "verdict": "ok",
+  "note": "Posterior dislocation after seizure: axillary lateral view.",
+  "reviewer": "claude-2026-11-02",
+  "clinicianConfirmed": false
+ },
+ {
+  "id": "6efa5ffd-20f5-4eb8-ba1a-b1da4d4d4ffb",
+  "verdict": "ok",
+  "note": "Lateral medullary syndrome with neck pain: CTA head and neck.",
+  "reviewer": "claude-2026-11-02",
+  "clinicianConfirmed": false
+ },
+ {
+  "id": "074fe6da-51e6-4bfb-9d28-0a7a5600b5d2",
+  "verdict": "minor",
+  "fault": "stem-error",
+  "note": "E/A 0.7 with DT 240 ms is grade 1, labelled grade 2; current first choice (SGLT2i) not offered, key acceptable among options.",
+  "reviewer": "claude-2026-11-02",
+  "clinicianConfirmed": false
+ },
+ {
+  "id": "f2a7251f-b86e-4a17-ba70-fe5c6f90bbfd",
+  "verdict": "ok",
+  "note": "Diverticular bleed after failed endoscopic therapy: angiographic embolization.",
+  "reviewer": "claude-2026-11-02",
+  "clinicianConfirmed": false
+ },
+ {
+  "id": "6ba86534-2acc-4c6f-825b-dd0e4c916192",
+  "verdict": "ok",
+  "note": "Severe symptomatic AS: valve replacement.",
+  "reviewer": "claude-2026-11-02",
+  "clinicianConfirmed": false
+ },
+ {
+  "id": "fb6302fb-143f-45d4-9c39-ebb401ac9f98",
+  "verdict": "minor",
+  "fault": "explanation-error",
+  "note": "Explanation says CT establishes a tissue diagnosis.",
+  "reviewer": "claude-2026-11-02",
+  "clinicianConfirmed": false
+ },
+ {
+  "id": "35321ca9-585a-4557-a0b6-e3ce0ddf6dd6",
+  "verdict": "ok",
+  "note": "Thalassemia trait: hemoglobin electrophoresis.",
+  "reviewer": "claude-2026-11-02",
+  "clinicianConfirmed": false
+ },
+ {
+  "id": "d697c559-25f9-4867-9b43-70aa3a4225c0",
+  "verdict": "ok",
+  "note": "Unstable UGIB: resuscitation first.",
+  "reviewer": "claude-2026-11-02",
+  "clinicianConfirmed": false
+ },
+ {
+  "id": "062eecd0-0ffd-4006-8860-28d449e688ab",
+  "verdict": "ok",
+  "note": "Critical coarctation in a neonate: PGE1.",
+  "reviewer": "claude-2026-11-02",
+  "clinicianConfirmed": false
+ },
+ {
+  "id": "faba3705-f2ac-44b5-b3c7-169e1f68e9c5",
+  "verdict": "ok",
+  "note": "Chagas: amastigotes in myocytes (board convention; scarce in chronic phase).",
+  "reviewer": "claude-2026-11-02",
+  "clinicianConfirmed": false
+ },
+ {
+  "id": "4d2bae63-bf8b-432c-a93c-a85ffb0918ef",
+  "verdict": "ok",
+  "note": "Asthma: obstructive, raised TLC, normal DLCO.",
+  "reviewer": "claude-2026-11-02",
+  "clinicianConfirmed": false
+ },
+ {
+  "id": "226a6261-e9c7-428f-aa31-4a153138f900",
+  "verdict": "minor",
+  "fault": "stem-error",
+  "note": "Dorsal sensory loss implies a lesion proximal to the wrist, inconsistent with a wrist laceration; key unaffected.",
+  "reviewer": "claude-2026-11-02",
+  "clinicianConfirmed": false
+ },
+ {
+  "id": "4f373177-2858-4073-913d-277bff27b7d3",
+  "verdict": "ok",
+  "note": "PGE1 keeps the ductus patent.",
+  "reviewer": "claude-2026-11-02",
+  "clinicianConfirmed": false
+ },
+ {
+  "id": "90ee10aa-7b89-432f-8fd2-9dffa02e7767",
+  "verdict": "ok",
+  "note": "Prolactin inhibits GnRH.",
+  "reviewer": "claude-2026-11-02",
+  "clinicianConfirmed": false
+ },
+ {
+  "id": "85eefda9-a691-4d1d-8a87-d636af87527f",
+  "verdict": "ok",
+  "note": "SPIKES: perception first.",
+  "reviewer": "claude-2026-11-02",
+  "clinicianConfirmed": false
+ },
+ {
+  "id": "d14a7953-8b8f-4c14-875c-cd3ce5029238",
+  "verdict": "ok",
+  "note": "Teratoma from a primordial germ cell.",
+  "reviewer": "claude-2026-11-02",
+  "clinicianConfirmed": false
+ },
+ {
+  "id": "371e1613-ab99-4815-93c5-7e926873e00b",
+  "verdict": "ok",
+  "note": "Leiomyoma.",
+  "reviewer": "claude-2026-11-02",
+  "clinicianConfirmed": false
+ },
+ {
+  "id": "5112eabb-0608-4fe6-9983-e009518f2f98",
+  "verdict": "minor",
+  "fault": "unit-error",
+  "note": "Ammonia in μmol/dL (hundredfold); key unaffected.",
+  "reviewer": "claude-2026-11-02",
+  "clinicianConfirmed": false
+ },
+ {
+  "id": "d6786052-05fc-45cc-b782-d176fe5c6078",
+  "verdict": "ok",
+  "note": "ICS: suppression of inflammatory gene transcription.",
+  "reviewer": "claude-2026-11-02",
+  "clinicianConfirmed": false
+ },
+ {
+  "id": "1636d6be-62f9-41ce-9e5c-c02ffd1b8d39",
+  "verdict": "ok",
+  "note": "Inferior STEMI with AV block: AV nodal branch of the RCA.",
+  "reviewer": "claude-2026-11-02",
+  "clinicianConfirmed": false
+ },
+ {
+  "id": "d4246009-320f-471a-b9f0-3f9e2acfb999",
+  "verdict": "ok",
+  "note": "CPS I deficiency: no orotic acid, undetectable citrulline.",
+  "reviewer": "claude-2026-11-02",
+  "clinicianConfirmed": false
+ },
+ {
+  "id": "0050b0c6-4264-439e-8686-3c72529b5779",
+  "verdict": "ok",
+  "note": "Wilms tumor from metanephric blastema.",
+  "reviewer": "claude-2026-11-02",
+  "clinicianConfirmed": false
+ },
+ {
+  "id": "0079b5ba-4089-47ac-935f-197f1d4e25f0",
+  "verdict": "ok",
+  "note": "Low-risk 3.2 cm PTC: lobectomy alone is best among the options. Probe disagreed and objected; both wrong.",
+  "reviewer": "claude-2026-11-02",
+  "clinicianConfirmed": false
+ },
+ {
+  "id": "b7bc54bb-5e48-4d92-8d9e-b676cd9e1691",
+  "verdict": "ok",
+  "note": "Dubin-Johnson (pigmented liver) = MRP2. Probe objection (Rotor) ignored the pigment.",
+  "reviewer": "claude-2026-11-02",
+  "clinicianConfirmed": false
+ },
+ {
+  "id": "ef70b23f-13ad-4c78-a863-3c32c68f3af3",
+  "verdict": "ok",
+  "note": "Erb palsy pattern spanning C5 and C6 = upper trunk. Probe objection (C5 root) was a false alarm.",
+  "reviewer": "claude-2026-11-02",
+  "clinicianConfirmed": false
+ },
+ {
+  "id": "f5d72f30-5d9f-4411-b4ea-309d660b35af",
+  "verdict": "fatal",
+  "fault": "duplicate-options",
+  "note": "A and E are both \"Ceftriaxone intravenously\".",
+  "reviewer": "claude-2026-11-02",
+  "clinicianConfirmed": false
+ },
+ {
+  "id": "2b7cf80d-f86a-4da0-b7a4-843465ff6109",
+  "verdict": "fatal",
+  "fault": "duplicate-options",
+  "note": "A and E are identical (IV labetalol).",
+  "reviewer": "claude-2026-11-02",
+  "clinicianConfirmed": false
+ },
+ {
+  "id": "8275f980-b74b-4624-9c18-afc059abab55",
+  "verdict": "fatal",
+  "fault": "duplicate-options",
+  "note": "A and B are identical (vancomycin and cefepime).",
+  "reviewer": "claude-2026-11-02",
+  "clinicianConfirmed": false
+ },
+ {
+  "id": "2900a5fc-5962-4f49-bc50-fdae866d3b73",
+  "verdict": "fatal",
+  "fault": "duplicate-options",
+  "note": "A and B are identical (high-dose aspirin plus colchicine).",
+  "reviewer": "claude-2026-11-02",
+  "clinicianConfirmed": false
+ },
+ {
+  "id": "522d46f5-19d0-4269-adf2-72c88ed29074",
+  "verdict": "fatal",
+  "fault": "wrong-key",
+  "note": "Fever, jaundice and RUQ pain with a duct stone is cholangitis: ERCP first, not cholecystectomy with IOC.",
+  "reviewer": "claude-2026-11-02",
+  "clinicianConfirmed": false
+ },
+ {
+  "id": "751ae051-7b14-4422-b183-6c243079b335",
+  "verdict": "ok",
+  "note": "Knee dislocation with ABI 0.82: CT angiography. Probe chose serial ABIs.",
+  "reviewer": "claude-2026-11-02",
+  "clinicianConfirmed": false
+ },
+ {
+  "id": "889c3b81-9fa4-4ecb-abc1-e6759c2b370f",
+  "verdict": "fatal",
+  "fault": "stem-error",
+  "note": "Shoulder dystocia injures the infant, not the 31-year-old mother; the vignette is incoherent.",
+  "reviewer": "claude-2026-11-02",
+  "clinicianConfirmed": false
+ },
+ {
+  "id": "eece1a22-98fc-4806-b4ac-565b6550f65b",
+  "verdict": "fatal",
+  "fault": "key-contradicts-explanation",
+  "note": "Keyed tagged RBC scan; the explanation argues colonoscopy within 24 hours.",
+  "reviewer": "claude-2026-11-02",
+  "clinicianConfirmed": false
+ },
+ {
+  "id": "acfb50d8-1332-4c24-93b5-324c97144492",
+  "verdict": "fatal",
+  "fault": "key-contradicts-explanation",
+  "note": "Keyed contralateral lobectomy; the explanation argues diagnostic ipsilateral lobectomy.",
+  "reviewer": "claude-2026-11-02",
+  "clinicianConfirmed": false
+ },
+ {
+  "id": "a7d57236-2729-4111-a57f-20ee795cdd77",
+  "verdict": "fatal",
+  "fault": "wrong-key",
+  "note": "With a normal CT and exam, herniation is not the risk that must be disclosed; post-LP headache is.",
+  "reviewer": "claude-2026-11-02",
+  "clinicianConfirmed": false
+ },
+ {
+  "id": "a950fda9-c6ba-4ea7-ab3c-0cec2df6ab07",
+  "verdict": "fatal",
+  "fault": "key-contradicts-explanation",
+  "note": "Keyed dense collagen; the explanation argues granulation tissue with macrophages. Stem also asks the question twice.",
+  "reviewer": "claude-2026-11-02",
+  "clinicianConfirmed": false
+ },
+ {
+  "id": "4800ecd5-b3aa-4020-b893-d81c7294a4be",
+  "verdict": "fatal",
+  "fault": "key-contradicts-explanation",
+  "note": "Keyed restrictive; the explanation opens \"Wait, correct answer is a. Let me fix.\" and argues dilated.",
+  "reviewer": "claude-2026-11-02",
+  "clinicianConfirmed": false
+ },
+ {
+  "id": "a6986eb4-64b6-45da-9278-51f573b8d499",
+  "verdict": "fatal",
+  "fault": "wrong-key",
+  "note": "Stem gives ticagrelor (not a CYP2C19 prodrug); keyed GP IIb/IIIa while the explanation argues P2Y12.",
+  "reviewer": "claude-2026-11-02",
+  "clinicianConfirmed": false
+ },
+ {
+  "id": "4c2b6c68-ff72-4957-8efd-aa9fd02d6e0f",
+  "verdict": "fatal",
+  "fault": "key-contradicts-explanation",
+  "note": "Keyed 3 days; the explanation argues about 14 days for a large infarct.",
+  "reviewer": "claude-2026-11-02",
+  "clinicianConfirmed": false
+ },
+ {
+  "id": "67f91867-b4e4-4e07-b884-49b2d89d7eca",
+  "verdict": "ok",
+  "note": "Spontaneous bacterial empyema: IV cefotaxime without a chest tube. Probe chose drainage.",
+  "reviewer": "claude-2026-11-02",
+  "clinicianConfirmed": false
+ },
+ {
+  "id": "46129510-ecb8-4f36-8d3b-2e21e8e17a50",
+  "verdict": "fatal",
+  "fault": "stem-error",
+  "note": "Transition at the rectosigmoid (Sudeck point) but keyed the splenic flexure.",
+  "reviewer": "claude-2026-11-02",
+  "clinicianConfirmed": false
+ },
+ {
+  "id": "f77b72a7-b814-4fcf-b0a2-50ed74326acd",
+  "verdict": "fatal",
+  "fault": "key-contradicts-explanation",
+  "note": "Keyed ruptured papillary muscle; the explanation argues Libman-Sacks.",
+  "reviewer": "claude-2026-11-02",
+  "clinicianConfirmed": false
+ },
+ {
+  "id": "baf4cdc0-7be1-4418-b8b2-221d58724d54",
+  "verdict": "fatal",
+  "fault": "wrong-key",
+  "note": "Ethosuximide does not antagonize AMPA receptors; best answer is thalamic vs cortical action.",
+  "reviewer": "claude-2026-11-02",
+  "clinicianConfirmed": false
+ },
+ {
+  "id": "db4a7c91-9180-40ef-ada8-083f79126327",
+  "verdict": "ok",
+  "note": "Digoxin: reduced Na/Ca exchange raises calcium. Probe chose PDE3.",
+  "reviewer": "claude-2026-11-02",
+  "clinicianConfirmed": false
+ },
+ {
+  "id": "55e3dab5-65f3-4c35-a80b-ae9aa178b52e",
+  "verdict": "fatal",
+  "fault": "key-contradicts-explanation",
+  "note": "Keyed duration; benzodiazepines raise opening frequency, as the explanation says.",
+  "reviewer": "claude-2026-11-02",
+  "clinicianConfirmed": false
+ },
+ {
+  "id": "7b4e1376-e3f4-41be-9c8d-8eb5a091b832",
+  "verdict": "fatal",
+  "fault": "key-contradicts-explanation",
+  "note": "Keyed duplex; the explanation argues exercise ABI.",
+  "reviewer": "claude-2026-11-02",
+  "clinicianConfirmed": false
+ },
+ {
+  "id": "949ddcff-6c18-4e86-8a25-612828b40862",
+  "verdict": "minor",
+  "fault": "stem-error",
+  "note": "46,XY phenotype details (breast development, low-male testosterone) are shaky; SOX9 is the best answer offered.",
+  "reviewer": "claude-2026-11-02",
+  "clinicianConfirmed": false
+ },
+ {
+  "id": "82ce8554-7dae-4471-8178-020ea454e935",
+  "verdict": "ok",
+  "note": "CURB-65 of 3 with SBP 88 before fluids: ward admission defensible; ICU for vasopressors premature. Contested.",
+  "reviewer": "claude-2026-11-02",
+  "clinicianConfirmed": false
+ },
+ {
+  "id": "b91ef02e-dd13-4a93-917f-9e28f3ba6287",
+  "verdict": "fatal",
+  "fault": "two-defensible",
+  "note": "Type 2 AIT with a compressive Bethesda III nodule: steroids and thyroidectomy both defensible.",
+  "reviewer": "claude-2026-11-02",
+  "clinicianConfirmed": false
+ },
+ {
+  "id": "99ec96d3-fdaf-4889-aea0-e16cce46c5e9",
+  "verdict": "ok",
+  "note": "Endometriosis failing first-line with endometrioma and fertility wish: laparoscopic excision.",
+  "reviewer": "claude-2026-11-02",
+  "clinicianConfirmed": false
+ },
+ {
+  "id": "b60b28d2-f551-4f91-a4b2-dd2a99f172fb",
+  "verdict": "ok",
+  "note": "Average-risk CRC screening from 45.",
+  "reviewer": "claude-2026-11-02",
+  "clinicianConfirmed": false
+ },
+ {
+  "id": "fdd9da9f-0b8b-4fec-8602-c85995a51cf6",
+  "verdict": "ok",
+  "note": "BRAN: the \"nothing\" element is missing.",
+  "reviewer": "claude-2026-11-02",
+  "clinicianConfirmed": false
+ },
+ {
+  "id": "72df0205-fac3-44d7-ac1c-8c3aa36a5ee4",
+  "verdict": "ok",
+  "note": "Minimal change disease.",
+  "reviewer": "claude-2026-11-02",
+  "clinicianConfirmed": false
+ },
+ {
+  "id": "531dbbfa-9a1d-4cc1-80a8-d49aa2632cdc",
+  "verdict": "ok",
+  "note": "HFrEF: add a beta blocker.",
+  "reviewer": "claude-2026-11-02",
+  "clinicianConfirmed": false
+ },
+ {
+  "id": "aa25312d-2083-4a1f-9a6c-5d460ca31ab3",
+  "verdict": "ok",
+  "note": "Cauda equina: MRI without contrast.",
+  "reviewer": "claude-2026-11-02",
+  "clinicianConfirmed": false
+ },
+ {
+  "id": "7cd185f8-c810-4b62-a7b2-bfedda0ec836",
+  "verdict": "ok",
+  "note": "Lactate 4.6: 30 mL/kg crystalloid.",
+  "reviewer": "claude-2026-11-02",
+  "clinicianConfirmed": false
+ },
+ {
+  "id": "0c8dfda4-d7a2-4f4a-baf0-4dddff690dda",
+  "verdict": "ok",
+  "note": "Septic shock: norepinephrine first.",
+  "reviewer": "claude-2026-11-02",
+  "clinicianConfirmed": false
+ },
+ {
+  "id": "d08c75a6-8d02-4f2f-9870-c433acf7d411",
+  "verdict": "ok",
+  "note": "HFrEF with K 5.3 and eGFR 28: SGLT2 inhibitor, not an MRA.",
+  "reviewer": "claude-2026-11-02",
+  "clinicianConfirmed": false
+ },
+ {
+  "id": "b81c25a3-d3d5-4fa6-acd1-132b67b3dfa5",
+  "verdict": "ok",
+  "note": "PVE empiric vancomycin, gentamicin, rifampin (board convention; rifampin timing nuance).",
+  "reviewer": "claude-2026-11-02",
+  "clinicianConfirmed": false
+ },
+ {
+  "id": "30901af4-9267-4609-b21a-828e73b7bbfc",
+  "verdict": "ok",
+  "note": "Amsterdam II family: germline MMR testing.",
+  "reviewer": "claude-2026-11-02",
+  "clinicianConfirmed": false
+ },
+ {
+  "id": "6ecad31c-b78a-4818-9873-f0285a492d3a",
+  "verdict": "ok",
+  "note": "Prinzmetal angina: vasospasm.",
+  "reviewer": "claude-2026-11-02",
+  "clinicianConfirmed": false
+ },
+ {
+  "id": "86c26047-2287-4578-b6aa-77040347077b",
+  "verdict": "ok",
+  "note": "Bitemporal hemianopia: chiasm.",
+  "reviewer": "claude-2026-11-02",
+  "clinicianConfirmed": false
+ },
+ {
+  "id": "dd81700d-b2a8-48e3-a29c-666d2baabfc1",
+  "verdict": "ok",
+  "note": "Angiotensin II constricts the efferent arteriole.",
+  "reviewer": "claude-2026-11-02",
+  "clinicianConfirmed": false
+ },
+ {
+  "id": "8309ae80-7e45-4804-9721-995a7acb9034",
+  "verdict": "ok",
+  "note": "S. epidermidis biofilm.",
+  "reviewer": "claude-2026-11-02",
+  "clinicianConfirmed": false
+ },
+ {
+  "id": "b26f5938-5457-4590-98c4-f9cc15a6d943",
+  "verdict": "minor",
+  "fault": "cueing",
+  "note": "Stem says \"maintains its large calibre\"; the key says \"calibre-persistent\".",
+  "reviewer": "claude-2026-11-02",
+  "clinicianConfirmed": false
+ },
+ {
+  "id": "8147ae42-6673-43bb-b90c-b015146ade9d",
+  "verdict": "ok",
+  "note": "Fabry: Gb3 in lysosomes.",
+  "reviewer": "claude-2026-11-02",
+  "clinicianConfirmed": false
+ },
+ {
+  "id": "cbd47372-92f2-4bbf-bc13-2e5a372da070",
+  "verdict": "ok",
+  "note": "DKA hyperkalemia: reduced Na/K-ATPase drive without insulin.",
+  "reviewer": "claude-2026-11-02",
+  "clinicianConfirmed": false
+ },
+ {
+  "id": "934e0537-774d-4ff6-b425-fcf8591ed2db",
+  "verdict": "ok",
+  "note": "Hemochromatosis: myocyte iron.",
+  "reviewer": "claude-2026-11-02",
+  "clinicianConfirmed": false
+ },
+ {
+  "id": "722ded33-3e89-447a-933b-8db0e60839fc",
+  "verdict": "ok",
+  "note": "Von Gierke: glucose-6-phosphatase.",
+  "reviewer": "claude-2026-11-02",
+  "clinicianConfirmed": false
+ },
+ {
+  "id": "23bfc058-8fce-4198-b212-f28f3d6c8e5c",
+  "verdict": "fatal",
+  "fault": "key-contradicts-explanation",
+  "note": "Keyed autoregulation; the explanation argues CSF displacement into the spinal canal, and the writer flag says it switched the key. Served; its probe had failed open.",
+  "reviewer": "claude-2026-11-02",
+  "clinicianConfirmed": false
+ },
+ {
+  "id": "d460612a-edfa-4fdf-b0b0-c770a32e436a",
+  "verdict": "fatal",
+  "fault": "two-defensible",
+  "note": "Copper IUD: the keyed copper-ion toxicity and the sterile spermicidal inflammatory reaction (First Aid wording) are both defensible; a distractor note names option a.",
+  "reviewer": "claude-2026-11-02",
+  "clinicianConfirmed": false
+ }
+]
