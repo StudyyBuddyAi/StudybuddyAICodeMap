@@ -8,15 +8,18 @@
  * (SECTION_LIMITS, BRANCH_LIMITS); these are the plain fields every mode reads.
  *
  * Set well above anything the app sends. The longest sheet topic on record is
- * 173 characters (2026-11-07); `notes` takes the topic rule the deck and QBank
- * already apply (validate-topic.ts).
+ * 173 characters and the longest card a student can ask to explain 604
+ * (2026-11-08); `notes` takes the topic rule the deck and QBank already apply
+ * (validate-topic.ts). Expand and Clinical send whatever the student
+ * highlighted, and one item of a saved sheet runs to 4,573 characters, so the
+ * highlight gets the same 5,000.
  */
 import { TOPIC_MAX_LENGTH } from "./validate-topic.ts";
 
 export const NOTES_FIELD_LIMITS = {
   notes: TOPIC_MAX_LENGTH,
-  /** The sheet line Expand or Clinical works on. */
-  itemText: 2_000,
+  /** What the student highlighted for Expand or Clinical — up to a whole item. */
+  itemText: TOPIC_MAX_LENGTH,
   enhanceTopic: 300,
   sectionKey: 120,
   /** The card a sheet is asked to focus on. */

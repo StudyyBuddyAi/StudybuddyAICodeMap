@@ -926,7 +926,6 @@ serve(async (req) => {
         // Hand back what the wave reserved and did not deliver, before the
         // summary, so the allowance it reports is the settled one.
         const released = await releaseReservation();
-        await finishCredits();
 
         log("wave_complete", {
           ms: Date.now() - startedAt,
@@ -1000,6 +999,9 @@ serve(async (req) => {
           })
         );
 
+        // After the summary, so the page can start its next wave without
+        // waiting on the hold coming back or the ledger settling.
+        await finishCredits();
         controller.close();
       },
     });

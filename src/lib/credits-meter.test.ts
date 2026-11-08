@@ -249,7 +249,9 @@ describe("request limits", () => {
 
   it("names the first field over its ceiling", () => {
     expect(oversizedNotesField({ notes: "x".repeat(NOTES_FIELD_LIMITS.notes + 1) })).toBe("notes");
-    expect(oversizedNotesField({ notes: "ok", itemText: "y".repeat(2001) })).toBe("itemText");
+    // A whole item of a saved sheet runs to 4,573 characters: Expand on it must still work.
+    expect(oversizedNotesField({ notes: "ok", itemText: "y".repeat(4573) })).toBeNull();
+    expect(oversizedNotesField({ notes: "ok", itemText: "y".repeat(NOTES_FIELD_LIMITS.itemText + 1) })).toBe("itemText");
     expect(oversizedNotesField({ notes: "ok", sectionItems: Array(61).fill("a") })).toBe("sectionItems");
     expect(oversizedNotesField({ notes: "ok", sectionItems: ["z".repeat(1001)] })).toBe("sectionItems");
   });
