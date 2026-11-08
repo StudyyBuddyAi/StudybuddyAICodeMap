@@ -36,6 +36,7 @@
  */
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.8";
+import { isStaff } from "../_shared/staff.ts";
 import { makeEmbeddings, embedQuery, retrieveChunks, type RagChunk } from "../_shared/rag.ts";
 import { requestSourceLabels, type RawSourceLabel } from "../_shared/source-labels.ts";
 import {
@@ -143,6 +144,9 @@ serve(async (req) => {
     );
     const { data: { user }, error: authError } = await authClient.auth.getUser(token);
     if (authError || !user) return json({ error: "invalid_token" }, 401);
+    // A spike, not a product surface: the eval harness and staff only. It runs
+    // the real writer with no credit meter, so it must not be open to anyone.
+    if (!EVAL_USER_IDS.includes(user.id) && !isStaff(user.id)) return json({ error: "forbidden" }, 403);
 
     const body = await req.json();
     const { notes, cardsOnly, explainMode, enhanceMode, useGrounding, topK, threshold, useMemory } = body;

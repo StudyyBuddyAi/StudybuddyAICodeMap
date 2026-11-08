@@ -1,5 +1,5 @@
 import type { RagChunk } from "./rag.ts";
-import { asCortiModel, cortiChatCompletion, cortiConfigFromEnv, type CortiModel } from "./corti.ts";
+import { asCortiModel, cortiChatCompletion, cortiConfigWith, type CortiMeter, type CortiModel } from "./corti.ts";
 
 /**
  * A formatting call against a short, fixed prompt — the smallest instant
@@ -64,7 +64,7 @@ const HEADING_PREVIEW_CHARS = 200;
  * already renders correctly from the mechanical repair alone, so a failure
  * here costs polish, never content.
  */
-export async function requestSourceLabels(chunks: readonly RagChunk[]): Promise<RawSourceLabel[]> {
+export async function requestSourceLabels(chunks: readonly RagChunk[], meter?: CortiMeter | null): Promise<RawSourceLabel[]> {
   if (chunks.length === 0) return [];
 
   const payload = chunks.map((c) => ({
@@ -77,9 +77,10 @@ export async function requestSourceLabels(chunks: readonly RagChunk[]): Promise<
   try {
     // No json mode: the reply is an array, and Corti's json_object mode
     // only takes an object. parseLabelArray tolerates the prose either side.
-    const response = await cortiChatCompletion(cortiConfigFromEnv(), {
+    const response = await cortiChatCompletion(cortiConfigWith(meter), {
       model: asCortiModel(Deno.env.get("CORTI_SOURCE_LABEL_MODEL"), DEFAULT_SOURCE_LABEL_MODEL),
       stream: false,
+      tag: "sheet.labels",
       temperature: 0,
       maxTokens: 900,
       messages: [

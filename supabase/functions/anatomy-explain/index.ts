@@ -1,6 +1,8 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.8";
-import { asCortiModel, cortiChatCompletion, cortiConfigFromEnv, type CortiModel } from "../_shared/corti.ts";
+import { asCortiModel, cortiChatCompletion, cortiConfigWith, type CortiModel } from "../_shared/corti.ts";
+import { CREDIT_HOLDS } from "../_shared/credits.ts";
+import { keepAlive, startCredits } from "../_shared/meter.ts";
 
 /**
  * Explains one labelled structure on one anatomical illustration.
@@ -42,6 +44,8 @@ serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   const startedAt = Date.now();
+  // Set on a cache miss, the only path that spends; given back on every exit.
+  let finishCredits: () => Promise<void> = () => Promise.resolve();
 
   try {
     const token = (req.headers.get("Authorization") ?? "").replace(/^Bearer\s+/i, "").trim();
@@ -81,7 +85,19 @@ serve(async (req) => {
       return json({ text: cached.data.explanation });
     }
 
-    const config = cortiConfigFromEnv();
+    const credits = await startCredits({
+      client: authClient,
+      userId: user.id,
+      fn: "anatomy-explain",
+      kind: "anatomy",
+      amount: CREDIT_HOLDS.anatomy,
+      keepAlive,
+      log,
+    });
+    finishCredits = credits.finish;
+    if (credits.refusal) return json(credits.refusal.body, credits.refusal.status);
+
+    const config = cortiConfigWith(credits.meter);
     const model = asCortiModel(Deno.env.get("CORTI_ANATOMY_MODEL"), DEFAULT_MODEL);
 
     // The last instruction matters: a label can be noise, and a model that
@@ -98,6 +114,7 @@ instead of guessing.`;
       stream: false,
       temperature: 0.3,
       maxTokens: 400,
+      tag: "anatomy.explain",
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: `Diagram: ${cleanDiagram}\nStructure: ${cleanPart}` },
@@ -135,5 +152,7 @@ instead of guessing.`;
     const message = e instanceof Error ? e.message : String(e);
     log("error", { error: message, elapsedMs: Date.now() - startedAt });
     return json({ error: message }, 500);
+  } finally {
+    await finishCredits();
   }
 });

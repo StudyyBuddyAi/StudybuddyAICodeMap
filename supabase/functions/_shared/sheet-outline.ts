@@ -30,7 +30,7 @@
  * questions), and the sheet is planned and written exactly as before.
  * SHEET_OUTLINE=off turns both off.
  */
-import { asCortiModel, cortiChatCompletion, cortiConfigFromEnv, type CortiModel } from "./corti.ts";
+import { asCortiModel, cortiChatCompletion, cortiConfigWith, type CortiMeter, type CortiModel } from "./corti.ts";
 
 export type TopicShape = "single" | "linked" | "compare" | "survey";
 
@@ -264,7 +264,14 @@ export interface OutlineResult {
  * carries no signal, and on a stalled exchange an abort-only limit let one
  * sheet's plan wait 52 s.
  */
-async function ask(system: string, user: string, maxTokens: number, timeoutMs: number): Promise<{ text: string | null; error: string | null }> {
+async function ask(
+  system: string,
+  user: string,
+  maxTokens: number,
+  timeoutMs: number,
+  meter: CortiMeter | null | undefined,
+  tag: string
+): Promise<{ text: string | null; error: string | null }> {
   const model = asCortiModel(Deno.env.get("CORTI_OUTLINE_MODEL"), DEFAULT_OUTLINE_MODEL);
   const controller = new AbortController();
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -275,11 +282,12 @@ async function ask(system: string, user: string, maxTokens: number, timeoutMs: n
     }, timeoutMs);
   });
   const attempt = (async (): Promise<{ text: string | null; error: string | null }> => {
-    const res = await cortiChatCompletion(cortiConfigFromEnv(), {
+    const res = await cortiChatCompletion(cortiConfigWith(meter), {
       model,
       temperature: 0,
       maxTokens,
       json: true,
+      tag,
       messages: [
         { role: "system", content: system },
         { role: "user", content: user },
@@ -303,17 +311,17 @@ const topicLine = (topic: string, examMode?: string, difficulty?: string) =>
 
 const disabled = () => Deno.env.get("SHEET_OUTLINE") === "off";
 
-export async function outlineSheet(topic: string, examMode?: string, difficulty?: string): Promise<OutlineResult> {
+export async function outlineSheet(topic: string, examMode?: string, difficulty?: string, meter?: CortiMeter | null): Promise<OutlineResult> {
   const startedAt = Date.now();
   if (disabled()) return { outline: null, ms: 0, error: "disabled" };
-  const { text, error } = await ask(OUTLINE_PROMPT, topicLine(topic, examMode, difficulty), 500, OUTLINE_TIMEOUT_MS);
+  const { text, error } = await ask(OUTLINE_PROMPT, topicLine(topic, examMode, difficulty), 500, OUTLINE_TIMEOUT_MS, meter, "sheet.outline");
   const outline = text ? parseOutline(text) : null;
   return { outline, ms: Date.now() - startedAt, error: outline ? null : error ?? "unreadable" };
 }
 
 /** Two warm-up questions for this topic, not yet matched to blocks. Empty on any failure. */
-export async function warmupFor(topic: string, examMode?: string, difficulty?: string): Promise<DraftQuestion[]> {
+export async function warmupFor(topic: string, examMode?: string, difficulty?: string, meter?: CortiMeter | null): Promise<DraftQuestion[]> {
   if (disabled()) return [];
-  const { text } = await ask(WARMUP_PROMPT, topicLine(topic, examMode, difficulty), 700, WARMUP_TIMEOUT_MS);
+  const { text } = await ask(WARMUP_PROMPT, topicLine(topic, examMode, difficulty), 700, WARMUP_TIMEOUT_MS, meter, "sheet.warmup");
   return text ? parseWarmup(text) : [];
 }

@@ -151,6 +151,8 @@ export async function verifyOne(
       temperature: probe.temperature ?? 0,
       maxTokens: VERIFIER_MAX_TOKENS,
       json: true,
+      // The second blind read names its own model (verifyTwice).
+      tag: probe.model ? "qbank.read2" : "qbank.read",
       messages: [
         { role: "system", content: verifierPrompt(track) },
         { role: "user", content: renderItem(question) },
@@ -304,6 +306,7 @@ export async function checkAmbiguity(
       temperature: probe.temperature ?? 0,
       maxTokens: 400,
       json: true,
+      tag: "qbank.ambiguity",
       messages: [
         { role: "system", content: AMBIGUITY_PROMPT },
         { role: "user", content: `${renderItem(question)}\n\nKeyed answer: ${question.correctOption.toUpperCase()}` },
@@ -454,6 +457,7 @@ export async function checkWriterFlag(
       temperature: 0,
       maxTokens: VERIFIER_MAX_TOKENS,
       json: true,
+      tag: "qbank.factcheck",
       messages: [
         { role: "system", content: flagCheckPrompt(track) },
         { role: "user", content: renderForFlagCheck(question) },
