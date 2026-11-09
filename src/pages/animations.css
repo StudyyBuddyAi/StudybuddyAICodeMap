@@ -11,7 +11,7 @@
   height: 600px;
   top: -200px;
   left: -200px;
-  background: var(--brand);
+  background: var(--accent);
   animation-duration: 25s;
 }
 .blob-2 {
@@ -66,7 +66,7 @@
 }
 .track span {
   font-weight: 700;
-  color: var(--brand);
+  color: var(--accent);
 }
 @keyframes scrollStrip {
   0% {
@@ -146,7 +146,7 @@ details[open] summary + * {
 .hero {
   background: radial-gradient(
     circle at 20% 30%,
-    rgba(var(--brand-rgb), 0.05) 0%,
+    color-mix(in srgb, var(--accent) 5%, transparent) 0%,
     transparent 60%
   );
 }
