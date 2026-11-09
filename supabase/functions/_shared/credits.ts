@@ -111,6 +111,17 @@ export const CREDIT_HOLDS = {
 
 export type CreditHoldKind = keyof typeof CREDIT_HOLDS;
 
+/**
+ * What each thing typically costs, in µ$, measured 2026-11-07
+ * (docs/credits-meter.md): what the usage page says the day's allowance buys.
+ */
+export const TYPICAL_COST_MICROS = {
+  comprehensiveSheet: 492_000,
+  highYieldSheet: 53_000,
+  qbankQuestion: 17_900,
+  deck50: 41_000,
+} as const;
+
 /** How long a hold outlives a request that never gave it back — longer than any request runs. */
 export const CREDIT_HOLD_TTL_SECONDS = 300;
 

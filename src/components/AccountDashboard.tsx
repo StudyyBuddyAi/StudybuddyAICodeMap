@@ -15,6 +15,8 @@ import { Loader2, LogIn, LogOut, Moon, Sparkles, Sun } from "lucide-react";
 import RedeemCodeForm from "@/components/RedeemCodeForm";
 import { formatPlanDate } from "@/lib/format-plan-date";
 import { Switch } from "@/components/ui/switch";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { UsagePanel } from "@/components/usage/DailyUsage";
 import GoProModal from "@/components/GoProModal";
 import { useTheme } from "@/hooks/use-theme";
 import { cleanUsername, displayName, USERNAME_MAX } from "@/lib/display-name";
@@ -22,9 +24,13 @@ import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 
+export type SettingsTab = "account" | "usage";
+
 interface AccountDashboardProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  tab: SettingsTab;
+  onTabChange: (tab: SettingsTab) => void;
   /** Opens the sign-in dialog; Settings shows a guest a way in. */
   onOpenAuth?: () => void;
 }
@@ -45,7 +51,7 @@ const ThemeSwitch = ({ isDark, onToggle }: { isDark: boolean; onToggle: () => vo
   </div>
 );
 
-const AccountDashboard = ({ open, onOpenChange, onOpenAuth }: AccountDashboardProps) => {
+const AccountDashboard = ({ open, onOpenChange, tab, onTabChange, onOpenAuth }: AccountDashboardProps) => {
   const { user, signOut, isAnonymous } = useAuth();
   const isGuest = !user || isAnonymous;
   const [showRedeem, setShowRedeem] = useState(false);
@@ -118,10 +124,23 @@ const AccountDashboard = ({ open, onOpenChange, onOpenAuth }: AccountDashboardPr
         <DialogHeader>
           <DialogTitle>Settings</DialogTitle>
           <DialogDescription>
-            {isGuest ? "Your preferences on this device." : "Your name, plan and preferences."}
+            {tab === "usage"
+              ? "How much of today's AI allowance you've used."
+              : isGuest
+              ? "Your preferences on this device."
+              : "Your name, plan and preferences."}
           </DialogDescription>
         </DialogHeader>
 
+        <Tabs value={tab} onValueChange={(v) => onTabChange(v as SettingsTab)} className="w-full">
+          <TabsList className="grid w-full grid-cols-2">
+            <TabsTrigger value="account">Account</TabsTrigger>
+            <TabsTrigger value="usage">Usage</TabsTrigger>
+          </TabsList>
+          <TabsContent value="usage">
+            <UsagePanel enabled={open && tab === "usage"} labelClassName={SECTION_LABEL} />
+          </TabsContent>
+          <TabsContent value="account">
         {isGuest ? (
           <div className="space-y-5 pt-2">
             <div className="space-y-3 rounded-lg border border-border p-4">
@@ -233,6 +252,8 @@ const AccountDashboard = ({ open, onOpenChange, onOpenAuth }: AccountDashboardPr
           </Button>
         </div>
         )}
+          </TabsContent>
+        </Tabs>
         <GoProModal open={goProOpen} onOpenChange={setGoProOpen} />
       </DialogContent>
     </Dialog>

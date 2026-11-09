@@ -3,7 +3,7 @@ import { useSearchParams } from "react-router-dom";
 import AppNav from "@/components/dashboard/AppNav";
 import AppFooter from "@/components/layout/AppFooter";
 import AuthModal from "@/components/AuthModal";
-import AccountDashboard from "@/components/AccountDashboard";
+import AccountDashboard, { type SettingsTab } from "@/components/AccountDashboard";
 import { useAuth } from "@/hooks/use-auth";
 import { useBackdropScene } from "@/components/backdrop/backdrop-scene";
 
@@ -26,6 +26,16 @@ const DashboardLayout = ({ children, wide = false }: DashboardLayoutProps) => {
     setSearchParams(next, { replace: true });
   }, [loading, user, isAnonymous, searchParams, setSearchParams]);
   const [accountModalOpen, setAccountModalOpen] = useState(false);
+  const [settingsTab, setSettingsTab] = useState<SettingsTab>("account");
+  // The dashboard's usage bar links here with ?settings=usage.
+  useEffect(() => {
+    if (searchParams.get("settings") !== "usage") return;
+    setSettingsTab("usage");
+    setAccountModalOpen(true);
+    const next = new URLSearchParams(searchParams);
+    next.delete("settings");
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams]);
   // Every app page gets the living backdrop; a page with its own scene (a
   // sheet, a QBank session) outranks this calm default.
   useBackdropScene({ mode: "ambient" }, 0);
@@ -35,7 +45,10 @@ const DashboardLayout = ({ children, wide = false }: DashboardLayoutProps) => {
     <div className="flex min-h-screen flex-col">
       <AppNav
         onOpenAuth={() => setAuthModalOpen(true)}
-        onOpenAccount={() => setAccountModalOpen(true)}
+        onOpenAccount={() => {
+          setSettingsTab("account");
+          setAccountModalOpen(true);
+        }}
       />
 
       {/* Padding as classes, not an inline style: an inline value can't change
@@ -57,6 +70,8 @@ const DashboardLayout = ({ children, wide = false }: DashboardLayoutProps) => {
       <AccountDashboard
         open={accountModalOpen}
         onOpenChange={setAccountModalOpen}
+        tab={settingsTab}
+        onTabChange={setSettingsTab}
         onOpenAuth={() => setAuthModalOpen(true)}
       />
     </div>

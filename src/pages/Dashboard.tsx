@@ -1,5 +1,6 @@
 import { useMemo, useState, type ReactNode } from "react";
 import PageHeader from "@/components/layout/PageHeader";
+import { DashboardUsageStrip } from "@/components/usage/DailyUsage";
 import { Link, useNavigate } from "react-router-dom";
 import {
   ArrowRight,
@@ -298,6 +299,8 @@ function Dashboard() {
             </>
           }
         />
+
+        <DashboardUsageStrip />
 
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
           {/* Today's plan: the week's numbers turned into what to do, most

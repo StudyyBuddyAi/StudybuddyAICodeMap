@@ -1,6 +1,6 @@
 # The credits meter
 
-Every Corti call the app makes is recorded with the tokens Corti reports and their cost. Each account has a daily budget, and a request that does not fit in it can be refused before it spends anything. This is the base for making StudyBuddy free for every student without one account draining the Corti credit. The page's usage bar comes later and reads what this records.
+Every Corti call the app makes is recorded with the tokens Corti reports and their cost. Each account has a daily budget, and a request that does not fit in it can be refused before it spends anything. This is the base for making StudyBuddy free for every student without one account draining the Corti credit. The dashboard's usage bar and the Usage tab in Settings read what this records.
 
 ## How it works
 
@@ -56,6 +56,8 @@ The deep dive's review runs on `corti-s1`, which reasons. It is about half of a 
 - **`medical-notes-next` and `medical-notes-corti` locked.** They run the real writer and nothing in production calls them. They now need `STAFF_USER_IDS`, and the spike also accepts its eval user. With the secret unset, they are closed to everyone.
 
 ## Deploying
+
+Deployed to production on 2026-11-09, in `record` mode. These steps are for any later environment or a full redeploy.
 
 The order matters. The `assist` count needs the migration's `usage_records` kind check.
 
