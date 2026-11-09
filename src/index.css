@@ -7,41 +7,49 @@
 
 @layer base {
   :root {
-    /* ── Tailwind semantic bridge → OpenMed tokens ────────────────────────
-       Tailwind reads these as hsl(H S% L%). The raw OpenMed hex values live
-       in styles/openmed-tokens.css; here they are restated in HSL so every
-       Tailwind utility (bg-background, text-primary, border-border) inherits
-       the OpenMed palette without touching a component.
+    /* ── Tailwind semantic bridge → the raw tokens ────────────────────────
+       Tailwind reads these as hsl(H S% L%). The raw hex values live in
+       styles/openmed-tokens.css; here they are restated in HSL so every
+       Tailwind utility (bg-background, text-primary, border-border) follows
+       them without touching a component. This is the one place a shared
+       colour is defined: pages/index.css (the landing, loaded on every
+       route) no longer overrides any of it.
+
+       Grounds and fills marked "frozen" are the values the app renders
+       today, measured in design-review/paper-harness (ground.json): they
+       must not change (plan decision 1). Some were set by the landing's
+       stylesheet before and are restated here so nothing moves.
     ── */
 
-    /* Surfaces: --paper #F8F8F8 */
+    /* The page: frozen. */
     --background: 0 0% 97%;
-    --foreground: 220 14% 8%; /* --ink #0E1116 */
+    /* Ink #0E1116 writes and commits: text, and the primary action. */
+    --foreground: 217.5 22.2% 7.1%;
 
-    --card: 0 0% 100%;
-    --card-foreground: 220 14% 8%;
+    --card: 0 0% 100%; /* frozen */
+    --card-foreground: 217.5 22.2% 7.1%;
 
     --popover: 0 0% 100%;
-    --popover-foreground: 220 14% 8%;
+    --popover-foreground: 217.5 22.2% 7.1%;
 
-    /* Primary: --teal-600 #0D6E6E */
-    --primary: 180 79% 24%;
-    --primary-foreground: 0 0% 100%;
+    /* Primary: ink, not navy (plan decision 4). */
+    --primary: 217.5 22.2% 7.1%;
+    --primary-foreground: 0 0% 97%;
 
     /* Secondary: --paper-2 #EFEFEF */
     --secondary: 0 0% 94%;
-    --secondary-foreground: 220 14% 8%;
+    --secondary-foreground: 217.5 22.2% 7.1%;
 
-    /* Muted: --stone-100 #E3E3E3 / --stone-500 #525252 */
-    --muted: 0 0% 89%;
+    /* Muted: the fill is frozen (#E8E8E8); the text is --stone-500's ink grey. */
+    --muted: 0 0% 91%;
     --muted-foreground: 0 0% 34%;
 
-    /* Accent: --teal-600 #0D6E6E.
+    /* Accent: the teal pen, --teal-600 #0D6E6E.
        Namespaced --sb-*: openmed-tokens.css owns the raw --accent / --border
        names (as hex), and this file loads after it. Reusing those names here
        would overwrite the hex with an HSL triplet and break every raw
        var(--accent) / var(--border) consumer, openmed-components.css included. */
-    --sb-accent: 180 79% 24%;
+    --sb-accent: 180 78.9% 24.1%;
     --accent-foreground: 0 0% 100%;
 
     /* Destructive: --coral-600 #C5453A */
@@ -51,10 +59,22 @@
     /* Borders: --stone-100 #E3E3E3 */
     --sb-border: 0 0% 89%;
     --input: 0 0% 85%;
-    --ring: 180 79% 24%;
+    /* The focus ring is the teal pen too. */
+    --ring: 180 78.9% 24.1%;
 
-    /* Matches OpenMed --radius-md (8px) */
-    --radius: 0.5rem;
+    /* Frozen: the corners render at this today. Paper corners (--r-sheet,
+       --r-control, --r-chip) replace it per component in Phase 2. */
+    --radius: 0.8rem;
+
+    /* The names the app's flashcard, QBank and sheet screens read raw (and
+       the landing too). The canvas, cards and edges are frozen; the ink and
+       the teal follow the tokens above. */
+    --color-background: #f8f8f8; /* frozen: the canvas behind the backdrop */
+    --color-card: #ffffff; /* frozen */
+    --color-border: #e0e0e0; /* frozen */
+    --color-foreground: hsl(var(--foreground));
+    --color-accent: var(--accent);
+    --color-accent-ink: var(--accent);
 
     --sidebar-background: 0 0% 97%;
     --sidebar-foreground: 220 14% 8%;
@@ -112,29 +132,32 @@
        elevation, badges, inputs and hover states were all indistinguishable.
        The ramp below spans 5% → 17% so each step reads as a distinct surface. */
 
-    /* Surfaces: --paper dark #0B0D10 */
-    --background: 220 16% 5%;
-    --foreground: 43 22% 90%; /* --ink dark #E9E4D7 */
+    /* The page: frozen as it renders (#101A23). */
+    --background: 210 37% 10%;
+    /* Ink at night, #E9E4D7. */
+    --foreground: 43.3 29% 87.8%;
 
-    --card: 220 17% 9%;
-    --card-foreground: 46 24% 90%;
+    --card: 210 33% 14%; /* frozen (#18242F) */
+    --card-foreground: 43.3 29% 87.8%;
 
     /* Popovers sit one step above cards so overlays read as floating */
     --popover: 220 17% 12%;
-    --popover-foreground: 46 24% 90%;
+    --popover-foreground: 43.3 29% 87.8%;
 
-    /* Primary: --teal-300 #6FB5B5 */
-    --primary: 180 32% 60%;
-    --primary-foreground: 220 16% 5%;
+    /* Primary: ink; the text on it is the page colour. */
+    --primary: 43.3 29% 87.8%;
+    --primary-foreground: 210 37% 10%;
 
     /* Secondary: --paper-2 dark #141820 */
     --secondary: 220 15% 15%;
-    --secondary-foreground: 46 24% 92%;
+    --secondary-foreground: 43.3 29% 87.8%;
 
-    --muted: 220 15% 17%;
+    /* The fill is frozen (#26303B); the text is --fg-muted's warm grey. */
+    --muted: 211 22% 19%;
     --muted-foreground: 43 12% 66%;
 
-    --sb-accent: 180 32% 60%;
+    /* The teal pen at night: --teal-300 #6FB5B5. */
+    --sb-accent: 180 32.1% 57.3%;
     --accent-foreground: 220 16% 5%;
 
     /* Inverted the way --primary already is: a LIGHT red on a dark foreground.
@@ -146,7 +169,11 @@
 
     --sb-border: 220 13% 24%;
     --input: 220 12% 34%; /* form controls need a stronger edge than panels */
-    --ring: 180 32% 60%;
+    --ring: 180 32.1% 57.3%;
+
+    --color-background: #101e2b; /* frozen: the canvas behind the backdrop */
+    --color-card: #152838; /* frozen */
+    --color-border: #2a3d4a; /* frozen */
 
     --sidebar-background: 220 16% 5%;
     --sidebar-foreground: 43 22% 90%;

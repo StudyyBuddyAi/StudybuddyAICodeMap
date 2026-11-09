@@ -133,6 +133,49 @@ export interface CortiConfig {
   blueprintModel: CortiModel;
   /** The second blind read; null when switched off. Absent reads as off. */
   secondVerifierModel?: CortiModel | null;
+  /**
+   * Where every call made with this config reports what it spent (meter.ts).
+   * Carried on the config because the config already reaches every call site,
+   * the side calls included. Absent: calls are not metered.
+   */
+  meter?: CortiMeter | null;
+}
+
+/** Corti's token accounting, as it reports it on a reply or a stream's last frame. */
+export interface CortiUsage {
+  prompt_tokens?: number;
+  completion_tokens?: number;
+  prompt_tokens_details?: { cached_tokens?: number } | null;
+  completion_tokens_details?: { reasoning_tokens?: number } | null;
+}
+
+/** One Corti call as the meter sees it, whether or not Corti reported its usage. */
+export interface CortiCallRecord {
+  /** What the call was for — "sheet.writer", "qbank.read" — for the ledger. */
+  tag: string;
+  model: CortiModel;
+  stream: boolean;
+  maxTokens: number;
+  /** The prompt's length, for an estimate when there is no usage. */
+  inputChars: number;
+  /** Content and reasoning characters received, for the same. */
+  outputChars: number;
+  ms: number;
+  /** HTTP status; 0 when no response arrived. */
+  status: number;
+  /**
+   * - ok: the reply (or stream) arrived whole.
+   * - http_error: Corti answered non-2xx; nothing was written.
+   * - aborted: our own signal stopped it — a timeout.
+   * - failed: the network or the stream broke.
+   * - cancelled: the reader stopped reading — the student left mid-stream.
+   */
+  outcome: "ok" | "http_error" | "aborted" | "failed" | "cancelled";
+  usage: CortiUsage | null;
+}
+
+export interface CortiMeter {
+  record(call: CortiCallRecord): void;
 }
 
 /** Narrows an env value onto the model enum, or falls back. */
@@ -177,6 +220,12 @@ export function cortiConfigFromEnv(): CortiConfig {
     blueprintModel: asCortiModel(Deno.env.get("CORTI_BLUEPRINT_MODEL"), DEFAULT_BLUEPRINT_MODEL),
     secondVerifierModel: second === "none" ? null : asCortiModel(second, DEFAULT_SECOND_VERIFIER_MODEL),
   };
+}
+
+/** The environment's config, reporting to `meter` when there is one. Throws as cortiConfigFromEnv does. */
+export function cortiConfigWith(meter?: CortiMeter | null): CortiConfig {
+  const config = cortiConfigFromEnv();
+  return meter ? { ...config, meter } : config;
 }
 
 /** Base URL for the Models API in a region, without a trailing slash. */
@@ -272,6 +321,8 @@ export interface CortiCompletionOptions {
    */
   streamUsage?: boolean;
   signal?: AbortSignal;
+  /** What this call is for, in the spend ledger. Only read when the config carries a meter. */
+  tag?: string;
 }
 
 /**
@@ -282,6 +333,11 @@ export interface CortiCompletionOptions {
  * medical-notes does. Non-2xx responses are returned as-is too — the caller
  * decides how to map an upstream failure onto its own status code, since only
  * it knows what needs refunding or cleaning up.
+ *
+ * With a meter on the config, the call reports what it spent, and the caller
+ * reads exactly what it would have read without one: a reply's body is read
+ * here for its usage and handed back whole, and a stream asks for Corti's
+ * usage frame and has it taken out again (unless the caller asked for it).
  */
 export async function cortiChatCompletion(
   config: CortiConfig,
@@ -297,26 +353,182 @@ export async function cortiChatCompletion(
     streamUsage = false,
     signal,
   } = options;
+  const meter = config.meter ?? null;
+  const includeUsage = stream && (streamUsage || meter !== null);
 
   const token = await getAccessToken(config);
 
-  return fetch(`${cortiBaseUrl(config.region)}/chat/completions`, {
-    method: "POST",
-    signal,
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": `Bearer ${token}`,
-      "Tenant-Name": config.tenant,
-    },
-    body: JSON.stringify({
-      model,
-      messages,
-      stream,
-      temperature,
-      max_tokens: maxTokens,
-      ...(json ? { response_format: { type: "json_object" } } : {}),
-      ...(stream && streamUsage ? { stream_options: { include_usage: true } } : {}),
+  const startedAt = Date.now();
+  const send = () =>
+    fetch(`${cortiBaseUrl(config.region)}/chat/completions`, {
+      method: "POST",
+      signal,
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${token}`,
+        "Tenant-Name": config.tenant,
+      },
+      body: JSON.stringify({
+        model,
+        messages,
+        stream,
+        temperature,
+        max_tokens: maxTokens,
+        ...(json ? { response_format: { type: "json_object" } } : {}),
+        ...(includeUsage ? { stream_options: { include_usage: true } } : {}),
+      }),
+    });
+  if (!meter) return send();
+
+  const call: Omit<CortiCallRecord, "outputChars" | "ms" | "status" | "outcome" | "usage"> = {
+    tag: options.tag ?? "corti",
+    model,
+    stream,
+    maxTokens,
+    inputChars: messages.reduce((n, m) => n + m.content.length, 0),
+  };
+  const lost = (status: number) => (outputChars: number, err?: unknown): CortiCallRecord => ({
+    ...call,
+    outputChars,
+    ms: Date.now() - startedAt,
+    status,
+    outcome: signal?.aborted || (err instanceof Error && err.name === "AbortError") ? "aborted" : "failed",
+    usage: null,
+  });
+
+  let response: Response;
+  try {
+    response = await send();
+  } catch (err) {
+    meter.record(lost(0)(0, err));
+    throw err;
+  }
+  if (!response.ok || !response.body) {
+    meter.record({ ...call, outputChars: 0, ms: Date.now() - startedAt, status: response.status, outcome: "http_error", usage: null });
+    return response;
+  }
+
+  if (!stream) {
+    let text: string;
+    try {
+      text = await response.text();
+    } catch (err) {
+      meter.record(lost(response.status)(0, err));
+      throw err;
+    }
+    let usage: CortiUsage | null = null;
+    let outputChars = 0;
+    try {
+      const data = JSON.parse(text);
+      usage = data?.usage ?? null;
+      const message = data?.choices?.[0]?.message;
+      outputChars = String(message?.content ?? "").length + String(message?.reasoning ?? "").length;
+    } catch {
+      // Not JSON: no usage to read; the caller sees the body as it came.
+    }
+    meter.record({ ...call, outputChars, ms: Date.now() - startedAt, status: response.status, outcome: "ok", usage });
+    return new Response(text, { status: response.status, statusText: response.statusText, headers: response.headers });
+  }
+
+  return new Response(
+    meterStream(response.body, {
+      keepUsageFrame: streamUsage,
+      onEnd: (outcome, usage, outputChars, err) =>
+        meter.record(
+          outcome === "failed"
+            ? lost(response.status)(outputChars, err)
+            : { ...call, outputChars, ms: Date.now() - startedAt, status: response.status, outcome, usage }
+        ),
     }),
+    { status: response.status, statusText: response.statusText, headers: response.headers }
+  );
+}
+
+/**
+ * A Corti SSE stream passed through event by event, reading its usage frame
+ * and counting what it carried. The usage-only frame (`choices: []`) is taken
+ * out unless the caller asked for it, so a relay that forwards frames to the
+ * page untouched forwards the same frames it always did. `onEnd` fires once:
+ * when the stream ends, breaks, or its reader cancels it.
+ */
+export function meterStream(
+  upstream: ReadableStream<Uint8Array>,
+  opts: {
+    keepUsageFrame: boolean;
+    onEnd: (outcome: "ok" | "failed" | "cancelled", usage: CortiUsage | null, outputChars: number, err?: unknown) => void;
+  }
+): ReadableStream<Uint8Array> {
+  const reader = upstream.getReader();
+  const decoder = new TextDecoder();
+  const encoder = new TextEncoder();
+  let buffer = "";
+  let usage: CortiUsage | null = null;
+  let outputChars = 0;
+  let ended = false;
+  const end = (outcome: "ok" | "failed" | "cancelled", err?: unknown) => {
+    if (ended) return;
+    ended = true;
+    opts.onEnd(outcome, usage, outputChars, err);
+  };
+
+  /** Reads one event; false when it is the usage frame and is to be dropped. */
+  const keep = (event: string): boolean => {
+    const dataLine = event.split(/\r?\n/).find((line) => line.startsWith("data:"));
+    if (!dataLine) return true;
+    const payload = dataLine.slice(5).trim();
+    if (!payload || payload === "[DONE]") return true;
+    try {
+      const parsed = JSON.parse(payload);
+      const delta = parsed?.choices?.[0]?.delta;
+      if (typeof delta?.content === "string") outputChars += delta.content.length;
+      const thought = delta?.reasoning ?? delta?.reasoning_content;
+      if (typeof thought === "string") outputChars += thought.length;
+      if (parsed?.usage) {
+        usage = parsed.usage;
+        const usageOnly = !Array.isArray(parsed.choices) || parsed.choices.length === 0;
+        if (usageOnly && !opts.keepUsageFrame) return false;
+      }
+    } catch {
+      // Not ours to judge: passed through as it came.
+    }
+    return true;
+  };
+
+  return new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      for (;;) {
+        let chunk: ReadableStreamReadResult<Uint8Array>;
+        try {
+          chunk = await reader.read();
+        } catch (err) {
+          end("failed", err);
+          throw err;
+        }
+        if (chunk.done) {
+          buffer += decoder.decode();
+          if (buffer && keep(buffer)) controller.enqueue(encoder.encode(buffer));
+          buffer = "";
+          end("ok");
+          controller.close();
+          return;
+        }
+        buffer += decoder.decode(chunk.value, { stream: true });
+        let out = "";
+        for (let m = /\r?\n\r?\n/.exec(buffer); m; m = /\r?\n\r?\n/.exec(buffer)) {
+          const event = buffer.slice(0, m.index + m[0].length);
+          buffer = buffer.slice(m.index + m[0].length);
+          if (keep(event)) out += event;
+        }
+        if (out) {
+          controller.enqueue(encoder.encode(out));
+          return;
+        }
+      }
+    },
+    cancel(reason) {
+      end("cancelled");
+      return reader.cancel(reason);
+    },
   });
 }
 

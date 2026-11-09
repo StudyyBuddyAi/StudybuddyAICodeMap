@@ -348,7 +348,7 @@ function App() {
           <div className="container hero-grid">
             <div className="hero-copy">
               <Reveal>
-                <h1>Study smarter.<br />Score <em>higher.</em> Pass.</h1>
+                <h1>Medical studies,<br />Reimagined with<br /><em>AI you can trust</em></h1>
                 <p className="hero-lede">Build your understanding with AI-powered Study Sheets, go deeper where you need clarity, and put your knowledge into practice with Flashcards and a USMLE-style QBank.</p>
                 <div className="hero-actions">
                   <ButtonLink href="/dashboard?start=sheet" onClick={startStudying} testId="button-hero-early-access">Get early access <ArrowRight size={18} /></ButtonLink>

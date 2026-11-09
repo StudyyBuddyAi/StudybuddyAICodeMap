@@ -236,6 +236,7 @@ export async function buildBlueprint(
       model,
       temperature: 0.5,
       maxTokens: 4000,
+      tag: "qbank.blueprint",
       messages: draftMessages(input.topic, input.system, input.track),
       signal: AbortSignal.timeout(DRAFT_TIMEOUT_MS),
     })
@@ -248,6 +249,7 @@ export async function buildBlueprint(
       model,
       temperature: 0,
       maxTokens: 1500,
+      tag: "qbank.blueprint",
       messages: auditMessages(input.topic, input.track, draft.concepts.map((c) => c.text)),
       signal: AbortSignal.timeout(AUDIT_TIMEOUT_MS),
     })

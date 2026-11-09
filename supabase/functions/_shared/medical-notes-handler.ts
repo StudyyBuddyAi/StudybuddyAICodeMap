@@ -45,7 +45,11 @@ import { attachBlocks, outlineSheet, toWireOutline, warmupFor, type DraftQuestio
 import { classifyArchetype } from "./archetype.ts";
 import { DEFAULT_ARCHETYPE, asDepth, type Depth } from "./sheet-sections.ts";
 import { buildCortiNotesPrompts } from "./medical-notes-prompts-corti.ts";
-import { asCortiModel, cortiChatCompletion, cortiConfigFromEnv, type CortiModel } from "./corti.ts";
+import { asCortiModel, cortiChatCompletion, cortiConfigWith, type CortiMeter, type CortiModel } from "./corti.ts";
+import { CREDIT_HOLDS, type CreditHoldKind } from "./credits.ts";
+import { keepAlive, startCredits } from "./meter.ts";
+import { ASSIST_MAX_TOKENS, oversizedNotesField } from "./request-limits.ts";
+import { isStaff } from "./staff.ts";
 import { PERSONALIZE_MAX_TOKENS, isGrantId, parsePersonalizeRequest } from "./personalize.ts";
 import { SECTION_MAX_TOKENS, buildSectionPrompts, parseSectionRequest } from "./sheet-section-prompts.ts";
 import {
@@ -124,6 +128,12 @@ const BRANCH_DAILY_CAP = 120;
  */
 const UNSIGNED_BRANCH_DAILY_CAP = 10;
 const UNSIGNED_SECTION_DAILY_CAP = 5;
+/**
+ * Explain, Expand, Clinical and personalize actions an account may make in a
+ * day, Pro included (usage_records kind "assist"). They had no limit at all;
+ * each is a fraction of a cent, so this is set to stop a script, not a student.
+ */
+const ASSIST_DAILY_CAP = 150;
 
 /**
  * A branch's review is given this long, and never past REQUEST_BUDGET_MS of
@@ -279,15 +289,18 @@ const CARDS_BY_DEPTH: Record<Depth, number> = { highYield: 3, comprehensive: 5 }
 /** A whole non-streaming completion from Corti. Null on any failure so the caller can fall back. */
 async function cortiComplete(
   model: CortiModel,
-  messages: { role: "system" | "user" | "assistant"; content: string }[]
+  messages: { role: "system" | "user" | "assistant"; content: string }[],
+  meter: CortiMeter | null,
+  tag: string
 ): Promise<string | null> {
   try {
-    const res = await cortiChatCompletion(cortiConfigFromEnv(), {
+    const res = await cortiChatCompletion(cortiConfigWith(meter), {
       model,
       messages,
       stream: false,
       temperature: 0.3,
       maxTokens: 2048,
+      tag,
     });
     if (!res.ok) return null;
     const body = await res.json();
@@ -306,12 +319,14 @@ async function cortiComplete(
 async function cortiStream(
   model: CortiModel,
   messages: { role: "system" | "user" | "assistant"; content: string }[],
-  maxTokens = 8192
+  maxTokens: number,
+  meter: CortiMeter | null,
+  tag: string
 ): Promise<{ response: Response | null; reason: string | null }> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), CORTI_HEADERS_TIMEOUT_MS);
   try {
-    const config = cortiConfigFromEnv();
+    const config = cortiConfigWith(meter);
     const response = await cortiChatCompletion(config, {
       model,
       messages,
@@ -320,6 +335,7 @@ async function cortiStream(
       temperature: 0.3,
       maxTokens,
       signal: controller.signal,
+      tag,
     });
     if (!response.ok || !response.body) {
       const body = await response.text().catch(() => "");
@@ -333,12 +349,28 @@ async function cortiStream(
   }
 }
 
-export async function handleMedicalNotes(req: Request): Promise<Response> {
+export interface MedicalNotesOptions {
+  /**
+   * Only STAFF_USER_IDS may call it: the staging copy, medical-notes-next,
+   * which runs the real writer for whoever reaches it and must not be a second
+   * door for everyone else.
+   */
+  staffOnly?: boolean;
+  /** The function's name in the spend ledger. */
+  fn?: string;
+}
+
+export async function handleMedicalNotes(req: Request, opts: MedicalNotesOptions = {}): Promise<Response> {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
 
   const startedAt = Date.now();
+  // Gives back the request's credit hold and settles its ledger writes. Set
+  // once the hold is taken, and called on every way out of the request; a
+  // hold a request never gives back — its reader left mid-reply — expires on
+  // its own (CREDIT_HOLD_TTL_SECONDS).
+  let finishCredits: () => Promise<void> = () => Promise.resolve();
 
   try {
     // ── JWT verification ───────────────────────────────────────────────────
@@ -352,6 +384,7 @@ export async function handleMedicalNotes(req: Request): Promise<Response> {
     );
     const { data: { user }, error: authError } = await authClient.auth.getUser(token);
     if (authError || !user) return json({ error: "invalid_token" }, 401);
+    if (opts.staffOnly && !isStaff(user.id)) return json({ error: "forbidden" }, 403);
     const authMs = since(startedAt);
 
     // Entitlement fields in the body (userId / isAnonymous / isPro /
@@ -362,6 +395,13 @@ export async function handleMedicalNotes(req: Request): Promise<Response> {
 
     if (!notes || typeof notes !== "string" || !notes.trim()) {
       return json({ error: "Notes are required" }, 400);
+    }
+    // Every free-text field that reaches a prompt has a ceiling, checked before
+    // anything is spent: without one a single request could fill the writer's
+    // whole context, and explain/enhance had no daily limit either.
+    const oversized = oversizedNotesField(body);
+    if (oversized) {
+      return json({ error: "That's too long to send. Please shorten it and try again.", code: "too_long", field: oversized }, 400);
     }
 
     // A standalone deck's topic is checked before anything is billed: markup,
@@ -379,8 +419,8 @@ export async function handleMedicalNotes(req: Request): Promise<Response> {
     const OPENROUTER_API_KEY = Deno.env.get("OPENROUTER_API_KEY");
 
     // An AI action on the student's own sheet: Pro (or a premium sheet's
-    // grant), uncapped, and nothing else a request does — no grounding, no
-    // memory, no quota, no premium hook. See _shared/personalize.ts.
+    // grant), on the daily assist count, and nothing else a request does — no
+    // grounding, no memory, no premium hook. See _shared/personalize.ts.
     const personalize = body.personalize == null ? null : parsePersonalizeRequest(body.personalize);
     if (body.personalize != null && !personalize) {
       return json({ error: "invalid_personalize_request" }, 400);
@@ -455,9 +495,21 @@ export async function handleMedicalNotes(req: Request): Promise<Response> {
 
     const isAnonymous =
       user.is_anonymous === true || decodeJwtPayload(token).is_anonymous === true;
-    const quotaEligible = !explainMode && !enhanceMode && !isPersonalize;
-    const usageKind = isBranch ? "branch" : isSection ? "section" : cardsOnly ? "cards" : "sheet";
-    const dailyCap = isBranch
+    // Explain, Expand, Clinical and personalize: an action on what is already
+    // on the page. Counted on their own daily cap, Pro included.
+    const isAssist = !!explainMode || !!enhanceMode || isPersonalize;
+    const usageKind = isAssist
+      ? "assist"
+      : isBranch
+      ? "branch"
+      : isSection
+      ? "section"
+      : cardsOnly
+      ? "cards"
+      : "sheet";
+    const dailyCap = isAssist
+      ? ASSIST_DAILY_CAP
+      : isBranch
       ? signed
         ? BRANCH_DAILY_CAP
         : UNSIGNED_BRANCH_DAILY_CAP
@@ -472,6 +524,51 @@ export async function handleMedicalNotes(req: Request): Promise<Response> {
     // the page grows a comprehensive sheet's branches once it has streamed.
     // Here depth only sizes the deck.
     const depth = asDepth(body.depth);
+
+    // ── Credits: a hold on the day's budget, before any Corti call ─────────
+    // Taken first and awaited, because the classifier, outline and warm-up
+    // below start spending the moment they are called; a refused request must
+    // not have paid for them. In record mode nothing is refused (meter.ts).
+    const holdKind: CreditHoldKind = isAssist
+      ? "assist"
+      : isBranch
+      ? branch!.action === "suggest"
+        ? "suggest"
+        : "dive"
+      : isSection
+      ? "section"
+      : cardsOnly
+      ? "deck"
+      : "sheet";
+    const credits = await startCredits({
+      client: authClient,
+      userId: user.id,
+      fn: opts.fn ?? "medical-notes",
+      kind: holdKind,
+      amount: CREDIT_HOLDS[holdKind],
+      keepAlive,
+      log,
+    });
+    finishCredits = credits.finish;
+    if (credits.refusal) {
+      await finishCredits();
+      return json(credits.refusal.body, credits.refusal.status);
+    }
+    const meter = credits.meter;
+    /** What each call is for, in the ledger. */
+    const writerTag = isAssist
+      ? isPersonalize
+        ? "personalize"
+        : enhanceMode
+        ? `enhance.${String(enhanceMode).slice(0, 20)}`
+        : "explain"
+      : isBranch
+      ? `branch.${branch!.action}`
+      : isSection
+      ? "section"
+      : cardsOnly
+      ? "cards"
+      : "sheet.writer";
 
     // ── Pre-model work, concurrently ────────────────────────────────────────
     // Grounding: sheet/cards only; explain/enhance/personalize are single-item
@@ -509,7 +606,7 @@ export async function handleMedicalNotes(req: Request): Promise<Response> {
     // slower — and fails open to the condition archetype, the shape a sheet
     // has always had.
     const archetypePromise = isSheetMode
-      ? classifyArchetype(notes)
+      ? classifyArchetype(notes, meter)
       : Promise.resolve({ archetype: null, ms: 0, error: null });
 
     // Outline: whether the topic is one thing or a group, and for a group its
@@ -518,11 +615,11 @@ export async function handleMedicalNotes(req: Request): Promise<Response> {
     // planned from its archetype. The warm-up questions for the wait start at
     // the same moment, so they reach the page before the sheet's first words.
     const outlinePromise: Promise<OutlineResult> = isSheetMode
-      ? outlineSheet(notes, body.examMode, body.difficulty)
+      ? outlineSheet(notes, body.examMode, body.difficulty, meter)
       : Promise.resolve({ outline: null, ms: 0, error: null });
     const warmupStartedAt = Date.now();
     const warmupPromise: Promise<DraftQuestion[]> = isSheetMode
-      ? warmupFor(notes, body.examMode, body.difficulty)
+      ? warmupFor(notes, body.examMode, body.difficulty, meter)
       : Promise.resolve([]);
 
     // Memory: the shared 10-turn window. enhance reads but never writes;
@@ -593,7 +690,7 @@ export async function handleMedicalNotes(req: Request): Promise<Response> {
             });
 
       const quotaPromise: Promise<"ok" | "exceeded" | "error" | "exempt"> =
-        !quotaEligible || isProUser
+        isProUser && !isAssist
           ? Promise.resolve("exempt")
           : authClient
               .rpc("consume_usage", { p_user: user.id, p_kind: usageKind, p_cap: dailyCap })
@@ -622,9 +719,12 @@ export async function handleMedicalNotes(req: Request): Promise<Response> {
     // fraction of the time retrieval and the classifier take — so it is
     // settled first, and a sheet can open its stream while they still run.
     const routing = await routingPromise;
-    if (routing.quota === "error") return json({ error: "quota_check_failed" }, 500);
-    if (routing.quota === "exceeded") return json({ error: "quota_exceeded" }, 429);
-    if (isPersonalize && !routing.isPremium) return json({ error: "pro_required" }, 403);
+    if (routing.quota === "error" || routing.quota === "exceeded" || (isPersonalize && !routing.isPremium)) {
+      await finishCredits();
+      if (routing.quota === "error") return json({ error: "quota_check_failed" }, 500);
+      if (routing.quota === "exceeded") return json({ error: "quota_exceeded" }, 429);
+      return json({ error: "pro_required" }, 403);
+    }
     const quotaConsumed = routing.quota === "ok";
     let refunded = false;
     const refund = async () => {
@@ -722,7 +822,7 @@ export async function handleMedicalNotes(req: Request): Promise<Response> {
       // Source labels: cheap formatting side call, started now and raced at
       // the end of the stream so it never delays the first byte.
       const sourceLabelsPromise: Promise<RawSourceLabel[]> = grounded
-        ? requestSourceLabels(ragChunks)
+        ? requestSourceLabels(ragChunks, meter)
         : Promise.resolve([]);
       sourceLabelsPromise.catch(() => {});
 
@@ -759,6 +859,8 @@ export async function handleMedicalNotes(req: Request): Promise<Response> {
         ? branch!.action === "suggest"
           ? SUGGEST_MAX_TOKENS
           : GROW_MAX_TOKENS
+        : isAssist
+        ? ASSIST_MAX_TOKENS
         : 8192;
       const messagesFor = (p: { systemPrompt: string; userContent: string }) => [
         { role: "system" as const, content: p.systemPrompt },
@@ -810,7 +912,7 @@ export async function handleMedicalNotes(req: Request): Promise<Response> {
           OUTAGE_SIMULATION_USER_IDS.includes(user.id) && req.headers.get("x-simulate-corti-outage") === "1";
         const primary = simulateOutage
           ? { response: null, reason: "simulated_outage" }
-          : await cortiStream(tierModel, messages, budget);
+          : await cortiStream(tierModel, messages, budget, meter, writerTag);
         if (primary.response) return { response: primary.response, modelUsed: `corti/${tierModel}`, fallbackReason: null };
         log("corti_unavailable", { userId: user.id, model: tierModel, reason: primary.reason });
         // A branch has no fallback: the page tries once more by itself, then
@@ -818,7 +920,7 @@ export async function handleMedicalNotes(req: Request): Promise<Response> {
         // review that follows it is the premium model's too.
         if (isBranch) return { response: null, modelUsed: `corti/${tierModel}`, fallbackReason: primary.reason };
         const fallbackModel = fallbackModelFor(tierModel);
-        const fallback = await cortiStream(fallbackModel, messages, budget);
+        const fallback = await cortiStream(fallbackModel, messages, budget, meter, writerTag);
         if (!fallback.response) {
           log("corti_fallback_unavailable", { userId: user.id, model: fallbackModel, reason: fallback.reason });
         }
@@ -862,8 +964,8 @@ export async function handleMedicalNotes(req: Request): Promise<Response> {
               { role: "user" as const, content: prompts.userContent },
             ];
             try {
-              return (await cortiComplete(tierModel, messages)) ??
-                (await cortiComplete(fallbackModelFor(tierModel), messages));
+              return (await cortiComplete(tierModel, messages, meter, "sheet.deck")) ??
+                (await cortiComplete(fallbackModelFor(tierModel), messages, meter, "sheet.deck"));
             } catch (err: unknown) {
               log("flashcards_failed", { err: err instanceof Error ? err.message : String(err) });
               return null;
@@ -917,7 +1019,7 @@ export async function handleMedicalNotes(req: Request): Promise<Response> {
         retrievalAttempts: retrieval.attempts,
         useMemory: useMemoryFlag,
         memoryTurnsInPrompt: memoryTurns.length / 2,
-        quotaEligible,
+        usageKind,
         authMs,
         retrievalMs: retrieval.ms,
         memoryMs: memory.ms,
@@ -944,6 +1046,7 @@ export async function handleMedicalNotes(req: Request): Promise<Response> {
     /** The writer's upstream failed before streaming: logs it, returns what to tell the client. */
     const upstreamFailure = async (ctx: Prepared) => {
       await refund();
+      await finishCredits();
       const t = ctx.response ? await ctx.response.text().catch(() => "") : "";
       const status = ctx.response?.status ?? 0;
       log("upstream_error", { model: ctx.modelUsed, status, body: t.slice(0, 300) });
@@ -977,7 +1080,7 @@ export async function handleMedicalNotes(req: Request): Promise<Response> {
         const timer = setTimeout(() => controller.abort(), Math.max(5_000, Math.min(REVIEW_TIMEOUT_MS, REQUEST_BUDGET_MS - since(startedAt))));
         let reply = "";
         try {
-          const res = await cortiChatCompletion(cortiConfigFromEnv(), {
+          const res = await cortiChatCompletion(cortiConfigWith(meter), {
             model: asCortiModel(Deno.env.get("CORTI_REVIEW_MODEL"), REVIEW_MODEL),
             messages: [
               { role: "system", content: prompts.systemPrompt },
@@ -987,6 +1090,7 @@ export async function handleMedicalNotes(req: Request): Promise<Response> {
             temperature: 0.1,
             maxTokens: REVIEW_MAX_TOKENS,
             signal: controller.signal,
+            tag: "branch.review",
           });
           if (!res.ok) throw new Error(`corti_${res.status}`);
           const data = await res.json();
@@ -1179,6 +1283,7 @@ export async function handleMedicalNotes(req: Request): Promise<Response> {
             const summary = trim500(buildMemorySummary()) || trim500(notes) || "(no answer)";
             await completeTurn(authClient, ctx.memoryClaim.rowId, summary);
           }
+          await finishCredits();
         },
       });
     };
@@ -1266,6 +1371,7 @@ export async function handleMedicalNotes(req: Request): Promise<Response> {
           // sheet written and paid for with nobody there.
           if (!clientOpen) {
             ctx.response?.body?.cancel().catch(() => {});
+            await finishCredits();
             return;
           }
           emit({ model: { used: ctx.modelUsed, fallback: ctx.fallbackReason !== null } });
@@ -1287,6 +1393,7 @@ export async function handleMedicalNotes(req: Request): Promise<Response> {
           if (e instanceof NotMedicalTopicError) {
             log("topic_declined", { elapsedMs: since(startedAt) });
             await refund();
+            await finishCredits();
             fail(NOT_MEDICAL_MESSAGE);
             return;
           }
@@ -1294,6 +1401,7 @@ export async function handleMedicalNotes(req: Request): Promise<Response> {
           log("error", { error: message, elapsedMs: since(startedAt) });
           // Nothing reached the student: the day's sheet goes back.
           if (!relayed) await refund();
+          await finishCredits();
           fail("Something went wrong writing this sheet. Please try again.");
         }
       },
@@ -1302,6 +1410,7 @@ export async function handleMedicalNotes(req: Request): Promise<Response> {
         // sheet nobody will see.
         clientOpen = false;
         upstreamReader?.cancel().catch(() => {});
+        keepAlive(finishCredits());
       },
     });
 
@@ -1315,6 +1424,7 @@ export async function handleMedicalNotes(req: Request): Promise<Response> {
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
     log("error", { error: message, elapsedMs: since(startedAt) });
+    await finishCredits().catch(() => {});
     // The detail is in the log; the page gets something it can say.
     return json({ error: "Something went wrong. Please try again." }, 500);
   }

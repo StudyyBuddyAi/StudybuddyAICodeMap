@@ -21,7 +21,7 @@
  * the same provider as the premium writer, and a free sheet's plan no longer
  * depends on OpenRouter at all.
  */
-import { asCortiModel, cortiChatCompletion, cortiConfigFromEnv, type CortiModel } from "./corti.ts";
+import { asCortiModel, cortiChatCompletion, cortiConfigWith, type CortiMeter, type CortiModel } from "./corti.ts";
 import { ARCHETYPES, ARCHETYPE_IDS, asArchetype, type ArchetypeId } from "./sheet-sections.ts";
 
 /**
@@ -88,12 +88,12 @@ export interface ArchetypeResult {
  * reason and the same measured cause, and the budget is there, since this runs
  * beside retrieval rather than before it.
  */
-export async function classifyArchetype(notes: string): Promise<ArchetypeResult> {
+export async function classifyArchetype(notes: string, meter?: CortiMeter | null): Promise<ArchetypeResult> {
   const startedAt = Date.now();
   const model = asCortiModel(Deno.env.get("CORTI_ARCHETYPE_MODEL"), DEFAULT_ARCHETYPE_MODEL);
-  const first = await classifyOnce(model, notes);
+  const first = await classifyOnce(model, notes, meter);
   if (first.archetype || first.notMedical) return { ...first, ms: Date.now() - startedAt };
-  const second = await classifyOnce(model, notes);
+  const second = await classifyOnce(model, notes, meter);
   return {
     archetype: second.archetype,
     ms: Date.now() - startedAt,
@@ -103,7 +103,7 @@ export async function classifyArchetype(notes: string): Promise<ArchetypeResult>
   };
 }
 
-async function classifyOnce(model: CortiModel, notes: string): Promise<ArchetypeResult> {
+async function classifyOnce(model: CortiModel, notes: string, meter?: CortiMeter | null): Promise<ArchetypeResult> {
   const startedAt = Date.now();
   const controller = new AbortController();
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -115,10 +115,11 @@ async function classifyOnce(model: CortiModel, notes: string): Promise<Archetype
   });
 
   const attempt = async (): Promise<ArchetypeResult> => {
-    const response = await cortiChatCompletion(cortiConfigFromEnv(), {
+    const response = await cortiChatCompletion(cortiConfigWith(meter), {
       model,
       temperature: 0,
       maxTokens: MAX_OUTPUT_TOKENS,
+      tag: "sheet.archetype",
       messages: [
         { role: "system", content: SYSTEM_PROMPT },
         { role: "user", content: notes.trim().slice(0, MAX_INPUT_CHARS) },

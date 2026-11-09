@@ -1,6 +1,12 @@
 /* =============================================================================
-   OpenMed design tokens — values copied verbatim from openmed.life/assets/style.css.
-   Do not tune these by hand; they are a transplanted system, not a starting point.
+   StudyBuddy's raw design tokens: the paper, the inks and the faces.
+
+   They began as a copy of openmed.life's system and are ours now, tuned for
+   "study paper" (docs/design/paper-redesign.md). This file holds the raw
+   values; index.css restates the ones Tailwind needs as HSL triplets (the
+   bridge), and nothing else defines a shared colour. The page and card
+   colours are frozen as they render (decision 1 of the plan): the paper
+   feeling comes from surfaces, edges, type and marks, never from the ground.
 
    Component rules live in openmed-components.css and are scoped under `.openmed`
    because Tailwind also emits `.container`, `.tag`, and friends. Tokens stay
@@ -54,14 +60,24 @@
     --accent-soft: var(--teal-100);
     --signal: var(--coral-600);
 
-    /* Clinical navy — the landing page's own accent, distinct from the teal the
-       app uses. Tokenised so the marketing page can follow the theme; whether
-       navy and teal should be reconciled is a brand decision, not a bug. */
-    --brand: #0F4C81;
-    --brand-soft: #D2E4FF;
-    --brand-soft-fg: #0369A1;
-    --brand-on: #FFFFFF;
-    --brand-pill: rgba(255, 255, 255, .15);
+    /* The study marks (plan §5.1), one instrument each. Red pen: a wrong pick.
+       Pencil: what is provisional — eliminated, noted, secondary — at ≥ 3:1 on
+       the page and on a sheet. Highlighter: what to remember, under ink text. */
+    --mark-red: hsl(var(--danger));
+    --mark-pencil: #6B6B6B;
+    --mark-hl: rgba(245, 226, 122, .75);
+    /* An index card's printed lines and its red header rule: decoration only. */
+    --card-rule: #C9DCEC;
+    --card-head: #E5958E;
+
+    /* Paper corners: a sheet, a control on it, a chip. */
+    --r-sheet: 4px;
+    --r-control: 6px;
+    --r-chip: 3px;
+    /* A shadow only ever means one sheet lying on another: a short contact
+       shadow, and a stronger one for what is laid on top (dialogs, menus). */
+    --shadow-sheet: 0 1px 0 rgba(14, 17, 22, .04), 0 12px 24px -18px rgba(14, 17, 22, .35);
+    --shadow-lift: 0 1px 0 rgba(14, 17, 22, .06), 0 24px 48px -24px rgba(14, 17, 22, .45);
 
     /* Inverse surface for Research + code */
     --surface-inverse: #0E1116;
@@ -127,19 +143,20 @@
     --fg-subtle: #756E5C;
     --border: #22272F;
     --border-strong: #323843;
-    --accent: #2BA5A5;
-    --accent-hover: var(--teal-300);
+    /* The teal pen at night: the light end of the same hue (≥ 6:1 on every
+       dark ground), with a lighter step for hover. */
+    --accent: var(--teal-300);
+    --accent-hover: #8FC7C7;
     --accent-soft: rgba(43, 165, 165, .14);
     --highlight: #E0CA5A;
-    /* Navy is unreadable on a near-black page, so dark mode lifts it into the
-       light end of the same hue and flips the on-brand foreground. */
-    --brand: #8EBDF9;
-    --brand-soft: rgba(142, 189, 249, .14);
-    --brand-soft-fg: #A9CDFB;
-    --brand-on: #0B0D10;
-    --brand-pill: rgba(255, 255, 255, .10);
+    --mark-pencil: #A6A192;
+    --mark-hl: rgba(224, 202, 90, .28);
+    --card-rule: #2C3A4A;
+    --card-head: #7A3F3A;
     --shadow-2: 0 12px 32px -12px rgba(0, 0, 0, .5), 0 2px 4px rgba(0, 0, 0, .25);
     --shadow-ink: 0 8px 24px -8px rgba(0, 0, 0, .6);
+    --shadow-sheet: 0 1px 0 rgba(0, 0, 0, .4), 0 12px 24px -16px rgba(0, 0, 0, .7);
+    --shadow-lift: 0 1px 0 rgba(0, 0, 0, .5), 0 24px 48px -20px rgba(0, 0, 0, .8);
 }
 
 /* ---------- Base ---------------------------------------------------------- */

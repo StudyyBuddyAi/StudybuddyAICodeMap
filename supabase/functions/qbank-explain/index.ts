@@ -1,6 +1,8 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.8";
-import { asCortiModel, cortiChatCompletion, cortiConfigFromEnv, type CortiModel } from "../_shared/corti.ts";
+import { asCortiModel, cortiChatCompletion, cortiConfigWith, type CortiModel } from "../_shared/corti.ts";
+import { CREDIT_HOLDS } from "../_shared/credits.ts";
+import { keepAlive, startCredits } from "../_shared/meter.ts";
 import {
   EXPLAIN_PROMPT_VERSION,
   EXPLAIN_SYSTEM_PROMPT,
@@ -47,6 +49,8 @@ const json = (body: unknown, status = 200) =>
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
   const startedAt = Date.now();
+  // Set on a cache miss, the only path that spends; given back on every exit.
+  let finishCredits: () => Promise<void> = () => Promise.resolve();
 
   try {
     const token = (req.headers.get("Authorization") ?? "").replace(/^Bearer\s+/i, "").trim();
@@ -98,13 +102,26 @@ serve(async (req) => {
         : json({ status: "held" });
     }
 
+    const credits = await startCredits({
+      client: admin,
+      userId: user.id,
+      fn: "qbank-explain",
+      kind: "qbankExplain",
+      amount: CREDIT_HOLDS.qbankExplain,
+      keepAlive,
+      log,
+    });
+    finishCredits = credits.finish;
+    if (credits.refusal) return json(credits.refusal.body, credits.refusal.status);
+
     const model = asCortiModel(Deno.env.get("CORTI_EXPLAIN_MODEL"), DEFAULT_MODEL);
-    const upstream = await cortiChatCompletion(cortiConfigFromEnv(), {
+    const upstream = await cortiChatCompletion(cortiConfigWith(credits.meter), {
       model,
       stream: false,
       json: true,
       temperature: 0.2,
       maxTokens: 3000,
+      tag: "qbank.explain",
       messages: [
         { role: "system", content: EXPLAIN_SYSTEM_PROMPT },
         { role: "user", content: explainUserContent(question as ExplainableQuestion) },
@@ -156,5 +173,7 @@ serve(async (req) => {
     const message = e instanceof Error ? e.message : String(e);
     log("error", { error: message, elapsedMs: Date.now() - startedAt });
     return json({ error: "explain_failed" }, 500);
+  } finally {
+    await finishCredits();
   }
 });

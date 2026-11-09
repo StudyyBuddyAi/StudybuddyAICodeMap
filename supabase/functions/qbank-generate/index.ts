@@ -6,6 +6,8 @@ import {
   cortiChatCompletion,
   cortiComplete,
 } from "../_shared/corti.ts";
+import { CREDIT_HOLDS } from "../_shared/credits.ts";
+import { startCredits } from "../_shared/meter.ts";
 import {
   SYSTEM_ROUTER_PROMPT,
   SYSTEM_NAMES,
@@ -170,6 +172,7 @@ async function resolveSystem(
       temperature: 0,
       maxTokens: 200,
       json: true,
+      tag: "qbank.route",
       messages: [
         { role: "system", content: SYSTEM_ROUTER_PROMPT },
         { role: "user", content: topic },
@@ -208,6 +211,8 @@ serve(async (req) => {
   let reservation: { granted: number; date: string; remainingAfter: number } | null = null;
   let delivered = 0;
   let releaseReservation: () => Promise<number> = () => Promise.resolve(0);
+  /** Gives back the credit hold and settles the ledger writes; every exit calls it. */
+  let finishCredits: () => Promise<void> = () => Promise.resolve();
 
   try {
     // ── JWT verification ─────────────────────────────────────────────────────
@@ -300,6 +305,27 @@ serve(async (req) => {
       return json({ error: "Question generation is not configured" }, 500);
     }
 
+    // ── Credits: a hold on the day's budget, before any Corti call ───────
+    // The router below is the first call, so the hold comes before it. Sized
+    // for the wave as asked; what the wave really spent is charged call by
+    // call. In record mode nothing is refused (_shared/meter.ts).
+    const credits = await startCredits({
+      client: authClient,
+      userId: user.id,
+      fn: "qbank-generate",
+      kind: "qbank",
+      amount: waveCount * CREDIT_HOLDS.qbankQuestion + topics.length * CREDIT_HOLDS.qbankRoute,
+      keepAlive,
+      log,
+    });
+    finishCredits = credits.finish;
+    if (credits.refusal) {
+      await finishCredits();
+      return json(credits.refusal.body, credits.refusal.status);
+    }
+    const meter = credits.meter;
+    if (meter) config = { ...config, meter };
+
     // Each topic routed on its own, in parallel — a mixed set's topics can sit
     // in different systems, and each item is written against its own brief.
     // Later waves pass the systems back, so the brief never changes mid-set.
@@ -317,6 +343,7 @@ serve(async (req) => {
     const declinedAt = routedList.findIndex((r) => (r as { notMedical?: boolean }).notMedical);
     if (declinedAt >= 0) {
       log("topic_declined", { topicLength: topics[declinedAt].length, topicCount: topics.length });
+      await finishCredits();
       return json(
         {
           error:
@@ -369,11 +396,13 @@ serve(async (req) => {
       // not a licence to generate without one.
       if (reserveError || !reserved) {
         log("allowance_failed", { message: reserveError?.message ?? "no result" });
+        await finishCredits();
         return json({ error: "quota_check_failed" }, 500);
       }
       const granted = Number(reserved.granted) || 0;
       if (granted <= 0) {
         log("allowance_exhausted", { limit: FREE_DAILY_QBANK_QUESTIONS });
+        await finishCredits();
         return json(
           {
             error: `You've used today's ${FREE_DAILY_QBANK_QUESTIONS} free questions. They reset at midnight UTC — or go Pro for unlimited sets.`,
@@ -445,7 +474,9 @@ serve(async (req) => {
     });
     const memory = await applyTopicMemory({
       client: authClient,
-      config,
+      // A topic's blueprint is built once for every student: recorded, never
+      // charged to the one whose set happened to start the build.
+      config: meter ? { ...config, meter: meter.child({ charge: false }) } : config,
       userId: user.id,
       generationId,
       plan,
@@ -481,6 +512,7 @@ serve(async (req) => {
         temperature: 0.7,
         maxTokens: MAX_OUTPUT_TOKENS,
         json: true,
+        tag: "qbank.writer",
         messages: [
           // Per mode, and static within a mode, so each stays cacheable. A
           // set holding a Communication & Ethics or Biostatistics item reads
@@ -503,6 +535,7 @@ serve(async (req) => {
       // reason — worth separating from a model-side failure in the response.
       const isAuth = message.startsWith("corti_auth_failed");
       await releaseReservation();
+      await finishCredits();
       return json(
         { error: isAuth ? "Question generation is not configured" : "AI service unreachable" },
         isAuth ? 500 : 502
@@ -513,6 +546,7 @@ serve(async (req) => {
       const text = await upstream.text().catch(() => "");
       log("upstream_status", { status: upstream.status, bodyLength: text.length });
       await releaseReservation();
+      await finishCredits();
       if (upstream.status === 429) {
         return json({ error: "Rate limit exceeded. Please try again in a moment." }, 429);
       }
@@ -965,6 +999,9 @@ serve(async (req) => {
           })
         );
 
+        // After the summary, so the page can start its next wave without
+        // waiting on the hold coming back or the ledger settling.
+        await finishCredits();
         controller.close();
       },
     });
@@ -983,6 +1020,7 @@ serve(async (req) => {
       message: err instanceof Error ? err.message : String(err),
     });
     await releaseReservation().catch(() => 0);
+    await finishCredits().catch(() => {});
     return json({ error: "Internal error" }, 500);
   }
 });

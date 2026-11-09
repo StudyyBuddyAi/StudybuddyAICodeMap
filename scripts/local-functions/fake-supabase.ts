@@ -13,6 +13,9 @@
  *     for this server's lifetime, so a dev session never touches the live
  *     quota tables.
  *   - premium_sheet_grants — issued and checked in memory.
+ *   - ai_spend, reserve_credits, release_credit_hold — the credits meter, kept
+ *     in memory with the migration's rules (20261107000000_credits_meter.sql),
+ *     and each call's cost printed, so a dev session shows what it spends.
  *   - everything else (memory, rag_logs) — refused, and the handler carries on
  *     without it, as it does in production when those fail.
  *
@@ -30,6 +33,46 @@ const env = (key: string): string | undefined =>
 const counters = new Map<string, number>();
 const premiumUsed = new Map<string, number>();
 const grants = new Map<string, string>();
+
+/** The meter's rows, as the dev server received them, for a harness to read. */
+export const localLedger: Record<string, unknown>[] = [];
+/** µ$ charged per user and day, as the migration's trigger adds them. */
+const credits = new Map<string, number>();
+const holds = new Map<string, { user: string; amount: number; expiresAt: number }>();
+
+function recordSpend(rows: Record<string, unknown>[]) {
+  for (const row of rows) {
+    localLedger.push(row);
+    const cost = Number(row.cost_micros) || 0;
+    if (row.charged && row.user_id && cost > 0) {
+      const key = `${row.user_id}|${today()}`;
+      credits.set(key, (credits.get(key) ?? 0) + cost);
+    }
+    console.log(
+      `\x1b[36m[local-fns]\x1b[0m spend ${String(row.feature).padEnd(16)} ${String(row.model).padEnd(22)} in ${row.prompt_tokens} out ${row.completion_tokens}${row.estimated ? " (estimated)" : ""} ${(cost / 10_000).toFixed(2)}¢${row.charged ? "" : " uncharged"}`
+    );
+  }
+}
+
+/** reserve_credits, with the migration's rules: today's charges plus live holds against the cap. */
+function reserveCredits(args: Record<string, unknown>): Result {
+  const user = String(args.p_user ?? "");
+  if (!user) return { data: null, error: { message: "user_required" } };
+  const now = Date.now();
+  for (const [id, h] of holds) if (h.user === user && h.expiresAt <= now) holds.delete(id);
+  const used = credits.get(`${user}|${today()}`) ?? 0;
+  const held = [...holds.values()].filter((h) => h.user === user).reduce((n, h) => n + h.amount, 0);
+  const amount = Math.max(Number(args.p_amount) || 0, 1);
+  const cap = args.p_cap == null ? null : Number(args.p_cap);
+  const within = cap === null || used + held + amount <= cap;
+  const enforce = args.p_enforce === true;
+  let hold: string | null = null;
+  if (within || !enforce) {
+    hold = crypto.randomUUID();
+    holds.set(hold, { user, amount, expiresAt: now + (Number(args.p_ttl_seconds) || 300) * 1000 });
+  }
+  return { data: { allowed: within || !enforce, within_budget: within, hold, used, held, cap }, error: null };
+}
 
 const today = () => new Date().toISOString().slice(0, 10);
 const refused = (what: string): Result => ({ data: null, error: { message: `local stand-in: ${what} is not available` } });
@@ -96,6 +139,11 @@ async function run(q: QueryState, token: string | null): Promise<Result> {
   }
 
   if (q.table === "rag_logs") return { data: null, error: null };
+
+  if (q.table === "ai_spend" && q.op === "insert") {
+    recordSpend((Array.isArray(q.payload) ? q.payload : [q.payload]) as Record<string, unknown>[]);
+    return { data: null, error: null };
+  }
 
   return refused(`table ${q.table}`);
 }
@@ -171,6 +219,11 @@ function rpc(name: string, args: Record<string, unknown>): Promise<Result> {
     if (used >= Number(args.p_limit)) return Promise.resolve({ data: { allowed: false }, error: null });
     premiumUsed.set(user, used + 1);
     return Promise.resolve({ data: { allowed: true }, error: null });
+  }
+  if (name === "reserve_credits") return Promise.resolve(reserveCredits(args));
+  if (name === "release_credit_hold") {
+    holds.delete(String(args.p_hold ?? ""));
+    return Promise.resolve({ data: null, error: null });
   }
   return Promise.resolve(refused(`rpc ${name}`));
 }
