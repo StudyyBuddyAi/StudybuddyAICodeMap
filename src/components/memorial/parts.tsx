@@ -35,11 +35,11 @@ export const MemorialPhoto = ({ card, className = "" }: { card: MemorialCard; cl
   );
 
 /** The names, the line under them, the words and, for the classmates, their register. */
-export const MemorialWords = ({ card, as: Heading = "h2" }: { card: MemorialCard; as?: "h2" | "h3" }) => (
+export const MemorialWords = ({ card }: { card: MemorialCard }) => (
   <div className="mem-words">
-    <Heading className="mem-names">
+    <h2 className="mem-names">
       <MemText>{card.names}</MemText>
-    </Heading>
+    </h2>
     <p className="mem-line">
       <MemText>{card.line}</MemText>
     </p>
@@ -79,48 +79,28 @@ export const RibbonMark = ({ size = 16, className = "" }: { size?: number; class
   </svg>
 );
 
-/** Previous / next, with the cards named between them (a count on a phone). */
+/** Previous / next, and which card of how many is showing. */
 export const DeckNav = ({
-  cards,
   index,
+  count,
   onPrev,
   onNext,
-  onPick,
   className = "",
 }: {
-  cards: MemorialCard[];
   index: number;
+  count: number;
   onPrev: () => void;
   onNext: () => void;
-  onPick?: (i: number) => void;
   className?: string;
 }) => (
   <div className={`mem-nav ${className}`}>
-    <button type="button" className="mem-arrow" onClick={onPrev} aria-label="Previous card">
+    <button type="button" className="mem-arrow" onClick={onPrev} aria-label="Previous photo">
       <ArrowLeft className="h-4 w-4" aria-hidden />
     </button>
-    {onPick ? (
-      <ul className="mem-tabs">
-        {cards.map((c, i) => (
-          <li key={c.id}>
-            <button
-              type="button"
-              className="mem-tab"
-              aria-current={i === index ? "true" : undefined}
-              onClick={() => onPick(i)}
-            >
-              <span className="mem-tab-long">{c.label}</span>
-              <span className="mem-tab-short">{c.short}</span>
-            </button>
-          </li>
-        ))}
-      </ul>
-    ) : (
-      <p className="mem-count">
-        {index + 1} of {cards.length}
-      </p>
-    )}
-    <button type="button" className="mem-arrow" onClick={onNext} aria-label="Next card">
+    <p className="mem-count">
+      {index + 1} of {count}
+    </p>
+    <button type="button" className="mem-arrow" onClick={onNext} aria-label="Next photo">
       <ArrowRight className="h-4 w-4" aria-hidden />
     </button>
   </div>

@@ -5,14 +5,18 @@
  * the page shows it as one (muted, dotted underline) so nothing reads as
  * finished by mistake. Photos go in public/memorial/ and are referenced by
  * path; until a card has one, the page draws a quiet empty frame.
+ *
+ * The memorial goes live (route and entry points, in production) only once
+ * this file is complete: no placeholder left and a photo on every card. See
+ * `memorialComplete` below and src/components/memorial/memorial-live.ts.
  */
 export type MemorialCardId = "parents" | "brother" | "classmates";
 
 export interface MemorialCard {
   id: MemorialCardId;
-  /** How the deck names the card: its tab, its slide label, its photo's alt text. */
+  /** How the deck names the card: its slide label and its photo's alt text. */
   label: string;
-  /** The same, short enough for a phone's tab row. */
+  /** The same, short, for the empty photo frame. */
   short: string;
   /** Set large, beside the photo. */
   names: string;
@@ -20,10 +24,16 @@ export interface MemorialCard {
   line: string;
   /** The words beside the photo, one string per paragraph. */
   text: string[];
-  /** Classmates only: the names, listed like a class register. */
+  /** Classmates only: their names, listed like a class register. */
   roll?: string[];
   /** A path under public/ (e.g. "/memorial/parents.jpg"), or null for the empty frame. */
   photo: string | null;
+  /**
+   * The photo's width ÷ height, so its print keeps the photo's own shape: a
+   * landscape class photo lies as a landscape print, never cropped to fit.
+   * Leave it out for the portrait default, 4:5.
+   */
+  photoAspect?: number;
 }
 
 export interface MemorialContent {
@@ -66,3 +76,18 @@ export const MEMORIAL: MemorialContent = {
     },
   ],
 };
+
+/** The portrait shape a print takes when its card gives none. */
+export const DEFAULT_PHOTO_ASPECT = 4 / 5;
+
+export const hasPlaceholder = (s: string) => /\[[^\]]+\]/.test(s);
+
+/** True once every word is the founder's own and every card has its photo. */
+export function memorialComplete(content: MemorialContent): boolean {
+  const words = [
+    content.dedication,
+    content.signature,
+    ...content.cards.flatMap((c) => [c.names, c.line, ...c.text, ...(c.roll ?? [])]),
+  ];
+  return !words.some(hasPlaceholder) && content.cards.every((c) => !!c.photo);
+}

@@ -1,25 +1,21 @@
 /* =============================================================================
-   The memorial (/in-memory), its entry points, and the development-only lab.
+   The memorial (/in-memory) and its three ways in.
 
    Inside the paper system (openmed-tokens.css): the same grounds, inks,
    Newsreader for what is read, contact shadows for paper lying on paper.
    The page is still on purpose: a plain ground over the living backdrop,
-   motion only when someone turns a card.
+   motion only when someone moves a photo.
    ============================================================================= */
 
 :root {
-  /* A photo print's paper, and an album's cloth cover. */
+  /* A photo print's paper. */
   --mem-print: #fbfaf6;
   --mem-print-shadow: 0 1px 1px rgba(14, 17, 22, 0.08), 0 16px 30px -18px rgba(14, 17, 22, 0.5);
-  --mem-cover: #0e4747;
-  --mem-corner: #1c2128;
 }
 [data-theme="dark"],
 .dark {
   --mem-print: #d9d5cc;
   --mem-print-shadow: 0 1px 1px rgba(0, 0, 0, 0.3), 0 18px 32px -16px rgba(0, 0, 0, 0.75);
-  --mem-cover: #0c3434;
-  --mem-corner: #0b0d10;
 }
 
 /* ---------- The page ------------------------------------------------------ */
@@ -92,7 +88,7 @@
   }
 }
 
-/* ---------- Shared type --------------------------------------------------- */
+/* ---------- Type ---------------------------------------------------------- */
 .mem-dedication {
   max-width: 26ch;
   color: var(--fg);
@@ -177,9 +173,6 @@
   -webkit-user-drag: none;
   user-select: none;
 }
-.mem-mono .mem-photo img {
-  filter: grayscale(1) contrast(1.04);
-}
 .mem-photo--empty {
   display: grid;
   place-items: center;
@@ -203,11 +196,10 @@
   text-align: center;
 }
 
-/* ---------- Deck controls ------------------------------------------------- */
+/* ---------- Previous / next ----------------------------------------------- */
 .mem-nav {
   display: flex;
   align-items: center;
-  justify-content: center;
   gap: 10px;
 }
 .mem-arrow {
@@ -231,32 +223,6 @@
 .mem-arrow:active {
   transform: translateY(1px);
 }
-.mem-tabs {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 2px;
-  list-style: none;
-}
-.mem-tab {
-  padding: 8px 12px;
-  border-radius: 6px;
-  color: var(--fg-muted);
-  font-size: 14px;
-  text-decoration-thickness: 1.5px;
-  text-underline-offset: 7px;
-  transition: color var(--dur-micro) ease;
-}
-.mem-tab:hover {
-  color: var(--fg);
-}
-.mem-tab[aria-current="true"] {
-  color: var(--fg);
-  text-decoration-line: underline;
-}
-.mem-tab-short {
-  display: none;
-}
 .mem-count {
   min-width: 64px;
   color: var(--fg-muted);
@@ -264,34 +230,7 @@
   font-variant-numeric: tabular-nums;
   text-align: center;
 }
-@media (max-width: 640px) {
-  .mem-tab-long {
-    display: none;
-  }
-  .mem-tab-short {
-    display: inline;
-  }
-  .mem-tab {
-    padding: 8px 8px;
-    font-size: 13px;
-  }
-  .mem-nav {
-    gap: 4px;
-  }
-}
 
-@keyframes mem-turn-in {
-  from {
-    opacity: 0;
-    transform: translateX(22px);
-  }
-}
-@keyframes mem-turn-in-back {
-  from {
-    opacity: 0;
-    transform: translateX(-22px);
-  }
-}
 @keyframes mem-rise {
   from {
     opacity: 0;
@@ -299,85 +238,7 @@
   }
 }
 
-/* ---------- A · Dedication ------------------------------------------------ */
-.ded {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  text-align: center;
-}
-.ded-title {
-  margin-inline: auto;
-}
-.ded-deck {
-  width: 100%;
-  margin-top: clamp(36px, 6vh, 64px);
-}
-.ded-stack {
-  position: relative;
-  max-width: 920px;
-  margin: 0 auto;
-  touch-action: pan-y;
-}
-/* The sheets under the top one: the deck is a small pile of paper. */
-.ded-stack::before,
-.ded-stack::after {
-  position: absolute;
-  border: 1px solid var(--border);
-  border-radius: var(--r-sheet);
-  background: var(--bg-elevated);
-  box-shadow: var(--shadow-sheet);
-  content: "";
-  inset: 0;
-}
-.ded-stack::before {
-  background: var(--bg-panel);
-  transform: translateY(20px) scale(0.95);
-}
-.ded-stack::after {
-  transform: translateY(10px) scale(0.975);
-}
-.ded-sheet {
-  position: relative;
-  z-index: 1;
-  overflow: hidden;
-  padding: clamp(18px, 3vw, 36px);
-  border: 1px solid var(--border);
-  border-radius: var(--r-sheet);
-  background: var(--bg-elevated);
-  box-shadow: var(--shadow-sheet);
-  text-align: start;
-}
-.ded-slide {
-  display: grid;
-  align-items: center;
-  animation: mem-turn-in 460ms var(--ease-out) both;
-  gap: clamp(22px, 4vw, 52px);
-  grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
-}
-.ded-slide[data-dir="-1"] {
-  animation-name: mem-turn-in-back;
-}
-.ded-slide[data-first] {
-  animation: none;
-}
-.ded-photo {
-  aspect-ratio: 4 / 5;
-  border-radius: 2px;
-}
-.ded-nav {
-  margin-top: 36px;
-}
-@media (max-width: 720px) {
-  .ded-slide {
-    grid-template-columns: 1fr;
-  }
-  .ded-photo {
-    aspect-ratio: 1 / 1;
-  }
-}
-
-/* ---------- B · Prints ---------------------------------------------------- */
+/* ---------- The prints ---------------------------------------------------- */
 .prints-head {
   max-width: 760px;
 }
@@ -388,22 +249,35 @@
   gap: clamp(36px, 7vw, 104px);
   grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr);
 }
+/* The table the prints lie on: a 4:5 area each print is centred in. */
 .prints-pile {
+  --pile-ar: 0.8;
   position: relative;
   width: min(100%, 400px);
   margin: 12px 0 24px;
-  aspect-ratio: 4 / 5.1;
+  aspect-ratio: 4 / 5;
   justify-self: center;
 }
+/* A print's place in the pile: it carries the pose, the depth and the motion. */
 .print {
   position: absolute;
+  display: grid;
+  inset: 0;
+  place-items: center;
+  pointer-events: none;
+  transition: transform 560ms var(--ease-out);
+}
+/* The print itself, in its photo's own shape (--ar = width ÷ height), as
+   large as the pile allows: a portrait fills its height, a landscape its width. */
+.print-paper {
+  box-sizing: border-box;
+  width: min(100%, calc(100% * var(--ar) / var(--pile-ar)));
   padding: 13px;
   border-radius: 2px;
+  aspect-ratio: var(--ar);
   background: var(--mem-print);
   box-shadow: var(--mem-print-shadow);
-  inset: 0;
   touch-action: pan-y;
-  transition: transform 560ms var(--ease-out);
   user-select: none;
 }
 .print-photo {
@@ -412,10 +286,13 @@
 }
 .print[data-depth="0"] {
   z-index: 3;
-  cursor: grab;
   transform: rotate(-1.6deg);
 }
-.print[data-depth="0"]:active {
+.print[data-depth="0"] .print-paper {
+  cursor: grab;
+  pointer-events: auto;
+}
+.print[data-depth="0"] .print-paper:active {
   cursor: grabbing;
 }
 .print[data-depth="1"] {
@@ -500,351 +377,27 @@
   .prints-side {
     align-items: stretch;
   }
+  .prints-nav {
+    justify-content: center;
+  }
   .prints-hint {
     text-align: center;
   }
 }
 
-/* ---------- C · Index cards ----------------------------------------------- */
-.ic-head {
-  max-width: 760px;
-}
-.ic-track {
-  position: relative;
-  display: flex;
-  width: 100vw;
-  margin-top: clamp(28px, 5vh, 56px);
-  margin-left: calc(50% - 50vw);
-  padding: 22px max(16px, calc((100vw - min(780px, 86vw)) / 2)) 30px;
-  gap: clamp(16px, 2.6vw, 32px);
-  overflow-x: auto;
-  overscroll-behavior-x: contain;
-  scroll-snap-type: x mandatory;
-  scrollbar-width: none;
-}
-.ic-track::-webkit-scrollbar {
-  display: none;
-}
-.ic-card {
-  display: grid;
-  flex: 0 0 min(780px, 86vw);
-  padding: clamp(20px, 3vw, 34px);
-  border: 1px solid var(--border);
-  border-radius: 3px;
-  background: var(--bg-elevated);
-  box-shadow: var(--shadow-sheet);
-  cursor: pointer;
-  gap: clamp(20px, 3vw, 36px);
-  grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
-  opacity: 0.45;
-  scroll-snap-align: center;
-  transform: scale(0.96);
-  transition:
-    opacity 420ms var(--ease-out),
-    transform 420ms var(--ease-out);
-}
-.ic-card[data-active] {
-  cursor: auto;
-  opacity: 1;
-  transform: none;
-}
-.ic-photo-wrap {
-  position: relative;
-  align-self: start;
-  margin-top: 12px;
-  padding: 8px;
-  background: var(--mem-print);
-  box-shadow: 0 1px 1px rgba(14, 17, 22, 0.08), 0 8px 16px -10px rgba(14, 17, 22, 0.4);
-  transform: rotate(-1.5deg);
-}
-.ic-photo {
-  aspect-ratio: 4 / 5;
-}
-.ic-clip {
-  position: absolute;
-  z-index: 1;
-  top: -20px;
-  left: 26px;
-  width: 15px;
-  height: 42px;
-  color: var(--stone-400);
-}
-/* The card's own print: a red rule under the names, blue rules under the words. */
-.ic-body {
-  display: flex;
-  flex-direction: column;
-}
-.ic-fill {
-  min-height: 60px;
-  flex: 1;
-  background-image: repeating-linear-gradient(
-    to bottom,
-    transparent 0 24px,
-    var(--card-rule) 24px 25px,
-    transparent 25px 30px
-  );
-}
-.ic-body .mem-names {
-  padding-bottom: 12px;
-  border-bottom: 1.5px solid var(--card-head);
-}
-.ic-body .mem-line,
-.ic-body .mem-text,
-.ic-body .mem-roll {
-  background-image: repeating-linear-gradient(
-    to bottom,
-    transparent 0 24px,
-    var(--card-rule) 24px 25px,
-    transparent 25px 30px
-  );
-  line-height: 30px;
-}
-.ic-body .mem-line {
-  margin-top: 6px;
-}
-.ic-body .mem-text {
-  margin-top: 0;
-}
-.ic-body .mem-text p {
-  font-size: 17px;
-  line-height: 30px;
-}
-.ic-body .mem-text p + p {
-  margin-top: 0;
-}
-.ic-body .mem-roll {
-  margin-top: 0;
-  padding-top: 0;
-  border-top: 0;
-  row-gap: 0;
-}
-.ic-nav {
-  margin-top: 4px;
-}
-@media (max-width: 720px) {
-  .ic-card {
-    grid-template-columns: 1fr;
-  }
-  .ic-photo-wrap {
-    width: min(76%, 280px);
-    justify-self: center;
-  }
-}
-
-/* ---------- D · Album ----------------------------------------------------- */
-.alb-head {
-  max-width: 760px;
-}
-.alb-book {
-  position: relative;
-  display: grid;
-  max-width: 1040px;
-  min-height: clamp(460px, 50vw, 600px);
-  margin: clamp(40px, 7vh, 72px) auto 0;
-  grid-template-columns: 1fr 1fr;
-  perspective: 2400px;
-  touch-action: pan-y;
-}
-/* The cloth cover the pages lie on. */
-.alb-book::before {
-  position: absolute;
-  z-index: 0;
-  border-radius: 6px;
-  background: var(--mem-cover);
-  box-shadow: var(--shadow-lift);
-  content: "";
-  inset: -11px -13px -13px;
-}
-.alb-page {
-  position: relative;
-  z-index: 1;
-  display: flex;
-  background: var(--bg-elevated);
-}
-.alb-page > div {
-  display: flex;
-  flex: 1;
-}
-.alb-page--left {
-  border-radius: 3px 0 0 3px;
-  box-shadow: inset -34px 0 30px -30px rgba(14, 17, 22, 0.34);
-}
-.alb-page--right {
-  border-radius: 0 3px 3px 0;
-  box-shadow: inset 34px 0 30px -30px rgba(14, 17, 22, 0.26);
-}
-.alb-inner {
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-  justify-content: center;
-  padding: clamp(28px, 4vw, 56px);
-}
-.alb-inner--photo {
-  align-items: center;
-}
-.alb-mount {
-  position: relative;
-  width: min(100%, 330px);
-}
-.alb-photo {
-  aspect-ratio: 4 / 5;
-}
-/* Album corners: four small pockets the photo is slipped into. */
-.alb-corner {
-  position: absolute;
-  width: 26px;
-  height: 26px;
-  background: var(--mem-corner);
-  clip-path: polygon(0 0, 100% 0, 0 100%);
-}
-.alb-corner--tl {
-  top: -5px;
-  left: -5px;
-}
-.alb-corner--tr {
-  top: -5px;
-  right: -5px;
-  transform: rotate(90deg);
-}
-.alb-corner--br {
-  right: -5px;
-  bottom: -5px;
-  transform: rotate(180deg);
-}
-.alb-corner--bl {
-  bottom: -5px;
-  left: -5px;
-  transform: rotate(270deg);
-}
-.alb-caption {
-  margin-top: 20px;
-  color: var(--fg-muted);
-  font-family: var(--font-display);
-  font-size: 15px;
-  font-style: italic;
-}
-/* The leaf being turned: front is the page it leaves, back the page it lands as. */
-.alb-leaf {
-  position: absolute;
-  z-index: 3;
-  top: 0;
-  bottom: 0;
-  width: 50%;
-  transform-style: preserve-3d;
-}
-.alb-leaf--next {
-  left: 50%;
-  animation: alb-turn-next 900ms cubic-bezier(0.45, 0.05, 0.3, 1) both;
-  transform-origin: left center;
-}
-.alb-leaf--prev {
-  left: 0;
-  animation: alb-turn-prev 900ms cubic-bezier(0.45, 0.05, 0.3, 1) both;
-  transform-origin: right center;
-}
-@keyframes alb-turn-next {
-  from {
-    transform: rotateY(0deg);
-  }
-  to {
-    transform: rotateY(-180deg);
-  }
-}
-@keyframes alb-turn-prev {
-  from {
-    transform: rotateY(0deg);
-  }
-  to {
-    transform: rotateY(180deg);
-  }
-}
-.alb-face {
-  position: absolute;
-  display: flex;
-  overflow: hidden;
-  backface-visibility: hidden;
-  -webkit-backface-visibility: hidden;
-  background: var(--bg-elevated);
-  inset: 0;
-}
-.alb-face--back {
-  transform: rotateY(180deg);
-}
-.alb-leaf--next .alb-face--front,
-.alb-leaf--prev .alb-face--back {
-  border-radius: 0 3px 3px 0;
-}
-.alb-leaf--next .alb-face--back,
-.alb-leaf--prev .alb-face--front {
-  border-radius: 3px 0 0 3px;
-}
-/* The leaf darkens as it stands up off the page, and lightens as it lies down. */
-.alb-face::after {
-  position: absolute;
-  animation: alb-shade 900ms ease-in-out both;
-  background: linear-gradient(to right, rgba(14, 17, 22, 0.2), transparent 45%);
-  content: "";
-  inset: 0;
-  opacity: 0;
-  pointer-events: none;
-}
-.alb-leaf--prev .alb-face::after {
-  background: linear-gradient(to left, rgba(14, 17, 22, 0.2), transparent 45%);
-}
-@keyframes alb-shade {
-  50% {
-    opacity: 1;
-  }
-}
-.alb-book[data-single] {
-  min-height: 0;
-  grid-template-columns: 1fr;
-  perspective: none;
-}
-.alb-book[data-single]::before {
-  inset: -7px -7px -9px;
-}
-.alb-book[data-single] .alb-page--left {
-  border-radius: 3px 3px 0 0;
-  box-shadow: inset 0 -14px 14px -14px rgba(14, 17, 22, 0.22);
-}
-.alb-book[data-single] .alb-page--right {
-  border-radius: 0 0 3px 3px;
-  box-shadow: inset 0 14px 14px -14px rgba(14, 17, 22, 0.16);
-}
-.alb-book[data-single] .alb-inner--words {
-  padding-top: 24px;
-}
-.alb-fade {
-  animation: mem-rise 480ms var(--ease-out) both;
-}
-.alb-nav {
-  margin-top: 40px;
-}
-.alb-note {
-  margin-top: 12px;
-  color: var(--fg-muted);
-  font-size: 13px;
-  text-align: center;
-}
-
 @media (prefers-reduced-motion: reduce) {
-  .ded-slide,
   .prints-caption,
-  .alb-fade,
   .print.is-tucking,
   .print.is-untucking {
     animation: none;
   }
-  .print,
-  .ic-card {
+  .print {
     transition: none;
   }
 }
 
-/* ---------- Entry points -------------------------------------------------- */
-/* 1 · The footer line. */
+/* ---------- The ways in --------------------------------------------------- */
+/* The footer line. */
 .mem-plaque {
   display: inline-flex;
   align-items: center;
@@ -866,7 +419,7 @@
   color: var(--fg);
 }
 
-/* 2 · The ribbon by the logo. */
+/* The ribbon by the logo. */
 .mem-ribbon {
   display: inline-grid;
   width: 30px;
@@ -886,7 +439,7 @@
   outline-offset: 2px;
 }
 
-/* 3 · The closing dedication on the landing page. */
+/* The closing dedication on the landing page. */
 .mem-closing {
   padding: clamp(72px, 11vw, 128px) 20px;
 }
@@ -956,209 +509,4 @@
 }
 .mem-closing-link:hover {
   color: var(--fg);
-}
-
-/* ---------- The lab (development only) ------------------------------------ */
-.mlab-pill,
-.mlab {
-  position: fixed;
-  z-index: 90;
-  bottom: 16px;
-  left: 16px;
-  font-family: var(--font-sans);
-}
-.mlab-pill {
-  padding: 9px 14px;
-  border-radius: 999px;
-  background: var(--fg);
-  box-shadow: var(--shadow-lift);
-  color: var(--bg);
-  font-size: 12px;
-  font-weight: 500;
-}
-.mlab {
-  display: flex;
-  width: min(340px, calc(100vw - 32px));
-  max-height: min(78vh, 720px);
-  flex-direction: column;
-  border: 1px solid var(--border-strong);
-  border-radius: 8px;
-  background: var(--bg-elevated);
-  box-shadow: var(--shadow-lift);
-  color: var(--fg);
-  font-size: 13px;
-}
-.mlab :is(a, button, input, textarea):focus-visible,
-.mlab-button:focus-within {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}
-.mlab-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 8px 10px 8px 16px;
-  border-bottom: 1px solid var(--border);
-}
-.mlab-title {
-  font-weight: 600;
-}
-.mlab-icon {
-  display: grid;
-  width: 28px;
-  height: 28px;
-  place-items: center;
-  border-radius: 6px;
-  color: var(--fg-muted);
-}
-.mlab-icon:hover {
-  background: var(--bg-panel);
-  color: var(--fg);
-}
-.mlab-scroll {
-  overflow-y: auto;
-  padding: 0 16px 16px;
-  overscroll-behavior: contain;
-}
-.mlab-group {
-  min-width: 0;
-  margin: 0;
-  padding: 14px 0;
-  border: 0;
-  border-bottom: 1px solid var(--border);
-}
-.mlab-group legend {
-  float: left;
-  width: 100%;
-  margin-bottom: 6px;
-  padding: 0;
-  color: var(--fg-muted);
-  font-size: 12px;
-  font-weight: 600;
-}
-.mlab-option {
-  display: flex;
-  align-items: flex-start;
-  padding: 6px 0;
-  clear: both;
-  cursor: pointer;
-  gap: 10px;
-}
-.mlab-option input {
-  margin-top: 3px;
-  accent-color: var(--accent);
-}
-.mlab-option b {
-  display: block;
-  font-weight: 500;
-}
-.mlab-option small {
-  display: block;
-  color: var(--fg-muted);
-  font-size: 12px;
-  line-height: 1.4;
-}
-.mlab-link,
-.mlab-links a {
-  color: var(--accent);
-  text-decoration: underline;
-  text-underline-offset: 2px;
-}
-.mlab-link {
-  display: inline-block;
-  margin-top: 6px;
-}
-.mlab-links {
-  margin-top: 6px;
-  clear: both;
-  color: var(--fg-muted);
-  font-size: 12px;
-  line-height: 1.5;
-}
-.mlab-field {
-  display: block;
-  margin-top: 10px;
-  clear: both;
-}
-.mlab-field > span {
-  display: block;
-  margin-bottom: 4px;
-  color: var(--fg-muted);
-  font-size: 12px;
-}
-.mlab-field input,
-.mlab-field textarea {
-  width: 100%;
-  padding: 7px 9px;
-  border: 1px solid var(--border-strong);
-  border-radius: 6px;
-  background: var(--bg);
-  color: var(--fg);
-  font: inherit;
-  resize: vertical;
-}
-.mlab-field ::placeholder {
-  color: var(--fg-subtle);
-}
-.mlab-card {
-  margin-top: 16px;
-  padding-top: 14px;
-  border-top: 1px dashed var(--border-strong);
-  clear: both;
-}
-.mlab-card-title {
-  font-weight: 600;
-}
-.mlab-photo-row {
-  display: flex;
-  align-items: center;
-  margin-top: 8px;
-  gap: 10px;
-}
-.mlab-thumb {
-  width: 40px;
-  height: 50px;
-  flex: none;
-  border-radius: 3px;
-  background: var(--bg-panel);
-  object-fit: cover;
-}
-.mlab-thumb--empty {
-  display: block;
-  border: 1px dashed var(--border-strong);
-}
-.mlab-button {
-  display: inline-flex;
-  align-items: center;
-  padding: 6px 10px;
-  border: 1px solid var(--border-strong);
-  border-radius: 6px;
-  cursor: pointer;
-  font-weight: 500;
-  gap: 6px;
-}
-.mlab-button:hover {
-  background: var(--bg-panel);
-}
-.mlab-text-button {
-  display: inline-flex;
-  align-items: center;
-  margin-top: 8px;
-  color: var(--fg-muted);
-  gap: 6px;
-  text-decoration: underline;
-  text-underline-offset: 2px;
-}
-.mlab-text-button:hover {
-  color: var(--fg);
-}
-.mlab-warn {
-  margin-top: 12px;
-  color: var(--signal);
-  font-size: 12px;
-}
-.mlab-fine {
-  margin-top: 12px;
-  color: var(--fg-muted);
-  font-size: 12px;
 }

@@ -1,7 +1,7 @@
 import { useRef, useState, type CSSProperties, type PointerEvent } from "react";
-import type { MemorialContent } from "@/content/memorial";
-import { DeckNav, DeckStatus, MemText, MemorialPhoto, MemorialWords } from "../parts";
-import { useDeck } from "../use-deck";
+import { DEFAULT_PHOTO_ASPECT, type MemorialContent } from "@/content/memorial";
+import { DeckNav, DeckStatus, MemText, MemorialPhoto, MemorialWords } from "./parts";
+import { useDeck } from "./use-deck";
 
 const TUCK_MS = 760;
 /** How far the top print has to travel before letting go moves it to the back. */
@@ -13,12 +13,13 @@ const REST = { side: -1 as 1 | -1, from: `rotate(${REST_TILT}deg)` };
 const pose = (dx: number) => `translate(${dx}px, ${-Math.abs(dx) * 0.04}px) rotate(${REST_TILT + dx / 28}deg)`;
 
 /**
- * B: the photographs themselves, in a pile. The top print slides out to the
- * side and is tucked under the others; going back draws the bottom one out
- * and lays it on top. Nothing is thrown away: every print stays in the pile.
- * Drag or tap the top print, or use the arrows.
+ * The photographs themselves, in a pile, with the words for the top one
+ * beside it. The top print slides out to the side and is tucked under the
+ * others; going back draws the bottom one out and lays it on top. Nothing is
+ * thrown away: every print stays in the pile. Drag or tap the top print, use
+ * the arrows, or the arrow keys.
  */
-const PrintsVersion = ({ content }: { content: MemorialContent }) => {
+const MemorialPrints = ({ content }: { content: MemorialContent }) => {
   const { cards } = content;
   const n = cards.length;
   const deck = useDeck(n, { lockMs: TUCK_MS });
@@ -90,18 +91,18 @@ const PrintsVersion = ({ content }: { content: MemorialContent }) => {
                 aria-hidden={top ? undefined : true}
                 onAnimationEnd={tucking ? () => setExit(REST) : undefined}
                 {...(top
-                  ? {
-                      role: "group",
-                      "aria-roledescription": "slide",
-                      "aria-label": `${deck.index + 1} of ${n}: ${c.label}`,
-                      onPointerDown: onDown,
-                      onPointerMove: onMove,
-                      onPointerUp: onUp,
-                      onPointerCancel: onCancel,
-                    }
+                  ? { role: "group", "aria-roledescription": "slide", "aria-label": `${deck.index + 1} of ${n}: ${c.label}` }
                   : {})}
               >
-                <MemorialPhoto card={c} className="print-photo" />
+                <div
+                  className="print-paper"
+                  style={{ "--ar": String(c.photoAspect ?? DEFAULT_PHOTO_ASPECT) } as CSSProperties}
+                  {...(top
+                    ? { onPointerDown: onDown, onPointerMove: onMove, onPointerUp: onUp, onPointerCancel: onCancel }
+                    : {})}
+                >
+                  <MemorialPhoto card={c} className="print-photo" />
+                </div>
               </div>
             );
           })}
@@ -111,7 +112,7 @@ const PrintsVersion = ({ content }: { content: MemorialContent }) => {
           <div key={deck.turn} className="prints-caption">
             <MemorialWords card={card} />
           </div>
-          <DeckNav cards={cards} index={deck.index} onPrev={deck.prev} onNext={deck.next} className="prints-nav" />
+          <DeckNav index={deck.index} count={n} onPrev={deck.prev} onNext={deck.next} className="prints-nav" />
           <p className="prints-hint">Drag the photo aside, or tap it, to see the next one.</p>
         </div>
       </section>
@@ -119,4 +120,4 @@ const PrintsVersion = ({ content }: { content: MemorialContent }) => {
   );
 };
 
-export default PrintsVersion;
+export default MemorialPrints;
