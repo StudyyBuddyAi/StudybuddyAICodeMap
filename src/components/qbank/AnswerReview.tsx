@@ -5,7 +5,6 @@ import { choiceLabel as choice, formatClock } from "@/lib/qbank-answer";
 import { TIMED_SECONDS_PER_QUESTION, type OptionKey, type Question, type QuestionMedia } from "@/lib/qbank-types";
 import { MediaBlock } from "./QuestionMedia";
 import ReportQuestion from "./ReportQuestion";
-import FullExplanation from "./FullExplanation";
 
 /**
  * What a graded question opens onto: the result, with the difficulty columns
@@ -92,8 +91,6 @@ const AnswerReview = forwardRef<
           <p dangerouslySetInnerHTML={{ __html: renderMarkdown(q.teaching_point) }} />
         </aside>
       )}
-
-      <FullExplanation question={q} correct={correct} />
 
       {(q.domain || q.subject) && (
         <div className="qb-domain">
