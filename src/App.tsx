@@ -11,6 +11,7 @@ import TopProgressBar from "@/components/TopProgressBar";
 import AppBackdrop from "@/components/backdrop/AppBackdrop";
 import { BackdropProvider } from "@/components/backdrop/backdrop-scene";
 import PageLoader from "@/components/PageLoader";
+import { MEMORIAL_PROTOTYPE } from "@/components/memorial/memorial-lab";
 import Index from "./pages/Index.tsx";
 import NotFound from "./pages/NotFound.tsx";
 import ResetPassword from "./pages/ResetPassword.tsx";
@@ -29,6 +30,9 @@ const QBank = lazy(() => import("./pages/QBank.tsx"));
 const QBankSession = lazy(() => import("./pages/QBankSession.tsx"));
 const QBankSummary = lazy(() => import("./pages/QBankSummary.tsx"));
 const QBankProgress = lazy(() => import("./pages/QBankProgress.tsx"));
+// The memorial is a prototype for now: dev server only (memorial-lab.ts).
+const InMemory = MEMORIAL_PROTOTYPE ? lazy(() => import("./pages/InMemory.tsx")) : null;
+const MemorialLab = MEMORIAL_PROTOTYPE ? lazy(() => import("@/components/memorial/MemorialLab")) : null;
 
 const queryClient = new QueryClient();
 
@@ -69,6 +73,7 @@ const AppRoutes = () => {
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/roadmap" element={<Roadmap />} />
           <Route path="/privacy" element={<Privacy />} />
+          {InMemory && <Route path="/in-memory" element={<InMemory />} />}
           <Route path="/sheets" element={<Sheets />} />
           <Route path="/flashcards" element={<Flashcards />} />
           <Route element={<QBankProvider><Outlet /></QBankProvider>}>
@@ -103,6 +108,11 @@ const App = () => (
           <BackdropProvider>
             <AppBackdrop />
             <AppRoutes />
+            {MemorialLab && (
+              <Suspense fallback={null}>
+                <MemorialLab />
+              </Suspense>
+            )}
           </BackdropProvider>
         </AuthProvider>
       </BrowserRouter>

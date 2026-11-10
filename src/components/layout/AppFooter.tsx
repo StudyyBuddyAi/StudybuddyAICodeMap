@@ -1,4 +1,5 @@
 import { Link } from "react-router-dom";
+import { MemorialPlaque } from "@/components/memorial/entries";
 
 const SOCIALS = [
   { href: "https://www.instagram.com/getstudybuddyai/", label: "Instagram" },
@@ -10,10 +11,13 @@ const SOCIALS = [
 const AppFooter = () => (
   <footer className="border-t border-border">
     <div className="mx-auto flex max-w-[var(--max-w,1280px)] flex-col gap-3 px-6 py-6 text-xs text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
-      <p>
-        <span className="font-semibold text-foreground">StudyBuddy AI</span> — medical education and active recall
-        · © {new Date().getFullYear()}
-      </p>
+      <div className="flex flex-col gap-2">
+        <p>
+          <span className="font-semibold text-foreground">StudyBuddy AI</span> — medical education and active recall
+          · © {new Date().getFullYear()}
+        </p>
+        <MemorialPlaque className="self-start" />
+      </div>
       <nav aria-label="Footer" className="flex flex-wrap gap-x-5 gap-y-2">
         <Link to="/roadmap" className="hover:text-foreground">
           Roadmap
