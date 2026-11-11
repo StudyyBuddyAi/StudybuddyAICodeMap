@@ -4,18 +4,18 @@
    Inside the paper system (openmed-tokens.css): the same grounds, inks,
    Newsreader for what is read, contact shadows for paper lying on paper.
    The page is still on purpose: a plain ground over the living backdrop,
-   motion only when someone moves a photo.
+   motion only when someone turns to the next tribute.
    ============================================================================= */
 
 :root {
   /* A photo print's paper. */
   --mem-print: #fbfaf6;
-  --mem-print-shadow: 0 1px 1px rgba(14, 17, 22, 0.08), 0 16px 30px -18px rgba(14, 17, 22, 0.5);
+  --mem-print-shadow: 0 1px 1px rgba(14, 17, 22, 0.08), 0 14px 26px -16px rgba(14, 17, 22, 0.45);
 }
 [data-theme="dark"],
 .dark {
   --mem-print: #d9d5cc;
-  --mem-print-shadow: 0 1px 1px rgba(0, 0, 0, 0.3), 0 18px 32px -16px rgba(0, 0, 0, 0.75);
+  --mem-print-shadow: 0 1px 1px rgba(0, 0, 0, 0.3), 0 16px 28px -14px rgba(0, 0, 0, 0.7);
 }
 
 /* ---------- The page ------------------------------------------------------ */
@@ -79,7 +79,7 @@
   max-width: 1120px;
   flex: 1;
   margin: 0 auto;
-  padding: clamp(28px, 7vh, 88px) 20px clamp(64px, 11vh, 128px);
+  padding: clamp(32px, 7vh, 88px) 20px clamp(64px, 11vh, 128px);
 }
 @media (max-width: 640px) {
   .mem-bar,
@@ -88,68 +88,7 @@
   }
 }
 
-/* ---------- Type ---------------------------------------------------------- */
-.mem-dedication {
-  max-width: 26ch;
-  color: var(--fg);
-  font-family: var(--font-display);
-  font-size: clamp(26px, 3.1vw, 40px);
-  font-style: italic;
-  font-weight: 400;
-  letter-spacing: -0.012em;
-  line-height: 1.22;
-  text-wrap: balance;
-}
-.mem-signature {
-  margin-top: 14px;
-  color: var(--fg-muted);
-  font-size: 14px;
-}
-.mem-signature::before {
-  content: "— ";
-}
-
-.mem-names {
-  color: var(--fg);
-  font-family: var(--font-display);
-  font-size: clamp(25px, 2.6vw, 34px);
-  font-weight: 500;
-  letter-spacing: -0.014em;
-  line-height: 1.15;
-  text-wrap: balance;
-}
-.mem-line {
-  margin-top: 8px;
-  color: var(--fg-muted);
-  font-size: 14px;
-  line-height: 1.5;
-}
-.mem-text {
-  margin-top: 20px;
-}
-.mem-text p {
-  max-width: 60ch;
-  color: var(--fg);
-  font-family: var(--font-display);
-  font-size: 18px;
-  line-height: 1.65;
-}
-.mem-text p + p {
-  margin-top: 12px;
-}
-.mem-roll {
-  display: grid;
-  margin-top: 20px;
-  padding-top: 14px;
-  border-top: 1px solid var(--border);
-  gap: 6px 24px;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  color: var(--fg);
-  font-size: 15px;
-  list-style: none;
-}
-
-/* A placeholder still waiting for the founder's words. */
+/* A placeholder still waiting for the family's words. */
 .mem-ph {
   color: var(--fg-muted);
   text-decoration-color: color-mix(in srgb, var(--fg-muted) 60%, transparent);
@@ -159,13 +98,176 @@
   text-underline-offset: 0.2em;
 }
 
-/* ---------- Photos -------------------------------------------------------- */
-.mem-photo {
-  position: relative;
-  overflow: hidden;
-  background: var(--bg-panel);
+/* ---------- The heading --------------------------------------------------- */
+.mem-heading {
+  max-width: 30ch;
+  margin: 0 auto;
+  color: var(--fg);
+  font-family: var(--font-display);
+  font-size: clamp(26px, 3vw, 40px);
+  font-style: italic;
+  font-weight: 400;
+  letter-spacing: -0.012em;
+  line-height: 1.24;
+  text-align: center;
+  text-wrap: balance;
 }
-.mem-photo img {
+
+/* ---------- The pile of tributes ------------------------------------------ */
+.tributes {
+  margin-top: clamp(40px, 7vh, 76px);
+}
+/* Every sheet in one grid cell: the pile is as tall as its longest tribute,
+   and every sheet is the same size, like a set of paper. */
+.tribute-pile {
+  display: grid;
+  max-width: 800px;
+  margin: 0 auto;
+  touch-action: pan-y;
+}
+.tribute-pile[data-photos] {
+  max-width: 1000px;
+}
+.tribute {
+  display: grid;
+  grid-area: 1 / 1;
+  transition: transform 560ms var(--ease-out);
+}
+.tribute-sheet {
+  display: grid;
+  align-content: start;
+  padding: clamp(26px, 5vw, 60px) clamp(22px, 5.5vw, 68px);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sheet);
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-sheet);
+  gap: clamp(24px, 4vw, 48px);
+}
+.tribute-sheet[data-photo] {
+  align-items: start;
+  grid-template-columns: minmax(0, 5fr) minmax(0, 8fr);
+}
+.tribute[data-depth="0"] {
+  z-index: 3;
+  transform: none;
+}
+.tribute[data-depth="1"] {
+  z-index: 2;
+  transform: translate(10px, 9px) rotate(0.8deg);
+}
+.tribute[data-depth="2"] {
+  z-index: 1;
+  transform: translate(-9px, 16px) rotate(-1.2deg);
+}
+.tribute[data-depth="3"] {
+  z-index: 0;
+  opacity: 0;
+  transform: translate(-9px, 16px) rotate(-1.2deg);
+}
+/* Only the top sheet shows its words; the ones under it are paper. */
+.tribute:not([data-depth="0"]) .tribute-sheet > * {
+  visibility: hidden;
+}
+@media (prefers-reduced-motion: no-preference) {
+  /* Out to the side, clear of the pile, then under it. */
+  .tribute.is-tucking {
+    animation: tribute-tuck 820ms cubic-bezier(0.3, 0.7, 0.2, 1) both;
+  }
+  .tribute.is-untucking {
+    animation: tribute-untuck 820ms cubic-bezier(0.3, 0.7, 0.2, 1) both;
+  }
+  .tribute.is-tucking .tribute-sheet > *,
+  .tribute.is-yielding .tribute-sheet > * {
+    visibility: visible;
+  }
+}
+@keyframes tribute-tuck {
+  0% {
+    z-index: 5;
+    transform: none;
+  }
+  48% {
+    z-index: 5;
+    transform: translate(-106%, -1%) rotate(-3deg);
+  }
+  52% {
+    z-index: 0;
+    transform: translate(-106%, -1%) rotate(-3deg);
+  }
+  100% {
+    z-index: 0;
+    transform: translate(-9px, 16px) rotate(-1.2deg);
+  }
+}
+@keyframes tribute-untuck {
+  0% {
+    z-index: 0;
+    transform: translate(-9px, 16px) rotate(-1.2deg);
+  }
+  48% {
+    z-index: 0;
+    transform: translate(-106%, -1%) rotate(-3deg);
+  }
+  52% {
+    z-index: 5;
+    transform: translate(-106%, -1%) rotate(-3deg);
+  }
+  100% {
+    z-index: 5;
+    transform: none;
+  }
+}
+
+/* ---------- A tribute ----------------------------------------------------- */
+.tribute-name {
+  color: var(--fg);
+  font-family: var(--font-display);
+  font-size: clamp(26px, 2.8vw, 34px);
+  font-weight: 500;
+  letter-spacing: -0.014em;
+  line-height: 1.15;
+  text-wrap: balance;
+}
+.tribute-years {
+  margin-top: 8px;
+  color: var(--fg-muted);
+  font-family: var(--font-display);
+  font-size: 17px;
+  font-variant-numeric: lining-nums tabular-nums;
+}
+.tribute-text {
+  display: grid;
+  margin-top: 28px;
+  gap: 16px;
+}
+.tribute-text p {
+  max-width: 64ch;
+  color: var(--fg);
+  font-family: var(--font-display);
+  font-size: 18.5px;
+  line-height: 1.7;
+}
+.tribute-nav {
+  justify-content: center;
+  margin-top: 40px;
+}
+@media (max-width: 640px) {
+  .tribute-text p {
+    font-size: 17px;
+  }
+}
+
+/* A photo, as a print on its sheet, in the photo's own shape (--ar). */
+.mem-print {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 10px;
+  border-radius: 2px;
+  aspect-ratio: var(--ar);
+  background: var(--mem-print);
+  box-shadow: var(--mem-print-shadow);
+}
+.mem-print img {
   display: block;
   width: 100%;
   height: 100%;
@@ -173,27 +275,18 @@
   -webkit-user-drag: none;
   user-select: none;
 }
-.mem-photo--empty {
-  display: grid;
-  place-items: center;
+.tribute-print {
+  margin-top: 6px;
+  transform: rotate(-1.4deg);
 }
-.mem-photo--empty::after {
-  position: absolute;
-  border: 1px dashed var(--border-strong);
-  border-radius: 2px;
-  content: "";
-  inset: 10px;
-  pointer-events: none;
-}
-.mem-photo-hint {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
-  padding: 0 16px;
-  color: var(--fg-muted);
-  font-size: 12px;
-  text-align: center;
+@media (max-width: 720px) {
+  .tribute-sheet[data-photo] {
+    grid-template-columns: 1fr;
+  }
+  .tribute-print {
+    width: min(80%, 300px);
+    justify-self: center;
+  }
 }
 
 /* ---------- Previous / next ----------------------------------------------- */
@@ -229,171 +322,6 @@
   font-size: 14px;
   font-variant-numeric: tabular-nums;
   text-align: center;
-}
-
-@keyframes mem-rise {
-  from {
-    opacity: 0;
-    transform: translateY(8px);
-  }
-}
-
-/* ---------- The prints ---------------------------------------------------- */
-.prints-head {
-  max-width: 760px;
-}
-.prints-body {
-  display: grid;
-  margin-top: clamp(36px, 7vh, 72px);
-  align-items: center;
-  gap: clamp(36px, 7vw, 104px);
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr);
-}
-/* The table the prints lie on: a 4:5 area each print is centred in. */
-.prints-pile {
-  --pile-ar: 0.8;
-  position: relative;
-  width: min(100%, 400px);
-  margin: 12px 0 24px;
-  aspect-ratio: 4 / 5;
-  justify-self: center;
-}
-/* A print's place in the pile: it carries the pose, the depth and the motion. */
-.print {
-  position: absolute;
-  display: grid;
-  inset: 0;
-  place-items: center;
-  pointer-events: none;
-  transition: transform 560ms var(--ease-out);
-}
-/* The print itself, in its photo's own shape (--ar = width ÷ height), as
-   large as the pile allows: a portrait fills its height, a landscape its width. */
-.print-paper {
-  box-sizing: border-box;
-  width: min(100%, calc(100% * var(--ar) / var(--pile-ar)));
-  padding: 13px;
-  border-radius: 2px;
-  aspect-ratio: var(--ar);
-  background: var(--mem-print);
-  box-shadow: var(--mem-print-shadow);
-  touch-action: pan-y;
-  user-select: none;
-}
-.print-photo {
-  width: 100%;
-  height: 100%;
-}
-.print[data-depth="0"] {
-  z-index: 3;
-  transform: rotate(-1.6deg);
-}
-.print[data-depth="0"] .print-paper {
-  cursor: grab;
-  pointer-events: auto;
-}
-.print[data-depth="0"] .print-paper:active {
-  cursor: grabbing;
-}
-.print[data-depth="1"] {
-  z-index: 2;
-  transform: translate(12px, 8px) rotate(2.6deg);
-}
-.print[data-depth="2"] {
-  z-index: 1;
-  transform: translate(-10px, 14px) rotate(-4.4deg);
-}
-.print[data-depth="3"] {
-  z-index: 0;
-  opacity: 0;
-  transform: translate(-10px, 14px) rotate(-4.4deg);
-}
-/* Out to the side, clear of the pile, then under it: never off the table. */
-.print.is-tucking {
-  animation: print-tuck 760ms cubic-bezier(0.3, 0.7, 0.2, 1) both;
-}
-.print.is-untucking {
-  animation: print-untuck 760ms cubic-bezier(0.3, 0.7, 0.2, 1) both;
-}
-@keyframes print-tuck {
-  0% {
-    z-index: 5;
-    transform: var(--from);
-  }
-  48% {
-    z-index: 5;
-    transform: translate(calc(var(--side) * 104%), -4%) rotate(calc(var(--side) * 8deg));
-  }
-  52% {
-    z-index: 0;
-    transform: translate(calc(var(--side) * 104%), -3%) rotate(calc(var(--side) * 8deg));
-  }
-  100% {
-    z-index: 0;
-    transform: translate(-10px, 14px) rotate(-4.4deg);
-  }
-}
-@keyframes print-untuck {
-  0% {
-    z-index: 0;
-    transform: translate(-10px, 14px) rotate(-4.4deg);
-  }
-  48% {
-    z-index: 0;
-    transform: translate(calc(var(--side) * 104%), -3%) rotate(calc(var(--side) * 8deg));
-  }
-  52% {
-    z-index: 5;
-    transform: translate(calc(var(--side) * 104%), -4%) rotate(calc(var(--side) * 8deg));
-  }
-  100% {
-    z-index: 5;
-    transform: rotate(-1.6deg);
-  }
-}
-.prints-side {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-}
-.prints-caption {
-  animation: mem-rise 520ms var(--ease-out) both;
-}
-.prints-nav {
-  margin-top: 30px;
-}
-.prints-hint {
-  margin-top: 12px;
-  color: var(--fg-muted);
-  font-size: 13px;
-}
-@media (max-width: 800px) {
-  .prints-body {
-    grid-template-columns: 1fr;
-  }
-  .prints-pile {
-    width: min(84%, 360px);
-  }
-  .prints-side {
-    align-items: stretch;
-  }
-  .prints-nav {
-    justify-content: center;
-  }
-  .prints-hint {
-    text-align: center;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .prints-caption,
-  .print.is-tucking,
-  .print.is-untucking {
-    animation: none;
-  }
-  .print {
-    transition: none;
-  }
 }
 
 /* ---------- The ways in --------------------------------------------------- */
@@ -439,13 +367,13 @@
   outline-offset: 2px;
 }
 
-/* The closing dedication on the landing page. */
+/* The closing line on the landing page. */
 .mem-closing {
   padding: clamp(72px, 11vw, 128px) 20px;
 }
 .mem-closing-inner {
   display: flex;
-  max-width: 640px;
+  max-width: 680px;
   flex-direction: column;
   align-items: center;
   margin: 0 auto;
@@ -453,6 +381,7 @@
 }
 .mem-closing-prints {
   display: flex;
+  align-items: center;
   justify-content: center;
   margin: 0 0 30px;
   padding: 0;
@@ -461,30 +390,17 @@
 .mem-closing-prints li {
   width: 64px;
   margin-inline: -5px;
-  padding: 5px;
-  background: var(--mem-print);
-  box-shadow: 0 1px 1px rgba(14, 17, 22, 0.08), 0 8px 14px -8px rgba(14, 17, 22, 0.45);
 }
-.mem-closing-prints li:nth-child(1) {
+.mem-closing-prints .mem-print {
+  padding: 5px;
+}
+.mem-closing-prints li:nth-child(odd) {
   transform: translateY(4px) rotate(-6deg);
 }
-.mem-closing-prints li:nth-child(2) {
+.mem-closing-prints li:nth-child(even) {
   position: relative;
   z-index: 1;
-  transform: rotate(1.5deg);
-}
-.mem-closing-prints li:nth-child(3) {
-  transform: translateY(5px) rotate(7deg);
-}
-.mem-closing-photo {
-  aspect-ratio: 4 / 5;
-}
-.mem-closing-photo .mem-photo-hint span,
-.mem-closing-photo .mem-photo-hint svg {
-  display: none;
-}
-.mem-closing-photo.mem-photo--empty::after {
-  inset: 4px;
+  transform: rotate(4deg);
 }
 .mem-closing-line {
   margin: 0;

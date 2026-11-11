@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type PointerEvent } from "react";
 
 export interface DeckMove {
   index: number;
-  /** The card that was showing before this move. */
+  /** The one that was showing before this move. */
   from: number;
   /** 1 forward, -1 back. */
   dir: 1 | -1;
@@ -11,9 +11,10 @@ export interface DeckMove {
 }
 
 /**
- * A deck that goes round: after the last card comes the first again, so no
- * card is ever the end. Arrow keys anywhere on the page move it (except in a
- * text field). `lockMs` holds the deck still while its animation plays out.
+ * A deck that goes round: after the last comes the first again, so none is
+ * ever the end. Arrow keys anywhere on the page move it (except in a text
+ * field), and so does a sideways swipe on a touch screen. `lockMs` holds the
+ * deck still while its animation plays out.
  */
 export function useDeck(count: number, { lockMs = 0 } = {}) {
   const [move, setMove] = useState<DeckMove>({ index: 0, from: 0, dir: 1, turn: 0 });
@@ -46,5 +47,27 @@ export function useDeck(count: number, { lockMs = 0 } = {}) {
     return () => window.removeEventListener("keydown", onKey);
   }, [next, prev]);
 
-  return { ...move, count, next, prev };
+  // Touch only: with a mouse, dragging is how you select the words.
+  const start = useRef<{ x: number; y: number } | null>(null);
+  const swipe = {
+    onPointerDown: (e: PointerEvent) => {
+      start.current = e.pointerType === "touch" ? { x: e.clientX, y: e.clientY } : null;
+    },
+    onPointerUp: (e: PointerEvent) => {
+      const s = start.current;
+      start.current = null;
+      if (!s) return;
+      const dx = e.clientX - s.x;
+      const dy = e.clientY - s.y;
+      if (Math.abs(dx) > 56 && Math.abs(dx) > Math.abs(dy) * 1.5) {
+        if (dx < 0) next();
+        else prev();
+      }
+    },
+    onPointerCancel: () => {
+      start.current = null;
+    },
+  };
+
+  return { ...move, count, next, prev, swipe };
 }

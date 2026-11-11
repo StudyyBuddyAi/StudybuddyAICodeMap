@@ -3,19 +3,19 @@ import { Link } from "react-router-dom";
 import { ArrowLeft } from "lucide-react";
 import BrandMark from "@/components/brand/BrandMark";
 import { MEMORIAL } from "@/content/memorial";
-import MemorialPrints from "@/components/memorial/MemorialPrints";
+import MemorialDeck from "@/components/memorial/MemorialDeck";
 import "@/components/memorial/memorial.css";
 
 /**
- * In memory of the founder's family and classmates, lost in the war. Public,
+ * The memorial: tributes to the founder's father, mother and brother. Public,
  * signed in or not, and still: a plain ground over the living backdrop, no
- * prompts and nothing to sell. The words and photos are in
+ * prompts and nothing to sell. Every word on it comes from
  * src/content/memorial.ts.
  */
 const InMemory = () => {
   useEffect(() => {
     const before = document.title;
-    document.title = "In memory · StudyBuddy AI";
+    document.title = "Memorial · StudyBuddy AI";
     return () => {
       document.title = before;
     };
@@ -34,7 +34,7 @@ const InMemory = () => {
         </Link>
       </header>
       <main className="mem-main">
-        <MemorialPrints content={MEMORIAL} />
+        <MemorialDeck content={MEMORIAL} />
       </main>
     </div>
   );

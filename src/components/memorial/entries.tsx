@@ -2,7 +2,7 @@ import { Link } from "react-router-dom";
 import { ArrowRight } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { MEMORIAL } from "@/content/memorial";
-import { MemText, MemorialPhoto, RibbonMark } from "./parts";
+import { MemText, RibbonMark, TributePrint } from "./parts";
 import { MEMORIAL_LIVE } from "./memorial-live";
 import "./memorial.css";
 
@@ -11,7 +11,7 @@ import "./memorial.css";
  * (memorial-live.ts).
  */
 
-const LINE = "In memory of my family and classmates";
+const LINE = "In memory of my family";
 
 /**
  * The footer line, on every page. Like a Stolperstein, the small brass plate
@@ -50,23 +50,26 @@ export const MemorialRibbonLink = ({ className = "" }: { className?: string }) =
 };
 
 /**
- * The landing page ends the way a book begins: one line to the people it is
- * for, and their three photos.
+ * The landing page ends the way a book begins: with the memorial's heading,
+ * and the photos once there are any.
  */
 export const MemorialClosing = () => {
   if (!MEMORIAL_LIVE) return null;
+  const withPhotos = MEMORIAL.tributes.filter((t) => t.photo);
   return (
-    <section className="mem-closing" aria-label="In memory">
+    <section className="mem-closing" aria-label="Memorial">
       <div className="mem-closing-inner">
-        <ul className="mem-closing-prints" aria-hidden="true">
-          {MEMORIAL.cards.map((card) => (
-            <li key={card.id}>
-              <MemorialPhoto card={card} className="mem-closing-photo" />
-            </li>
-          ))}
-        </ul>
+        {withPhotos.length > 0 && (
+          <ul className="mem-closing-prints" aria-hidden="true">
+            {withPhotos.map((t) => (
+              <li key={t.id}>
+                <TributePrint tribute={t} />
+              </li>
+            ))}
+          </ul>
+        )}
         <p className="mem-closing-line">
-          <MemText>{MEMORIAL.dedication}</MemText>
+          <MemText>{MEMORIAL.heading}</MemText>
         </p>
         <Link to="/in-memory" className="mem-closing-link">
           Visit the memorial <ArrowRight className="h-3.5 w-3.5" aria-hidden />

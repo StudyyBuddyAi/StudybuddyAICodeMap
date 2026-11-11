@@ -11,10 +11,11 @@ const renderPage = () =>
     </MemoryRouter>,
   );
 
-const slideName = () => screen.getByRole("group").getAttribute("aria-label");
+const [father, mother, brother] = MEMORIAL.tributes;
+const showing = () => screen.getByRole("group").getAttribute("aria-label");
 
 describe("InMemory", () => {
-  // The deck holds still while a print is tucked away; let each move land
+  // The deck holds still while a sheet is tucked away; let each move land
   // before the next by moving the clock a second on every read.
   let clock = 0;
   beforeEach(() => {
@@ -23,36 +24,41 @@ describe("InMemory", () => {
   });
   afterEach(() => vi.restoreAllMocks());
 
-  it("opens on the first card, with the dedication above it", () => {
+  it("opens with the heading, on the father's tribute", () => {
     renderPage();
-    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent(MEMORIAL.dedication);
-    expect(slideName()).toBe(`1 of 3: ${MEMORIAL.cards[0].label}`);
+    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent(MEMORIAL.heading);
+    expect(showing()).toBe(`1 of 3: ${father.name}`);
     expect(screen.getByText("1 of 3")).toBeInTheDocument();
   });
 
-  it("moves through the cards and goes round, by buttons and arrow keys", () => {
+  it("holds every tribute, in order, word for word, paragraph by paragraph", () => {
+    const { container } = renderPage();
+    const sheets = Array.from(container.querySelectorAll("article.tribute"));
+    expect(sheets).toHaveLength(3);
+    sheets.forEach((sheet, i) => {
+      const t = MEMORIAL.tributes[i];
+      expect(sheet.querySelector(".tribute-name")?.textContent).toBe(t.name);
+      expect(sheet.querySelector(".tribute-years")?.textContent).toBe(t.years);
+      expect(Array.from(sheet.querySelectorAll(".tribute-text p"), (p) => p.textContent)).toEqual(t.paragraphs);
+    });
+  });
+
+  it("moves through the tributes and goes round, by buttons and arrow keys", () => {
     renderPage();
-    fireEvent.click(screen.getByRole("button", { name: "Next photo" }));
-    expect(slideName()).toBe(`2 of 3: ${MEMORIAL.cards[1].label}`);
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    expect(showing()).toBe(`2 of 3: ${mother.name}`);
     fireEvent.keyDown(window, { key: "ArrowRight" });
-    expect(slideName()).toBe(`3 of 3: ${MEMORIAL.cards[2].label}`);
-    // After the last card comes the first again.
-    fireEvent.click(screen.getByRole("button", { name: "Next photo" }));
-    expect(slideName()).toBe(`1 of 3: ${MEMORIAL.cards[0].label}`);
+    expect(showing()).toBe(`3 of 3: ${brother.name}`);
+    // After the last comes the first again.
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    expect(showing()).toBe(`1 of 3: ${father.name}`);
     fireEvent.keyDown(window, { key: "ArrowLeft" });
-    expect(slideName()).toBe(`3 of 3: ${MEMORIAL.cards[2].label}`);
+    expect(showing()).toBe(`3 of 3: ${brother.name}`);
   });
 
-  it("shows the words for the top photo only, and the classmates' names with theirs", () => {
-    renderPage();
+  it("shows only the top tribute to a screen reader, and no image until there is a photo", () => {
+    const { container } = renderPage();
     expect(screen.getAllByRole("heading", { level: 2 })).toHaveLength(1);
-    expect(screen.queryByRole("list", { name: "Their names" })).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Previous photo" }));
-    expect(screen.getByRole("list", { name: "Their names" })).toBeInTheDocument();
-  });
-
-  it("marks a card's empty photo frame as a photo still to come", () => {
-    renderPage();
-    expect(screen.getByRole("img", { name: `${MEMORIAL.cards[0].label}: photo to come` })).toBeInTheDocument();
+    expect(container.querySelector("img")).toBeNull();
   });
 });

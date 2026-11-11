@@ -1,39 +1,40 @@
 import { describe, expect, it } from "vitest";
-import { MEMORIAL, memorialComplete, type MemorialContent } from "./memorial";
+import { MEMORIAL, memorialComplete } from "./memorial";
 
-/** The memorial as it would be once written: every word real, every photo in. */
-const finished = (): MemorialContent => ({
-  dedication: "In memory of my family and the classmates I lost in the war.",
-  signature: "Osama",
-  cards: MEMORIAL.cards.map((c) => ({
-    ...c,
-    names: "Names",
-    line: "A line",
-    text: ["Words."],
-    roll: c.roll ? ["One", "Two"] : undefined,
-    photo: `/memorial/${c.id}.jpg`,
-  })),
+describe("the memorial's content", () => {
+  it("keeps the family's order: father, mother, brother", () => {
+    expect(MEMORIAL.tributes.map((t) => t.name)).toEqual([
+      "Dr. Ibrahim Mustafa Shihada",
+      "Ruwaida Muhammad Hussein",
+      "Dr. Mustafa Ibrahim Shihada",
+    ]);
+  });
+
+  it("writes the years with an en dash", () => {
+    expect(MEMORIAL.tributes.map((t) => t.years)).toEqual(["1953 – 2024", "1960 – 2018", "1987 – 2025"]);
+    for (const t of MEMORIAL.tributes) expect(t.years).toMatch(/^\d{4} – \d{4}$/);
+  });
+
+  it("keeps the paragraph breaks as written", () => {
+    expect(MEMORIAL.tributes.map((t) => t.paragraphs.length)).toEqual([4, 4, 5]);
+  });
+
+  it("never says 'died'", () => {
+    const all = [MEMORIAL.heading, ...MEMORIAL.tributes.flatMap((t) => [t.name, ...t.paragraphs])].join(" ");
+    expect(all).not.toMatch(/\bdied\b/i);
+  });
 });
 
 describe("memorialComplete", () => {
-  it("keeps the memorial unpublished while it still holds placeholders", () => {
-    expect(memorialComplete(MEMORIAL)).toBe(false);
+  it("is complete with the real words in, photos or not", () => {
+    expect(MEMORIAL.tributes.every((t) => t.photo === null)).toBe(true);
+    expect(memorialComplete(MEMORIAL)).toBe(true);
   });
 
-  it("publishes once every word and photo is in", () => {
-    expect(memorialComplete(finished())).toBe(true);
-  });
-
-  it("holds back for one missing photo", () => {
-    const c = finished();
-    c.cards[1] = { ...c.cards[1], photo: null };
-    expect(memorialComplete(c)).toBe(false);
-  });
-
-  it("holds back for one placeholder anywhere, even in the class register", () => {
-    const c = finished();
-    c.cards[2] = { ...c.cards[2], roll: ["One", "[Name]"] };
-    expect(memorialComplete(c)).toBe(false);
-    expect(memorialComplete({ ...finished(), signature: "[Your name]" })).toBe(false);
+  it("holds the memorial back while any placeholder is left", () => {
+    const draft = structuredClone(MEMORIAL);
+    draft.tributes[1].paragraphs[2] = "[Your words]";
+    expect(memorialComplete(draft)).toBe(false);
+    expect(memorialComplete({ ...MEMORIAL, heading: "[Heading]" })).toBe(false);
   });
 });

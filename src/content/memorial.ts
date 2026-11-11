@@ -1,93 +1,89 @@
 /**
- * The memorial at /in-memory: one dedication line and one card per person.
+ * The memorial at /in-memory: the page's heading and one tribute per person,
+ * in this order: father, mother, brother.
  *
- * Every [bracketed] string is a placeholder for the founder's own words, and
- * the page shows it as one (muted, dotted underline) so nothing reads as
- * finished by mistake. Photos go in public/memorial/ and are referenced by
- * path; until a card has one, the page draws a quiet empty frame.
+ * The tributes are the family's own words, final and reviewed. Edit them here
+ * and only here (the page reads this file and adds nothing of its own), and
+ * keep them exactly as written: no rephrasing, the en dash in the years, the
+ * paragraph breaks as they are.
  *
- * The memorial goes live (route and entry points, in production) only once
- * this file is complete: no placeholder left and a photo on every card. See
- * `memorialComplete` below and src/components/memorial/memorial-live.ts.
+ * A photo is optional. Put it in public/memorial/ and set `photo` to its path
+ * (e.g. "/memorial/father.jpg"), and `photoAspect` to its width ÷ height so
+ * its print keeps the photo's own shape. With no photo, nothing stands in for
+ * one.
  */
-export type MemorialCardId = "parents" | "brother" | "classmates";
+export type MemorialTributeId = "father" | "mother" | "brother";
 
-export interface MemorialCard {
-  id: MemorialCardId;
-  /** How the deck names the card: its slide label and its photo's alt text. */
-  label: string;
-  /** The same, short, for the empty photo frame. */
-  short: string;
-  /** Set large, beside the photo. */
-  names: string;
-  /** One short line under the names. */
-  line: string;
-  /** The words beside the photo, one string per paragraph. */
-  text: string[];
-  /** Classmates only: their names, listed like a class register. */
-  roll?: string[];
-  /** A path under public/ (e.g. "/memorial/parents.jpg"), or null for the empty frame. */
+export interface MemorialTribute {
+  id: MemorialTributeId;
+  /** The tribute's heading. */
+  name: string;
+  /** e.g. "1953 – 2024", with an en dash. */
+  years: string;
+  /** The tribute itself, one string per paragraph. */
+  paragraphs: string[];
+  /** A path under public/, or null until there is a photo. */
   photo: string | null;
-  /**
-   * The photo's width ÷ height, so its print keeps the photo's own shape: a
-   * landscape class photo lies as a landscape print, never cropped to fit.
-   * Leave it out for the portrait default, 4:5.
-   */
+  /** The photo's width ÷ height. Leave it out for a portrait 4:5. */
   photoAspect?: number;
 }
 
 export interface MemorialContent {
-  dedication: string;
-  signature: string;
-  cards: MemorialCard[];
+  /** The page's heading, and the landing page's closing line. */
+  heading: string;
+  tributes: MemorialTribute[];
 }
 
 export const MEMORIAL: MemorialContent = {
-  dedication: "In memory of my family and the classmates I lost in the war.",
-  signature: "[Your name]",
-  cards: [
+  heading: "StudyBuddy AI was made in memory of those who saw education as their message to the world.",
+  tributes: [
     {
-      id: "parents",
-      label: "My mother and father",
-      short: "Mother and father",
-      names: "[Mother’s name] and [Father’s name]",
-      line: "[A short line under their names]",
-      text: ["[Your words about your mother and father. A few sentences or a few paragraphs.]"],
+      id: "father",
+      name: "Dr. Ibrahim Mustafa Shihada",
+      years: "1953 – 2024",
+      paragraphs: [
+        "Dr. Ibrahim Mustafa Shihada was born in 1953 in a refugee camp in Khan Younis. He was an outstanding student at every stage of school. In his final year of high school he ranked first across the Gaza Strip and the Sinai Peninsula, and that earned him a scholarship to study medicine at Kasr Al Ainy in Cairo. He graduated with first-class honors.",
+        "He returned to Gaza to build his life there and married Ruwaida Muhammad Hussein at 28. Over the following decades he became one of the pioneers of obstetrics and gynecology in Gaza. He led the OB/GYN department at Nasser Medical Complex until he retired, and along the way he trained many of the doctors who now carry on that work. He cared for thousands of women and brought modern prenatal ultrasound to the Strip. In the late 1990s he earned a diploma in ultrasonography and in vitro fertilization in Vienna, and he brought that knowledge home to his patients.",
+        "Retiring didn't stop him. He kept seeing patients at his own clinic, and when the war came he still kept going. As his health got worse, the treatment he needed was no longer available in Gaza. He passed away from heart failure in 2024, the day after a long shift at his clinic, where he had treated dozens of patients displaced by the war.",
+        "He gave his life to caring for others, right up to the very last day.",
+      ],
+      photo: null,
+    },
+    {
+      id: "mother",
+      name: "Ruwaida Muhammad Hussein",
+      years: "1960 – 2018",
+      paragraphs: [
+        "Ruwaida Muhammad Hussein was born in 1960 in Al-Bureij refugee camp in central Gaza. She studied mathematics at Birzeit University in the West Bank and came back to Gaza to teach.",
+        "She started as a teacher in UNRWA schools and later became a school principal. Over her career she helped educate several generations of Palestinian children, and she became one of the most respected figures in education in Khan Younis.",
+        "Alongside all of that, she raised a family of eight. She was a loving mother, and later a devoted grandmother.",
+        "She passed away suddenly in 2018. Generations of her students still remember her with gratitude, and so do the children and grandchildren she raised with so much love.",
+      ],
       photo: null,
     },
     {
       id: "brother",
-      label: "My brother",
-      short: "Brother",
-      names: "[Brother’s name]",
-      line: "[A short line under his name]",
-      text: ["[Your words about your brother.]"],
-      photo: null,
-    },
-    {
-      id: "classmates",
-      label: "My classmates",
-      short: "Classmates",
-      names: "[Your class or year]",
-      line: "[A short line about them]",
-      text: ["[Your words about your classmates.]"],
-      roll: ["[Name]", "[Name]", "[Name]", "[Name]"],
+      name: "Dr. Mustafa Ibrahim Shihada",
+      years: "1987 – 2025",
+      paragraphs: [
+        "Dr. Mustafa Ibrahim Shihada was born in 1987 in Khan Younis. Like his father, he was an excellent student, and like his father, he went on to study medicine at Kasr Al Ainy in Cairo.",
+        "He came back to Gaza and trained in obstetrics and gynecology at Nasser Medical Complex, the same department his father had led, and he rose to become a senior attending physician. He cared for many patients over his career and helped train the junior doctors who came after him. He also taught medical students: he gave lectures, led them on clinical rounds, and helped with their assessments.",
+        "When the war came, he kept working. He lost his father, he lost his home, and his family was evacuated to Egypt, leaving him alone in Gaza. He carried all of that and still kept treating patients through bombardment, exhaustion and impossible conditions. He performed many operations that saved the lives of people wounded in the war.",
+        "In 2025 he passed away from a sudden cardiac arrest while on duty at the International Medical Corps field hospital in central Gaza. In the months before, he had been carrying the grief of losing his father and his home and the separation from his family, all while working under extreme strain, through famine and with too little food and water.",
+        "He was a loving father of four, a devoted husband, and a caring big brother. He gave everything he had to his patients and his family.",
+      ],
       photo: null,
     },
   ],
 };
 
-/** The portrait shape a print takes when its card gives none. */
+/** The portrait shape a print takes when its tribute gives none. */
 export const DEFAULT_PHOTO_ASPECT = 4 / 5;
 
 export const hasPlaceholder = (s: string) => /\[[^\]]+\]/.test(s);
 
-/** True once every word is the founder's own and every card has its photo. */
+/** True once no [placeholder] is left anywhere. Photos are optional. */
 export function memorialComplete(content: MemorialContent): boolean {
-  const words = [
-    content.dedication,
-    content.signature,
-    ...content.cards.flatMap((c) => [c.names, c.line, ...c.text, ...(c.roll ?? [])]),
-  ];
-  return !words.some(hasPlaceholder) && content.cards.every((c) => !!c.photo);
+  const words = [content.heading, ...content.tributes.flatMap((t) => [t.name, t.years, ...t.paragraphs])];
+  return !words.some(hasPlaceholder);
 }
