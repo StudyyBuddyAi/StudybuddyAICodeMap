@@ -11,6 +11,7 @@ import TopProgressBar from "@/components/TopProgressBar";
 import AppBackdrop from "@/components/backdrop/AppBackdrop";
 import { BackdropProvider } from "@/components/backdrop/backdrop-scene";
 import PageLoader from "@/components/PageLoader";
+import RequireAccount from "@/components/auth/RequireAccount";
 import { MEMORIAL_LIVE } from "@/components/memorial/memorial-live";
 import Index from "./pages/Index.tsx";
 import NotFound from "./pages/NotFound.tsx";
@@ -67,23 +68,27 @@ const AppRoutes = () => {
     <div className={stage === "exit" ? "page-transition-exit" : "page-transition-enter"}>
       <Suspense fallback={<PageLoader context="generic" />}>
         <Routes location={displayLocation}>
+          {/* Open to anyone: the landing page, the memorial, the privacy policy and the auth landings. */}
           <Route path="/" element={<Index />} />
           <Route path="/home" element={<Home />} />
-          <Route path="/dashboard" element={<Dashboard />} />
-          <Route path="/roadmap" element={<Roadmap />} />
           <Route path="/privacy" element={<Privacy />} />
           {InMemory && <Route path="/in-memory" element={<InMemory />} />}
-          <Route path="/sheets" element={<Sheets />} />
-          <Route path="/flashcards" element={<Flashcards />} />
-          <Route element={<QBankProvider><Outlet /></QBankProvider>}>
-            <Route path="/qbank" element={<QBank />} />
-            {/* Generation merged into /qbank; the old entry point still resolves. */}
-            <Route path="/qbank/generate" element={<Navigate to="/qbank" replace />} />
-            <Route path="/qbank/session" element={<QBankSession />} />
-            <Route path="/qbank/summary" element={<QBankSummary />} />
-            <Route path="/qbank/progress" element={<QBankProgress />} />
+          {/* The app itself takes an account. */}
+          <Route element={<RequireAccount />}>
+            <Route path="/dashboard" element={<Dashboard />} />
+            <Route path="/roadmap" element={<Roadmap />} />
+            <Route path="/sheets" element={<Sheets />} />
+            <Route path="/flashcards" element={<Flashcards />} />
+            <Route element={<QBankProvider><Outlet /></QBankProvider>}>
+              <Route path="/qbank" element={<QBank />} />
+              {/* Generation merged into /qbank; the old entry point still resolves. */}
+              <Route path="/qbank/generate" element={<Navigate to="/qbank" replace />} />
+              <Route path="/qbank/session" element={<QBankSession />} />
+              <Route path="/qbank/summary" element={<QBankSummary />} />
+              <Route path="/qbank/progress" element={<QBankProgress />} />
+            </Route>
+            <Route path="/library" element={<Library />} />
           </Route>
-          <Route path="/library" element={<Library />} />
           <Route path="/reset-password" element={<ResetPassword />} />
           <Route path="/auth/callback" element={<AuthCallback />} />
           {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}

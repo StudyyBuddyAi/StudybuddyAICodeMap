@@ -14,32 +14,16 @@ import {
   clearPendingUpgrade,
 } from "@/lib/auth-upgrade";
 
-/**
- * Routes that receive a real session from an out-of-band redirect (the OAuth
- * callback, a password-reset link). Bootstrapping an anonymous session while
- * one of those is still settling races the incoming real session, so the
- * bootstrap is suppressed until the app navigates away from them.
+/*
+ * Using StudyBuddy takes an account. Visitors are no longer signed in as
+ * anonymous guests: the landing page and the memorial are open to anyone, and
+ * every app page asks for an account first (src/components/auth/RequireAccount).
+ *
+ * Guests from before that change can still hold an anonymous session in their
+ * browser. They meet the same sign-in screen, and signing up turns their guest
+ * user into a real account in place (same id), so everything they made stays
+ * theirs; `isAnonymous` and the upgrade paths below exist for them.
  */
-const AUTH_LANDING_ROUTES = ["/auth/callback", "/reset-password"];
-
-/**
- * Anonymous sign-in, deduplicated across every caller. Previously each
- * component that mounted while the session was empty fired its own
- * signInAnonymously(), which minted a throwaway anonymous user per component
- * and could trip GoTrue's per-IP anonymous sign-in rate limit. Once that limit
- * trips the session stays null and isAnonymous silently becomes false,
- * degrading every `!!userId && !isAnonymous` entitlement gate.
- */
-let anonSignIn: Promise<unknown> | null = null;
-
-export function ensureAnonSession(): Promise<unknown> {
-  if (!anonSignIn) {
-    anonSignIn = supabase.auth.signInAnonymously().finally(() => {
-      anonSignIn = null;
-    });
-  }
-  return anonSignIn;
-}
 
 interface AuthContextValue {
   user: User | null;
@@ -79,7 +63,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const navigate = useNavigate();
   const navigateRef = useRef(navigate);
   navigateRef.current = navigate;
-  const onAuthLanding = AUTH_LANDING_ROUTES.some((route) => pathname.startsWith(route));
 
   useEffect(() => {
     let mounted = true;
@@ -122,14 +105,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       navigate("/reset-password", { replace: true });
     }
   }, [loading, session, pathname, navigate]);
-
-  // Every visitor gets a session: anonymous until they upgrade. Kept separate
-  // from the effect above so it also covers a session that goes away later
-  // (sign-out), and so leaving an auth landing route re-arms it.
-  useEffect(() => {
-    if (loading || session || onAuthLanding) return;
-    ensureAnonSession();
-  }, [loading, session, onAuthLanding]);
 
   const isAnonymous = Boolean(session?.user?.is_anonymous);
 
@@ -243,14 +218,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     return { error: null };
   };
 
-  // Re-establish an anonymous session immediately: without a JWT the app is
-  // left on an app route where every RLS-backed query fails until a reload.
-  // This runs even when signOut() reports an error, because supabase-js still
-  // drops the local session on most failing sign-outs (an already-expired JWT
-  // returning 403, say) — the error path is exactly when it is needed most.
+  // Signed out, an app page shows its sign-in screen again (RequireAccount):
+  // no guest session is started in its place.
   const signOut = async (): Promise<{ error: string | null }> => {
     const { error } = await supabase.auth.signOut();
-    await ensureAnonSession();
     return { error: error?.message ?? null };
   };
 

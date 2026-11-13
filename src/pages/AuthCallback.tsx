@@ -17,10 +17,9 @@ type Status = "working" | "failed";
 const CALLBACK_TIMEOUT_MS = 8000;
 
 /**
- * Lands here after the Google OAuth redirect. Deliberately does not call
- * useAuth(): that hook's mount effect calls signInAnonymously() whenever
- * getSession() comes back empty, which here would race the incoming real
- * session. Talk to supabase.auth directly instead, the way ResetPassword does.
+ * Lands here after the Google OAuth redirect. Talks to supabase.auth directly,
+ * the way ResetPassword does, and waits for the incoming session itself; it
+ * also folds a former guest's usage into the new account (auth-upgrade.ts).
  */
 const AuthCallback = () => {
   const navigate = useNavigate();
