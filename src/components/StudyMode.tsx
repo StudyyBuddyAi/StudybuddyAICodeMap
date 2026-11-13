@@ -8,8 +8,8 @@ import { getTagColors } from "@/lib/tag-colors";
 import { type Card, useDeckGrounding } from "@/hooks/use-flashcard-deck";
 import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useUsageLimit } from "@/hooks/use-usage-limit";
-import GoProModal from "@/components/GoProModal";
+import { useDailyLimit } from "@/hooks/use-usage-limit";
+import { limitReachedText } from "@/lib/daily-credits";
 import SheetSources from "@/components/SheetSources";
 import { startTopProgress, finishTopProgress } from "@/components/TopProgressBar";
 import { callMedicalNotes } from "@/lib/callMedicalNotes";
@@ -426,13 +426,12 @@ interface ExplainPanelProps {
 
 export const ExplainPanel = ({ open, scope, card, onClose }: ExplainPanelProps) => {
   const { toast } = useToast();
-  const { isSheetLimited } = useUsageLimit();
+  const { reached: limitReached, resetsIn } = useDailyLimit();
   // Same shared 10-turn window as sheets and cards — see use-memory-preference.
   const { useMemory } = useMemoryPreference();
   const [output, setOutput] = useState("");
   const [loading, setLoading] = useState(false);
   const [started, setStarted] = useState(false);
-  const [goProOpen, setGoProOpen] = useState(false);
   const [modelUsed, setModelUsed] = useState<ModelUsed | null>(null);
 
   useEffect(() => {
@@ -450,9 +449,9 @@ export const ExplainPanel = ({ open, scope, card, onClose }: ExplainPanelProps) 
 
   useEffect(() => {
     if (!open || started) return;
-    if (isSheetLimited) {
+    if (limitReached) {
       onClose();
-      setGoProOpen(true);
+      toast({ title: "Today's usage limit is used up", description: limitReachedText(resetsIn) });
       return;
     }
     setStarted(true);
@@ -537,7 +536,6 @@ export const ExplainPanel = ({ open, scope, card, onClose }: ExplainPanelProps) 
 
   return (
     <>
-    <GoProModal open={goProOpen} onOpenChange={setGoProOpen} />
     <div
       className="fixed inset-x-0 bottom-0 top-[15vh] z-50 bg-background border-t border-border rounded-t-xl shadow-2xl flex flex-col"
       style={{

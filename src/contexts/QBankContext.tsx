@@ -116,8 +116,8 @@ export interface GenerationState {
   /** Set when the run failed outright, or ended short for a known reason. */
   error: string | null;
   /**
-   * The run stopped on a free account's daily allowance. The player offers Pro
-   * rather than "write the remaining", which the server would only refuse.
+   * The run stopped on the day's usage limit. The player does not offer
+   * "write the remaining", which the server would only refuse.
    */
   capReached: boolean;
   /**
@@ -205,7 +205,7 @@ interface QBankContextValue {
   ) => Promise<string>;
   /**
    * Re-sits questions from the review queue — the student's own misses and
-   * marks. Nothing is generated, so it never touches the free allowance.
+   * marks. Nothing is generated, so it costs none of the day's usage limit.
    * Resolves with the new session's id.
    */
   startReviewSession: (questionIds: string[], mode?: PlayMode) => Promise<string>;
@@ -905,9 +905,9 @@ export const QBankProvider = ({ children }: { children: ReactNode }) => {
           genRunningRef.current = false;
         }
 
-        // The server counted what this run delivered against the free
-        // allowance; the pages that show it re-read today's usage.
-        queryClient.invalidateQueries({ queryKey: ["usage"] });
+        // The run spent some of the day's usage limit; the lines that show
+        // it re-read today's credits.
+        queryClient.invalidateQueries({ queryKey: ["credits"] });
 
         heldBackRef.current = heldBackBase + outcome.heldBack;
         heldBackItemsRef.current = [...heldBackItemsBase, ...outcome.heldBackItems];

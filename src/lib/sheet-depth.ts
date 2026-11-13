@@ -54,7 +54,7 @@ export interface SectionRequestParams {
   instruction?: string;
   /** The ids of the passages the sheet was built on. */
   sourceIds: string[];
-  /** The premium sheet's grant, for a student without Pro. */
+  /** The premium sheet's grant. Only a guest from before accounts needs it. */
   grant?: string;
   /** The sheet's signatures, for the server to check the sheet is the one it wrote. */
   signature: SheetSignature | null;

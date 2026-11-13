@@ -6,7 +6,6 @@ import {
   Layers,
   Lightbulb,
   Loader2,
-  Lock,
   MessageSquarePlus,
   MoreHorizontal,
   Pencil,
@@ -22,7 +21,6 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuSub,
   DropdownMenuSubContent,
@@ -88,17 +86,15 @@ export function ItemMenu({ anchor, effective, sectionTitle, canEdit }: ItemMenuP
   const branchesEnabled = useBranchesEnabled();
   const branches = useBranchActions();
   if (!p || p.readOnly) return null;
-  // Branching is for every student, not only Pro. A mnemonic has nothing to branch into.
+  // A mnemonic has nothing to branch into.
   const canBranch = branchesEnabled && !!branches && anchorSection(anchor) !== "memoryHooks";
   const { layer } = p;
   const edited = !!layer.edits[anchor];
   const known = layer.known.includes(anchor);
   const hidden = layer.hidden.includes(anchor);
-  const locked = !p.entitled;
   const act = (fn: () => void) => () => p.guard(fn);
   const ai = (action: "rewrite" | "card" | "explain", label: string, style?: (typeof REWRITE_STYLES)[number]["style"]) =>
     act(() => p.runSuggestion({ anchor, action, label, style, original: effective, sectionTitle }));
-  const lockIcon = locked ? <Lock className="ml-auto h-3 w-3 opacity-60" /> : null;
 
   return (
     <DropdownMenu>
@@ -116,17 +112,9 @@ export function ItemMenu({ anchor, effective, sectionTitle, canEdit }: ItemMenuP
             <DropdownMenuSeparator />
           </>
         )}
-        {locked && (
-          <>
-            <DropdownMenuLabel className="flex items-center gap-1.5 text-xs font-medium text-primary">
-              <Sparkles className="h-3.5 w-3.5" /> Pro · make this sheet yours
-            </DropdownMenuLabel>
-            <DropdownMenuSeparator />
-          </>
-        )}
         {canEdit && (
           <DropdownMenuItem onSelect={act(() => p.setEditing(anchor))}>
-            <Pencil className="mr-2 h-4 w-4" /> Edit {lockIcon}
+            <Pencil className="mr-2 h-4 w-4" /> Edit
           </DropdownMenuItem>
         )}
         {canEdit && (
@@ -141,28 +129,27 @@ export function ItemMenu({ anchor, effective, sectionTitle, canEdit }: ItemMenuP
                     <span>{s.label}</span>
                     <span className="text-[11px] text-muted-foreground">{s.hint}</span>
                   </span>
-                  {lockIcon}
                 </DropdownMenuItem>
               ))}
               <DropdownMenuSeparator />
               <DropdownMenuItem onSelect={act(() => p.setAsking(anchor))}>
-                Ask for something else… {lockIcon}
+                Ask for something else…
               </DropdownMenuItem>
             </DropdownMenuSubContent>
           </DropdownMenuSub>
         )}
         <DropdownMenuItem onSelect={ai("explain", "Explained")}>
-          <Lightbulb className="mr-2 h-4 w-4" /> Explain it simply {lockIcon}
+          <Lightbulb className="mr-2 h-4 w-4" /> Explain it simply
         </DropdownMenuItem>
         <DropdownMenuItem onSelect={ai("card", "New flashcard")}>
-          <Layers className="mr-2 h-4 w-4" /> Make a flashcard {lockIcon}
+          <Layers className="mr-2 h-4 w-4" /> Make a flashcard
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuItem onSelect={act(() => p.update((l) => toggleKnown(l, anchor)))}>
-          <Check className="mr-2 h-4 w-4" /> {known ? "Mark as not known yet" : "I know this"} {lockIcon}
+          <Check className="mr-2 h-4 w-4" /> {known ? "Mark as not known yet" : "I know this"}
         </DropdownMenuItem>
         <DropdownMenuItem onSelect={act(() => p.setNoting(anchor))}>
-          <MessageSquarePlus className="mr-2 h-4 w-4" /> Add a note {lockIcon}
+          <MessageSquarePlus className="mr-2 h-4 w-4" /> Add a note
         </DropdownMenuItem>
         {edited && (
           <DropdownMenuItem onSelect={act(() => p.update((l) => removeEdit(l, anchor)))}>
@@ -171,7 +158,7 @@ export function ItemMenu({ anchor, effective, sectionTitle, canEdit }: ItemMenuP
         )}
         <DropdownMenuItem onSelect={act(() => p.update((l) => toggleHidden(l, anchor)))}>
           {hidden ? <Eye className="mr-2 h-4 w-4" /> : <EyeOff className="mr-2 h-4 w-4" />}
-          {hidden ? "Put it back on my sheet" : "Remove from my sheet"} {lockIcon}
+          {hidden ? "Put it back on my sheet" : "Remove from my sheet"}
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
@@ -606,12 +593,12 @@ export function SectionFooter({ sectionKey, canAdd, knownHidden }: FooterProps) 
         >
           {showButtons && canAdd && (
             <button type="button" className={FOOTER_BUTTON} onClick={() => p.guard(() => setAdding(true))}>
-              <Plus className="h-3.5 w-3.5" /> Add a point {!p.entitled && <Lock className="h-3 w-3 opacity-60" />}
+              <Plus className="h-3.5 w-3.5" /> Add a point
             </button>
           )}
           {showButtons && (
             <button type="button" className={FOOTER_BUTTON} onClick={() => p.guard(() => p.setNoting(end))}>
-              <MessageSquarePlus className="h-3.5 w-3.5" /> Note {!p.entitled && <Lock className="h-3 w-3 opacity-60" />}
+              <MessageSquarePlus className="h-3.5 w-3.5" /> Note
             </button>
           )}
           {knownHidden > 0 && (

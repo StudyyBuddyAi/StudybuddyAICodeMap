@@ -33,7 +33,7 @@ const SuggestionCards = ({
   onShuffle: () => void;
   startingId: string | null;
   disabled?: boolean;
-  /** The size a card will actually run at — inside a free allowance. */
+  /** The size a card will actually run at. */
   sizeFor: (s: Suggestion) => number;
   /** The exam every card is written for, shown on each. */
   badge?: { label: string; className: string };

@@ -320,21 +320,12 @@ serve(async (req) => {
     }
 
     // ── SERVER-SIDE IDENTITY & ENTITLEMENT ──────────────────────────────────
-    // Citation limits are derived from the verified JWT + the profiles row,
-    // never from request body fields. Pro users are uncapped.
+    // Derived from the verified JWT, never from request body fields. Free
+    // access (2026-11): every account is uncapped, as Pro was; only anonymous
+    // guests from before accounts were required keep a daily citation cap.
     const isAnonymous =
       user.is_anonymous === true || decodeJwtPayload(token).is_anonymous === true;
-
-    const { data: profile } = await authClient
-      .from("profiles")
-      .select("is_pro, pro_expires_at")
-      .eq("id", user.id)
-      .maybeSingle();
-
-    const isProUser =
-      profile?.is_pro === true &&
-      (profile.pro_expires_at === null ||
-        new Date(profile.pro_expires_at) > new Date());
+    const isProUser = !isAnonymous;
 
     // ── Burst rate limit (best-effort, per-instance) ────────────────────────
     if (!checkBurstLimit(user.id, Date.now())) {

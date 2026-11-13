@@ -39,9 +39,7 @@ const CitationBadgeList = ({
       >
         <Lock className="h-3 w-3" />
         <span>
-          {isLoggedIn
-            ? "Upgrade to Pro to cite sources"
-            : "Sign in to access cited generations"}
+          {isLoggedIn ? "Sources couldn't be loaded" : "Sign in to access cited generations"}
         </span>
       </button>
     );

@@ -5,14 +5,14 @@ import ExamSwitch from "@/components/qbank/ExamSwitch";
 import TopicComposer from "@/components/qbank/TopicComposer";
 import SystemBrowser from "@/components/qbank/SystemBrowser";
 import SetSizeStepper from "@/components/qbank/SetSizeStepper";
-import GoProModal from "@/components/GoProModal";
 import { Switch } from "@/components/ui/switch";
 import DealingTable, { type DealtCard } from "@/components/flashcards/DealingTable";
 import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/hooks/use-toast";
 import { useFlashcardDeck, type GroundingMeta } from "@/hooks/use-flashcard-deck";
-import { useUsageLimit, MAX_DAILY_CARDS } from "@/hooks/use-usage-limit";
-import { usePremiumHook } from "@/hooks/use-premium-hook";
+import { useDailyLimit } from "@/hooks/use-usage-limit";
+import { UsageLimitLine } from "@/components/usage/UsageLimitLine";
+import { limitReachedText } from "@/lib/daily-credits";
 import { useMemoryPreference } from "@/hooks/use-memory-preference";
 import { useQBankTarget } from "@/hooks/use-qbank-target";
 import { useCurriculumTopics } from "@/hooks/use-curriculum-topics";
@@ -50,8 +50,8 @@ const PILL_OFF = "bg-card border-border text-muted-foreground hover:border-prima
 const MAX_TOPICS = 5;
 /** The server writes at least this many cards a request. */
 const MIN_PER_TOPIC = 3;
-const FREE_MAX_CARDS = MAX_CARDS_PER_REQUEST;
-const PRO_MAX_CARDS = 50;
+/** The largest deck: above MAX_CARDS_PER_REQUEST it is written in batches. */
+const MAX_DECK_CARDS = 50;
 const DEFAULT_SIZE = 12;
 const SIZE_PRESETS = [12, 20, 30, 50];
 /** The deck of QBank misses, one standing deck that grows as the student misses more. */
@@ -122,10 +122,8 @@ const DeckComposer = ({
   const { user, isAnonymous } = useAuth();
   const signedIn = !!user && !isAnonymous;
   const { saveCards } = useFlashcardDeck();
-  const { cardsCount, isProUser: pro, refresh: refreshUsage } = useUsageLimit();
-  const { premiumRemaining, isPremiumHookActive, refetch: refetchPremium } = usePremiumHook();
+  const { reached: limitReached, resetsIn, refresh: refreshUsage } = useDailyLimit();
   const { useMemory } = useMemoryPreference();
-  const decksLeft = pro ? Infinity : Math.max(0, MAX_DAILY_CARDS - cardsCount);
 
   // The exam is the QBank's own remembered setting: a student prepares for one.
   const [target, setTarget] = useQBankTarget();
@@ -172,7 +170,6 @@ const DeckComposer = ({
   const [focus, setFocus] = useState<(typeof FOCUSES)[number]["value"]>("general");
   const [grounded, setGrounded] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [goProOpen, setGoProOpen] = useState(false);
   const [startingId, setStartingId] = useState<string | null>(null);
   const [dealing, setDealing] = useState<Dealing | null>(null);
   const [dealt, setDealt] = useState<DealtCard[]>([]);
@@ -184,17 +181,13 @@ const DeckComposer = ({
     return [...topics, typed].slice(0, MAX_TOPICS);
   }, [topics, draft]);
   const mixing = pendingTopics.length >= 2;
-  const maxSize = pro ? PRO_MAX_CARDS : FREE_MAX_CARDS;
+  const maxSize = MAX_DECK_CARDS;
   const minSize = Math.max(MIN_PER_TOPIC, MIN_PER_TOPIC * pendingTopics.length);
   // Keep the size inside what the mix allows as topics come and go.
   useEffect(() => {
     if (size < minSize) setSize(minSize);
     if (size > maxSize) setSize(maxSize);
   }, [minSize, maxSize]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  /** Requests a deck costs: one per topic, three for a deck above twenty. */
-  const requestsFor = (spec: DeckSpec) =>
-    spec.missed ? 1 : splitDeck(spec.topics, spec.size).reduce((n, p) => n + deckBatches(p.count).length, 0);
 
   useEffect(() => onDealingChange?.(!!dealing), [dealing, onDealingChange]);
 
@@ -209,13 +202,8 @@ const DeckComposer = ({
           return;
         }
       }
-      const cost = requestsFor(spec);
-      if (cost > decksLeft) {
-        setError(
-          decksLeft === 0
-            ? `You've written today's ${MAX_DAILY_CARDS} free decks — they reset at midnight UTC.`
-            : `That deck needs ${cost} of your free decks and ${decksLeft} ${decksLeft === 1 ? "is" : "are"} left today. Mix fewer topics, or go Pro.`
-        );
+      if (limitReached) {
+        setError(limitReachedText(resetsIn));
         return;
       }
       setError(null);
@@ -260,7 +248,6 @@ const DeckComposer = ({
         )
       );
       refreshUsage();
-      refetchPremium();
 
       if (controller.signal.aborted) {
         setDealing(null);
@@ -337,7 +324,7 @@ const DeckComposer = ({
       }, 900);
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [dealing, decksLeft, target, style, focus, grounded, useMemory, saveCards, onGenerated]
+    [dealing, limitReached, resetsIn, target, style, focus, grounded, useMemory, saveCards, onGenerated]
   );
 
   const stop = () => abortRef.current?.abort();
@@ -406,7 +393,6 @@ const DeckComposer = ({
   const styleLabel = STYLES.find((s) => s.value === style)!.label;
   const focusLabel = FOCUSES.find((f) => f.value === focus)!.label;
   const busy = !!dealing;
-  const cost = requestsFor({ topics: pendingTopics, size });
 
   if (dealing) {
     return (
@@ -466,26 +452,8 @@ const DeckComposer = ({
           )}
         </div>
 
-        {/* Today's allowance — free accounts only. */}
-        {!pro && (
-          <p className="text-xs leading-relaxed text-muted-foreground">
-            {decksLeft === 0 ? (
-              <span className="font-medium text-warning">You've written today's {MAX_DAILY_CARDS} free decks · they reset at midnight UTC · </span>
-            ) : (
-              <span>
-                {decksLeft} of {MAX_DAILY_CARDS} free decks left today
-                {cost > 1 ? ` · this one uses ${cost}` : ""}
-                {isPremiumHookActive && premiumRemaining > 0
-                  ? ` · ${premiumRemaining} written by our medical model`
-                  : ""}{" "}
-                ·{" "}
-              </span>
-            )}
-            <button type="button" className="underline hover:text-foreground" onClick={() => setGoProOpen(true)}>
-              Go Pro for unlimited decks of up to 50
-            </button>
-          </p>
-        )}
+        {/* Today's usage limit, the same line as under every tool. */}
+        <UsageLimitLine />
 
         {/* The deck in one line, and the button that writes it. */}
         <div className="flex flex-col gap-3 border-t border-[color:var(--color-border)] pt-4 sm:flex-row sm:items-center">
@@ -508,7 +476,7 @@ const DeckComposer = ({
           <button
             type="button"
             onClick={start}
-            disabled={busy || pendingTopics.length === 0 || decksLeft === 0}
+            disabled={busy || pendingTopics.length === 0 || limitReached}
             className={`flex h-12 shrink-0 items-center justify-center gap-2 rounded-[14px] px-6 text-sm font-semibold shadow-[0_16px_32px_rgba(15,23,42,0.12)] transition-all duration-200 hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:translate-y-0 ${theme.solid}`}
           >
             <Sparkles className="h-4 w-4" />
@@ -530,9 +498,7 @@ const DeckComposer = ({
                 disabled={busy}
               />
               <p className="mt-2 text-[11px] text-muted-foreground">
-                {pro
-                  ? "Up to 50 — a deck above 20 is written in three batches, side by side."
-                  : "Up to 20 a deck · Pro decks go to 50."}
+                Up to 50 — a deck above 20 is written in three batches, side by side.
               </p>
             </div>
             <div>
@@ -626,7 +592,7 @@ const DeckComposer = ({
                 <button
                   type="button"
                   onClick={() => startSuggestion(s)}
-                  disabled={busy || decksLeft === 0}
+                  disabled={busy || limitReached}
                   className="group flex h-full w-full flex-col gap-1.5 rounded-2xl border border-[color:var(--color-border)] bg-[color:var(--color-card)] p-4 text-left transition-all duration-200 hover:-translate-y-0.5 hover:border-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:translate-y-0"
                 >
                   <span className="flex items-center gap-2">
@@ -673,7 +639,7 @@ const DeckComposer = ({
                 : "Nothing missed yet — the questions you get wrong will land here"
             }
             busy={startingId === "misses"}
-            disabled={busy || !missedIds.length || decksLeft === 0}
+            disabled={busy || !missedIds.length || limitReached}
             onClick={startMisses}
           />
           <QuickStart
@@ -681,7 +647,7 @@ const DeckComposer = ({
             title="Daily 12"
             detail="A deck across what you studied most recently"
             busy={startingId === "daily"}
-            disabled={busy || decksLeft === 0}
+            disabled={busy || limitReached}
             onClick={startDaily}
           />
           <QuickStart
@@ -689,7 +655,7 @@ const DeckComposer = ({
             title="Surprise pair"
             detail={`Two look-alikes for ${target === "mixed" ? "Step 1 and Step 2 CK" : theme.label}, on one deck`}
             busy={startingId === "surprise"}
-            disabled={busy || decksLeft === 0}
+            disabled={busy || limitReached}
             onClick={startSurprise}
           />
         </div>
@@ -709,7 +675,6 @@ const DeckComposer = ({
           if (error) setError(null);
         }}
       />
-      <GoProModal open={goProOpen} onOpenChange={setGoProOpen} />
     </div>
   );
 };

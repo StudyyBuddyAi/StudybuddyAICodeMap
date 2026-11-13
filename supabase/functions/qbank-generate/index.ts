@@ -32,7 +32,7 @@ import {
   type VerificationResult,
 } from "../_shared/qbank-verify.ts";
 import { hasWriterFlag, type QaResult } from "../_shared/qbank-qa.ts";
-import { FREE_DAILY_QBANK_QUESTIONS, QBANK_USAGE_KIND } from "../_shared/qbank-allowance.ts";
+import { FREE_DAILY_QBANK_QUESTIONS, QBANK_USAGE_KIND } from "../_shared/qbank-limits.ts";
 import { applyTopicMemory, loadSetCanonicals, type WaveTopic } from "../_shared/qbank-memory.ts";
 import { topicKey } from "../_shared/qbank-repetition.ts";
 
@@ -369,23 +369,16 @@ serve(async (req) => {
     // the only thing it could have been asking for.
     const examMode = asExamMode(body?.examMode);
 
-    // ── Free-tier allowance ──────────────────────────────────────────────────
-    // Settled after routing, so a declined topic never touches the counter,
-    // and before the plan, because the plan is sized by what was granted.
-    // Reserve the whole wave, release what it does not deliver — see
-    // 20261030000000_qbank_free_daily_cap.sql. Anonymous accounts count as
-    // free: the page needs a sign-in, but the endpoint must not rely on that.
-    const { data: profile } = await authClient
-      .from("profiles")
-      .select("is_pro, pro_expires_at")
-      .eq("id", user.id)
-      .maybeSingle();
-    const isPro =
-      (user as { is_anonymous?: boolean }).is_anonymous !== true &&
-      profile?.is_pro === true &&
-      (!profile.pro_expires_at || new Date(profile.pro_expires_at) > new Date());
+    // ── The old daily question cap: anonymous guests only ───────────────────
+    // Free access (2026-11): every account gets unlimited sets, as Pro had,
+    // and the day's credits are the one limit. A guest from before accounts
+    // were required still has the old cap. Settled after routing, so a
+    // declined topic never touches the counter, and before the plan, because
+    // the plan is sized by what was granted. Reserve the whole wave, release
+    // what it does not deliver (20261030000000_qbank_free_daily_cap.sql).
+    const capped = (user as { is_anonymous?: boolean }).is_anonymous === true;
 
-    if (!isPro) {
+    if (capped) {
       const { data: reserved, error: reserveError } = await authClient.rpc("reserve_usage", {
         p_user: user.id,
         p_kind: QBANK_USAGE_KIND,
@@ -395,17 +388,17 @@ serve(async (req) => {
       // Fails closed, as medical-notes' quota does: an unreadable counter is
       // not a licence to generate without one.
       if (reserveError || !reserved) {
-        log("allowance_failed", { message: reserveError?.message ?? "no result" });
+        log("guest_cap_failed", { message: reserveError?.message ?? "no result" });
         await finishCredits();
         return json({ error: "quota_check_failed" }, 500);
       }
       const granted = Number(reserved.granted) || 0;
       if (granted <= 0) {
-        log("allowance_exhausted", { limit: FREE_DAILY_QBANK_QUESTIONS });
+        log("guest_cap_reached", { limit: FREE_DAILY_QBANK_QUESTIONS });
         await finishCredits();
         return json(
           {
-            error: `You've used today's ${FREE_DAILY_QBANK_QUESTIONS} free questions. They reset at midnight UTC — or go Pro for unlimited sets.`,
+            error: `You've used today's ${FREE_DAILY_QBANK_QUESTIONS} guest questions. Create a free account to keep going.`,
             code: "daily_cap",
             limit: FREE_DAILY_QBANK_QUESTIONS,
             remaining: 0,
@@ -429,7 +422,7 @@ serve(async (req) => {
           p_date: reservation.date,
         });
         if (releaseError) {
-          log("allowance_release_failed", { unused, message: releaseError.message });
+          log("guest_cap_release_failed", { unused, message: releaseError.message });
           return 0;
         }
         return unused;
@@ -450,7 +443,7 @@ serve(async (req) => {
     // What this student has already been asked on these topics, applied to the
     // plan: rows assigned to concepts they have not met (or to a revisit of
     // one they missed), and a do-not-re-test list for the writer. See
-    // _shared/qbank-repetition.ts. After the allowance, so a refused request
+    // _shared/qbank-repetition.ts. After the guest cap, so a refused request
     // costs no reads; fails open, so an unreadable history costs nothing but
     // the history.
     //
@@ -619,7 +612,7 @@ serve(async (req) => {
     const dispatchReady = (controller: ReadableStreamDefaultController<Uint8Array>) => {
       const prepared = prepareBatch(content, plan);
       // Nothing past the plan is written. A model that over-produces would
-      // otherwise hand a free account more than its allowance granted, and
+      // otherwise hand a guest more than its cap granted, and
       // number the extras into the next wave's range (waveStart + i), which
       // is what claim_generated_questions orders the set by.
       const usable = Math.min(prepared.questions.length, plan.questions.length);
@@ -712,7 +705,7 @@ serve(async (req) => {
 
             if (id) {
               persistedIds.push(id);
-              // What the allowance charges for: committed AND playable — the
+              // What the guest cap charges for: committed AND playable — the
               // same three tests claim_generated_questions applies.
               if (!qaResult?.blocked && verdict.agreed) delivered++;
             } else {
@@ -924,7 +917,7 @@ serve(async (req) => {
         const disputed = verifications.filter((v) => !v.agreed).length;
 
         // Hand back what the wave reserved and did not deliver, before the
-        // summary, so the allowance it reports is the settled one.
+        // summary, so the cap it reports is the settled one.
         const released = await releaseReservation();
 
         log("wave_complete", {
@@ -949,7 +942,7 @@ serve(async (req) => {
           flagChecksCleared: flagChecks.filter((f) => f.confirmed).length,
           flagCheckErrors: flagChecks.filter((f) => f.error).length,
           delivered,
-          allowanceReleased: released,
+          guestCapReleased: released,
         });
 
         controller.enqueue(
@@ -984,8 +977,8 @@ serve(async (req) => {
                 // broader topic it names.
                 coverage: memory.coverage,
                 streamError,
-                // A free account's settled allowance for today; null for Pro.
-                allowance: reservation
+                // A guest's settled daily cap for today; null for an account.
+                guestCap: reservation
                   ? {
                       limit: FREE_DAILY_QBANK_QUESTIONS,
                       remaining: reservation.remainingAfter + released,

@@ -83,3 +83,15 @@ export function whatsLeftCovers(remaining: number): { label: string; count: numb
     { label: "50-card flashcard decks", cost: TYPICAL_COST_MICROS.deck50 },
   ].map(({ label, cost }) => ({ label, count: Math.floor(remaining / cost) }));
 }
+
+/** What a student is told once today's usage limit is used up. */
+export function limitReachedText(resetsIn?: string): string {
+  return resetsIn
+    ? `You've reached today's usage limit. It resets in ${resetsIn}.`
+    : "You've reached today's usage limit. It resets at midnight UTC.";
+}
+
+/** The server's refusal once the day's usage limit is used up (_shared/credits.ts). */
+export function isLimitRefusal(body: unknown): boolean {
+  return (body as { code?: unknown } | null)?.code === "credits_exhausted";
+}

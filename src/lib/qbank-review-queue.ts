@@ -3,8 +3,8 @@
  *
  * The server decides what is due (get_qbank_review_queue, migration
  * 20261030000200): a miss once it is 20 hours old, a mark at once. This module
- * reads that answer and turns it into a set. Re-sits never count against the
- * free allowance — nothing is generated.
+ * reads that answer and turns it into a set. Re-sits cost none of the day's
+ * usage limit — nothing is generated.
  */
 
 /** qbank_sessions.system for a re-sit set, so other surfaces can tell it apart. */

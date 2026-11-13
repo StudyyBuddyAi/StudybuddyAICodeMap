@@ -24,8 +24,7 @@ vi.mock("@/contexts/QBankContext", () => ({
   }),
 }));
 vi.mock("@/hooks/use-usage-limit", () => ({
-  MAX_DAILY_QBANK_QUESTIONS: 10,
-  useUsageLimit: () => ({ qbankRemaining: 10, isProUser: false, isLoading: false }),
+  useDailyLimit: () => ({ reached: false, percent: 12, resetsIn: "5h 12m", isLoading: false, refresh: vi.fn() }),
 }));
 vi.mock("@/hooks/use-qbank-review-queue", () => ({
   useQBankReviewQueue: () => ({ queue: { due: [], dueCount: 0, missedDue: 0, marked: 0, upcoming: 0, nextDueAt: null } }),
@@ -45,7 +44,6 @@ vi.mock("@/hooks/use-curriculum-topics", () => ({
 vi.mock("@/hooks/use-library-topics", () => ({ useLibraryTopics: () => ({ topics: [] }) }));
 vi.mock("@/integrations/supabase/client", () => ({ supabase: { rpc: vi.fn(async () => ({ data: [], error: null })) } }));
 vi.mock("@/components/dashboard/DashboardLayout", () => ({ default: ({ children }: { children: React.ReactNode }) => <div>{children}</div> }));
-vi.mock("@/components/GoProModal", () => ({ default: () => null }));
 vi.mock("@/components/AuthModal", () => ({ default: () => null }));
 vi.mock("@/hooks/use-toast", () => ({ useToast: () => ({ toast: vi.fn() }) }));
 
@@ -72,9 +70,10 @@ describe("QBank page", () => {
     expect(screen.getByRole("combobox", { name: /topics to practise/i })).toBeInTheDocument();
     expect(screen.getByText("Today's challenge")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: /for you/i })).toBeInTheDocument();
-    expect(screen.getByText(/Half exam block · 10 Q/)).toBeInTheDocument();
+    expect(screen.getByText(/Exam block · 20 Q/)).toBeInTheDocument();
     expect(screen.getByText("Surprise me")).toBeInTheDocument();
-    expect(screen.getByText(/10 of 10 free questions left today/)).toBeInTheDocument();
+    expect(screen.getByText(/12% of today's usage limit used · resets in 5h 12m/)).toBeInTheDocument();
+    expect(screen.queryByText(/Go Pro|free questions/)).toBeNull();
   });
 
   it("mixes typed topics into one set at the page's exam", async () => {
@@ -91,7 +90,7 @@ describe("QBank page", () => {
     await waitFor(() => expect(navigateMock).toHaveBeenCalledWith("/qbank/session?session=sess-1"));
   });
 
-  it("starts a card with its own topics, systems and level, inside the free allowance", async () => {
+  it("starts a card with its own topics, systems and level", async () => {
     renderPage();
     fireEvent.click(screen.getByRole("radio", { name: /^Step 2 CK/ }));
     const card = screen.getByText("Today's challenge").closest("button")!;
@@ -100,7 +99,7 @@ describe("QBank page", () => {
     await waitFor(() => expect(startGeneratedSession).toHaveBeenCalled());
     const [topics, size, level, exam, , opts] = startGeneratedSession.mock.calls[0];
     expect(exam).toBe("step2ck");
-    expect(size).toBeLessThanOrEqual(10);
+    expect(size).toBeGreaterThan(0);
     expect(["foundations", "balanced", "challenge"]).toContain(level);
     expect(Array.isArray(topics) ? topics.length : 1).toBe(opts.systems.length);
     // The target is remembered.
@@ -141,10 +140,10 @@ describe("QBank page", () => {
 
   it("builds an exam block with one pre-routed topic per question, timed", async () => {
     renderPage();
-    fireEvent.click(screen.getByText(/Half exam block · 10 Q/).closest("button")!);
+    fireEvent.click(screen.getByText(/Exam block · 20 Q/).closest("button")!);
     await waitFor(() => expect(startGeneratedSession).toHaveBeenCalled());
     const [topics, size, , , mode, opts] = startGeneratedSession.mock.calls[0];
-    expect(size).toBe(10);
+    expect(size).toBe(20);
     expect(mode).toBe("timed");
     expect(Array.isArray(topics)).toBe(true);
     expect(opts.systems).toHaveLength((topics as string[]).length);

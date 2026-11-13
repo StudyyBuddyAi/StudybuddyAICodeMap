@@ -9,7 +9,6 @@ import BlockClock from "@/components/qbank/BlockClock";
 import BlockReviewDialog from "@/components/qbank/BlockReviewDialog";
 import { BottomBar, SaveExitButton, ToolsSheet, TopBar, type ExamTools } from "@/components/qbank/ExamBars";
 import FloatingCalculator from "@/components/qbank/FloatingCalculator";
-import GoProModal from "@/components/GoProModal";
 import HighlightableText from "@/components/qbank/HighlightableText";
 import { ItemRail, ItemSheet } from "@/components/qbank/ItemNavigator";
 import LabValuesSheet from "@/components/qbank/LabValuesSheet";
@@ -44,12 +43,10 @@ const GenerationNotice = ({
   generation,
   loaded,
   onResume,
-  onGoPro,
 }: {
   generation: GenerationState;
   loaded: number;
   onResume: () => void;
-  onGoPro: () => void;
 }) => {
   const running = generation.status === "running";
   const short = !running && loaded < generation.target;
@@ -101,13 +98,8 @@ const GenerationNotice = ({
             ))}
           </ul>
         )}
-        {/* A set the free allowance stopped is not one to retry: the server
-            would refuse the remaining questions until tomorrow. */}
-        {short && generation.capReached && (
-          <button type="button" onClick={onGoPro} className="qb-btn qb-btn--outline" style={{ marginTop: 8 }}>
-            Go Pro for unlimited questions
-          </button>
-        )}
+        {/* A set the usage limit stopped is not one to retry: the server
+            would refuse the remaining questions until it resets. */}
         {short && !generation.capReached && (
           <button type="button" onClick={onResume} className="qb-btn qb-btn--outline" style={{ marginTop: 8 }}>
             <RotateCcw aria-hidden /> Write the remaining {generation.target - loaded}
@@ -200,7 +192,6 @@ const QBankSession = () => {
   const [loadAttempt, setLoadAttempt] = useState(0);
   const [retrying, setRetrying] = useState(false);
   const [viewer, setViewer] = useState<{ items: QuestionMedia[]; index: number }>({ items: [], index: 0 });
-  const [goProOpen, setGoProOpen] = useState(false);
   /** What the live region last said: the result of a submitted answer. */
   const [announcement, setAnnouncement] = useState("");
   const prefs = useQBankPrefs();
@@ -675,7 +666,6 @@ const QBankSession = () => {
                 generation={generation}
                 loaded={session.questions.length}
                 onResume={resumeGeneration}
-                onGoPro={() => setGoProOpen(true)}
               />
             )}
 
@@ -887,7 +877,6 @@ const QBankSession = () => {
         readOnly={!inSession}
       />
       <FloatingCalculator open={calcOpen} onClose={() => setCalcOpen(false)} />
-      <GoProModal open={goProOpen} onOpenChange={setGoProOpen} />
       <ItemSheet
         cells={cells}
         onSelect={handleGo}

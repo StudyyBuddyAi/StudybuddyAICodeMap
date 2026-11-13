@@ -40,13 +40,10 @@ export interface MedicalNotesParams {
   // Conversation memory control — shared across all four modes (sheet, cards,
   // explain, enhance write/read the same 10-turn window). Default true.
   useMemory?: boolean;
-  // Entitlement fields kept for backwards compatibility: the medical-notes
-  // edge function now derives identity/entitlement from the verified JWT +
-  // profiles and IGNORES these values. Keep the fields so existing callers
-  // (SheetGenerator, deck-request) still compile and send them harmlessly.
+  // Identity fields kept for backwards compatibility: the medical-notes edge
+  // function derives who is asking from the verified JWT and IGNORES these.
   userId?: string | null;
   isAnonymous?: boolean;
-  isPro?: boolean;
   preferredModel?: string;
   [key: string]: unknown;
 }

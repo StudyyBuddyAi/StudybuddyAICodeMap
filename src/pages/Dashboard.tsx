@@ -38,7 +38,6 @@ import { useLibraryTopics } from "@/hooks/use-library-topics";
 import { useQBankReviewQueue } from "@/hooks/use-qbank-review-queue";
 import { buildTodayPlan, lastSevenDays, type PlanItem } from "@/lib/today-plan";
 import { displayName } from "@/lib/display-name";
-import { MAX_DAILY_CARDS, MAX_DAILY_SHEETS, useUsageLimit } from "@/hooks/use-usage-limit";
 
 /** One saved sheet a day — the goal the Sheets ring is drawn against. */
 const WEEKLY_SHEET_GOAL = 7;
@@ -124,7 +123,6 @@ function ToolCard({
   line,
   progress,
   queue,
-  allowance,
   secondary,
   primary,
 }: {
@@ -133,7 +131,6 @@ function ToolCard({
   line: ReactNode;
   progress?: number;
   queue: ReactNode;
-  allowance?: string;
   secondary: { label: string; to: string };
   primary: { label: string; to: string };
 }) {
@@ -151,11 +148,6 @@ function ToolCard({
         <div className="h-full rounded-full bg-primary" style={{ width: `${progress ?? 0}%` }} />
       </div>
       <p className="mt-3 flex-1 text-sm text-muted-foreground">{queue}</p>
-      {allowance && (
-        <p className="mt-2 flex items-center gap-1.5 text-xs font-medium text-foreground">
-          <Sparkles className="h-3.5 w-3.5 text-primary" aria-hidden /> {allowance}
-        </p>
-      )}
       <div className="mt-5 flex gap-2.5">
         <Link
           to={secondary.to}
@@ -266,11 +258,6 @@ function Dashboard() {
   );
   const week = lastSevenDays(activeDays, dayKey, now);
   const studiedToday = activeDays.has(dayKey(now));
-
-  // What is left of today's free allowance, on each tool's card.
-  const { sheetCount, cardsCount, isProUser } = useUsageLimit();
-  const left = (used: number, cap: number, noun: string) =>
-    isProUser ? "Unlimited with Pro" : `${Math.max(0, cap - used)} of ${cap} ${noun} left today`;
 
   return (
     <DashboardLayout>
@@ -445,7 +432,6 @@ function Dashboard() {
               line={history[0] ? `Last: ${history[0].topic}` : "No sheets saved yet"}
               progress={pct(sheetsThisWeek.length, WEEKLY_SHEET_GOAL)}
               queue={`${sheetsThisWeek.length} of ${WEEKLY_SHEET_GOAL} this week`}
-              allowance={left(sheetCount, MAX_DAILY_SHEETS, "sheets")}
               secondary={{ label: "Library", to: "/library" }}
               primary={{ label: "New sheet", to: "/sheets" }}
             />
@@ -455,7 +441,6 @@ function Dashboard() {
               line={`${reviewedToday} studied today`}
               progress={pct(reviewedToday, reviewedToday + dueNow)}
               queue={deck.total === 0 ? "No flashcards yet" : `${dueNow} cards waiting today · ${deck.total} in your deck`}
-              allowance={left(cardsCount, MAX_DAILY_CARDS, "decks")}
               secondary={{ label: "New deck", to: "/flashcards" }}
               primary={
                 dueNow > 0
@@ -475,7 +460,6 @@ function Dashboard() {
                   ? "Sign in to practise USMLE-style questions"
                   : "Name a topic to start a set"
               }
-              allowance={isGuest ? undefined : "No daily limit"}
               secondary={{ label: "New set", to: "/qbank" }}
               primary={
                 lastSet

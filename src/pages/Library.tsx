@@ -458,11 +458,9 @@ const Library = () => {
                     ? {
                         // Shown, not changed: the sheet opens on the Sheets page for that.
                         layer: activeLayer,
-                        entitled: false,
                         ready: true,
                         readOnly: true,
                         update: () => {},
-                        onLocked: () => {},
                         context: { topic: activeSheet.topic },
                       }
                     : undefined

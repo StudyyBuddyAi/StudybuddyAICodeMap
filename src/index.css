@@ -1012,7 +1012,7 @@
     border-radius: var(--radius);
   }
 
-  /* ─── Landing Page Pricing & Testimonial Animations ─── */
+  /* ─── Landing Page Animations ─── */
   @keyframes fadeIn {
     from {
       opacity: 0;
@@ -1026,15 +1026,6 @@
 
   .tab-content {
     animation: fadeIn 0.3s ease-out;
-  }
-
-  .pricing-card-pro {
-    transition: transform 0.3s ease, box-shadow 0.3s ease;
-  }
-
-  .pricing-card-pro:hover {
-    transform: scale(1.02);
-    box-shadow: 0 20px 40px -12px rgba(13, 148, 136, 0.25);
   }
 
   .feature-badge {

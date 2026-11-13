@@ -125,7 +125,10 @@ describe("requestDeck", () => {
   it("names the refusals the page words itself", async () => {
     callMedicalNotes.mockResolvedValueOnce(new Response(JSON.stringify({ code: "invalid_topic", error: "Not a topic" }), { status: 400 }));
     await expect(requestDeck({ notes: "asdf" })).rejects.toBeInstanceOf(DeckTopicError);
-    callMedicalNotes.mockResolvedValueOnce(new Response("{}", { status: 429 }));
+    callMedicalNotes.mockResolvedValueOnce(new Response(JSON.stringify({ code: "credits_exhausted" }), { status: 429 }));
     await expect(requestDeck({ notes: "HF" })).rejects.toBeInstanceOf(DeckQuotaError);
+    // A passing rate limit is not the day's usage limit.
+    callMedicalNotes.mockResolvedValueOnce(new Response("{}", { status: 429 }));
+    await expect(requestDeck({ notes: "HF" })).rejects.not.toBeInstanceOf(DeckQuotaError);
   });
 });

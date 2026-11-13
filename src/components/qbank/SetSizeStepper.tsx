@@ -29,7 +29,7 @@ const SetSizeStepper = ({
   unit = "question",
 }: {
   value: number;
-  /** The largest set allowed today — the block for Pro, what is left for a free account. */
+  /** The largest set the picker offers. */
   max: number;
   /** The smallest set — a deck mixed across topics needs a few cards each. */
   min?: number;

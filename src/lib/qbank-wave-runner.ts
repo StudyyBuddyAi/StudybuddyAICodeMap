@@ -43,7 +43,7 @@ export const WAVE_SIZE = 5;
 
 /**
  * The set sizes a student can pick: any number in this range. The ceiling is
- * the USMLE block since May 2026 (qbank-allowance.ts EXAM_BLOCK_SIZE).
+ * the USMLE block since May 2026 (qbank-limits.ts EXAM_BLOCK_SIZE).
  */
 export const MIN_SET_SIZE = 1;
 export const MAX_SET_SIZE = 20;
@@ -165,9 +165,8 @@ export interface GenerationOutcome {
   /** Set for "failed", and for "short" when a reason is known. */
   error: string | null;
   /**
-   * The run stopped because a free account used its daily allowance. Not a
-   * failure to retry: "write the remaining" would only be refused again, so
-   * the player offers Pro instead.
+   * The run stopped on the day's usage limit. Not a failure to retry: "write
+   * the remaining" would only be refused again until it resets.
    */
   capReached?: boolean;
 }
@@ -243,7 +242,7 @@ interface WaveResult {
   fatal: string | null;
   /** The wave closed with a waveComplete frame — proof the server speaks this protocol. */
   completed: boolean;
-  /** Refused because the account's daily allowance is used up. Always fatal. */
+  /** Refused because the day's usage limit is reached. Always fatal. */
   capReached: boolean;
   /** Blueprint coverage the wave reported; empty for a topic without a blueprint. */
   coverage: TopicCoverage[];
@@ -357,9 +356,10 @@ async function runWave(
     if (!response.ok || !response.body) {
       const body = await response.json().catch(() => null);
       const message = body?.error ?? `Generation failed (${response.status})`;
-      // The free allowance is spent. A 429 is otherwise a rate limit worth
-      // retrying, so this is told apart by its code, not its status.
-      if (body?.code === "daily_cap") {
+      // The day's usage limit is reached (or, for an old guest session, the
+      // guest cap). A 429 is otherwise a rate limit worth retrying, so this
+      // is told apart by its code, not its status.
+      if (body?.code === "credits_exhausted" || body?.code === "daily_cap") {
         result.fatal = message;
         result.capReached = true;
         result.streamError = message;
@@ -642,7 +642,7 @@ export async function runQbankGeneration(
       }
 
       if (wave?.capReached) {
-        // A set the allowance cut short is short, not failed: what it already
+        // A set the usage limit cut short is short, not failed: what it already
         // delivered is a playable set.
         return {
           status: delivered > 0 ? "short" : "failed",

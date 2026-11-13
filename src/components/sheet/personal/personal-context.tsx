@@ -7,7 +7,7 @@ import {
   type SheetLayer,
 } from "@/lib/sheet-layer";
 import {
-  ProRequiredError,
+  LimitReachedError,
   ServerOutdatedError,
   oneLine,
   parseCardText,
@@ -15,6 +15,7 @@ import {
   type PersonalizeAction,
   type RewriteStyle,
 } from "@/lib/personalize";
+import { limitReachedText } from "@/lib/daily-credits";
 
 /**
  * What the sheet page hands the document so the student can make it theirs.
@@ -22,8 +23,6 @@ import {
  */
 export interface PersonalProps {
   layer: SheetLayer;
-  /** Pro, or a sheet generated as premium. Everything below is gated on it. */
-  entitled: boolean;
   /** The saved layer has loaded; edits before that are refused. */
   ready: boolean;
   /** A view that shows the layer but offers no way to change it (Library). */
@@ -31,8 +30,6 @@ export interface PersonalProps {
   unsaved?: boolean;
   saveFailed?: boolean;
   update: (fn: (layer: SheetLayer) => SheetLayer) => void;
-  /** Explains Pro, when an unentitled student reaches for a Pro action. */
-  onLocked: () => void;
   /** What the AI actions need to know about the sheet. */
   context: { topic: string; examMode?: string; difficulty?: string; grant?: string };
   /** Adds a card made from the sheet to the student's deck. Resolves false on failure. */
@@ -60,7 +57,7 @@ export interface Suggestion {
 }
 
 export interface PersonalApi extends PersonalProps {
-  /** Entitled, loaded, and not a read-only view: the layer can change. */
+  /** Loaded, and not a read-only view: the layer can change. */
   editable: boolean;
   showOriginal: boolean;
   setShowOriginal: (on: boolean) => void;
@@ -86,7 +83,7 @@ export interface PersonalApi extends PersonalProps {
   /** Card → the (possibly edited) card goes into the deck and the layer. */
   acceptCard: (card: { question: string; answer: string }) => Promise<boolean>;
 
-  /** Runs `fn` if the student may, or explains why not. */
+  /** Runs `fn` once the layer can change. */
   guard: (fn: () => void) => void;
   /** The practice focus the layer currently implies (for QBank). */
   focus: string;
@@ -105,8 +102,8 @@ export function PersonalProvider({ value, children }: { value: PersonalProps; ch
   const [suggestion, setSuggestion] = useState<Suggestion | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
-  const editable = value.entitled && value.ready && !value.readOnly;
-  const { update, onLocked, context } = value;
+  const editable = value.ready && !value.readOnly;
+  const { update, context } = value;
 
   // One inline surface open at a time under a line: the editor, the note, the
   // question to the AI. Opening one closes the others.
@@ -134,10 +131,9 @@ export function PersonalProvider({ value, children }: { value: PersonalProps; ch
 
   const guard = useCallback(
     (fn: () => void) => {
-      if (!value.entitled) onLocked();
-      else if (editable) fn();
+      if (editable) fn();
     },
-    [value.entitled, editable, onLocked]
+    [editable]
   );
 
   const start = useCallback(
@@ -175,19 +171,16 @@ export function PersonalProvider({ value, children }: { value: PersonalProps; ch
         )
         .catch((e: unknown) => {
           if (e instanceof Error && e.name === "AbortError") return;
-          if (e instanceof ProRequiredError) {
-            setSuggestion(null);
-            onLocked();
-            return;
-          }
           const error =
-            e instanceof ServerOutdatedError
+            e instanceof LimitReachedError
+              ? limitReachedText()
+              : e instanceof ServerOutdatedError
               ? "This isn't available yet — StudyBuddy is being updated. Try again later."
               : "That didn't work. Try again in a moment.";
           setSuggestion((cur) => (cur && abortRef.current === controller ? { ...cur, status: "error", error } : cur));
         });
     },
-    [context, onLocked]
+    [context]
   );
 
   const runSuggestion = useCallback((s: Omit<Suggestion, "text" | "status" | "error">) => guard(() => start(s)), [guard, start]);

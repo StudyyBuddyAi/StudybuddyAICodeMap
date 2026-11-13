@@ -26,7 +26,6 @@ import { useAuth } from "@/hooks/use-auth";
 import { readPendingUpgrade } from "@/lib/auth-upgrade";
 import { isRecoveryPending } from "@/lib/recovery-landing";
 import { useTheme } from "@/hooks/use-theme";
-import GoProModal from "@/components/GoProModal";
 import { MemorialClosing, MemorialPlaque, MemorialRibbonLink } from "@/components/memorial/entries";
 import "@/pages/index.css";
 const SOCIALS = {
@@ -38,7 +37,7 @@ const SOCIALS = {
 const NAV_LINKS = [
   { href: "#tools", label: "Features" },
   { href: "#film", label: "How it works" },
-  { href: "#pricing", label: "Pricing" },
+  { href: "#free-access", label: "Free access" },
   { href: "#faq", label: "FAQ" },
 ];
 
@@ -81,8 +80,12 @@ const FAQS = [
     a: "USMLE Step 1 and Step 2 CK. In the QBank you choose Step 1, Step 2 CK, or a mix, and every question is a single-best-answer clinical vignette with explanations.",
   },
   {
-    q: "Can I try it without an account?",
-    a: "Yes. As a guest you can make 5 study sheets and 5 flashcard decks a day; guest decks stay on your device. The QBank needs a free account so your sets are saved and you can resume them.",
+    q: "Is it really free?",
+    a: "Yes. Every account gets every tool, with one daily usage limit shared by sheets, flashcards and the QBank. It covers about 5 comprehensive sheets with their deep dives, a 50-card deck and 40 QBank questions a day, and it resets at midnight UTC. There is nothing to buy.",
+  },
+  {
+    q: "Do I need an account?",
+    a: "Yes, a free one. Your sheets, decks and QBank sets are saved to it, and it is how your daily usage limit is kept.",
   },
   {
     q: "Where do the answers come from?",
@@ -98,54 +101,22 @@ const FAQS = [
   },
 ];
 
-const PLANS = [
-  {
-    key: "guest",
-    kicker: "No account",
-    name: "Guest",
-    price: "$0",
-    note: "try it now",
-    features: [
-      "5 study sheets a day",
-      "5 flashcard decks a day, saved on this device",
-      "1 sheet written by our medical AI model",
-      "1 PubMed citation lookup a day",
-      "QBank needs a free account",
-    ],
-    cta: "Try as guest",
-  },
-  {
-    key: "free",
-    kicker: "Free account",
-    name: "Free",
-    price: "$0",
-    note: "always free",
-    features: [
-      "5 study sheets a day",
-      "5 flashcard decks a day, synced to your account",
-      "QBank: USMLE-style sets of up to 20 questions",
-      "3 sheets written by our medical AI model",
-      "3 PubMed citation lookups a day",
-      "Progress and history saved",
-    ],
-    cta: "Start free",
-  },
-  {
-    key: "pro",
-    kicker: "For the serious student",
-    name: "Pro",
-    price: "$5",
-    note: "/ month",
-    features: [
-      "Unlimited study sheets and flashcard decks",
-      "Our medical AI model, whenever you choose it",
-      "Unlimited PubMed citation lookups",
-      "Make sheets yours: highlight, notes, AI rewrite",
-      "Everything in Free",
-    ],
-    cta: "Get Pro",
-  },
-] as const;
+/** What every account gets: there are no plans. */
+const FREE_ACCESS = [
+  "Study sheets with deep dives, written by our medical AI model",
+  "Flashcard decks of up to 50 cards, with spaced repetition",
+  "USMLE-style QBank sets of up to 20 questions, and timed exam blocks",
+  "Make sheets yours: highlight, notes, AI rewrites",
+  "Sources on every sheet, PubMed papers included",
+  "Progress and history saved to your account",
+];
+
+/** What one day's usage limit covers, all together (the app's own numbers). */
+const DAY_COVERS = [
+  { label: "Comprehensive sheets with deep dives", count: 5 },
+  { label: "50-card flashcard deck", count: 1 },
+  { label: "QBank questions", count: 40 },
+];
 
 function useInView() {
   const ref = useRef<HTMLDivElement>(null);
@@ -283,7 +254,6 @@ function App() {
     else if (readPendingUpgrade()) navigate("/auth/callback", { replace: true });
     else navigate("/dashboard", { replace: true });
   }, [signedIn, navigate]);
-  const [goProOpen, setGoProOpen] = useState(false);
   // The same theme setting the app uses, so a choice made on either side
   // survives a visit to the other and a reload.
   const { isDark, toggleTheme } = useTheme();
@@ -426,24 +396,30 @@ function App() {
           </div>
         </section>
 
-        <section id="pricing" className="section pricing-section">
+        <section id="free-access" className="section access-section">
           <div className="container">
-            <SectionHeading eyebrow="Pricing" title={<>Start free. <em>Upgrade</em> when you need more.</>} center>No credit card required. Limits reset every day.</SectionHeading>
-            <Reveal className="pricing-grid">
-              {PLANS.map((plan) => (
-                <article className={`pricing-card ${plan.key === "pro" ? "pricing-pro" : ""}`} key={plan.key} data-testid={`card-plan-${plan.key}`}>
-                  {plan.key === "pro" ? <span className="popular-badge">MOST POPULAR</span> : null}
-                  <span className="plan-kicker">{plan.kicker}</span>
-                  <h3>{plan.name}</h3>
-                  <div className="price">{plan.price} <small>{plan.note}</small></div>
-                  <ul>{plan.features.map((feature) => <li key={feature}><Check size={16} />{feature}</li>)}</ul>
-                  {plan.key === "pro" ? (
-                    <ButtonLink href="#pricing" onClick={() => setGoProOpen(true)} variant="accent" testId="button-pricing-pro">{plan.cta} <ArrowRight size={15} /></ButtonLink>
-                  ) : (
-                    <ButtonLink href="/dashboard?start=sheet" onClick={plan.key === "free" ? signIn : startStudying} variant="ghost" testId={`button-pricing-${plan.key}`}>{plan.cta} <ArrowRight size={15} /></ButtonLink>
-                  )}
-                </article>
-              ))}
+            <SectionHeading eyebrow="Free access" title={<>Free for every student. <em>One daily usage limit.</em></>} center>No plans and no card. Create a free account and every tool is yours, up to one usage limit that resets every day.</SectionHeading>
+            <Reveal className="access-grid">
+              <article className="access-card" data-testid="card-free-access">
+                <span className="plan-kicker">Every account</span>
+                <h3>Every tool, for free</h3>
+                <ul>{FREE_ACCESS.map((item) => <li key={item}><Check size={16} />{item}</li>)}</ul>
+                <ButtonLink href="/dashboard?start=sheet" onClick={startStudying} testId="button-free-access-start">Create a free account <ArrowRight size={15} /></ButtonLink>
+              </article>
+              <article className="access-card usage-preview" data-testid="card-usage-limit" aria-label="How the daily usage limit works">
+                <span className="plan-kicker">The daily usage limit</span>
+                <h3>One limit, shared by every tool</h3>
+                <div className="usage-meter" aria-hidden="true">
+                  <div className="usage-meter-head"><b>Today's usage limit</b><span>See usage</span></div>
+                  <div className="usage-bar"><span /></div>
+                  <p className="usage-line">38% used · resets in 9h 12m</p>
+                </div>
+                <p className="usage-covers-label">One day covers about</p>
+                <ul className="usage-covers">
+                  {DAY_COVERS.map((c) => <li key={c.label}><span>{c.label}</span><b>{c.count}</b></li>)}
+                </ul>
+                <p className="usage-note">All in the same day. Spend it on whatever you like; it resets at midnight UTC.</p>
+              </article>
             </Reveal>
           </div>
         </section>
@@ -464,14 +440,13 @@ function App() {
         <div className="container">
           <div className="footer-grid">
             <div className="footer-brand"><a href="#home" className="brand" data-testid="link-footer-home"><BrandMark size={34} className="brand-mark" /><span className="brand-name">StudyBuddy <b>AI</b></span></a><p>Study sheets, flashcards, and a USMLE-style QBank for medical students.</p></div>
-            <div><h4>Product</h4><a href="#tools" data-testid="link-footer-tools">Tools</a><a href="#film" data-testid="link-footer-demo">Demo</a><a href="#pricing" data-testid="link-footer-pricing">Pricing</a></div>
+            <div><h4>Product</h4><a href="#tools" data-testid="link-footer-tools">Tools</a><a href="#film" data-testid="link-footer-demo">Demo</a><a href="#free-access" data-testid="link-footer-free-access">Free access</a></div>
             <div><h4>Resources</h4><a href="#faq" data-testid="link-footer-faq">FAQ</a><a href="/privacy" data-testid="link-footer-privacy">Privacy Policy</a></div>
             <div><h4>Connect</h4><a href={SOCIALS.instagram} target="_blank" rel="noopener noreferrer" data-testid="link-footer-instagram"><Instagram size={14} /> Instagram</a><a href={SOCIALS.linkedin} target="_blank" rel="noopener noreferrer" data-testid="link-footer-linkedin"><Linkedin size={14} /> LinkedIn</a><a href={SOCIALS.telegram} target="_blank" rel="noopener noreferrer" data-testid="link-footer-telegram"><Send size={14} /> Telegram</a></div>
           </div>
           <div className="footer-bottom"><span>© {new Date().getFullYear()} StudyBuddy AI</span><MemorialPlaque className="footer-memorial" /><span>Built in Gaza, for medical students across MENA</span></div>
         </div>
       </footer>
-      <GoProModal open={goProOpen} onOpenChange={setGoProOpen} />
     </div>
   );
 }

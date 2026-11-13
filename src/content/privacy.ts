@@ -8,7 +8,7 @@
  */
 
 export const PRIVACY_EFFECTIVE_DATE = "1 November 2026";
-export const PRIVACY_LAST_UPDATED = "1 November 2026";
+export const PRIVACY_LAST_UPDATED = "13 November 2026";
 export const PRIVACY_CONTACT_EMAIL = "support@studyybuddyai.com";
 export const PRIVACY_SITE = "studyybuddyai.com";
 
@@ -72,7 +72,7 @@ export const PRIVACY_SECTIONS: PrivacySection[] = [
           },
           {
             term: "Messages to us.",
-            text: "If you contact us — by email, or on WhatsApp to buy Pro — we receive what you send, including your email address or phone number and display name.",
+            text: "If you contact us, by email or on WhatsApp, we receive what you send, including your email address or phone number and display name.",
           },
         ],
       },
@@ -84,8 +84,8 @@ export const PRIVACY_SECTIONS: PrivacySection[] = [
             text: "Each flashcard review (the rating you gave and when), your practice-question answers, time per question and scores, and your study settings such as daily limits and target retention. This is used to schedule reviews, show your progress and calculate your study streak.",
           },
           {
-            term: "Usage and plan.",
-            text: "How many sheets, decks, question sets and reference lookups you use each day, so free daily limits can apply; whether you have Pro and until when; and any Pro access codes you redeem.",
+            term: "Usage.",
+            text: "How much of your daily usage limit you use each day, and how many sheets, decks, question sets and reference lookups you make, so the daily usage limit can apply. Before StudyBuddy became free we also recorded Pro status and any Pro access codes redeemed; those records are no longer used.",
           },
           {
             term: "AI memory.",
@@ -101,13 +101,13 @@ export const PRIVACY_SECTIONS: PrivacySection[] = [
           },
         ],
       },
-      { subheading: "Guest use" },
-      "You can use StudyBuddy without an account. We then create an anonymous session that contains no email address or name, and is used to apply free daily limits. Guest sheets and flashcards are stored in your browser or on your device, not on our servers. If you later create an account, that work is moved into it.",
+      { subheading: "Accounts and guests" },
+      "Using StudyBuddy's study tools needs a free account; the website's home page, this policy and the memorial page can be read without one. Before accounts were required, guests used an anonymous session that contains no email address or name. A guest from then keeps that session until they create an account: their sheets and flashcards stay in their browser or on their device, not on our servers, and move into the account when they create one.",
       { subheading: "Information we do not collect" },
       {
         list: [
           "We do not collect your location, contacts, photos, camera or microphone.",
-          "We do not process card or bank details. Pro is arranged directly with us (see Pro purchases below); we record only your Pro status and its end date.",
+          "We do not process card or bank details. StudyBuddy is free, and nothing is sold through it.",
           "We do not ask for, and you should not enter, information that identifies a patient. StudyBuddy is a study tool, not a clinical record system.",
         ],
       },
@@ -124,7 +124,7 @@ export const PRIVACY_SECTIONS: PrivacySection[] = [
           rows: [
             ["Provide the Service: create your account, generate and save your material, and keep it in sync across the website and apps", "Performance of our contract with you"],
             ["Schedule your flashcard reviews, keep your QBank progress and show your statistics", "Performance of our contract with you"],
-            ["Apply free daily limits and Pro access", "Performance of our contract with you"],
+            ["Apply the daily usage limit", "Performance of our contract with you"],
             ["Send account emails, such as sign-in codes and password resets", "Performance of our contract with you"],
             ["Check and improve the accuracy and safety of AI-generated material, including through question reports", "Our legitimate interest in a reliable study tool"],
             ["Keep the Service secure, prevent abuse and fix errors", "Our legitimate interest in a secure service"],
@@ -169,18 +169,11 @@ export const PRIVACY_SECTIONS: PrivacySection[] = [
             ["US National Library of Medicine (PubMed)", "Find published sources", "Study topics"],
             ["Google", "Sign-in, only if you choose Sign in with Google", "Sign-in data"],
             ["Google Play, Apple App Store", "Distribute the apps", "As described in their own policies"],
-            ["WhatsApp (Meta)", "Messaging, only if you contact us there to buy Pro", "Your messages and phone number"],
+            ["WhatsApp (Meta)", "Messaging, only if you contact us there", "Your messages and phone number"],
           ],
         },
       },
       "We may also disclose information if required by law, to protect the rights, safety or security of our users or the public, or as part of a merger, acquisition or transfer of the Service — in which case this policy will continue to apply to your information.",
-    ],
-  },
-  {
-    id: "pro-purchases",
-    heading: "Pro purchases",
-    body: [
-      "Pro is not sold through the website or the apps. To buy it, you message us on WhatsApp, and we activate Pro on your account or send you an access code to redeem. We use that conversation only to arrange and confirm your purchase and to support you. We record your Pro status, its end date and any code you redeemed; payment details are not stored in StudyBuddy.",
     ],
   },
   {
@@ -253,16 +246,16 @@ export const PRIVACY_SECTIONS: PrivacySection[] = [
         list: [
           {
             term: "Deleted:",
-            text: "your account (email, username and sign-in), profile and plan; your study sheets and everything added to them; your decks, cards and review history; your QBank sets, answers, flags, notes and the questions generated for you; your question reports, usage counts and AI memory.",
+            text: "your account (email, username and sign-in) and profile; your study sheets and everything added to them; your decks, cards and review history; your QBank sets, answers, flags, notes and the questions generated for you; your question reports, usage counts and AI memory.",
           },
           {
             term: "Kept, with no link to you:",
-            text: "the text of reference-library queries and which passages they used, to measure answer quality; and any Pro access code you redeemed, which stays marked as used.",
+            text: "the text of reference-library queries and which passages they used, to measure answer quality; and any Pro access code you redeemed before StudyBuddy became free, which stays marked as used.",
           },
         ],
       },
       `If you cannot use the app, email ${PRIVACY_CONTACT_EMAIL} from the address on your account with the subject "Delete my account". We confirm the request and delete the account within 30 days.`,
-      "Guest work is stored only on your device: clear the site's data in your browser, or clear the app's data or uninstall it.",
+      "A guest's work from before accounts were required is stored only on their device: clear the site's data in your browser, or clear the app's data or uninstall it.",
     ],
   },
   {

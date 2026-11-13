@@ -5,7 +5,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { historyStart, summarizeCredits, timeUntilReset, utcDay } from "@/lib/daily-credits";
 
 /**
- * Today's AI allowance and the week behind it. The count is written by the
+ * Today's usage limit and the week behind it. The count is written by the
  * spend ledger's trigger (20261107000000_credits_meter.sql) as each AI call
  * finishes; the client only reads it.
  */

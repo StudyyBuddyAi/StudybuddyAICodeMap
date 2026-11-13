@@ -9,18 +9,11 @@ import {
   Settings,
   LogIn,
 } from "lucide-react";
-import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
 import { displayName } from "@/lib/display-name";
-import { supabase } from "@/integrations/supabase/client";
 import ThemeToggle from "@/components/ThemeToggle";
 import BrandMark from "@/components/brand/BrandMark";
 import { MemorialRibbonLink } from "@/components/memorial/entries";
-
-interface ProfileRow {
-  is_pro: boolean;
-  pro_expires_at: string | null;
-}
 
 interface AppNavProps {
   onNavigate?: () => void;
@@ -55,25 +48,6 @@ const AppNav = ({ onNavigate, onOpenAuth, onOpenAccount }: AppNavProps) => {
   const name = displayName(user);
   const signedIn = !!user && !isAnonymous;
   const brandTo = signedIn ? "/dashboard" : "/";
-
-  const userId = user?.id ?? null;
-  const profileQuery = useQuery({
-    queryKey: ["profile", userId],
-    enabled: !!userId && !isAnonymous,
-    queryFn: async (): Promise<ProfileRow | null> => {
-      const { data, error } = await supabase
-        .from("profiles")
-        .select("is_pro, pro_expires_at")
-        .eq("id", userId!)
-        .maybeSingle();
-      if (error) throw error;
-      return data;
-    },
-  });
-  const profile = profileQuery.data ?? null;
-  const isPro =
-    profile?.is_pro === true &&
-    (profile.pro_expires_at === null || new Date(profile.pro_expires_at) > new Date());
 
   // A prefix only counts at a path-segment boundary, so /qbank/session keeps
   // QBank lit but "/" doesn't match every route.
@@ -162,26 +136,8 @@ const AppNav = ({ onNavigate, onOpenAuth, onOpenAccount }: AppNavProps) => {
 
           {/* Account */}
           <div className="flex shrink-0 items-center gap-2">
-            {isPro && (
-              <span
-                className="hidden sm:inline"
-                style={{
-                  fontFamily: "var(--font-mono)",
-                  fontSize: 10,
-                  letterSpacing: "0.1em",
-                  textTransform: "uppercase",
-                  padding: "4px 10px",
-                  border: "1px solid var(--accent)",
-                  borderRadius: "var(--radius-pill)",
-                  color: "var(--accent)",
-                }}
-              >
-                Pro
-              </span>
-            )}
-
             {signedIn ? (
-              // One account button: Go Pro, theme and sign out live in Settings.
+              // One account button: usage, theme and sign out live in Settings.
               <button
                 type="button"
                 onClick={onOpenAccount}
