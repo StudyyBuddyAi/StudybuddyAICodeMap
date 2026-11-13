@@ -26,17 +26,23 @@ interface AuthModalProps {
   onSignedIn?: () => void;
   /** One line above the form saying why sign-in is needed here. */
   reason?: string;
+  /** The tab it opens on: "signin" (the default) or "signup". */
+  initialTab?: "signin" | "signup";
 }
 
 /** Seconds before a new code can be requested. */
 const RESEND_COOLDOWN_S = 60;
 
-const AuthModal = ({ open, onOpenChange, onSignedIn, reason }: AuthModalProps) => {
+const AuthModal = ({ open, onOpenChange, onSignedIn, reason, initialTab = "signin" }: AuthModalProps) => {
   const { signIn, signUp, signInWithGoogle, resetPasswordForEmail, verifyOtp, resendSignUpOtp, isAnonymous } =
     useAuth();
   const { toast } = useToast();
 
-  const [tab, setTab] = useState<"signin" | "signup">("signin");
+  const [tab, setTab] = useState<"signin" | "signup">(initialTab);
+  // Each time it opens, it opens on the tab asked for.
+  useEffect(() => {
+    if (open) setTab(initialTab);
+  }, [open, initialTab]);
 
   const [googleLoading, setGoogleLoading] = useState(false);
   const [googleError, setGoogleError] = useState<string | null>(null);

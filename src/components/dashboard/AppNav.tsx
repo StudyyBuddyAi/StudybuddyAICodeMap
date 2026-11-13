@@ -15,6 +15,7 @@ import { displayName } from "@/lib/display-name";
 import { supabase } from "@/integrations/supabase/client";
 import ThemeToggle from "@/components/ThemeToggle";
 import BrandMark from "@/components/brand/BrandMark";
+import { MemorialRibbonLink } from "@/components/memorial/entries";
 
 interface ProfileRow {
   is_pro: boolean;
@@ -93,7 +94,8 @@ const AppNav = ({ onNavigate, onOpenAuth, onOpenAccount }: AppNavProps) => {
         {/* 63px + the 1px border: the 64px --nav-h that sticky bars sit under.
             Below lg the second row makes it taller (openmed-tokens.css). */}
         <div className="flex h-14 items-center justify-between gap-3 lg:h-[63px] lg:gap-4">
-          {/* Brand */}
+          {/* Brand, and the memorial's ribbon beside it when that entry point is on. */}
+          <div className="flex shrink-0 items-center gap-1.5">
           <Link
             to={brandTo}
             onClick={onNavigate}
@@ -131,6 +133,8 @@ const AppNav = ({ onNavigate, onOpenAuth, onOpenAccount }: AppNavProps) => {
               Beta
             </span>
           </Link>
+          <MemorialRibbonLink />
+          </div>
 
           {/* Pages — one row in the bar from lg up. */}
           <nav aria-label="Main" className="hidden lg:block">

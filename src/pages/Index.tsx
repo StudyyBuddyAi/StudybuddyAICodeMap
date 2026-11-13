@@ -27,6 +27,7 @@ import { readPendingUpgrade } from "@/lib/auth-upgrade";
 import { isRecoveryPending } from "@/lib/recovery-landing";
 import { useTheme } from "@/hooks/use-theme";
 import GoProModal from "@/components/GoProModal";
+import { MemorialClosing, MemorialPlaque, MemorialRibbonLink } from "@/components/memorial/entries";
 import "@/pages/index.css";
 const SOCIALS = {
   instagram: "https://www.instagram.com/getstudybuddyai/",
@@ -307,11 +308,14 @@ function App() {
 
       <header className={`site-header ${menuOpen ? "menu-open" : ""}`}>
         <div className="container header-inner">
-          <a href="#home" className="brand" onClick={closeMenu} data-testid="link-brand-home" aria-label="StudyBuddy AI home">
-            <BrandMark size={44} className="brand-mark" />
-            <span className="brand-name">StudyBuddy <b>AI</b></span>
-            <span className="brand-beta">BETA</span>
-          </a>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
+            <a href="#home" className="brand" onClick={closeMenu} data-testid="link-brand-home" aria-label="StudyBuddy AI home">
+              <BrandMark size={44} className="brand-mark" />
+              <span className="brand-name">StudyBuddy <b>AI</b></span>
+              <span className="brand-beta">BETA</span>
+            </a>
+            <MemorialRibbonLink />
+          </div>
           <nav className="desktop-nav" aria-label="Primary navigation">
             {NAV_LINKS.map((link) => (
               <a href={link.href} key={link.href} data-testid={`link-nav-${link.href.slice(1)}`}>
@@ -453,6 +457,7 @@ function App() {
           </div>
         </section>
 
+        <MemorialClosing />
       </main>
 
       <footer className="site-footer">
@@ -463,7 +468,7 @@ function App() {
             <div><h4>Resources</h4><a href="#faq" data-testid="link-footer-faq">FAQ</a><a href="/privacy" data-testid="link-footer-privacy">Privacy Policy</a></div>
             <div><h4>Connect</h4><a href={SOCIALS.instagram} target="_blank" rel="noopener noreferrer" data-testid="link-footer-instagram"><Instagram size={14} /> Instagram</a><a href={SOCIALS.linkedin} target="_blank" rel="noopener noreferrer" data-testid="link-footer-linkedin"><Linkedin size={14} /> LinkedIn</a><a href={SOCIALS.telegram} target="_blank" rel="noopener noreferrer" data-testid="link-footer-telegram"><Send size={14} /> Telegram</a></div>
           </div>
-          <div className="footer-bottom"><span>© {new Date().getFullYear()} StudyBuddy AI</span><span>Built in Gaza, for medical students across MENA</span></div>
+          <div className="footer-bottom"><span>© {new Date().getFullYear()} StudyBuddy AI</span><MemorialPlaque className="footer-memorial" /><span>Built in Gaza, for medical students across MENA</span></div>
         </div>
       </footer>
       <GoProModal open={goProOpen} onOpenChange={setGoProOpen} />

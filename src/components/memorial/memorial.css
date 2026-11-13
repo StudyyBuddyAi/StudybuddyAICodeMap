@@ -1,0 +1,607 @@
+/* =============================================================================
+   The memorial (/in-memory) and its three ways in.
+
+   Inside the paper system (openmed-tokens.css): the same grounds, inks,
+   Newsreader for what is read, contact shadows for paper lying on paper.
+   The page is still on purpose: a plain ground over the living backdrop,
+   motion only when someone turns to the next tribute.
+   ============================================================================= */
+
+:root {
+  /* A photo print's paper. */
+  --mem-print: #fbfaf6;
+  --mem-print-shadow: 0 1px 1px rgba(14, 17, 22, 0.08), 0 14px 26px -16px rgba(14, 17, 22, 0.45);
+}
+[data-theme="dark"],
+.dark {
+  --mem-print: #d9d5cc;
+  --mem-print-shadow: 0 1px 1px rgba(0, 0, 0, 0.3), 0 16px 28px -14px rgba(0, 0, 0, 0.7);
+}
+
+/* ---------- The page ------------------------------------------------------ */
+.mem-page {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  min-height: 100vh;
+  min-height: 100dvh;
+  flex-direction: column;
+  overflow-x: clip;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-sans);
+}
+.mem-page ::selection {
+  background: color-mix(in srgb, var(--accent) 24%, transparent);
+}
+.mem-page :is(a, button):focus-visible,
+.mem-plaque:focus-visible,
+.mem-closing-link:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+.mem-bar {
+  display: flex;
+  width: 100%;
+  max-width: 1120px;
+  margin: 0 auto;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 20px;
+}
+.mem-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  border-radius: 6px;
+  color: var(--fg);
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.mem-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 6px;
+  color: var(--fg-muted);
+  font-size: 14px;
+  transition: color var(--dur-micro) ease;
+}
+.mem-back:hover {
+  color: var(--fg);
+}
+
+.mem-main {
+  width: 100%;
+  max-width: 1120px;
+  flex: 1;
+  margin: 0 auto;
+  padding: clamp(32px, 7vh, 88px) 20px clamp(64px, 11vh, 128px);
+}
+@media (max-width: 640px) {
+  .mem-bar,
+  .mem-main {
+    padding-inline: 16px;
+  }
+}
+
+/* A placeholder still waiting for the family's words. */
+.mem-ph {
+  color: var(--fg-muted);
+  text-decoration-color: color-mix(in srgb, var(--fg-muted) 60%, transparent);
+  text-decoration-line: underline;
+  text-decoration-style: dotted;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.2em;
+}
+
+/* ---------- The heading --------------------------------------------------- */
+.mem-heading {
+  max-width: 34ch;
+  margin: 0 auto;
+  color: var(--fg);
+  font-family: var(--font-display);
+  font-size: clamp(26px, 3vw, 40px);
+  font-style: italic;
+  font-weight: 400;
+  letter-spacing: -0.012em;
+  line-height: 1.24;
+  text-align: center;
+  text-wrap: balance;
+}
+
+/* ---------- The pile of tributes ------------------------------------------ */
+.tributes {
+  margin-top: clamp(36px, 6vh, 64px);
+}
+/* Above the pile, so it stays put when the next tribute is longer or shorter. */
+.tribute-nav {
+  justify-content: center;
+  margin-bottom: 28px;
+}
+.tribute-pile {
+  position: relative;
+  max-width: 800px;
+  margin: 0 auto;
+  touch-action: pan-y;
+}
+.tribute-pile[data-photos] {
+  max-width: 1060px;
+}
+/* A sheet of paper. The ones under the top sheet lie the same size as it,
+   their words hidden; the top sheet is as long as its own tribute and sets
+   the pile's height. */
+.tribute {
+  position: absolute;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sheet);
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-sheet);
+  inset: 0;
+  transition: transform 560ms var(--ease-out);
+}
+.tribute[data-depth="0"] {
+  position: relative;
+  z-index: 3;
+  overflow: visible;
+  inset: auto;
+  transform: none;
+}
+.tribute[data-depth="1"] {
+  z-index: 2;
+  transform: translate(10px, 9px) rotate(0.8deg);
+}
+.tribute[data-depth="2"] {
+  z-index: 1;
+  transform: translate(-9px, 16px) rotate(-1.2deg);
+}
+.tribute[data-depth="3"] {
+  z-index: 0;
+  opacity: 0;
+  transform: translate(-9px, 16px) rotate(-1.2deg);
+}
+.tribute:not([data-depth="0"]) .tribute-sheet {
+  visibility: hidden;
+}
+@media (prefers-reduced-motion: no-preference) {
+  /* Out to the side at its full length, clear of the pile, then under it at
+     the pile's length. */
+  .tribute.is-tucking {
+    bottom: auto;
+    animation: tribute-tuck 820ms cubic-bezier(0.3, 0.7, 0.2, 1) both;
+  }
+  .tribute.is-untucking {
+    animation: tribute-untuck 820ms cubic-bezier(0.3, 0.7, 0.2, 1) both;
+  }
+  .tribute.is-yielding {
+    bottom: auto;
+    animation: tribute-yield 820ms linear both;
+  }
+  .tribute.is-tucking .tribute-sheet,
+  .tribute.is-yielding .tribute-sheet {
+    visibility: visible;
+  }
+}
+@keyframes tribute-tuck {
+  0% {
+    z-index: 5;
+    max-height: none;
+    transform: none;
+  }
+  48% {
+    z-index: 5;
+    max-height: none;
+    transform: translate(-106%, -1%) rotate(-3deg);
+  }
+  52% {
+    z-index: 0;
+    max-height: 100%;
+    transform: translate(-106%, -1%) rotate(-3deg);
+  }
+  100% {
+    z-index: 0;
+    max-height: 100%;
+    transform: translate(-9px, 16px) rotate(-1.2deg);
+  }
+}
+@keyframes tribute-untuck {
+  0% {
+    z-index: 0;
+    transform: translate(-9px, 16px) rotate(-1.2deg);
+  }
+  48% {
+    z-index: 0;
+    transform: translate(-106%, -1%) rotate(-3deg);
+  }
+  52% {
+    z-index: 5;
+    transform: translate(-106%, -1%) rotate(-3deg);
+  }
+  100% {
+    z-index: 5;
+    transform: none;
+  }
+}
+/* Back: the sheet that was on top keeps its full length until it is covered. */
+@keyframes tribute-yield {
+  0%,
+  50% {
+    max-height: none;
+  }
+  52%,
+  100% {
+    max-height: 100%;
+  }
+}
+
+/* ---------- A tribute ----------------------------------------------------- */
+.tribute-sheet {
+  display: grid;
+  align-content: start;
+  padding: clamp(26px, 5vw, 60px) clamp(22px, 5.5vw, 68px);
+  gap: clamp(28px, 4vw, 52px);
+}
+@media (min-width: 900px) {
+  /* Photos beside the words, and staying in view while the words are read. */
+  .tribute-sheet[data-photos] {
+    align-items: start;
+    grid-template-columns: minmax(0, 0.92fr) minmax(0, 1.08fr);
+  }
+  .tribute-sheet[data-photos] .collage {
+    position: sticky;
+    top: 24px;
+  }
+}
+.tribute-name {
+  color: var(--fg);
+  font-family: var(--font-display);
+  font-size: clamp(26px, 2.8vw, 34px);
+  font-weight: 500;
+  letter-spacing: -0.014em;
+  line-height: 1.15;
+  text-wrap: balance;
+}
+.tribute-years {
+  margin-top: 8px;
+  color: var(--fg-muted);
+  font-family: var(--font-display);
+  font-size: 17px;
+  font-variant-numeric: lining-nums tabular-nums;
+}
+.tribute-text {
+  display: grid;
+  margin-top: 28px;
+  gap: 16px;
+}
+.tribute-text p {
+  max-width: 64ch;
+  color: var(--fg);
+  font-family: var(--font-display);
+  font-size: 18.5px;
+  line-height: 1.7;
+}
+/* The classmates' names, as a class register on the app's index-card ruling,
+   in its accent: a full teal rule under the heading, and lighter teal lines
+   between the names. */
+.tribute-roll {
+  display: grid;
+  margin: 28px 0 0;
+  padding: 0;
+  border-top: 1.5px solid var(--accent);
+  column-gap: clamp(24px, 4vw, 48px);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  list-style: none;
+}
+.tribute-roll li {
+  padding: 20px 0 18px;
+  border-bottom: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  color: var(--fg);
+  font-family: var(--font-display);
+  font-size: clamp(21px, 2.1vw, 26px);
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  line-height: 1.25;
+  text-wrap: balance;
+}
+@media (max-width: 900px) {
+  .tribute-roll {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 520px) {
+  .tribute-roll {
+    grid-template-columns: 1fr;
+  }
+}
+@media (max-width: 640px) {
+  .tribute-text p {
+    font-size: 17px;
+  }
+}
+
+/* ---------- The photos ---------------------------------------------------- */
+/* Mounted the way the app mounts paper: one print-paper mount with a contact
+   shadow and a faint teal edge, the photos set into it with the mount's own
+   paper between them, each with a teal keyline. The mount lies a touch
+   askew on the sheet, like a print laid on a page. */
+.collage {
+  display: grid;
+  margin: 0;
+  padding: 10px;
+  border-radius: 3px;
+  background: var(--mem-print);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--accent) 20%, transparent),
+    var(--mem-print-shadow);
+  gap: 10px;
+  transform: rotate(-0.6deg);
+}
+.collage--mosaic {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.5fr);
+}
+.collage-photo {
+  position: relative;
+  overflow: hidden;
+  border-radius: 2px;
+  aspect-ratio: var(--ar);
+  background: var(--bg-panel);
+}
+.collage--mosaic .collage-photo {
+  grid-column: 1;
+  aspect-ratio: 6 / 5;
+}
+/* The tall photo on the right runs the full height of the ones beside it. */
+.collage--mosaic .collage-photo[data-lead] {
+  grid-column: 2;
+  aspect-ratio: auto;
+}
+.collage-photo img {
+  position: absolute;
+  display: block;
+  width: 100%;
+  height: 100%;
+  inset: 0;
+  object-fit: cover;
+  -webkit-user-drag: none;
+  user-select: none;
+}
+.collage-photo::after {
+  position: absolute;
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 55%, transparent);
+  content: "";
+  inset: 0;
+  pointer-events: none;
+}
+@media (max-width: 899.98px) {
+  .collage {
+    width: min(100%, 560px);
+    justify-self: center;
+  }
+}
+@media (max-width: 640px) {
+  .collage {
+    padding: 8px;
+    gap: 8px;
+  }
+}
+
+/* ---------- The founder, under the tributes -------------------------------- */
+.mem-founder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-top: clamp(64px, 10vh, 104px);
+  text-align: center;
+}
+.mem-founder-name {
+  color: var(--fg);
+  font-family: var(--font-display);
+  font-size: 24px;
+  font-style: italic;
+  line-height: 1.2;
+}
+.mem-founder-role {
+  margin-top: 6px;
+  color: var(--fg-muted);
+  font-size: 14px;
+}
+.mem-contact {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  margin: 22px 0 0;
+  padding: 0;
+  gap: 10px;
+  list-style: none;
+}
+.mem-contact-button {
+  display: inline-flex;
+  height: 42px;
+  align-items: center;
+  padding: 0 18px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-control);
+  background: var(--bg-elevated);
+  box-shadow: 0 1px 0 rgba(14, 17, 22, 0.04);
+  color: var(--fg);
+  font-size: 14px;
+  font-weight: 500;
+  gap: 8px;
+  transition:
+    border-color var(--dur-micro) ease,
+    color var(--dur-micro) ease;
+}
+.mem-contact-button svg {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  color: var(--accent);
+}
+.mem-contact-button:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.mem-contact-button:active {
+  transform: translateY(1px);
+}
+
+/* ---------- Previous / next ----------------------------------------------- */
+.mem-nav {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.mem-arrow {
+  display: grid;
+  width: 40px;
+  height: 40px;
+  flex: none;
+  place-items: center;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: var(--bg-elevated);
+  color: var(--fg);
+  transition:
+    background-color var(--dur-micro) ease,
+    border-color var(--dur-micro) ease;
+}
+.mem-arrow:hover {
+  border-color: var(--fg-subtle);
+  background: var(--bg-panel);
+}
+.mem-arrow:active {
+  transform: translateY(1px);
+}
+.mem-count {
+  min-width: 64px;
+  color: var(--fg-muted);
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+/* ---------- The ways in --------------------------------------------------- */
+/* The footer line. */
+.mem-plaque {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border-radius: 4px;
+  color: inherit;
+  text-decoration: none;
+  transition: color var(--dur-micro) ease;
+}
+.mem-plaque:hover {
+  color: var(--fg);
+}
+.mem-plaque:hover span {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.mem-plaque-mark {
+  flex: none;
+  color: var(--fg);
+}
+
+/* The ribbon by the logo. */
+.mem-ribbon {
+  display: inline-grid;
+  width: 30px;
+  height: 30px;
+  flex: none;
+  place-items: center;
+  border-radius: 999px;
+  color: var(--fg);
+  transition: background-color var(--dur-micro) ease;
+}
+.mem-ribbon:hover {
+  --mem-ribbon-gap: var(--bg-panel);
+  background: var(--bg-panel);
+}
+.mem-ribbon:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* The closing line on the landing page. */
+.mem-closing {
+  padding: clamp(72px, 11vw, 128px) 20px;
+}
+.mem-closing-inner {
+  display: flex;
+  max-width: 680px;
+  flex-direction: column;
+  align-items: center;
+  margin: 0 auto;
+  text-align: center;
+}
+.mem-closing-prints {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 0 30px;
+  padding: 0;
+  list-style: none;
+}
+.mem-closing-prints li {
+  width: 72px;
+  margin-inline: -5px;
+}
+/* One small print per tribute, in the same mount as the memorial's photos. */
+.mem-thumb {
+  padding: 5px;
+  border-radius: 2px;
+  aspect-ratio: 4 / 5;
+  background: var(--mem-print);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--accent) 20%, transparent),
+    0 1px 1px rgba(14, 17, 22, 0.08),
+    0 8px 14px -8px rgba(14, 17, 22, 0.45);
+}
+.mem-thumb img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 1px;
+  object-fit: cover;
+}
+.mem-closing-prints li:nth-child(odd) {
+  transform: translateY(4px) rotate(-6deg);
+}
+.mem-closing-prints li:nth-child(even) {
+  position: relative;
+  z-index: 1;
+  transform: rotate(1.5deg);
+}
+.mem-closing-prints li:nth-child(3) {
+  transform: translateY(5px) rotate(6deg);
+}
+.mem-closing-line {
+  margin: 0;
+  color: var(--fg);
+  font-family: var(--font-display);
+  font-size: clamp(22px, 2.6vw, 30px);
+  font-style: italic;
+  font-weight: 400;
+  line-height: 1.3;
+  text-wrap: balance;
+}
+.mem-closing-link {
+  display: inline-flex;
+  align-items: center;
+  margin-top: 18px;
+  gap: 6px;
+  border-radius: 4px;
+  color: var(--fg-muted);
+  font-size: 14px;
+  text-decoration: none;
+  transition: color var(--dur-micro) ease;
+}
+.mem-closing-link:hover {
+  color: var(--fg);
+}

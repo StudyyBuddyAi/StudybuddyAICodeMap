@@ -2,8 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import type { Question } from "@/lib/qbank-types";
 
-// The review's two networked children are not what this tests.
-vi.mock("./FullExplanation", () => ({ default: () => null }));
+// The review's networked child is not what this tests.
 vi.mock("./ReportQuestion", () => ({ default: () => null }));
 
 import AnswerReview from "./AnswerReview";

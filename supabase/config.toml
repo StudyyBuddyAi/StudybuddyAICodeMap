@@ -18,8 +18,12 @@ additional_redirect_urls = [
   "https://www.studyybuddyai.com/auth/callback",
   "http://localhost:8080/auth/callback",
 ]
-# Every visitor is signed in anonymously on load (src/hooks/use-auth.ts).
-# Turning this off breaks the entire app, not just signup.
+# Using the app takes an account now: visitors are no longer signed in
+# anonymously (src/components/auth/RequireAccount.tsx). Turn this off, in the
+# dashboard (Authentication > Sign In / Providers > "Allow anonymous sign-ins")
+# and then here, only once that frontend is live: the frontend before it signs
+# every visitor in anonymously and breaks without it. Guests from before keep
+# their sessions and can still turn them into accounts.
 enable_anonymous_sign_ins = true
 
 [auth.external.google]
