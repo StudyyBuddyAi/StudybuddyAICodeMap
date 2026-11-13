@@ -1,6 +1,6 @@
 import type { CSSProperties } from "react";
 import { ArrowLeft, ArrowRight } from "lucide-react";
-import { DEFAULT_PHOTO_ASPECT, type MemorialTribute } from "@/content/memorial";
+import type { MemorialPhoto, MemorialTribute } from "@/content/memorial";
 
 /**
  * Text with any [bracketed] placeholder marked as one, so a draft never
@@ -20,16 +20,56 @@ export const MemText = ({ children }: { children: string }) => (
   </>
 );
 
-/** A tribute's photo as a print, in the photo's own shape. Nothing at all until there is one. */
-export const TributePrint = ({ tribute, className = "" }: { tribute: MemorialTribute; className?: string }) =>
-  tribute.photo ? (
-    <div
-      className={`mem-print ${className}`}
-      style={{ "--ar": String(tribute.photoAspect ?? DEFAULT_PHOTO_ASPECT) } as CSSProperties}
-    >
-      <img src={tribute.photo} alt={tribute.name} draggable={false} />
+const PhotoImg = ({ photo, alt = photo.alt, eager }: { photo: MemorialPhoto; alt?: string; eager?: boolean }) => (
+  <img
+    src={photo.src}
+    alt={alt}
+    draggable={false}
+    loading={eager ? "eager" : "lazy"}
+    decoding="async"
+    style={photo.focus ? { objectPosition: photo.focus } : undefined}
+  />
+);
+
+/**
+ * A tribute's photos, mounted the way the app mounts paper: one print-paper
+ * mount, a contact shadow, the photos set into it with the mount's own paper
+ * between them and a teal keyline round each. Nothing at all with no photos.
+ */
+export const TributeCollage = ({ tribute, eager }: { tribute: MemorialTribute; eager?: boolean }) => {
+  if (!tribute.photos.length) return null;
+  const mosaic = tribute.collage === "mosaic" && tribute.photos.length > 1;
+  return (
+    <figure className={`collage collage--${mosaic ? "mosaic" : "stack"}`}>
+      {tribute.photos.map((p, i) => (
+        <div
+          key={p.src}
+          className="collage-photo"
+          data-lead={mosaic && i === 0 ? true : undefined}
+          style={
+            {
+              "--ar": String(p.aspect),
+              ...(mosaic && i === 0 ? { gridRow: `1 / span ${tribute.photos.length - 1}` } : {}),
+            } as CSSProperties
+          }
+        >
+          <PhotoImg photo={p} eager={eager} />
+        </div>
+      ))}
+    </figure>
+  );
+};
+
+/** The one photo that stands for a tribute, as a small print (the landing page). */
+export const CoverPrint = ({ tribute }: { tribute: MemorialTribute }) => {
+  const photo = tribute.photos[tribute.cover ?? 0];
+  if (!photo) return null;
+  return (
+    <div className="mem-thumb">
+      <PhotoImg photo={photo} alt="" />
     </div>
-  ) : null;
+  );
+};
 
 /** The name, the years and the words, exactly as written. */
 export const TributeWords = ({ tribute }: { tribute: MemorialTribute }) => (

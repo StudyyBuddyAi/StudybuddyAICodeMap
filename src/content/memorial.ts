@@ -7,12 +7,22 @@
  * keep them exactly as written: no rephrasing, the en dash in the years, the
  * paragraph breaks as they are.
  *
- * A photo is optional. Put it in public/memorial/ and set `photo` to its path
- * (e.g. "/memorial/father.jpg"), and `photoAspect` to its width ÷ height so
- * its print keeps the photo's own shape. With no photo, nothing stands in for
- * one.
+ * Photos are optional. They live in public/memorial/, cut from the family's
+ * collages so the page can lay them out in its own frame. With none, nothing
+ * stands in for one.
  */
 export type MemorialTributeId = "father" | "mother" | "brother";
+
+export interface MemorialPhoto {
+  /** A path under public/. */
+  src: string;
+  /** The file's width ÷ height. */
+  aspect: number;
+  /** Who the photo shows, for screen readers: names only. */
+  alt: string;
+  /** What to keep in frame if a layout trims the photo (CSS object-position). */
+  focus?: string;
+}
 
 export interface MemorialTribute {
   id: MemorialTributeId;
@@ -22,10 +32,15 @@ export interface MemorialTribute {
   years: string;
   /** The tribute itself, one string per paragraph. */
   paragraphs: string[];
-  /** A path under public/, or null until there is a photo. */
-  photo: string | null;
-  /** The photo's width ÷ height. Leave it out for a portrait 4:5. */
-  photoAspect?: number;
+  photos: MemorialPhoto[];
+  /**
+   * How the photos are laid out. "stack": each whole, one under the other.
+   * "mosaic": the first photo tall on the right, the rest down the left, as
+   * the family's own collage had them.
+   */
+  collage?: "stack" | "mosaic";
+  /** The photo that stands for the tribute where only one fits. Default 0. */
+  cover?: number;
 }
 
 export interface MemorialContent {
@@ -47,7 +62,11 @@ export const MEMORIAL: MemorialContent = {
         "Retiring didn't stop him. He kept seeing patients at his own clinic, and when the war came he still kept going. As his health got worse, the treatment he needed was no longer available in Gaza. He passed away from heart failure in 2024, the day after a long shift at his clinic, where he had treated dozens of patients displaced by the war.",
         "He gave his life to caring for others, right up to the very last day.",
       ],
-      photo: null,
+      photos: [
+        { src: "/memorial/father-1.jpg", aspect: 0.7858, alt: "Dr. Ibrahim Mustafa Shihada" },
+        { src: "/memorial/father-2.jpg", aspect: 1.7904, alt: "Dr. Ibrahim Mustafa Shihada" },
+      ],
+      collage: "stack",
     },
     {
       id: "mother",
@@ -59,7 +78,15 @@ export const MEMORIAL: MemorialContent = {
         "Alongside all of that, she raised a family of eight. She was a loving mother, and later a devoted grandmother.",
         "She passed away suddenly in 2018. Generations of her students still remember her with gratitude, and so do the children and grandchildren she raised with so much love.",
       ],
-      photo: null,
+      photos: [
+        {
+          src: "/memorial/mother-1.jpg",
+          aspect: 1.4458,
+          alt: "Ruwaida Muhammad Hussein and Dr. Ibrahim Mustafa Shihada",
+          focus: "30% 45%",
+        },
+      ],
+      collage: "stack",
     },
     {
       id: "brother",
@@ -72,13 +99,17 @@ export const MEMORIAL: MemorialContent = {
         "In 2025 he passed away from a sudden cardiac arrest while on duty at the International Medical Corps field hospital in central Gaza. In the months before, he had been carrying the grief of losing his father and his home and the separation from his family, all while working under extreme strain, through famine and with too little food and water.",
         "He was a loving father of four, a devoted husband, and a caring big brother. He gave everything he had to his patients and his family.",
       ],
-      photo: null,
+      photos: [
+        { src: "/memorial/brother-1.jpg", aspect: 0.5962, alt: "Dr. Mustafa Ibrahim Shihada", focus: "50% 40%" },
+        { src: "/memorial/brother-2.jpg", aspect: 1.2116, alt: "Dr. Mustafa Ibrahim Shihada", focus: "55% 40%" },
+        { src: "/memorial/brother-3.jpg", aspect: 1.0829, alt: "Dr. Mustafa Ibrahim Shihada", focus: "70% 35%" },
+        { src: "/memorial/brother-4.jpg", aspect: 1.1706, alt: "Dr. Mustafa Ibrahim Shihada", focus: "35% 40%" },
+      ],
+      collage: "mosaic",
+      cover: 3,
     },
   ],
 };
-
-/** The portrait shape a print takes when its tribute gives none. */
-export const DEFAULT_PHOTO_ASPECT = 4 / 5;
 
 export const hasPlaceholder = (s: string) => /\[[^\]]+\]/.test(s);
 

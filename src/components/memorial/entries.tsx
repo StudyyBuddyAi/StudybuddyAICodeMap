@@ -2,7 +2,7 @@ import { Link } from "react-router-dom";
 import { ArrowRight } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { MEMORIAL } from "@/content/memorial";
-import { MemText, RibbonMark, TributePrint } from "./parts";
+import { CoverPrint, MemText, RibbonMark } from "./parts";
 import { MEMORIAL_LIVE } from "./memorial-live";
 import "./memorial.css";
 
@@ -51,11 +51,11 @@ export const MemorialRibbonLink = ({ className = "" }: { className?: string }) =
 
 /**
  * The landing page ends the way a book begins: with the memorial's heading,
- * and the photos once there are any.
+ * and one photo for each of them.
  */
 export const MemorialClosing = () => {
   if (!MEMORIAL_LIVE) return null;
-  const withPhotos = MEMORIAL.tributes.filter((t) => t.photo);
+  const withPhotos = MEMORIAL.tributes.filter((t) => t.photos.length);
   return (
     <section className="mem-closing" aria-label="Memorial">
       <div className="mem-closing-inner">
@@ -63,7 +63,7 @@ export const MemorialClosing = () => {
           <ul className="mem-closing-prints" aria-hidden="true">
             {withPhotos.map((t) => (
               <li key={t.id}>
-                <TributePrint tribute={t} />
+                <CoverPrint tribute={t} />
               </li>
             ))}
           </ul>

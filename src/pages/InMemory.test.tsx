@@ -56,9 +56,18 @@ describe("InMemory", () => {
     expect(showing()).toBe(`3 of 3: ${brother.name}`);
   });
 
-  it("shows only the top tribute to a screen reader, and no image until there is a photo", () => {
-    const { container } = renderPage();
+  it("shows only the top tribute to a screen reader, with its own photos", () => {
+    renderPage();
     expect(screen.getAllByRole("heading", { level: 2 })).toHaveLength(1);
-    expect(container.querySelector("img")).toBeNull();
+    const photos = screen.getAllByRole("img");
+    expect(photos.map((img) => img.getAttribute("src"))).toEqual(father.photos.map((p) => p.src));
+    expect(photos.every((img) => img.getAttribute("alt") === father.name)).toBe(true);
+  });
+
+  it("lays each tribute's photos in its own collage on its sheet", () => {
+    const { container } = renderPage();
+    const sheets = Array.from(container.querySelectorAll("article.tribute"));
+    expect(sheets.map((s) => s.querySelectorAll(".collage img").length)).toEqual([2, 1, 4]);
+    expect(sheets[2].querySelector(".collage--mosaic [data-lead] img")?.getAttribute("src")).toBe(brother.photos[0].src);
   });
 });
