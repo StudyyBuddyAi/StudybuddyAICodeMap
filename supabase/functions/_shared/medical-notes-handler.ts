@@ -450,7 +450,7 @@ export async function handleMedicalNotes(req: Request, opts: MedicalNotesOptions
     const isFollowUp = isSection || isBranch;
 
     // Whether the sheet a follow-up sends is one this server wrote, section by
-    // section. It decides the day's allowance, never whether the request runs.
+    // section. It decides the daily cap, never whether the request runs.
     const followUpRequest = branch ?? section;
     const signed = followUpRequest
       ? await verifySections(signingSecret(), followUpRequest.signature, followUpRequest.topic, followUpRequest.sent).catch(() => false)
@@ -639,15 +639,11 @@ export async function handleMedicalNotes(req: Request, opts: MedicalNotesOptions
     // Entitlement → tier, then premium hook and quota side by side.
     const routingStartedAt = Date.now();
     const routingPromise = (async () => {
-      const { data: profile } = await authClient
-        .from("profiles")
-        .select("is_pro, pro_expires_at")
-        .eq("id", user.id)
-        .maybeSingle();
-
-      const isProUser =
-        profile?.is_pro === true &&
-        (profile.pro_expires_at === null || new Date(profile.pro_expires_at) > new Date());
+      // Free access (2026-11): every account gets what Pro had, the premium
+      // writer and no per-tool daily caps, and the day's credits are the one
+      // limit. Only anonymous guests from before accounts were required keep
+      // the old free caps. The profile's is_pro is no longer read.
+      const isProUser = !isAnonymous;
       // Pro is always the premium writer. The old "fastest" choice
       // (preferred_model "gpt-oss") pointed at GPT-OSS, and the only other
       // Corti writer is slower, not faster, so the stored value is ignored.

@@ -19,7 +19,6 @@ import {
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import DashboardLayout from "@/components/dashboard/DashboardLayout";
 import AuthModal from "@/components/AuthModal";
-import GoProModal from "@/components/GoProModal";
 import TopicComposer from "@/components/qbank/TopicComposer";
 import SystemBrowser from "@/components/qbank/SystemBrowser";
 import SuggestionCards from "@/components/qbank/SuggestionCards";
@@ -27,8 +26,9 @@ import ExamSwitch from "@/components/qbank/ExamSwitch";
 import DifficultyScale from "@/components/qbank/DifficultyScale";
 import WritingOverlay from "@/components/qbank/WritingOverlay";
 import { EXAM_THEME } from "@/lib/qbank-exam-theme";
-import { useUsageLimit, MAX_DAILY_QBANK_QUESTIONS } from "@/hooks/use-usage-limit";
-import { examBlockFor, largestSetSize } from "../../supabase/functions/_shared/qbank-allowance.ts";
+import { useDailyLimit } from "@/hooks/use-usage-limit";
+import { UsageLimitLine } from "@/components/usage/UsageLimitLine";
+import { EXAM_BLOCK } from "../../supabase/functions/_shared/qbank-limits.ts";
 import SetSizeStepper from "@/components/qbank/SetSizeStepper";
 import { useQBankReviewQueue } from "@/hooks/use-qbank-review-queue";
 import { useQBankTarget } from "@/hooks/use-qbank-target";
@@ -145,21 +145,17 @@ const QBank = () => {
   const [resumingId, setResumingId] = useState<string | null>(null);
   // Signing in happens here, so the topic a sheet handed over is still in the box afterwards.
   const [authOpen, setAuthOpen] = useState(false);
-  const [goProOpen, setGoProOpen] = useState(false);
 
   // The exam the student prepares for — a remembered page setting, not a pill
   // on every set.
   const [target, setTarget] = useQBankTarget();
   const theme = EXAM_THEME[target];
 
-  // The free allowance: ten delivered questions a day (Pro: null, unlimited).
-  // The picker never offers a set the server would cut short.
-  const { qbankRemaining, isProUser, isLoading: usageLoading } = useUsageLimit();
-  const remaining = usageLoading ? null : qbankRemaining;
-  const maxSize = largestSetSize(remaining, MAX_SET_SIZE);
-  const outOfQuestions = remaining === 0;
-  const examBlock = examBlockFor(remaining);
-  const fit = useCallback((size: number) => (remaining === null ? size : Math.min(size, remaining)), [remaining]);
+  // Every account has the whole range of set sizes and the full exam block;
+  // the day's usage limit, shared with sheets and decks, is the one limit.
+  const { reached: outOfQuestions } = useDailyLimit();
+  const maxSize = MAX_SET_SIZE;
+  const examBlock = EXAM_BLOCK;
 
   // Missed and marked questions that are due back. Re-sits are free.
   const { queue } = useQBankReviewQueue();
@@ -194,12 +190,6 @@ const QBank = () => {
   const [showOptions, setShowOptions] = useState(false);
 
   const [setSize, setSetSize] = useState(DEFAULT_SET_SIZE);
-  // Keep the chosen size inside today's allowance as it changes — after a set,
-  // or once usage loads.
-  useEffect(() => {
-    if (maxSize > 0 && setSize > maxSize) setSetSize(maxSize);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [maxSize]);
   const [challenge, setChallenge] = useState<ChallengeLevel>("balanced");
   const [playMode, setPlayMode] = useState<PlayMode>("tutor");
   const [isStarting, setIsStarting] = useState(false);
@@ -272,7 +262,7 @@ const QBank = () => {
 
   /**
    * Every way into a set ends here: the composer, a card, a quick start. The
-   * size is held inside a free allowance; the exam is the page's target.
+   * exam is the page's target.
    */
   const launch = useCallback(
     async (spec: {
@@ -284,7 +274,7 @@ const QBank = () => {
       id?: string;
     }) => {
       if (isStarting || outOfQuestions || spec.topics.length === 0) return;
-      const size = fit(spec.size);
+      const size = spec.size;
       if (size <= 0) return;
 
       cancelledRef.current = false;
@@ -317,7 +307,7 @@ const QBank = () => {
         toast({ title: "Could not generate questions", description: message, variant: "destructive" });
       }
     },
-    [isStarting, outOfQuestions, fit, startGeneratedSession, target, playMode, queryClient, navigate, toast]
+    [isStarting, outOfQuestions, startGeneratedSession, target, playMode, queryClient, navigate, toast]
   );
 
   /** The composer's set: its chips plus anything typed and not yet added. */
@@ -344,7 +334,6 @@ const QBank = () => {
 
   /** An exam block: one topic per question across the systems, by exam weight. */
   const startExamBlock = () => {
-    if (!examBlock) return;
     const block = buildExamBlock({ target, size: examBlock.size, curriculum });
     void launch({ topics: block.topics, systems: block.systems, size: examBlock.size, level: "balanced", mode: "timed", id: "exam-block" });
   };
@@ -574,24 +563,8 @@ const QBank = () => {
                   )}
                 </div>
 
-                {/* Today's allowance — free accounts only. */}
-                {!isProUser && remaining !== null && (
-                  <p className="text-xs leading-relaxed text-muted-foreground">
-                    {outOfQuestions ? (
-                      <span className="font-medium text-warning">
-                        You've used today's {MAX_DAILY_QBANK_QUESTIONS} free questions · they reset at midnight UTC ·{" "}
-                      </span>
-                    ) : (
-                      <span>
-                        {remaining} of {MAX_DAILY_QBANK_QUESTIONS} free questions left today · retries of missed and
-                        marked questions are free ·{" "}
-                      </span>
-                    )}
-                    <button type="button" className="underline hover:text-foreground" onClick={() => setGoProOpen(true)}>
-                      Go Pro for unlimited
-                    </button>
-                  </p>
-                )}
+                {/* Today's usage limit, the same line as under every tool. */}
+                <UsageLimitLine />
 
                 {/* The set in one line, and the button that starts it. */}
                 <div className="flex flex-col gap-3 border-t border-[color:var(--color-border)] pt-4 sm:flex-row sm:items-center">
@@ -654,13 +627,12 @@ const QBank = () => {
                       <p className={`${MONO_EYEBROW} text-muted-foreground mb-2`}>Questions</p>
                       <SetSizeStepper
                         value={setSize}
-                        max={Math.max(1, maxSize)}
+                        max={maxSize}
                         onChange={setSetSize}
                         disabled={isStarting || outOfQuestions}
                       />
                       <p className="mt-2 text-[11px] text-muted-foreground">
-                        Any number from 1 to {Math.max(1, maxSize)}
-                        {remaining === null ? " — 20 is a USMLE block" : " today"}. You start after the first one is
+                        Any number from 1 to {maxSize} — 20 is a USMLE block. You start after the first one is
                         written; the rest arrive while you answer.
                       </p>
                     </div>
@@ -691,7 +663,7 @@ const QBank = () => {
                 onShuffle={() => setSeed((s) => s + 1)}
                 startingId={startingId}
                 disabled={quickBusy}
-                sizeFor={(s) => fit(s.size)}
+                sizeFor={(s) => s.size}
                 badge={{ label: theme.label === "Both" ? "Step 1 + 2 CK" : theme.label, className: theme.badge }}
               />
 
@@ -701,19 +673,17 @@ const QBank = () => {
                   Quick start
                 </h2>
                 <div className="grid gap-2.5 sm:grid-cols-3">
-                  {examBlock && (
-                    <QuickStart
-                      icon={Timer}
-                      title={`${remaining === null ? "Exam block" : "Half exam block"} · ${examBlock.size} Q`}
-                      detail={`Timed, ${Number.isInteger(examBlock.minutes) ? examBlock.minutes : examBlock.minutes.toFixed(1)} min — mixed across systems like the real exam`}
-                      busy={startingId === "exam-block"}
-                      disabled={quickBusy || curriculum.length === 0}
-                      onClick={startExamBlock}
-                    />
-                  )}
+                  <QuickStart
+                    icon={Timer}
+                    title={`Exam block · ${examBlock.size} Q`}
+                    detail={`Timed, ${examBlock.minutes} min — mixed across systems like the real exam`}
+                    busy={startingId === "exam-block"}
+                    disabled={quickBusy || curriculum.length === 0}
+                    onClick={startExamBlock}
+                  />
                   <QuickStart
                     icon={CalendarDays}
-                    title={`Daily ${fit(5)}`}
+                    title="Daily 5"
                     detail="A quick mix of what you studied most recently"
                     busy={startingId === "daily-5"}
                     disabled={quickBusy}
@@ -826,7 +796,6 @@ const QBank = () => {
           if (error) setError(null);
         }}
       />
-      <GoProModal open={goProOpen} onOpenChange={setGoProOpen} />
       <AuthModal
         open={authOpen}
         onOpenChange={setAuthOpen}

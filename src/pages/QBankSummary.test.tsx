@@ -21,7 +21,7 @@ vi.mock("react-router-dom", async (orig) => ({
 vi.mock("@/components/dashboard/DashboardLayout", () => ({ default: ({ children }: { children: React.ReactNode }) => <div>{children}</div> }));
 vi.mock("@/integrations/supabase/client", () => ({ supabase: {} }));
 vi.mock("@/lib/qbank-generation-report", () => ({ fetchGenerationReport: async () => null }));
-vi.mock("@/hooks/use-usage-limit", () => ({ useUsageLimit: () => ({ qbankRemaining: null, refresh: vi.fn() }) }));
+vi.mock("@/hooks/use-usage-limit", () => ({ useDailyLimit: () => ({ reached: false, percent: 0, resetsIn: "5h", isLoading: false, refresh: vi.fn() }) }));
 vi.mock("@/hooks/use-flashcard-deck", () => ({ useFlashcardDeck: () => ({ saveCards: vi.fn() }) }));
 vi.mock("@/hooks/use-toast", () => ({ useToast: () => ({ toast: vi.fn() }) }));
 

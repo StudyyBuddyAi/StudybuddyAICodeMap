@@ -196,22 +196,23 @@ const baseOpts = () => ({
   retryBackoffMs: [0, 0],
 });
 
-describe("runQbankGeneration — free daily allowance", () => {
-  const capped = () => errorResponse(429, "You've used today's 10 free questions.", "daily_cap");
+describe("runQbankGeneration — the day's usage limit", () => {
+  const capped = () =>
+    errorResponse(429, "You've reached today's usage limit. It resets at midnight UTC.", "credits_exhausted");
 
-  it("stops at once when the allowance is spent, without retrying", async () => {
+  it("stops at once when the usage limit is reached, without retrying", async () => {
     const { call, calls } = fakeCall([capped()]);
 
     const outcome = await runQbankGeneration({ ...baseOpts(), target: 5, call });
 
     expect(outcome.status).toBe("failed");
     expect(outcome.capReached).toBe(true);
-    expect(outcome.error).toContain("10 free questions");
-    // A plain 429 is retried; the allowance is not a transient condition.
+    expect(outcome.error).toContain("today's usage limit");
+    // A plain 429 is retried; the usage limit is not a transient condition.
     expect(calls).toHaveLength(1);
   });
 
-  it("keeps what landed before the allowance ran out, as a short set", async () => {
+  it("keeps what landed before the usage limit was reached, as a short set", async () => {
     const { call, calls } = fakeCall([{ delivers: 3 }, capped()]);
 
     const outcome = await runQbankGeneration({ ...baseOpts(), target: 5, call });
@@ -220,6 +221,15 @@ describe("runQbankGeneration — free daily allowance", () => {
     expect(outcome.delivered).toBe(3);
     expect(outcome.capReached).toBe(true);
     expect(calls).toHaveLength(2);
+  });
+
+  it("stops the same way on an old guest session's daily cap", async () => {
+    const { call, calls } = fakeCall([errorResponse(429, "You've used today's 10 guest questions.", "daily_cap")]);
+
+    const outcome = await runQbankGeneration({ ...baseOpts(), target: 5, call });
+
+    expect(outcome.capReached).toBe(true);
+    expect(calls).toHaveLength(1);
   });
 
   it("still retries an ordinary rate limit", async () => {

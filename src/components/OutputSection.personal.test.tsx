@@ -17,7 +17,7 @@ import {
   type SheetLayer,
 } from "@/lib/sheet-layer";
 import type { PersonalProps } from "@/components/sheet/personal/personal-context";
-import { ServerOutdatedError, runPersonalize } from "@/lib/personalize";
+import { LimitReachedError, ServerOutdatedError, runPersonalize } from "@/lib/personalize";
 
 vi.mock("@/lib/personalize", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/personalize")>()),
@@ -64,21 +64,16 @@ async function renderWith(ui: React.ReactElement): Promise<RenderResult> {
 /** The document with a layer the test can watch change. */
 function Harness({
   initial,
-  entitled = true,
-  onLocked = () => {},
   onLayer,
   onAddCard,
 }: {
   initial: SheetLayer;
-  entitled?: boolean;
-  onLocked?: () => void;
   onLayer?: (l: SheetLayer) => void;
   onAddCard?: PersonalProps["onAddCard"];
 }) {
   const [layer, setLayer] = useState(initial);
   const personal: PersonalProps = {
     layer,
-    entitled,
     ready: true,
     update: (fn) =>
       setLayer((prev) => {
@@ -86,7 +81,6 @@ function Harness({
         onLayer?.(next);
         return next;
       }),
-    onLocked,
     context: { topic: "DKA", grant: "0b8f6c2e-5a1d-4c3e-9f7a-2d4b6e8a1c3f" },
     onAddCard,
   };
@@ -165,15 +159,12 @@ describe("the student's layer on the sheet", () => {
     expect(section("keyPoints").textContent).toContain("1 known hidden");
   });
 
-  it("offers Pro instead of changing anything for a student who isn't entitled", async () => {
-    const onLocked = vi.fn();
-    const onLayer = vi.fn();
-    await renderWith(<Harness initial={emptyLayer()} entitled={false} onLocked={onLocked} onLayer={onLayer} />);
+  it("offers every student the personal tools, with nothing to unlock", async () => {
+    await renderWith(<Harness initial={emptyLayer()} />);
 
-    expect(screen.getByText("Make this sheet yours")).toBeTruthy();
-    fireEvent.click(section("keyPoints").querySelector("button[class*='h-7']") as HTMLElement); // "Add a point"
-    expect(onLocked).toHaveBeenCalled();
-    expect(onLayer).not.toHaveBeenCalled();
+    expect(screen.queryByText("Make this sheet yours")).toBeNull();
+    expect(screen.queryByText(/\bPro\b/)).toBeNull();
+    expect(screen.getAllByRole("button", { name: /Add a point/ }).length).toBeGreaterThan(0);
   });
 
   it("adds the student's own point from the section's foot", async () => {
@@ -288,5 +279,17 @@ describe("AI on the student's own sheet", () => {
       fireEvent.click(screen.getByRole("button", { name: "Explain" }));
     });
     expect(screen.getByText(/StudyBuddy is being updated/)).toBeTruthy();
+  });
+
+  it("names the daily usage limit when the server refuses an action for the day", async () => {
+    vi.mocked(runPersonalize).mockRejectedValueOnce(new LimitReachedError());
+    await renderWith(<Harness initial={emptyLayer()} />);
+
+    selectIn("keyPoints:1", "Close the gap");
+    fireEvent.click(screen.getByRole("button", { name: "AI" }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Explain" }));
+    });
+    expect(screen.getByText(/today's usage limit/)).toBeTruthy();
   });
 });

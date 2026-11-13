@@ -1,3 +1,4 @@
+import { isLimitRefusal, limitReachedText } from "@/lib/daily-credits";
 import { callMedicalNotes, type MedicalNotesParams } from "@/lib/callMedicalNotes";
 import { parseModelUsed, type ModelUsed } from "@/lib/model-used";
 import { parseFlashcardsFromOutput, type ParsedCard } from "@/lib/parse-flashcards";
@@ -30,7 +31,7 @@ export interface DeckResult {
 
 /** The server turned the topic away before writing: say why. */
 export class DeckTopicError extends Error {}
-/** Today's free decks are used up. */
+/** The day's usage limit is reached. */
 export class DeckQuotaError extends Error {}
 
 /**
@@ -61,7 +62,8 @@ export async function requestDeck(
   if (!response.ok) {
     const err = await response.json().catch(() => ({}));
     if (response.status === 400 && err.code === "invalid_topic") throw new DeckTopicError(err.error || "");
-    if (response.status === 429) throw new DeckQuotaError("You've reached today's free limit. It resets at midnight UTC.");
+    if (response.status === 429 && isLimitRefusal(err)) throw new DeckQuotaError(limitReachedText());
+    if (response.status === 429) throw new Error(err.error || "Too many requests just now. Try again in a minute.");
     throw new Error(err.error || `Error: ${response.status}`);
   }
   const model = parseModelUsed(response.headers);

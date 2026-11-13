@@ -47,9 +47,9 @@ import {
   jumpToSection,
   listSections,
 } from "@/components/sheet/sheet-nav";
-import { useUsageLimit, MAX_DAILY_SHEETS } from "@/hooks/use-usage-limit";
-import { useCitationUsage } from "@/hooks/use-citation-usage";
-import { usePremiumHook } from "@/hooks/use-premium-hook";
+import { useDailyLimit } from "@/hooks/use-usage-limit";
+import { isLimitRefusal, limitReachedText } from "@/lib/daily-credits";
+import { UsageLimitLine } from "@/components/usage/UsageLimitLine";
 import { useAuth } from "@/hooks/use-auth";
 import { callMedicalNotes } from "@/lib/callMedicalNotes";
 import { modelUsedFrom, parseModelUsed, type ModelUsed } from "@/lib/model-used";
@@ -76,7 +76,6 @@ import { applySourceLabels } from "@/lib/source-labels";
 import { fetchBestCitation, type CitationResult } from "@/lib/citation";
 import { getCitationsForTopic } from "@/lib/citation-store";
 import AuthModal from "@/components/AuthModal";
-import GoProModal from "@/components/GoProModal";
 import type { StudyHistoryItem } from "@/hooks/use-study-history";
 import { useMemoryPreference } from "@/hooks/use-memory-preference";
 import { sheetToPlainText } from "@/lib/sheet-to-text";
@@ -251,7 +250,6 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
   const [citationState, setCitationState] = useState<CitationState>("idle");
   const [citations, setCitations] = useState<CitationResult[]>([]);
   const [authModalOpen, setAuthModalOpen] = useState(false);
-  const [goProOpen, setGoProOpen] = useState(false);
   // The topic bar's Edit panel. It edits the same state as the composer, and
   // closing it without regenerating puts that state back.
   const [editOpen, setEditOpen] = useState(false);
@@ -319,8 +317,9 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
   // because it is generated alongside the sheet rather than inside it.
   const flashcardsRef = useRef<Flashcard[] | null>(null);
   // Whether the premium writer wrote this sheet (X-Is-Premium), and the grant
-  // the server recorded for it when the student has no Pro. Both ride on the
-  // sheet: a premium sheet is personalizable like a Pro one.
+  // the server recorded for it. Both ride on the sheet. Every account may
+  // personalize any sheet; the grant only matters for a guest from before
+  // accounts were required.
   const premiumRef = useRef<{ premium: boolean; grant?: string }>({ premium: false });
   // The server's signature on the sheet's sections, sent as the stream ends.
   const signatureRef = useRef<SheetSignature | null>(null);
@@ -350,14 +349,10 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
     });
   };
 
-  const { sheetCount, isSheetLimited, isProUser: pro, refresh: refreshUsage } = useUsageLimit();
-  const { premiumRemaining, isPremiumHookActive, refetch: refetchPremium } = usePremiumHook();
+  // Free access: one daily usage limit for every account, spent on anything.
+  const { reached: limitReached, resetsIn, refresh: refreshUsage } = useDailyLimit();
   const { user, isAnonymous } = useAuth();
-  const {
-    canUseCitation,
-    isLoggedIn,
-    refreshCitation,
-  } = useCitationUsage();
+  const isLoggedIn = !!user && !isAnonymous;
   const { saveCards, allCards } = useFlashcardDeck();
   const { saveItem } = useStudyHistory();
   const layerState = useSheetLayer(generationId, savedSheetId);
@@ -376,8 +371,8 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
       toast({ title: "Not a medical topic", description: topicRejectionMessage(rejection), variant: "destructive" });
       return;
     }
-    if (isSheetLimited) {
-      setGoProOpen(true);
+    if (limitReached) {
+      toast({ title: "Today's usage limit is used up", description: limitReachedText(resetsIn) });
       return;
     }
     recordRecentTopic(activeNotes);
@@ -476,13 +471,14 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
         useMemory,
         userId: user?.id ?? null,
         isAnonymous: isAnonymous ?? false,
-        isPro: pro,
       });
 
       if (!response.ok) {
         const err = await response.json().catch(() => ({}));
         if (response.status === 429) {
-          throw new Error("You've reached today's free limit. It resets at midnight UTC.");
+          throw new Error(
+            isLimitRefusal(err) ? limitReachedText(resetsIn) : err.error || "Too many requests just now. Try again in a minute."
+          );
         }
         throw new Error(err.error || `Error: ${response.status}`);
       }
@@ -492,7 +488,6 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
 
       // Usage was incremented server-side; refresh the displayed counts.
       refreshUsage();
-      refetchPremium();
 
       const reader = response.body?.getReader();
       if (!reader) throw new Error("No response body");
@@ -550,8 +545,8 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
               if (meta.stage === "thinking") {
                 setGenerationStatus((s) => ({ ...s, thinking: true }));
               }
-              // Proof, for the AI actions later, that this premium sheet may
-              // be personalized without Pro.
+              // Proof, for the AI actions later, that the premium writer
+              // wrote this sheet (read only for an old guest session).
               if (meta.signature !== undefined) {
                 signatureRef.current = parseSignature(meta.signature);
               }
@@ -703,27 +698,19 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
       setLoading(false);
       pulseBrandMark();
 
-      // Citation lookup — runs after stream completes. Serves from the local
-      // topic cache when available (no quota consumed); otherwise the edge
-      // function consumes one unit server-side and returns whether it was
-      // accepted, so the server is the source of truth for the daily limit.
+      // Citation lookup, once the stream completes: from the local topic
+      // cache when it has the topic, otherwise from the edge function, which
+      // every account may call without a daily cap.
       try {
         const cached = getCitationsForTopic(activeNotes);
         if (cached.length > 0) {
           setCitations(cached);
           setCitationState("found");
-        } else if (canUseCitation) {
+        } else if (isLoggedIn) {
           setCitationState("loading");
           const result = await fetchBestCitation(activeNotes);
           setCitations(result.citations);
-          if (result.quotaExceeded) {
-            setCitationState("locked");
-          } else {
-            setCitationState(result.citations.length > 0 ? "found" : "hidden");
-          }
-          await refreshCitation();
-        } else if (isLoggedIn) {
-          setCitationState("locked");
+          setCitationState(result.citations.length > 0 ? "found" : "hidden");
         } else {
           setCitationState("hidden");
         }
@@ -955,7 +942,7 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
     } catch (e) {
       setFullDeck({ status: "idle", count: 0 });
       if (e instanceof DeckQuotaError) {
-        toast({ title: "Today's free decks are used up", description: e.message, variant: "destructive" });
+        toast({ title: "Today's usage limit is used up", description: limitReachedText(resetsIn) });
       } else {
         toast({ title: "Couldn't write the deck", description: "Please try again.", variant: "destructive" });
       }
@@ -967,9 +954,6 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
       : null;
 
   // ── The student's own layer ────────────────────────────────────────────
-  // Pro, or a sheet the premium writer wrote: the free premium generation is
-  // the Pro experience, whatever the student's plan.
-  const entitled = pro || sheet?.premium === true;
   const sheetTopic = sheet?.topic?.trim() || firstLine(activeSettings.notes) || "this topic";
 
   // Export PDF: the composed export for a structured sheet; a legacy text
@@ -1140,8 +1124,7 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
       if (e instanceof Error && e.name === "AbortError") return;
       setJob(null);
       if (e instanceof SectionQuotaError) {
-        setGoProOpen(true);
-        toast({ title: "You've used today's section rewrites", description: "They reset at midnight UTC. Pro is unlimited." });
+        toast({ title: "Today's usage limit is used up", description: limitReachedText(resetsIn) });
       } else if (e instanceof SectionOutdatedError) {
         toast({ title: "This needs the latest StudyBuddy", description: "Section rewrites aren't live on the server yet.", variant: "destructive" });
       } else {
@@ -1209,10 +1192,7 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
       difficulty: activeSettings.difficulty,
       sourceIds: (sheet?.sources ?? []).map((s) => s.id),
     },
-    onQuota: () => {
-      setGoProOpen(true);
-      toast({ title: "You've used today's deep dives", description: "They reset at midnight UTC. Pro is unlimited." });
-    },
+    onQuota: () => toast({ title: "Today's usage limit is used up", description: limitReachedText(resetsIn) }),
     onOutdated: () =>
       toast({ title: "Deep dives aren't live yet", description: "StudyBuddy is being updated. Try again later.", variant: "destructive" }),
   });
@@ -1221,12 +1201,10 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
     sheet && !legacyOutput
       ? {
           layer: layerState.layer,
-          entitled,
           ready: layerState.status === "ready" && !loading,
           unsaved: layerState.unsaved,
           saveFailed: layerState.saveFailed,
           update: updateLayer,
-          onLocked: () => setGoProOpen(true),
           context: {
             topic: sheetTopic,
             examMode: activeSettings.examMode,
@@ -1293,45 +1271,7 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
     />
   );
 
-  const goPro = () => setGoProOpen(true);
-  const usageLine = pro ? (
-    <p className="flex items-center gap-1.5 text-xs font-medium text-primary">
-      <span className="h-1.5 w-1.5 rounded-full bg-primary" />
-      Unlimited access active
-    </p>
-  ) : (
-    <p className="text-xs leading-relaxed text-muted-foreground">
-      {isSheetLimited ? (
-        <span className="font-medium text-warning">
-          Daily limit reached ·{" "}
-          <button type="button" className="underline" onClick={goPro}>
-            Go Pro for unlimited
-          </button>
-        </span>
-      ) : (
-        <span>
-          {sheetCount} / {MAX_DAILY_SHEETS} used today · resets at midnight
-        </span>
-      )}
-      {isPremiumHookActive ? (
-        <span className="text-info">
-          {" "}
-          · ✦ {premiumRemaining} {premiumRemaining === 1 ? "sheet" : "sheets"} by our medical AI model left ·{" "}
-          <button type="button" className="underline" onClick={goPro}>
-            Go Pro for more
-          </button>
-        </span>
-      ) : !isSheetLimited ? (
-        <span>
-          {" "}
-          · Free plan ·{" "}
-          <button type="button" className="underline hover:text-foreground" onClick={goPro}>
-            Go Pro for unlimited
-          </button>
-        </span>
-      ) : null}
-    </p>
-  );
+  const usageLine = <UsageLimitLine />;
 
   // ── Reading ────────────────────────────────────────────────────────────
   const reading = loading || !!sheet || !!legacyOutput;
@@ -1428,9 +1368,7 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
               <p className="text-[11px] leading-snug text-muted-foreground">
                 {onlyDeeper
                   ? "Writes this sheet's top deep dives — your highlights and notes stay."
-                  : pro
-                  ? "Rewrites the sheet with these settings."
-                  : "Rewrites the sheet — uses one of today's generations."}
+                  : "Rewrites the sheet with these settings."}
               </p>
               <Button
                 type="submit"
@@ -1619,7 +1557,7 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
                     input={activeSettings.notes}
                     status={generationStatus}
                     plan={planned ? resolvePlan(readingSheet) : null}
-                    model={pro ? modelUsed : undefined}
+                    model={modelUsed}
                     outline={outline}
                     hasWarmup={warmup.length > 0}
                   />
@@ -1637,12 +1575,11 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
                   modeInfo={activeModeInfo}
                   citations={citations}
                   citationState={citationState}
-                  modelUsed={pro ? modelUsed : undefined}
-                  isPro={pro}
+                  modelUsed={modelUsed}
                   userId={user?.id ?? null}
                   isAnonymous={isAnonymous ?? false}
                   sheetId={activeSettings.notes}
-                  onCitationLockedClick={() => (isLoggedIn ? setGoProOpen(true) : setAuthModalOpen(true))}
+                  onCitationLockedClick={() => setAuthModalOpen(true)}
                   citationIsLoggedIn={isLoggedIn}
                   isStreaming={loading}
                   streamedKeys={streamedKeys}
@@ -1755,7 +1692,6 @@ const SheetGenerator = ({ prefill }: SheetGeneratorProps) => {
           }}
           onSignedIn={() => afterAuthRef.current?.()}
         />
-        <GoProModal open={goProOpen} onOpenChange={setGoProOpen} />
         {sheet && !legacyOutput && (
           <ExportPdfDialog
             open={exportOpen}

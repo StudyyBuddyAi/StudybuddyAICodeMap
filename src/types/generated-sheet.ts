@@ -167,22 +167,22 @@ export interface GeneratedSheet {
   // model judged it not relevant" (both reconcile to groundingLevel "none").
   retrievedChunks?: number;
   /**
-   * Written by the premium writer (X-Is-Premium). A premium sheet is
-   * personalizable whatever the student's plan — the free premium generation
-   * is the Pro experience. Unlocks the manual parts only: see `premiumGrant`.
+   * Written by the premium writer (X-Is-Premium). Every account may
+   * personalize any sheet; this only mattered while there were plans, and
+   * still does for a guest from before accounts were required.
    */
   premium?: boolean;
   /**
-   * The server's proof that this sheet was streamed as premium to a student
-   * without Pro (premium_sheet_grants). The AI actions send it, and the server
-   * checks it; a client flag alone unlocks nothing that costs anything.
+   * The server's proof that this sheet was streamed as premium
+   * (premium_sheet_grants). The AI actions send it, and the server checks it
+   * for an old guest session; a client flag alone unlocks nothing.
    */
   premiumGrant?: string;
   /**
    * The server's signature on each section it wrote (sheet-signature.ts). A
    * branch or a rewrite sends it back, and the server checks the sheet it is
    * sent is the one it wrote. Absent on sheets from before signing: they
-   * still grow, on a smaller daily allowance.
+   * still grow, on a smaller daily cap.
    */
   signature?: SheetSignature;
   /**

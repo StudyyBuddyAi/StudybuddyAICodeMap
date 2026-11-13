@@ -42,7 +42,7 @@ const DashboardHero = ({
             </p>
             <div className="flex items-center gap-1.5 text-[11px] text-amber-400/80 font-medium mt-1">
               <span>⚡</span>
-              <span>Pro generations are cited from PubMed</span>
+              <span>Sheets are cited from PubMed</span>
             </div>
           </div>
           <Button
@@ -108,7 +108,7 @@ const DashboardHero = ({
         <p className="text-[11px] text-muted-foreground">{formatToday()}</p>
         <div className="flex items-center gap-1.5 text-[11px] text-amber-400/80 font-medium">
           <span>⚡</span>
-          <span>Pro generations are cited from PubMed</span>
+          <span>Sheets are cited from PubMed</span>
         </div>
       </CardContent>
     </Card>

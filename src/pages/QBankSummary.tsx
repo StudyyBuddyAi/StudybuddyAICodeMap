@@ -17,7 +17,8 @@ import PageLoader from "@/components/PageLoader";
 import { StatusIcon } from "@/components/qbank/ItemNavigator";
 import "@/components/qbank/exam.css";
 import { useQBankContext } from "@/contexts/QBankContext";
-import { useUsageLimit } from "@/hooks/use-usage-limit";
+import { useDailyLimit } from "@/hooks/use-usage-limit";
+import { limitReachedText } from "@/lib/daily-credits";
 import { useFlashcardDeck } from "@/hooks/use-flashcard-deck";
 import { useToast } from "@/hooks/use-toast";
 import { DeckQuotaError, MAX_CARDS_PER_REQUEST, requestDeck } from "@/lib/deck-request";
@@ -218,7 +219,7 @@ const QBankSummary = () => {
   const [searchParams] = useSearchParams();
   const sessionId = searchParams.get("session");
 
-  const { qbankRemaining, refresh: refreshUsage } = useUsageLimit();
+  const { resetsIn, refresh: refreshUsage } = useDailyLimit();
   const { saveCards } = useFlashcardDeck();
   const { toast } = useToast();
   const {
@@ -581,14 +582,13 @@ const QBankSummary = () => {
       setCards({ status: "idle", count: 0 });
       toast(
         e instanceof DeckQuotaError
-          ? { title: "Today's free decks are used up", description: e.message, variant: "destructive" }
+          ? { title: "Today's usage limit is used up", description: limitReachedText(resetsIn) }
           : { title: "Couldn't write the cards", description: "Please try again.", variant: "destructive" }
       );
     }
   };
-  // The same size again, inside a free account's allowance for today.
-  const wantedAgain = lastGeneration?.target ?? Math.max(summaryData?.total ?? 0, 5);
-  const againSize = qbankRemaining === null ? wantedAgain : Math.min(wantedAgain, qbankRemaining);
+  // The same size again.
+  const againSize = lastGeneration?.target ?? Math.max(summaryData?.total ?? 0, 5);
   // This set's own row first: it is this set's by construction, where the
   // in-memory generation is only the latest one this tab ran.
   const standings = isReviewSet ? [] : topicStandings(sessionCoverage ?? lastGeneration?.coverage);

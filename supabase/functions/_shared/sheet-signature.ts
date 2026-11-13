@@ -10,7 +10,7 @@
  *
  * A request that doesn't check out is not refused — sheets saved before
  * signing, or damaged ones the server couldn't read, still grow — but it is
- * held to a much smaller daily allowance than a signed one.
+ * held to a much smaller daily cap than a signed one.
  *
  * Web Crypto only, so Deno and the page's tests both run it.
  */

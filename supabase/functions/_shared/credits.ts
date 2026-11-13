@@ -2,7 +2,7 @@
  * The daily AI budget: what a Corti call costs, what a day allows, and what a
  * request sets aside before it runs.
  *
- * One place for the numbers, as qbank-allowance.ts is for the QBank cap: the
+ * One place for the numbers, as qbank-limits.ts is for the QBank guest cap: the
  * edge functions charge against it and the page's usage bar will show it, and
  * the two must never disagree. No imports and no Deno API at module scope, so
  * it bundles into the client unchanged.
@@ -113,7 +113,7 @@ export type CreditHoldKind = keyof typeof CREDIT_HOLDS;
 
 /**
  * What each thing typically costs, in µ$, measured 2026-11-07
- * (docs/credits-meter.md): what the usage page says the day's allowance buys.
+ * (docs/credits-meter.md): what the usage page says the day's usage limit buys.
  */
 export const TYPICAL_COST_MICROS = {
   comprehensiveSheet: 492_000,
@@ -147,7 +147,7 @@ export function creditsResetAt(now: Date = new Date()): string {
 /** The refusal a page can word: what is used, of what, and when it comes back. */
 export function creditsExhaustedBody(used: number, budget: number, now: Date = new Date()) {
   return {
-    error: "You've used today's AI allowance. It resets at midnight UTC.",
+    error: "You've reached today's usage limit. It resets at midnight UTC.",
     code: "credits_exhausted",
     used,
     budget,

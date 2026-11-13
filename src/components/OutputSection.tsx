@@ -93,7 +93,8 @@ import {
   SectionFooter,
 } from "@/components/sheet/personal/PersonalItem";
 import { HighlightMenu, SelectionToolbar, type AiChoice } from "@/components/sheet/personal/SelectionToolbar";
-import { LayerBar, LayerUpsell } from "@/components/sheet/personal/LayerBar";
+import { LayerBar } from "@/components/sheet/personal/LayerBar";
+import { limitReachedText } from "@/lib/daily-credits";
 
 type EnhanceKind = "enhance" | "expand" | "clinical";
 
@@ -289,7 +290,6 @@ interface OutputSectionProps {
   modelUsed?: ModelUsed | null;
   /** The sheet's saved id when it is already in the Library, so its Save button reads "Saved". */
   savedId?: string | null;
-  isPro?: boolean;
   userId?: string | null;
   isAnonymous?: boolean;
   sheetId?: string;
@@ -1406,7 +1406,6 @@ interface InlineEnhancementProps {
   enhKey: string;
   enhancement: ActiveEnhancement;
   topic: string;
-  isPro: boolean;
   userId: string | null;
   isAnonymous: boolean;
   sheetId?: string;
@@ -1420,7 +1419,6 @@ const InlineEnhancement = ({
   enhKey,
   enhancement,
   topic,
-  isPro,
   userId,
   isAnonymous,
   sheetId,
@@ -1459,7 +1457,6 @@ const InlineEnhancement = ({
           sectionKey: enhancement.anchor,
           sectionItems: [],
           enhanceTopic: topic,
-          isPro,
           userId,
           isAnonymous,
           useMemory,
@@ -1468,6 +1465,10 @@ const InlineEnhancement = ({
         { signal: abortRef.current.signal }
       );
 
+      if (response.status === 429) {
+        setError(limitReachedText());
+        return;
+      }
       if (!response.ok) throw new Error("Enhancement failed");
       setEnhanceModel(parseModelUsed(response.headers));
 
@@ -1522,7 +1523,7 @@ const InlineEnhancement = ({
     } finally {
       setLoading(false);
     }
-  }, [enhKey, enhancement, mode, topic, isPro, userId, isAnonymous, useMemory, cacheKey, onResult]);
+  }, [enhKey, enhancement, mode, topic, userId, isAnonymous, useMemory, cacheKey, onResult]);
 
   useEffect(() => {
     if (loading) {
@@ -1691,7 +1692,6 @@ const OutputSectionBody = ({
   citationIsLoggedIn,
   modelUsed,
   savedId,
-  isPro = false,
   userId,
   isAnonymous,
   sheetId,
@@ -2172,7 +2172,6 @@ const OutputSectionBody = ({
           enhKey={key}
           enhancement={enh}
           topic={sheet.topic ?? inputText ?? ""}
-          isPro={isPro}
           userId={userId ?? null}
           isAnonymous={isAnonymous ?? false}
           sheetId={sheetId ?? inputText}
@@ -2583,8 +2582,6 @@ const OutputSectionBody = ({
         <AnatomySection topic={inputText} />
       ) : null}
 
-      {p && !isStreaming && <LayerUpsell />}
-
       {/* The last line of the document, under its Sources. */}
       {renderDisclaimer(disclaimerCollapsed, toggleDisclaimer)}
 
@@ -2603,7 +2600,6 @@ const OutputSectionBody = ({
               onEnhance={fireSelectionEnhance}
               canMark={!!selection.mark}
               canRewrite={!!selection.mark && !isTableAnchor(selection.mark.anchor)}
-              locked={!p.entitled}
               onHighlight={markSelection}
               onAi={aiOnSelection}
               onAsk={canAskSelection ? askSelection : undefined}

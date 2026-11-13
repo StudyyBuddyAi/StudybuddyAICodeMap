@@ -25,7 +25,7 @@
  *               the wrong way, an unsafe dose — and corrects only those.
  *
  * Both requests carry the sheet's signatures (sheet-signature.ts); the handler
- * checks them before it counts the request against a day's allowance.
+ * checks them before it counts the request against a daily cap.
  *
  * Grounding is the sheet's own passages, re-read by id, as for a section
  * request.

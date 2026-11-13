@@ -14,7 +14,7 @@ export { parseSignature, type SheetSignature };
  * The signature for the sheet as the student has it: the sheet's own, with a
  * rewritten section's signature in place of the original's. A rewrite without
  * one (from before signing) leaves its key unsigned, and the request is then
- * held to the smaller unsigned allowance — which is right: the server can't
+ * held to the smaller unsigned cap — which is right: the server can't
  * vouch for it. Null for a sheet from before signing.
  */
 export function requestSignature(sheet: GeneratedSheet, layer: SheetLayer): SheetSignature | null {

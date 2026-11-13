@@ -27,17 +27,17 @@ export interface PersonalizeParams {
   focus?: string;
   sectionTitle?: string;
   topic?: string;
-  /** The premium sheet's grant, for a student without Pro. */
+  /** The premium sheet's grant. Only a guest from before accounts needs it. */
   grant?: string;
   examMode?: string;
   difficulty?: string;
 }
 
-/** The server said this needs Pro (or a premium sheet's grant). */
-export class ProRequiredError extends Error {
+/** The server refused it for the day: the usage limit is reached. */
+export class LimitReachedError extends Error {
   constructor() {
-    super("pro_required");
-    this.name = "ProRequiredError";
+    super("limit_reached");
+    this.name = "LimitReachedError";
   }
 }
 
@@ -71,7 +71,7 @@ export function parseCardText(text: string): { question: string; answer: string 
 
 /**
  * Runs one action, streaming the reply into `onText` as it arrives, and
- * resolves to the whole reply. Throws ProRequiredError on a 403.
+ * resolves to the whole reply. Throws LimitReachedError on a 429.
  */
 export async function runPersonalize(
   params: PersonalizeParams,
@@ -89,7 +89,7 @@ export async function runPersonalize(
     },
     { signal: opts.signal }
   );
-  if (response.status === 403) throw new ProRequiredError();
+  if (response.status === 429) throw new LimitReachedError();
   if (!response.ok || !response.body) throw new Error(`personalize failed: ${response.status}`);
   const model = parseModelUsed(response.headers);
 

@@ -8,37 +8,9 @@ const TOGGLE =
   "inline-flex h-7 items-center gap-1.5 rounded-full border px-2.5 text-xs font-medium transition-colors";
 
 /**
- * For a student without Pro: one line, at the end of the sheet, saying what it
- * could do. It used to sit at the top, above the content the student came
- * for; the top now carries the student's own layer bar or nothing.
- */
-export function LayerUpsell() {
-  const p = usePersonal();
-  if (!p || p.entitled || p.readOnly) return null;
-  const s = summarizeLayer(p.layer);
-  if (s.highlights + s.edits + s.notes + s.additions + s.known + s.hidden + s.cards > 0) return null;
-  return (
-    <button
-      type="button"
-      data-no-print
-      onClick={p.onLocked}
-      className="flex w-full items-center gap-2 rounded-xl border border-dashed border-border px-4 py-2.5 text-start text-xs text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground"
-    >
-      <Sparkles className="h-3.5 w-3.5 shrink-0 text-primary" />
-      <span>
-        <span className="font-medium text-foreground">Make this sheet yours</span> — highlight, rewrite lines with AI,
-        add notes, and turn any line into a flashcard.
-      </span>
-      <span className="ms-auto shrink-0 font-medium text-primary">Pro</span>
-    </button>
-  );
-}
-
-/**
  * The top of a sheet the student has made theirs: what their layer holds, the
  * two ways of looking at it (as generated, or without what they know), and the
- * hand-off to QBank on what they marked. Without Pro it renders nothing here —
- * see LayerUpsell, at the end of the sheet.
+ * hand-off to QBank on what they marked.
  */
 export function LayerBar() {
   const p = usePersonal();
@@ -46,7 +18,6 @@ export function LayerBar() {
   const s = summarizeLayer(p.layer);
   const any = s.highlights + s.edits + s.notes + s.additions + s.known + s.hidden + s.cards > 0;
 
-  if (!p.entitled && !any) return null;
   if (!any && p.readOnly) return null;
 
   const parts = [

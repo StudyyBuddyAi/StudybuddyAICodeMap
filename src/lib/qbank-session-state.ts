@@ -95,11 +95,11 @@ export const plannedTotal = (s: Pick<SessionState, "questions" | "expectedTotal"
   Math.max(s.questions.length, s.expectedTotal);
 
 /**
- * A timed block's allowance. Counted against the planned size rather than what
+ * A timed block's time limit. Counted against the planned size rather than what
  * has been written so far: a generated set hands over question one while the
  * other nineteen are still being written, and budgeting 90s for "the set" at
  * that moment would end the block before question two existed. When a run ends
- * short, expectedTotal is reconciled down and the allowance shrinks with it.
+ * short, expectedTotal is reconciled down and the time limit shrinks with it.
  */
 export const timedBudgetMs = (s: Pick<SessionState, "questions" | "expectedTotal">): number =>
   plannedTotal(s) * TIMED_SECONDS_PER_QUESTION * 1000;

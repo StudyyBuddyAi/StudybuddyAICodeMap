@@ -23,7 +23,7 @@ function UsageMeter({ percent, level, className }: { percent: number; level: Usa
   return (
     <div
       role="progressbar"
-      aria-label="Today's AI allowance used"
+      aria-label="Today's usage limit used"
       aria-valuemin={0}
       aria-valuemax={100}
       aria-valuenow={percent}
@@ -37,7 +37,7 @@ function UsageMeter({ percent, level, className }: { percent: number; level: Usa
   );
 }
 
-/** The day's allowance on the dashboard, with the way into the detail. */
+/** The day's usage limit on the dashboard, with the way into the detail. */
 export function DashboardUsageStrip() {
   const { credits, resetsIn, isLoading, isError } = useDailyCredits();
   // Nothing to say without a session, and a failed read is no reason to alarm anyone.
@@ -52,7 +52,7 @@ export function DashboardUsageStrip() {
       className="grid min-w-0 grid-cols-[1fr_auto] items-center gap-x-4 gap-y-2 rounded-2xl border border-border bg-card px-4 py-3 sm:flex sm:px-5"
     >
       <h2 id="usage-title" className="shrink-0 text-sm font-semibold text-foreground">
-        Today's AI allowance
+        Today's usage limit
       </h2>
       <Link
         to="?settings=usage"
@@ -80,11 +80,11 @@ export function DashboardUsageStrip() {
 const dayOf = (date: string, options: Intl.DateTimeFormatOptions) =>
   new Date(`${date}T00:00:00Z`).toLocaleDateString(undefined, { ...options, timeZone: "UTC" });
 
-/** One column per day, scaled so a full column is a full day's allowance. */
+/** One column per day, scaled so a full column is a full day's usage limit. */
 function WeekChart({ days }: { days: CreditDay[] }) {
   return (
     <div>
-      <ol aria-label="Allowance used on each of the last 7 days" className="flex h-20 items-end gap-0.5 border-b border-border">
+      <ol aria-label="Usage limit used on each of the last 7 days" className="flex h-20 items-end gap-0.5 border-b border-border">
         {days.map((d) => (
           <li key={d.date} className="h-full min-w-0 flex-1">
             <Tooltip>
@@ -162,8 +162,8 @@ export function UsagePanel({ enabled, labelClassName }: { enabled: boolean; labe
           </p>
         )}
         <p className="text-xs leading-relaxed text-muted-foreground">
-          Each day covers about 5 comprehensive sheets with their deep dives, a 50-card deck and 40 QBank questions. Spend it
-          on whatever you like.
+          Every account has the same daily usage limit. It covers about 5 comprehensive sheets with their deep dives, a
+          50-card deck and 40 QBank questions. Spend it on whatever you like.
         </p>
       </div>
 

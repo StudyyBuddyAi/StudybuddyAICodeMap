@@ -1,6 +1,6 @@
 import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { m } from "motion/react";
-import { Layers, Lightbulb, Lock, Sparkles, Stethoscope, Trash2, Wand2 } from "lucide-react";
+import { Layers, Lightbulb, Sparkles, Stethoscope, Trash2, Wand2 } from "lucide-react";
 import { ENTER, EXIT } from "@/lib/motion";
 import { REWRITE_STYLES, type RewriteStyle } from "@/lib/personalize";
 import type { HighlightIntent } from "@/lib/sheet-layer";
@@ -84,8 +84,6 @@ interface SelectionToolbarProps {
   canMark: boolean;
   /** A prose line or list item can be rewritten; a table row cannot. */
   canRewrite: boolean;
-  /** Not Pro and not a premium sheet: the personal actions explain Pro instead. */
-  locked: boolean;
   onHighlight: (intent: HighlightIntent) => void;
   onAi: (choice: AiChoice) => void;
   /** Ask a deep dive about the selected words — absent where the sheet can't take one. */
@@ -98,9 +96,8 @@ interface SelectionToolbarProps {
  * inside the bubble rather than as a menu of its own — a portalled menu sits
  * outside the bubble, and a click there reads as a click away from it.
  */
-export function SelectionToolbar({ top, left, innerRef, onEnhance, canMark, canRewrite, locked, onHighlight, onAi, onAsk }: SelectionToolbarProps) {
+export function SelectionToolbar({ top, left, innerRef, onEnhance, canMark, canRewrite, onHighlight, onAi, onAsk }: SelectionToolbarProps) {
   const [aiOpen, setAiOpen] = useState(false);
-  const lock = locked ? <Lock className="h-3 w-3 opacity-60" /> : null;
   const bubble = useClampedBubble(left, innerRef);
 
   return (
@@ -149,7 +146,7 @@ export function SelectionToolbar({ top, left, innerRef, onEnhance, canMark, canR
               onClick={() => setAiOpen((o) => !o)}
               className={`${PILL} text-primary ${aiOpen ? "bg-secondary" : ""}`}
             >
-              <Wand2 className="h-3.5 w-3.5" /> AI {lock}
+              <Wand2 className="h-3.5 w-3.5" /> AI
             </button>
             <Divider />
           </>
