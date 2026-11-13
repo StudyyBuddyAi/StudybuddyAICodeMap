@@ -11,7 +11,7 @@ import "./memorial.css";
  * (memorial-live.ts).
  */
 
-const LINE = "In memory of my family";
+const LINE = "In memory of my family and classmates";
 
 /**
  * The footer line, on every page. Like a Stolperstein, the small brass plate

@@ -1,6 +1,6 @@
 /**
  * The memorial at /in-memory: the page's heading and one tribute per person,
- * in this order: father, mother, brother.
+ * in this order: father, mother, brother, then a card for the founder's classmates.
  *
  * The tributes are the family's own words, final and reviewed. Edit them here
  * and only here (the page reads this file and adds nothing of its own), and
@@ -11,7 +11,7 @@
  * collages so the page can lay them out in its own frame. With none, nothing
  * stands in for one.
  */
-export type MemorialTributeId = "father" | "mother" | "brother";
+export type MemorialTributeId = "father" | "mother" | "brother" | "classmates";
 
 export interface MemorialPhoto {
   /** A path under public/. */
@@ -29,9 +29,11 @@ export interface MemorialTribute {
   /** The tribute's heading. */
   name: string;
   /** e.g. "1953 – 2024", with an en dash. */
-  years: string;
+  years?: string;
   /** The tribute itself, one string per paragraph. */
   paragraphs: string[];
+  /** Names listed like a class register (the classmates' card). */
+  roll?: string[];
   photos: MemorialPhoto[];
   /**
    * How the photos are laid out. "stack": each whole, one under the other.
@@ -108,6 +110,23 @@ export const MEMORIAL: MemorialContent = {
       collage: "mosaic",
       cover: 3,
     },
+    {
+      // The founder's classmates, lost in the war. Their names as the founder
+      // gave them in Arabic, in English: ياسين الأخرس، أحمد مهدي، ديما أبو عودة،
+      // طارق أبو البطيخ، سلطان خضر، يارا الحصري.
+      id: "classmates",
+      name: "My classmates",
+      paragraphs: [],
+      roll: [
+        "Yassin Al-Akhras",
+        "Ahmed Mahdi",
+        "Dima Abu Odeh",
+        "Tareq Abu Al-Batikh",
+        "Sultan Khader",
+        "Yara Al-Husari",
+      ],
+      photos: [],
+    },
   ],
 };
 
@@ -115,6 +134,9 @@ export const hasPlaceholder = (s: string) => /\[[^\]]+\]/.test(s);
 
 /** True once no [placeholder] is left anywhere. Photos are optional. */
 export function memorialComplete(content: MemorialContent): boolean {
-  const words = [content.heading, ...content.tributes.flatMap((t) => [t.name, t.years, ...t.paragraphs])];
+  const words = [
+    content.heading,
+    ...content.tributes.flatMap((t) => [t.name, t.years ?? "", ...t.paragraphs, ...(t.roll ?? [])]),
+  ];
   return !words.some(hasPlaceholder);
 }

@@ -71,22 +71,35 @@ export const CoverPrint = ({ tribute }: { tribute: MemorialTribute }) => {
   );
 };
 
-/** The name, the years and the words, exactly as written. */
+/** The name, the years and the words, exactly as written; or, for the classmates, their names. */
 export const TributeWords = ({ tribute }: { tribute: MemorialTribute }) => (
   <div className="tribute-words">
     <h2 className="tribute-name">
       <MemText>{tribute.name}</MemText>
     </h2>
-    <p className="tribute-years">
-      <MemText>{tribute.years}</MemText>
-    </p>
-    <div className="tribute-text">
-      {tribute.paragraphs.map((p, i) => (
-        <p key={i}>
-          <MemText>{p}</MemText>
-        </p>
-      ))}
-    </div>
+    {tribute.years && (
+      <p className="tribute-years">
+        <MemText>{tribute.years}</MemText>
+      </p>
+    )}
+    {tribute.paragraphs.length > 0 && (
+      <div className="tribute-text">
+        {tribute.paragraphs.map((p, i) => (
+          <p key={i}>
+            <MemText>{p}</MemText>
+          </p>
+        ))}
+      </div>
+    )}
+    {tribute.roll && (
+      <ul className="tribute-roll">
+        {tribute.roll.map((name) => (
+          <li key={name}>
+            <MemText>{name}</MemText>
+          </li>
+        ))}
+      </ul>
+    )}
   </div>
 );
 

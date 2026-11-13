@@ -4,25 +4,43 @@ import { describe, expect, it } from "vitest";
 import { MEMORIAL, memorialComplete } from "./memorial";
 
 describe("the memorial's content", () => {
-  it("keeps the family's order: father, mother, brother", () => {
+  it("keeps the family's order, father, mother, brother, then the classmates", () => {
     expect(MEMORIAL.tributes.map((t) => t.name)).toEqual([
       "Dr. Ibrahim Mustafa Shihada",
       "Ruwaida Muhammad Hussein",
       "Dr. Mustafa Ibrahim Shihada",
+      "My classmates",
     ]);
   });
 
   it("writes the years with an en dash", () => {
-    expect(MEMORIAL.tributes.map((t) => t.years)).toEqual(["1953 – 2024", "1960 – 2018", "1987 – 2025"]);
-    for (const t of MEMORIAL.tributes) expect(t.years).toMatch(/^\d{4} – \d{4}$/);
+    const family = MEMORIAL.tributes.filter((t) => t.id !== "classmates");
+    expect(family.map((t) => t.years)).toEqual(["1953 – 2024", "1960 – 2018", "1987 – 2025"]);
+    for (const t of family) expect(t.years).toMatch(/^\d{4} – \d{4}$/);
   });
 
   it("keeps the paragraph breaks as written", () => {
-    expect(MEMORIAL.tributes.map((t) => t.paragraphs.length)).toEqual([4, 4, 5]);
+    expect(MEMORIAL.tributes.map((t) => t.paragraphs.length)).toEqual([4, 4, 5, 0]);
+  });
+
+  it("lists the six classmates by name alone", () => {
+    const classmates = MEMORIAL.tributes.find((t) => t.id === "classmates");
+    expect(classmates?.roll).toEqual([
+      "Yassin Al-Akhras",
+      "Ahmed Mahdi",
+      "Dima Abu Odeh",
+      "Tareq Abu Al-Batikh",
+      "Sultan Khader",
+      "Yara Al-Husari",
+    ]);
+    expect(classmates?.roll?.join(" ")).not.toMatch(/martyr/i);
   });
 
   it("never says 'died'", () => {
-    const all = [MEMORIAL.heading, ...MEMORIAL.tributes.flatMap((t) => [t.name, ...t.paragraphs])].join(" ");
+    const all = [
+      MEMORIAL.heading,
+      ...MEMORIAL.tributes.flatMap((t) => [t.name, ...t.paragraphs, ...(t.roll ?? [])]),
+    ].join(" ");
     expect(all).not.toMatch(/\bdied\b/i);
   });
 });
@@ -48,7 +66,7 @@ describe("the memorial's photos", () => {
   const all = MEMORIAL.tributes.flatMap((t) => t.photos.map((p) => ({ t, p })));
 
   it("gives every tribute its photos", () => {
-    expect(MEMORIAL.tributes.map((t) => t.photos.length)).toEqual([2, 1, 4]);
+    expect(MEMORIAL.tributes.map((t) => t.photos.length)).toEqual([2, 1, 4, 0]);
   });
 
   it("points at files that exist, with the shape they really have", () => {
@@ -69,8 +87,8 @@ describe("the memorial's photos", () => {
     }
   });
 
-  it("picks a cover photo that exists", () => {
-    for (const t of MEMORIAL.tributes) expect(t.photos[t.cover ?? 0]).toBeDefined();
+  it("picks a cover photo that exists, wherever there are photos", () => {
+    for (const t of MEMORIAL.tributes.filter((t) => t.photos.length)) expect(t.photos[t.cover ?? 0]).toBeDefined();
   });
 });
 
