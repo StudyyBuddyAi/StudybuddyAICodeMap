@@ -45,14 +45,33 @@ export interface MemorialTribute {
   cover?: number;
 }
 
+/** The founder, signed under the tributes, and how to reach the founder. */
+export interface MemorialFounder {
+  name: string;
+  role: string;
+  linkedin: string;
+  email: string;
+  /** International format, e.g. "+972592823030". */
+  whatsapp: string;
+}
+
 export interface MemorialContent {
   /** The page's heading, and the landing page's closing line. */
   heading: string;
   tributes: MemorialTribute[];
+  founder: MemorialFounder;
 }
 
 export const MEMORIAL: MemorialContent = {
-  heading: "StudyBuddy AI was made in memory of those who saw education as their message to the world.",
+  heading:
+    "StudyBuddy AI was made in memory of its founder’s family and classmates, who saw education as their message to the world.",
+  founder: {
+    name: "Osama Shihada",
+    role: "Founder of StudyBuddy AI",
+    linkedin: "https://www.linkedin.com/in/osamashihada",
+    email: "Osama200az@gmail.com",
+    whatsapp: "+972592823030",
+  },
   tributes: [
     {
       id: "father",

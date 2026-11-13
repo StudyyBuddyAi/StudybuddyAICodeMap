@@ -4,6 +4,7 @@ import { ArrowLeft } from "lucide-react";
 import BrandMark from "@/components/brand/BrandMark";
 import { MEMORIAL } from "@/content/memorial";
 import MemorialDeck from "@/components/memorial/MemorialDeck";
+import { FounderContact } from "@/components/memorial/parts";
 import "@/components/memorial/memorial.css";
 
 /**
@@ -35,6 +36,7 @@ const InMemory = () => {
       </header>
       <main className="mem-main">
         <MemorialDeck content={MEMORIAL} />
+        <FounderContact founder={MEMORIAL.founder} />
       </main>
     </div>
   );

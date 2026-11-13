@@ -1,6 +1,6 @@
 import type { CSSProperties } from "react";
-import { ArrowLeft, ArrowRight } from "lucide-react";
-import type { MemorialPhoto, MemorialTribute } from "@/content/memorial";
+import { ArrowLeft, ArrowRight, Linkedin, Mail, MessageCircle } from "lucide-react";
+import type { MemorialFounder, MemorialPhoto, MemorialTribute } from "@/content/memorial";
 
 /**
  * Text with any [bracketed] placeholder marked as one, so a draft never
@@ -146,6 +146,48 @@ export const DeckNav = ({
     </button>
   </div>
 );
+
+/** "+972592823030" → "+972 59 282 3030", for the button's tooltip. */
+const spaced = (n: string) => n.replace(/^\+(\d{3})(\d{2})(\d{3})(\d+)$/, "+$1 $2 $3 $4");
+
+/**
+ * The founder's name under the tributes, and three ways to reach the founder:
+ * LinkedIn, email and WhatsApp, each a button that opens it.
+ */
+export const FounderContact = ({ founder }: { founder: MemorialFounder }) => {
+  const links = [
+    { label: "LinkedIn", href: founder.linkedin, title: founder.linkedin.replace(/^https?:\/\//, ""), Icon: Linkedin, external: true },
+    { label: "Email", href: `mailto:${founder.email}`, title: founder.email, Icon: Mail, external: false },
+    {
+      label: "WhatsApp",
+      href: `https://wa.me/${founder.whatsapp.replace(/\D/g, "")}`,
+      title: spaced(founder.whatsapp),
+      Icon: MessageCircle,
+      external: true,
+    },
+  ];
+  return (
+    <footer className="mem-founder" aria-label={`Contact ${founder.name}`}>
+      <p className="mem-founder-name">{founder.name}</p>
+      <p className="mem-founder-role">{founder.role}</p>
+      <ul className="mem-contact">
+        {links.map(({ label, href, title, Icon, external }) => (
+          <li key={label}>
+            <a
+              href={href}
+              title={title}
+              className="mem-contact-button"
+              {...(external ? { target: "_blank", rel: "noopener noreferrer" } : {})}
+            >
+              <Icon aria-hidden />
+              {label}
+            </a>
+          </li>
+        ))}
+      </ul>
+    </footer>
+  );
+};
 
 /** Says whose tribute is showing, for screen readers, without moving focus. */
 export const DeckStatus = ({ tributes, index }: { tributes: MemorialTribute[]; index: number }) => (

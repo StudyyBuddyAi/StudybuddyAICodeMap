@@ -75,6 +75,17 @@ describe("InMemory", () => {
     expect(photos.every((img) => img.getAttribute("alt") === father.name)).toBe(true);
   });
 
+  it("signs the page with the founder's name, and LinkedIn, email and WhatsApp buttons that open them", () => {
+    renderPage();
+    expect(screen.getByText("Osama Shihada")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "LinkedIn" })).toHaveAttribute("href", "https://www.linkedin.com/in/osamashihada");
+    expect(screen.getByRole("link", { name: "Email" })).toHaveAttribute("href", "mailto:Osama200az@gmail.com");
+    const whatsapp = screen.getByRole("link", { name: "WhatsApp" });
+    expect(whatsapp).toHaveAttribute("href", "https://wa.me/972592823030");
+    expect(whatsapp).toHaveAttribute("title", "+972 59 282 3030");
+    expect(whatsapp).toHaveAttribute("target", "_blank");
+  });
+
   it("lays each tribute's photos in its own collage on its sheet", () => {
     const { container } = renderPage();
     const sheets = Array.from(container.querySelectorAll("article.tribute"));

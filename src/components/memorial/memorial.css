@@ -100,7 +100,7 @@
 
 /* ---------- The heading --------------------------------------------------- */
 .mem-heading {
-  max-width: 30ch;
+  max-width: 34ch;
   margin: 0 auto;
   color: var(--fg);
   font-family: var(--font-display);
@@ -388,6 +388,66 @@
     padding: 8px;
     gap: 8px;
   }
+}
+
+/* ---------- The founder, under the tributes -------------------------------- */
+.mem-founder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-top: clamp(64px, 10vh, 104px);
+  text-align: center;
+}
+.mem-founder-name {
+  color: var(--fg);
+  font-family: var(--font-display);
+  font-size: 24px;
+  font-style: italic;
+  line-height: 1.2;
+}
+.mem-founder-role {
+  margin-top: 6px;
+  color: var(--fg-muted);
+  font-size: 14px;
+}
+.mem-contact {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  margin: 22px 0 0;
+  padding: 0;
+  gap: 10px;
+  list-style: none;
+}
+.mem-contact-button {
+  display: inline-flex;
+  height: 42px;
+  align-items: center;
+  padding: 0 18px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-control);
+  background: var(--bg-elevated);
+  box-shadow: 0 1px 0 rgba(14, 17, 22, 0.04);
+  color: var(--fg);
+  font-size: 14px;
+  font-weight: 500;
+  gap: 8px;
+  transition:
+    border-color var(--dur-micro) ease,
+    color var(--dur-micro) ease;
+}
+.mem-contact-button svg {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  color: var(--accent);
+}
+.mem-contact-button:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.mem-contact-button:active {
+  transform: translateY(1px);
 }
 
 /* ---------- Previous / next ----------------------------------------------- */
